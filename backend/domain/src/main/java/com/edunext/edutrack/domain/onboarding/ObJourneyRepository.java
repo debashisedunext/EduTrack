@@ -2,6 +2,12 @@ package com.edunext.edutrack.domain.onboarding;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
+
+import java.util.Optional;
 
 /**
  * ⚠ <b>A-112 · do not call this from feature code.</b> Every journey read goes
@@ -32,4 +38,20 @@ public interface ObJourneyRepository extends JpaRepository<ObJourney, Long>,
      * not, answers it.
      */
     boolean existsByObClientIdAndGateStatus(Long obClientId, ObGateStatus gateStatus);
+
+    /**
+     * C-107 · the per-journey lock {@code ob_step_history}'s chain needs
+     * before an append — {@code TicketRepository#findByIdForUpdate}'s own
+     * precedent, one module over. {@code SELECT ... FOR UPDATE} on the parent
+     * journey row before reading the chain tail, so two concurrent skips (or,
+     * later, any other event this journey's history records) cannot both read
+     * the same tail and fork it.
+     *
+     * <p>A plain JPQL lock, not a native query: unlike {@link ObStepHistory},
+     * {@link ObJourney} is an ordinary mutable entity, so Hibernate's
+     * lock-mode upgrade on the loaded instance has nothing to conflict with.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from ObJourney j where j.id = :id")
+    Optional<ObJourney> findByIdForUpdate(@Param("id") Long id);
 }

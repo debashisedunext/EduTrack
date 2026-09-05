@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
 import org.springframework.security.core.Authentication;
 
 /**
@@ -31,5 +32,20 @@ final class CallerIdentityAccess {
                 .map(CallerIdentity::userId)
                 .orElseThrow(() -> new IllegalStateException(
                         "authenticated onboarding step-lifecycle route reached with no resolvable caller identity"));
+    }
+
+    /**
+     * C-107 · the caller's role <em>within</em> the onboarding module — {@code
+     * OB_MANAGER}, {@code OB_ADMIN}, and so on — for {@link
+     * ObJourneyStepLifecycleService#skip} to check against. Distinct from
+     * {@link #requireUserId}'s hard failure: an absent role is a legitimate
+     * answer here (a caller with no onboarding standing at all), refused by
+     * {@link NotAnOnboardingModeratorException} rather than by a 500, so this
+     * returns {@code null} instead of throwing.
+     */
+    static String onboardingModuleRole(Authentication caller) {
+        return CallerIdentity.of(caller)
+                .flatMap(identity -> identity.moduleRole(ModuleAccessGuard.ONBOARDING))
+                .orElse(null);
     }
 }

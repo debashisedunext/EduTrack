@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
+import com.edunext.edutrack.domain.journal.ObStepJournal;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -18,6 +19,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepositor
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepHistory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -32,7 +35,7 @@ import java.util.stream.Collectors;
  * block-with-mandatory-reason, waiting-on-client, resume. Five actions on
  * {@link ObJourneyStepStatus}'s {@code PENDING → IN_PROGRESS ⇄
  * {BLOCKED, WAITING_ON_CLIENT} → DONE} shape; {@code SKIPPED} is C-107's own
- * transition and does not appear here.
+ * transition (see {@link #skip}) and is not one of the five.
  *
  * <h2>What this service deliberately does not do</h2>
  *
@@ -65,13 +68,26 @@ import java.util.stream.Collectors;
  * a step on {@code DONE} rather than flipping the status column directly —
  * the design's own acceptance path does the latter and enforces none of
  * this, which is exactly the gap this task exists to close.
+ *
+ * <h2>C-107 · skip</h2>
+ *
+ * <p>{@link #skip} is the sixth transition and the odd one out: not row-
+ * scoped by ownership, not gated by anything {@link #complete} checks, and
+ * the first method in this class to write anywhere other than the {@code
+ * ob_journey_steps} row it mutates — see its own javadoc and {@link
+ * #appendSkippedHistory}.
  */
 @Service
 @UnscopedAccess("""
         A-112's guard, C-104's transitions: this class reads ObJourneyRepository         once, and not as a caller-scoped read. requireOwnership has already         refused anyone who is neither the step's owner nor its backup, and         OnboardingScopeResolver grants OB_STEP_OWNER exactly the journeys         containing their steps — owner or backup, deliberately — so a caller         who reaches the findById below is provably in scope for that journey         already. The read is of the step's own parent, for gate_status and         held_by_journey_id, and it can disclose nothing the caller did not         just prove they may act on.
 
-        Routing it through ScopedJourneys would also be worse than redundant         here: this method takes a callerId, not an Authentication, so it would         need a second principal shape threaded through five transitions to         re-answer a question requireOwnership has already answered — and a         scope miss would surface as the IllegalStateException below, a 500,         where the whole point of the guard is a 404.""")
+        Routing it through ScopedJourneys would also be worse than redundant         here: this method takes a callerId, not an Authentication, so it would         need a second principal shape threaded through five transitions to         re-answer a question requireOwnership has already answered — and a         scope miss would surface as the IllegalStateException below, a 500,         where the whole point of the guard is a 404.
+
+        C-107's own skip() reads the same repository the same way, for a         sixth transition — a plain findById for obClientId, to put on the         ob_step_history row it builds. The FOR UPDATE lock that append needs         is ObStepJournal's own, taken inside domain/journal/ where         ScopeGuardRulesTest does not reach; this class never calls         findByIdForUpdate itself.""")
 public class ObJourneyStepLifecycleService {
+
+    /** Plan §3's "override steps with logged reason" — {@link #skip}'s own capability. */
+    private static final Set<String> MODERATOR_ROLES = Set.of("OB_MANAGER", "OB_ADMIN");
 
     private final ObJourneyStepRepository journeySteps;
     private final ObJourneyRepository journeys;
@@ -80,11 +96,12 @@ public class ObJourneyStepLifecycleService {
     private final ObJourneyTemplateStepDocRepository templateStepDocs;
     private final ObAttachmentRepository attachments;
     private final ObSignoffRepository signoffs;
+    private final ObStepJournal stepJournal;
 
     public ObJourneyStepLifecycleService(ObJourneyStepRepository journeySteps, ObJourneyRepository journeys,
             ObJourneyStepItemRepository stepItems, ObJourneyTemplateStepItemRepository templateStepItems,
             ObJourneyTemplateStepDocRepository templateStepDocs, ObAttachmentRepository attachments,
-            ObSignoffRepository signoffs) {
+            ObSignoffRepository signoffs, ObStepJournal stepJournal) {
         this.journeySteps = journeySteps;
         this.journeys = journeys;
         this.stepItems = stepItems;
@@ -92,6 +109,7 @@ public class ObJourneyStepLifecycleService {
         this.templateStepDocs = templateStepDocs;
         this.attachments = attachments;
         this.signoffs = signoffs;
+        this.stepJournal = stepJournal;
     }
 
     /**
@@ -276,6 +294,61 @@ public class ObJourneyStepLifecycleService {
         return step;
     }
 
+    /**
+     * C-107 · any status → {@code SKIPPED}. Manager/Admin only — plan §3's
+     * "override steps with logged reason" — with a mandatory {@code reason}
+     * and a hash-chained {@code ob_step_history} row recording who and why.
+     *
+     * <p><b>Not row-scoped by ownership, unlike the five transitions above.</b>
+     * {@link #requireOwnership} does not apply: this is exactly the override
+     * plan §3 grants a Manager or Admin over a step they may not own, which is
+     * the point of an override.
+     *
+     * <p><b>No gate or dependency check, deliberately.</b> Unlike {@link
+     * #start}, this does not refuse a {@code LOCKED} or held journey. An
+     * override that only worked once the ordinary rules already permitted
+     * action would not be an override — plan §3 draws no such exception, and
+     * C-119's dependency graph re-evaluates a journey on every step that
+     * finishes or is skipped regardless of how it got there.
+     *
+     * @param moduleRole the caller's role inside the {@code ONBOARDING}
+     *                   module ({@link CallerIdentityAccess#onboardingModuleRole}),
+     *                   or {@code null}/blank if they hold none
+     * @throws JourneyStepNotFoundException        no such step, <em>or</em> the caller holds no
+     *                                              standing in {@code ONBOARDING} at all — see
+     *                                              {@link #requireModerator}'s own javadoc for why
+     *                                              the two are answered identically
+     * @throws NotAnOnboardingModeratorException   the caller holds a role in {@code ONBOARDING},
+     *                                              and it is neither {@code OB_MANAGER} nor {@code OB_ADMIN}
+     * @throws StepAlreadyTerminalException        the step is already {@code DONE} or {@code SKIPPED}
+     */
+    @Transactional
+    public ObJourneyStep skip(long stepId, long callerId, String moduleRole, String reason) {
+        ObJourneyStep step = requireStep(stepId);
+        requireModerator(stepId, moduleRole);
+        requireNotTerminal(step);
+
+        // A plain read — for obClientId, to put on the history entry.
+        // ObStepJournal#append takes its own findByIdForUpdate lock before
+        // touching the chain; this class does not need to hold one itself.
+        ObJourney journey = journeys.findById(step.getJourneyId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "journey step " + stepId + " points at journey " + step.getJourneyId() + " which does not exist"));
+
+        ObJourneyStepStatus previousStatus = step.getStatus();
+        step.setStatus(ObJourneyStepStatus.SKIPPED);
+        step.setSkipReason(reason);
+        step.setSkippedBy(callerId);
+
+        appendSkippedHistory(journey, step, previousStatus, callerId, reason);
+        return step;
+    }
+
+    /** C-107 · a plain read, for the controller's {@code ETag} precondition check — no transition, no lock. */
+    public ObJourneyStep getStep(long stepId) {
+        return requireStep(stepId);
+    }
+
     private ObJourneyStep requireStep(long stepId) {
         return journeySteps.findById(stepId).orElseThrow(() -> new JourneyStepNotFoundException(stepId));
     }
@@ -290,5 +363,74 @@ public class ObJourneyStepLifecycleService {
         if (step.getStatus() != required) {
             throw new InvalidStepTransitionException(step.getId(), action, step.getStatus());
         }
+    }
+
+    /**
+     * C-107 · two different refusals behind {@code moduleRole}, on {@code
+     * ModuleAccessGuard}'s own two-part reasoning even though that guard is
+     * not wired into this route yet (see the controller's class javadoc):
+     *
+     * <ul>
+     *   <li><b>No standing in {@code ONBOARDING} at all</b> — {@code
+     *       moduleRole} null or blank, exactly what {@link
+     *       com.edunext.edutrack.api.security.CallerIdentity#moduleRole}
+     *       returns for a caller who holds no grant in the module. Answered
+     *       identically to a step that does not exist: {@code
+     *       ModuleAccessGuard}'s own javadoc argues a module-gate 403 would
+     *       tell a ticketing-only caller that onboarding is deployed at all,
+     *       which is a larger disclosure than for one row. Reusing {@link
+     *       JourneyStepNotFoundException} rather than inventing a second 404
+     *       makes that indistinguishability structural rather than a promise
+     *       two exception classes have to keep in step.</li>
+     *   <li><b>Holds the module, wrong role within it</b> — {@code OB_SALES},
+     *       {@code OB_STEP_OWNER}, {@code OB_VIEWER}, or anything the {@code
+     *       ck_user_module_access_module_role} CHECK does not contain. This
+     *       is the genuine capability failure {@code contracts/openapi.yaml}
+     *       documents as {@code 403} on this route, and it does not leak row
+     *       existence — the caller already knows the module exists, since
+     *       they hold a role in it.</li>
+     * </ul>
+     */
+    private void requireModerator(long stepId, String moduleRole) {
+        if (moduleRole == null || moduleRole.isBlank()) {
+            throw new JourneyStepNotFoundException(stepId);
+        }
+        if (!MODERATOR_ROLES.contains(moduleRole)) {
+            throw new NotAnOnboardingModeratorException(moduleRole);
+        }
+    }
+
+    private void requireNotTerminal(ObJourneyStep step) {
+        if (step.getStatus() == ObJourneyStepStatus.DONE || step.getStatus() == ObJourneyStepStatus.SKIPPED) {
+            throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
+        }
+    }
+
+    /**
+     * C-107 · the only writer {@code ob_step_history} has today, and it does
+     * not write directly: {@code AppendOnlyRulesTest.theProtectedTablesAreWrittenOnlyThroughTheJournal}
+     * is stated over {@code assignableTo(AppendOnly.class)}, so {@link
+     * ObStepHistoryRepository} — the moment it extends {@code AppendOnly} —
+     * falls under the identical door rule {@code TicketHistoryRepository}
+     * does. {@link ObStepJournal} is that door, one module over from {@code
+     * TicketJournal} in Stream A's {@code domain/journal/} (TEAM-PLAN.md §6,
+     * flagged there rather than added quietly). This method only builds the
+     * unhashed entry; the lock, the chain tail and the hash are the
+     * journal's job.
+     */
+    private void appendSkippedHistory(ObJourney journey, ObJourneyStep step, ObJourneyStepStatus previousStatus,
+                                       long actorId, String reason) {
+        ObStepHistory entry = new ObStepHistory();
+        entry.setJourneyId(journey.getId());
+        entry.setStepId(step.getId());
+        entry.setObClientId(journey.getObClientId());
+        entry.setEventType("SKIPPED");
+        entry.setFieldName("status");
+        entry.setOldValue(previousStatus.name());
+        entry.setNewValue(ObJourneyStepStatus.SKIPPED.name());
+        entry.setActorId(actorId);
+        entry.setActorType("USER");
+        entry.setRemarks(reason);
+        stepJournal.append(entry);
     }
 }

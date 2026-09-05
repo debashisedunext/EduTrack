@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
+import com.edunext.edutrack.domain.journal.ObStepJournal;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -17,9 +18,12 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepositor
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepHistory;
+import com.edunext.edutrack.domain.onboarding.ObStepHistoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +36,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * C-104 · unit tests for the five step-lifecycle actions, on {@code
- * ObJourneyInstantiationServiceTest}'s own fake-repository shape — no
- * container, {@code mvnw -pl api -Dtest} runs this in seconds.
+ * C-104/C-106/C-107 · unit tests for the step-lifecycle actions — start,
+ * complete (gated by C-106), block, waiting-on-client, resume, and skip
+ * (C-107) — on {@code ObJourneyInstantiationServiceTest}'s own
+ * fake-repository shape — no container, {@code mvnw -pl api -Dtest} runs
+ * this in seconds.
  */
 class ObJourneyStepLifecycleServiceTest {
 
@@ -46,6 +52,7 @@ class ObJourneyStepLifecycleServiceTest {
 
     private final Map<Long, ObJourneyStep> stepRows = new HashMap<>();
     private final Map<Long, ObJourney> journeyRows = new HashMap<>();
+    private final List<ObStepHistory> historyRows = new ArrayList<>();
 
     private final ObJourneyStepRepository journeySteps = mock(ObJourneyStepRepository.class);
     private final ObJourneyRepository journeys = mock(ObJourneyRepository.class);
@@ -54,9 +61,12 @@ class ObJourneyStepLifecycleServiceTest {
     private final ObJourneyTemplateStepDocRepository templateStepDocs = mock(ObJourneyTemplateStepDocRepository.class);
     private final ObAttachmentRepository attachments = mock(ObAttachmentRepository.class);
     private final ObSignoffRepository signoffs = mock(ObSignoffRepository.class);
+    private final ObStepHistoryRepository stepHistory = mock(ObStepHistoryRepository.class);
+    private final ObStepJournal stepJournal = new ObStepJournal(journeys, stepHistory);
 
     private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
-            journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs);
+            journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs,
+            stepJournal);
 
     @BeforeEach
     void wireFakes() {
@@ -64,12 +74,26 @@ class ObJourneyStepLifecycleServiceTest {
                 Optional.ofNullable(stepRows.get(inv.<Long>getArgument(0))));
         when(journeys.findById(any())).thenAnswer(inv ->
                 Optional.ofNullable(journeyRows.get(inv.<Long>getArgument(0))));
+        when(journeys.findByIdForUpdate(any())).thenAnswer(inv ->
+                Optional.ofNullable(journeyRows.get(inv.<Long>getArgument(0))));
         // C-106's completion gate defaults to "nothing outstanding" — an
         // empty Task List and no document checklist — so every C-104 test
         // written before this task keeps completing exactly as it did.
         when(stepItems.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
         when(templateStepItems.findAllById(any())).thenReturn(List.of());
         when(templateStepDocs.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
+        when(stepHistory.findFirstByJourneyIdOrderByIdDesc(any())).thenAnswer(inv -> {
+            Long journeyId = inv.getArgument(0);
+            return historyRows.stream()
+                    .filter(row -> row.getJourneyId().equals(journeyId))
+                    .reduce((first, second) -> second);
+        });
+        when(stepHistory.insert(any())).thenAnswer(inv -> {
+            ObStepHistory row = inv.getArgument(0);
+            row.setId((long) (historyRows.size() + 1));
+            historyRows.add(row);
+            return row;
+        });
 
         ObJourney journey = new ObJourney();
         journey.setId(JOURNEY);
@@ -438,5 +462,126 @@ class ObJourneyStepLifecycleServiceTest {
 
         assertThatThrownBy(() -> service.resume(STEP, STRANGER))
                 .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    // ── skip (C-107) ─────────────────────────────────────────────────────
+
+    private static final String MANAGER_ROLE = "OB_MANAGER";
+    private static final String ADMIN_ROLE = "OB_ADMIN";
+    private static final String WRONG_ROLE = "OB_SALES";
+
+    @Test
+    void skipMovesAnyNonTerminalStatusToSkippedWithReasonAndActor() {
+        ObJourneyStep skipped = service.skip(STEP, STRANGER, MANAGER_ROLE, "client does not need this service");
+
+        assertThat(skipped.getStatus()).isEqualTo(ObJourneyStepStatus.SKIPPED);
+        assertThat(skipped.getSkipReason()).isEqualTo("client does not need this service");
+        assertThat(skipped.getSkippedBy()).isEqualTo(STRANGER);
+    }
+
+    @Test
+    void skipIsAllowedForAnAdminToo() {
+        ObJourneyStep skipped = service.skip(STEP, STRANGER, ADMIN_ROLE, "duplicate service");
+
+        assertThat(skipped.getStatus()).isEqualTo(ObJourneyStepStatus.SKIPPED);
+    }
+
+    @Test
+    void skipIsNotRowScopedByOwnership() {
+        // STRANGER owns nothing on this step, and that is exactly the point of
+        // an override — see the service's own class javadoc on skip().
+        ObJourneyStep skipped = service.skip(STEP, STRANGER, MANAGER_ROLE, "override, not owned");
+
+        assertThat(skipped.getStatus()).isEqualTo(ObJourneyStepStatus.SKIPPED);
+    }
+
+    @Test
+    void skipWorksFromAnyNonTerminalStatusIncludingBlocked() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.BLOCKED);
+        stepRows.get(STEP).setBlockedReasonCode("client-unresponsive");
+
+        ObJourneyStep skipped = service.skip(STEP, OWNER, MANAGER_ROLE, "no longer needed");
+
+        assertThat(skipped.getStatus()).isEqualTo(ObJourneyStepStatus.SKIPPED);
+    }
+
+    @Test
+    void skipDoesNotRequireTheJourneyGateToBeOpen() {
+        journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
+
+        ObJourneyStep skipped = service.skip(STEP, OWNER, MANAGER_ROLE, "override while locked");
+
+        assertThat(skipped.getStatus()).isEqualTo(ObJourneyStepStatus.SKIPPED);
+    }
+
+    @Test
+    void skipRefusesACallerHoldingTheWrongOnboardingRole() {
+        assertThatThrownBy(() -> service.skip(STEP, OWNER, WRONG_ROLE, "not a manager"))
+                .isInstanceOf(NotAnOnboardingModeratorException.class);
+    }
+
+    @Test
+    void skipAnswersNotFoundForACallerWithNoOnboardingStandingAtAll() {
+        assertThatThrownBy(() -> service.skip(STEP, OWNER, null, "no onboarding role"))
+                .isInstanceOf(JourneyStepNotFoundException.class);
+    }
+
+    @Test
+    void skipRefusesAnAlreadyDoneStep() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.DONE);
+
+        assertThatThrownBy(() -> service.skip(STEP, OWNER, MANAGER_ROLE, "too late"))
+                .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    @Test
+    void skipRefusesAnAlreadySkippedStep() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.SKIPPED);
+
+        assertThatThrownBy(() -> service.skip(STEP, OWNER, MANAGER_ROLE, "already gone"))
+                .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    @Test
+    void skipFailsCleanlyForAnUnknownStep() {
+        assertThatThrownBy(() -> service.skip(404L, OWNER, MANAGER_ROLE, "no such step"))
+                .isInstanceOf(JourneyStepNotFoundException.class);
+    }
+
+    @Test
+    void skipAppendsAGenesisHistoryRowOnTheFirstSkipOfAJourney() {
+        service.skip(STEP, OWNER, MANAGER_ROLE, "first ever event on this journey");
+
+        assertThat(historyRows).hasSize(1);
+        ObStepHistory entry = historyRows.get(0);
+        assertThat(entry.getJourneyId()).isEqualTo(JOURNEY);
+        assertThat(entry.getStepId()).isEqualTo(STEP);
+        assertThat(entry.getObClientId()).isEqualTo(journeyRows.get(JOURNEY).getObClientId());
+        assertThat(entry.getEventType()).isEqualTo("SKIPPED");
+        assertThat(entry.getOldValue()).isEqualTo("PENDING");
+        assertThat(entry.getNewValue()).isEqualTo("SKIPPED");
+        assertThat(entry.getActorId()).isEqualTo(OWNER);
+        assertThat(entry.getActorType()).isEqualTo("USER");
+        assertThat(entry.getRemarks()).isEqualTo("first ever event on this journey");
+        assertThat(entry.getPrevHash()).isNull();
+        assertThat(entry.getRowHash()).isNotBlank();
+    }
+
+    @Test
+    void skipChainsOntoAPriorHistoryRowOfTheSameJourney() {
+        ObStepHistory earlier = new ObStepHistory();
+        earlier.setId(1L);
+        earlier.setJourneyId(JOURNEY);
+        earlier.setEventType("STEP_ACTIVATED");
+        earlier.setActorType("SYSTEM");
+        earlier.setRowHash("a".repeat(64));
+        historyRows.add(earlier);
+
+        service.skip(STEP, OWNER, MANAGER_ROLE, "second event on this journey");
+
+        assertThat(historyRows).hasSize(2);
+        ObStepHistory entry = historyRows.get(1);
+        assertThat(entry.getPrevHash()).isEqualTo("a".repeat(64));
+        assertThat(entry.getRowHash()).isNotEqualTo(entry.getPrevHash());
     }
 }
