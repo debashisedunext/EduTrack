@@ -194,3 +194,36 @@ edutrack:
       # addresses. The default should not be the one that puts mail on a
       # wire.
       transport: logging
+
+  # B-120 · the onboarding dashboard tables (ob_dashboard_summary,
+  # ob_implementor_daily_stats — A-108). Its own block rather than a reuse of
+  # edutrack.stats above, for edutrack.ob-outbox' reason: the ticketing
+  # summaries are recomputed from a hot, high-volume corpus and these from a
+  # few hundred journeys, so the cadence that suits one is not evidence about
+  # the other. Sharing the key would also mean that a test switching the
+  # ticketing refresh off — StatsRefreshIT does, on every run — silently
+  # switched this one off too.
+  ob-stats:
+    enabled: true
+
+    # Same five minutes as edutrack.stats, and for the same reason: it is a
+    # recompute rather than an accumulation, so a missed pass costs latency and
+    # never correctness.
+    refresh-interval: ${OB_STATS_REFRESH_INTERVAL:PT5M}
+
+    # How many trailing days each pass recomputes the FLOW columns for. The
+    # stock columns are never recomputed for a past day — they are current
+    # values with no history behind them, and rewriting them would overwrite
+    # what was true with what is true now. ObDashboardStatsRepository's class
+    # note carries the argument.
+    #
+    # Seven covers a working week of outage. The window is additionally clamped
+    # to the oldest stat_date already stored, so a fresh table fills forward
+    # rather than inventing zero rows for days before it existed.
+    flow-window-days: ${OB_STATS_FLOW_WINDOW_DAYS:7}
+
+    # The share of a step's TAT at which it turns AMBER. The contract's ObRag
+    # description names 75% as the default and calls it configurable; B-113 is
+    # where it becomes a row on the TAT settings screen rather than a property,
+    # and this key is what that task replaces.
+    amber-share: ${OB_STATS_AMBER_SHARE:0.75}
