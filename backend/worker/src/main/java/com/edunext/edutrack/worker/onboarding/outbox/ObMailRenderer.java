@@ -102,10 +102,12 @@ class ObMailRenderer {
             "chip_text", "recipient_name", "is_client");
 
     private final ObMailLinks links;
+    private final ObDigestBody digestBody;
     private final TemplateEngine thymeleaf;
 
-    ObMailRenderer(ObMailLinks links, TemplateEngine thymeleaf) {
+    ObMailRenderer(ObMailLinks links, ObDigestBody digestBody, TemplateEngine thymeleaf) {
         this.links = links;
+        this.digestBody = digestBody;
         this.thymeleaf = thymeleaf;
     }
 
@@ -132,7 +134,11 @@ class ObMailRenderer {
         }
 
         ObMailTemplate chosen = template.get();
-        String body = bodyOf(chosen, values);
+        // The digest's rows, if this is the digest. Appended rather than
+        // substituted — see ObDigestBody for why a list cannot be a {{variable}}
+        // and why one event gets a body the template engine did not write.
+        String table = digestBody.tableFor(message).orElse("");
+        String body = bodyOf(chosen, values) + table;
         if (body.isBlank()) {
             log.warn("ob-mail: every paragraph of {} lost a value for id={}, sending the generic notice",
                     chosen, message.id());
@@ -385,8 +391,13 @@ class ObMailRenderer {
      * <p>Ampersand first, or it re-escapes the ampersands the later replacements
      * introduce and turns {@code <} into {@code &amp;lt;}. Both quote forms,
      * because a value can land inside an attribute.
+     *
+     * <p>Package-private rather than private since B-114: {@link ObDigestBody}
+     * builds the one body this class does not substitute, and its cells are user
+     * text with the same problem. One escaper in the package, not a fourth copy
+     * of the same eleven lines.
      */
-    private static String escape(String value) {
+    static String escape(String value) {
         return value
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")

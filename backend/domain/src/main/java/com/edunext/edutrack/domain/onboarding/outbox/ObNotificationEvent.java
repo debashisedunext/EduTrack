@@ -46,10 +46,6 @@ import java.util.Set;
  *
  * <h2>What is deliberately absent</h2>
  *
- * <p>No manager digest. B-114 composes a list of stuck journeys, and a list is
- * not a {@code {{variable}}} — that task owns its own body and its own entry
- * here if it wants one.
- *
  * <p>No IN_APP titles. B-112 decided what an onboarding bell entry looks like
  * and put the wording in {@code worker}'s {@code ObInAppTemplate}, beside the
  * mail wording it mirrors — what came back here is {@link #category()} alone,
@@ -165,6 +161,45 @@ public enum ObNotificationEvent {
             vars("client_name", "action_url"),
             vars("product_name", "resolution_note", "resolved_by")),
 
+    // ───────────────────────────────────────────────────────── the daily digest
+    //
+    // B-114. Every other event here fires because something happened to one
+    // step; this one fires because it is 08:30 and somebody's team has work
+    // that has stopped moving.
+
+    /**
+     * One mail a day to a manager, listing every stuck step under them (§7's
+     * "non-mandatory skip (→ manager digest)", generalised to the stall the
+     * digest exists to surface).
+     *
+     * <p><strong>The list is not a variable, and that is why this event looks
+     * unlike its neighbours.</strong> Every other event names one step, so its
+     * facts fit in {@code {{placeholders}}} and the layout's facts table. A
+     * digest is about many steps across many clients, and there is no
+     * {@code {{}}} that prints a table. So the rows travel in the payload as a
+     * JSON array under {@link #STUCK_ROWS} — invisible to
+     * {@code ObMailRenderer}'s substitution, which drops non-scalar values by
+     * design — and {@code ObDigestBody} turns them into markup that is appended
+     * to this template's prose. The variables below are the <em>summary</em>:
+     * what the subject says and what the opening sentence needs.
+     *
+     * <p>{@code threshold} is a phrase, not a number ("2 working days"),
+     * because the sentence reads "…for longer than {@code {{threshold}}}" and
+     * the caller is the one that knows whether the setting is in days or hours.
+     * B-113 makes the setting configuration; the wording does not change.
+     *
+     * <p><strong>{@link ObCategory#ESCALATION}, by B-112's own rule rather
+     * than by a fresh judgement.</strong> A {@code REMINDER} is "a deadline
+     * approaching that nobody has missed yet", and every row in this mail has
+     * already missed — that is the entry condition. It is what separates
+     * {@link #TAT_REMINDER} from {@link #TAT_BREACHED}, and the digest is on
+     * the breached side of it. A summary rather than an incident, but the tab
+     * is named for why the event exists, not for how many things it names.
+     */
+    MANAGER_DIGEST(ObCategory.ESCALATION,
+            vars("stuck_count", "client_count", "threshold"),
+            vars("action_url", "oldest_stalled_for")),
+
     // ───────────────────────────────────────────────────── sign-off and go-live
 
     /**
@@ -200,6 +235,18 @@ public enum ObNotificationEvent {
     GO_LIVE(ObCategory.UPDATE,
             vars("client_name"),
             vars("action_url", "live_on", "product_names", "support_contact"));
+
+    /**
+     * The payload key {@link #MANAGER_DIGEST} carries its rows under — a JSON
+     * array of objects, one per stuck step.
+     *
+     * <p>Named here rather than in either end because both ends are in
+     * different modules: the scheduler that writes it is in {@code worker}, the
+     * composer that reads it is in {@code worker} too today, and B-112's bell
+     * will want the same rows from {@code api}. A string literal in two places
+     * is a contract that can be misspelled in one of them.
+     */
+    public static final String STUCK_ROWS = "stuck";
 
     /** {@code ob_notification_outbox.event_key VARCHAR(60)} — {@link ObNotification#EVENT_KEY_MAX}. */
     private static final int KEY_MAX = ObNotification.EVENT_KEY_MAX;
