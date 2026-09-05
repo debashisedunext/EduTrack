@@ -739,6 +739,18 @@ final class PermissionMatrix {
             {"reasonCode":"client-unresponsive","note":"Matrix fixture"}""";
 
     /**
+     * C-107 · {@code ObJourneyStepLifecycleDtos.ObStepSkipRequest}: {@code reason}
+     * is {@code @NotBlank}, {@code @Size(min = 3)}. The step id names no real
+     * row — {@code BLOCK_JOURNEY_STEP}'s own standing rule: an allowed role is
+     * entitled to reach the service and be refused there (here, by {@code
+     * NotAnOnboardingModeratorException}'s own 403 for every role but a
+     * Manager or Admin — a service-level refusal all the same, not this
+     * fixture's), not by this fixture.
+     */
+    private static final String SKIP_JOURNEY_STEP = """
+            {"reason":"Matrix fixture — client does not need this service"}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -2019,6 +2031,21 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/block", BLOCK_JOURNEY_STEP),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/waiting-on-client"),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/resume"),
+
+            // ── C-107 · skip a step ────────────────────────────────────────────
+            //
+            // Still isAuthenticated() only, same interim state as the five
+            // above. "Manager/Admin only" is a capability this file cannot
+            // express: it depends on the ONBOARDING moduleRoles claim, which
+            // JwtAuthoritiesConverter does not turn into a Spring authority
+            // (OnboardingScopeResolver's own note), so none of these six
+            // ticketing-role fixtures carries any onboarding standing at all.
+            // Every one of them is therefore refused inside the service — but
+            // with 404 (ObJourneyStepLifecycleService#requireModerator), not
+            // 403, on ModuleAccessGuard's own "indistinguishable from not
+            // found" reasoning for a caller with no module grant. 404 is not
+            // 403, so this is still "everyRole", not a restricted set.
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/skip", SKIP_JOURNEY_STEP),
 
             // ── B-112 · OB-13, the onboarding notification centre ─────────────
             //

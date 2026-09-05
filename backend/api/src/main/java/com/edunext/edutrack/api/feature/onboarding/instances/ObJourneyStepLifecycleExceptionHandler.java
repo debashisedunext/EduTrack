@@ -23,6 +23,8 @@ class ObJourneyStepLifecycleExceptionHandler {
     private static final URI JOURNEY_NOT_OPEN = URI.create("https://edutrack/errors/journey-not-open");
     private static final URI COMPLETION_GATE_NOT_SATISFIED =
             URI.create("https://edutrack/errors/completion-gate-not-satisfied");
+    private static final URI STEP_MODERATOR_REQUIRED = URI.create("https://edutrack/errors/step-moderator-required");
+    private static final URI STEP_TERMINAL = URI.create("https://edutrack/errors/ob-step-terminal");
 
     /** No {@code ob_journey_steps} row for the given id. */
     @ExceptionHandler(JourneyStepNotFoundException.class)
@@ -81,6 +83,30 @@ class ObJourneyStepLifecycleExceptionHandler {
         problem.setProperty("unansweredMandatoryItems", e.unansweredMandatoryItems());
         problem.setProperty("missingRequiredDocs", e.missingRequiredDocs());
         problem.setProperty("signoffMissing", e.signoffMissing());
+        return ResponseEntity.unprocessableEntity().body(problem);
+    }
+
+    /**
+     * C-107 · 403 — a plain capability check, not a row-scope one. See {@link
+     * NotAnOnboardingModeratorException}'s own javadoc for why this is 403
+     * where {@link #handleNotStepOwner} is 422.
+     */
+    @ExceptionHandler(NotAnOnboardingModeratorException.class)
+    ResponseEntity<ProblemDetail> handleNotModerator(NotAnOnboardingModeratorException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
+        problem.setType(STEP_MODERATOR_REQUIRED);
+        problem.setTitle("Only an onboarding Manager or Admin may skip a step");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    /** C-107 · 422 {@code ob-step-terminal} — already `DONE` or already `SKIPPED`. */
+    @ExceptionHandler(StepAlreadyTerminalException.class)
+    ResponseEntity<ProblemDetail> handleTerminal(StepAlreadyTerminalException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(STEP_TERMINAL);
+        problem.setTitle("This service is already closed");
+        problem.setDetail(e.getMessage());
         return ResponseEntity.unprocessableEntity().body(problem);
     }
 }
