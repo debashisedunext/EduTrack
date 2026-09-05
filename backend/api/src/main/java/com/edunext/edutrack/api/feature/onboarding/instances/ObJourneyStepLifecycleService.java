@@ -1,6 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
-import com.edunext.edutrack.domain.journal.ChainDigest;
+import com.edunext.edutrack.domain.journal.ObStepJournal;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -20,12 +20,10 @@ import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
-import com.edunext.edutrack.domain.onboarding.ObStepHistoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -85,13 +83,11 @@ import java.util.stream.Collectors;
 
         Routing it through ScopedJourneys would also be worse than redundant         here: this method takes a callerId, not an Authentication, so it would         need a second principal shape threaded through five transitions to         re-answer a question requireOwnership has already answered — and a         scope miss would surface as the IllegalStateException below, a 500,         where the whole point of the guard is a 404.
 
-        C-107's own skip() reads the same repository the same way, for a         sixth transition, plus one further use of the lock: findByIdForUpdate         before appending an ob_step_history row, so two concurrent appends to         one journey's chain cannot read the same tail and fork it (PLAN.md         §3.7's argument, one module over). Locking is not scoping — it is a         write concern the guard has no opinion about — so it does not widen         this exemption, only exercises it a second way.""")
+        C-107's own skip() reads the same repository the same way, for a         sixth transition — a plain findById for obClientId, to put on the         ob_step_history row it builds. The FOR UPDATE lock that append needs         is ObStepJournal's own, taken inside domain/journal/ where         ScopeGuardRulesTest does not reach; this class never calls         findByIdForUpdate itself.""")
 public class ObJourneyStepLifecycleService {
 
     /** Plan §3's "override steps with logged reason" — {@link #skip}'s own capability. */
     private static final Set<String> MODERATOR_ROLES = Set.of("OB_MANAGER", "OB_ADMIN");
-
-    private static final int CHAIN_PAYLOAD_VERSION = 1;
 
     private final ObJourneyStepRepository journeySteps;
     private final ObJourneyRepository journeys;
@@ -100,12 +96,12 @@ public class ObJourneyStepLifecycleService {
     private final ObJourneyTemplateStepDocRepository templateStepDocs;
     private final ObAttachmentRepository attachments;
     private final ObSignoffRepository signoffs;
-    private final ObStepHistoryRepository stepHistory;
+    private final ObStepJournal stepJournal;
 
     public ObJourneyStepLifecycleService(ObJourneyStepRepository journeySteps, ObJourneyRepository journeys,
             ObJourneyStepItemRepository stepItems, ObJourneyTemplateStepItemRepository templateStepItems,
             ObJourneyTemplateStepDocRepository templateStepDocs, ObAttachmentRepository attachments,
-            ObSignoffRepository signoffs, ObStepHistoryRepository stepHistory) {
+            ObSignoffRepository signoffs, ObStepJournal stepJournal) {
         this.journeySteps = journeySteps;
         this.journeys = journeys;
         this.stepItems = stepItems;
@@ -113,7 +109,7 @@ public class ObJourneyStepLifecycleService {
         this.templateStepDocs = templateStepDocs;
         this.attachments = attachments;
         this.signoffs = signoffs;
-        this.stepHistory = stepHistory;
+        this.stepJournal = stepJournal;
     }
 
     /**
@@ -332,11 +328,10 @@ public class ObJourneyStepLifecycleService {
         requireModerator(stepId, moduleRole);
         requireNotTerminal(step);
 
-        // Locked here, once, rather than read first and locked again inside
-        // the history append: the lock is what makes the chain-tail read in
-        // appendSkippedHistory safe against a concurrent append to this
-        // journey, so it must already be held by the time that method runs.
-        ObJourney journey = journeys.findByIdForUpdate(step.getJourneyId())
+        // A plain read — for obClientId, to put on the history entry.
+        // ObStepJournal#append takes its own findByIdForUpdate lock before
+        // touching the chain; this class does not need to hold one itself.
+        ObJourney journey = journeys.findById(step.getJourneyId())
                 .orElseThrow(() -> new IllegalStateException(
                         "journey step " + stepId + " points at journey " + step.getJourneyId() + " which does not exist"));
 
@@ -412,18 +407,16 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
-     * C-107 · the only writer {@code ob_step_history} has today. The caller
-     * must already hold {@link ObJourneyRepository#findByIdForUpdate}'s lock
-     * on {@code journey} — that is what makes the tail read below safe
-     * against a concurrent append to the same journey. Reads the chain tail
-     * with its own {@code FOR UPDATE} on top of that (see {@link
-     * ObStepHistoryRepository#findFirstByJourneyIdOrderByIdDesc}'s own
-     * javadoc for why the journey lock alone is not enough under MySQL's
-     * REPEATABLE READ), and stamps {@code prevHash}/{@code rowHash} before
-     * the insert — exactly {@code TicketJournal#append(TicketHistory)}'s
-     * shape, one module over, and deliberately not a shared class yet: this
-     * is the only caller, and {@code TicketJournal} lives in Stream A's
-     * {@code domain/journal/} (TEAM-PLAN.md §6).
+     * C-107 · the only writer {@code ob_step_history} has today, and it does
+     * not write directly: {@code AppendOnlyRulesTest.theProtectedTablesAreWrittenOnlyThroughTheJournal}
+     * is stated over {@code assignableTo(AppendOnly.class)}, so {@link
+     * ObStepHistoryRepository} — the moment it extends {@code AppendOnly} —
+     * falls under the identical door rule {@code TicketHistoryRepository}
+     * does. {@link ObStepJournal} is that door, one module over from {@code
+     * TicketJournal} in Stream A's {@code domain/journal/} (TEAM-PLAN.md §6,
+     * flagged there rather than added quietly). This method only builds the
+     * unhashed entry; the lock, the chain tail and the hash are the
+     * journal's job.
      */
     private void appendSkippedHistory(ObJourney journey, ObJourneyStep step, ObJourneyStepStatus previousStatus,
                                        long actorId, String reason) {
@@ -438,39 +431,6 @@ public class ObJourneyStepLifecycleService {
         entry.setActorId(actorId);
         entry.setActorType("USER");
         entry.setRemarks(reason);
-
-        String prevHash = stepHistory.findFirstByJourneyIdOrderByIdDesc(journey.getId())
-                .map(ObStepHistory::getRowHash)
-                .orElse(null);
-        entry.setPrevHash(prevHash);
-        entry.setRowHash(ChainDigest.rowHash(prevHash, chainPayload(entry)));
-        stepHistory.insert(entry);
-    }
-
-    /**
-     * The hashed columns of an {@code ob_step_history} row, on {@code
-     * ChainPayloads.of(TicketHistory)}'s exact convention: snake_case keys
-     * matching the schema, a {@code _v} version marker, {@code id} and {@code
-     * created_at} excluded because both are {@code @Generated}/{@code
-     * AUTO_INCREMENT} and null at hash time, {@code prev_hash}/{@code
-     * row_hash} excluded because they are the chain rather than the payload.
-     */
-    private static Map<String, Object> chainPayload(ObStepHistory entry) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("_v", CHAIN_PAYLOAD_VERSION);
-        payload.put("journey_id", entry.getJourneyId());
-        payload.put("step_id", entry.getStepId());
-        payload.put("ob_client_id", entry.getObClientId());
-        payload.put("event_type", entry.getEventType());
-        payload.put("field_name", entry.getFieldName());
-        payload.put("old_value", entry.getOldValue());
-        payload.put("new_value", entry.getNewValue());
-        payload.put("actor_id", entry.getActorId());
-        payload.put("actor_type", entry.getActorType());
-        payload.put("actor_contact_id", entry.getActorContactId());
-        payload.put("remarks", entry.getRemarks());
-        payload.put("is_correction", entry.isCorrection());
-        payload.put("corrects_entry_id", entry.getCorrectsEntryId());
-        return payload;
+        stepJournal.append(entry);
     }
 }

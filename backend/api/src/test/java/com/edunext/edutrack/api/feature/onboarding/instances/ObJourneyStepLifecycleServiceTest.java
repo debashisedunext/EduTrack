@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
+import com.edunext.edutrack.domain.journal.ObStepJournal;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -61,10 +62,11 @@ class ObJourneyStepLifecycleServiceTest {
     private final ObAttachmentRepository attachments = mock(ObAttachmentRepository.class);
     private final ObSignoffRepository signoffs = mock(ObSignoffRepository.class);
     private final ObStepHistoryRepository stepHistory = mock(ObStepHistoryRepository.class);
+    private final ObStepJournal stepJournal = new ObStepJournal(journeys, stepHistory);
 
     private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
             journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs,
-            stepHistory);
+            stepJournal);
 
     @BeforeEach
     void wireFakes() {
