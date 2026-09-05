@@ -532,3 +532,2175 @@ export const updateObClientResponse = zod.object({
 })).describe('The OB-05 page in one document.')
 })
 
+/**
+ * The accordion that sits **above** the journey accordions on OB-05, and
+the interactive half of CP-03. Its strip is `gateStatus` plus
+`mandatoryVerified / mandatoryTotal`; expanded, it is `tasks`.
+
+Tasks are **not paginated** — the instance is a snapshot of one
+template version, so the bound is the master's own (see
+`getObPrereqTemplate`), and both the progress bar and the gate
+arithmetic need the complete set to mean anything. A page-two task
+nobody fetched is a mandatory task nobody knows is outstanding.
+
+## The gate is reported here, not decided here
+
+`gateStatus` is the same value every journey on this client carries,
+and it is derived by C-118's `PrerequisiteGateService` from the task
+rows below — every mandatory task `VERIFIED`, every non-mandatory one
+`VERIFIED` or `SKIPPED`. It is repeated on this response so the
+accordion strip can render without reading a journey, not because
+there is a second copy of the truth.
+
+**There is no endpoint that opens the gate**, and that is a deliberate
+absence rather than a slice still to come. Plan §5.3: "There is no
+'open gate anyway' override — the only valve is skipping non-mandatory
+tasks." The gate opens as a *consequence* of the last mandatory
+verification, inside the same transaction as
+`verifyObClientPrereqTask`. The same shape `ObGateStatus` already
+states for journeys, and the same reasoning
+`getObJourneyStep`'s panel gives for having no status field on its
+`PATCH`: one way to make a move, with its own rules, rather than two.
+
+ * @summary One client's prerequisites, and the state of their gate (OB-05, CP-03)
+ */
+export const getObClientPrereqsParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const getObClientPrereqsResponseDataTasksItemTitleMax = 200;
+
+export const getObClientPrereqsResponseDataTasksItemDescriptionMax = 4000;
+
+export const getObClientPrereqsResponseDataTasksItemSkipReasonMax = 2000;
+
+
+
+export const getObClientPrereqsResponse = zod.object({
+  "data": zod.object({
+  "obClientId": zod.number(),
+  "templateVersion": zod.number().describe('The master version this instance was snapshotted from. Pinned:\npublishing a newer master leaves every boarded client on the\nchecklist they were actually given — plan §1.1 #2.\n'),
+  "status": zod.enum(['IN_PROGRESS', 'CLEARED']).describe('`ob_client_prereqs.status`. `CLEARED` is the header\'s record that\nthe gate condition was met, and it is not a second opinion about\n`gateStatus` — the two move in the same transaction.\n'),
+  "clearedAt": zod.string().datetime({}).nullish(),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n').describe('The same value every journey on this client carries. Repeated here\nso the OB-05 strip can render without reading a journey — derived\nfrom the tasks below by C-118, never a third place the truth is\nkept.\n'),
+  "mandatoryTotal": zod.number().describe('The denominator of the strip\'s progress bar.'),
+  "mandatoryVerified": zod.number(),
+  "optionalOutstanding": zod.number().optional().describe('Non-mandatory tasks neither verified nor skipped. These hold the\ngate too — plan §5.3 requires every non-mandatory task be\n`VERIFIED` \*\*or\*\* `SKIPPED` — and the progress bar counts only\nmandatory ones, so without this number a screen showing 4\/4\nmandatory beside a locked gate looks broken.\n'),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(getObClientPrereqsResponseDataTasksItemTitleMax),
+  "description": zod.string().max(getObClientPrereqsResponseDataTasksItemDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(getObClientPrereqsResponseDataTasksItemSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.'))
+}).describe('`ob_client_prereqs` and its tasks — the accordion above the journeys\non OB-05, and the interactive half of CP-03.\n')
+})
+
+/**
+ * Plan §4 allows "snapshot instances **and ad-hoc per-client tasks**" —
+a client whose situation needs something the master does not ask
+everybody for. It does not go back into the master; this client's
+instance is the only place it exists.
+
+## Why a create takes `If-Match`, which CONVENTIONS §5 does not require
+
+Because an ad-hoc task can be mandatory, and adding a mandatory task
+**re-locks a gate that may have just opened**. The precondition is
+against the client's prerequisite `ETag`, so an Admin adding a task
+from a screen rendered before another Admin verified the last
+mandatory one is refused with `412` rather than silently reversing a
+gate-open — which would stop clocks that had already started and
+contradict a kickoff mail already sent.
+
+That is a lost-update in every sense the convention cares about; what
+makes it unusual is only that the row being lost is not the one being
+written. Listing it here rather than exempting it: the tag exists,
+`getObClientPrereqs` serves it, and the race is real.
+
+ * @summary Add an ad-hoc task to one client's checklist (OB-05)
+ */
+export const addObClientPrereqTaskParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const addObClientPrereqTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n'),
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const addObClientPrereqTaskBodyTitleMax = 200;
+
+export const addObClientPrereqTaskBodyDescriptionMax = 4000;
+
+export const addObClientPrereqTaskBodyTatDaysMax = 365;
+
+
+
+export const addObClientPrereqTaskBody = zod.object({
+  "title": zod.string().min(1).max(addObClientPrereqTaskBodyTitleMax),
+  "description": zod.string().max(addObClientPrereqTaskBodyDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(addObClientPrereqTaskBodyTatDaysMax),
+  "isMandatory": zod.boolean().describe('True re-locks a gate that has already opened — which is why the\ncreate is preconditioned on the client\'s prerequisite `ETag`. See\n`addObClientPrereqTask`.\n')
+})
+
+/**
+ * The client's task page: description, the Admin's reference documents,
+their own submissions, and the comment thread. Staff read the same
+shape from OB-05.
+
+**Identical for both principals, and that is on purpose.** A
+prerequisite is the one object in this module a client and a staff
+member genuinely share — plan §11's never-visible list (owners,
+internal comms, block reasons, TAT internals) is about *journeys*, and
+none of it is on this row. There is nothing here to hide, so there is
+no second serializer to drift.
+
+ * @summary One prerequisite task in full (CP-04)
+ */
+export const getObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const getObClientPrereqTaskResponseDataTitleMax = 200;
+
+export const getObClientPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const getObClientPrereqTaskResponseDataSkipReasonMax = 2000;
+
+export const getObClientPrereqTaskResponseDataReferenceDocsItemLabelMax = 200;
+
+
+
+export const getObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(getObClientPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(getObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(getObClientPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.').and(zod.object({
+  "referenceDocs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(getObClientPrereqTaskResponseDataReferenceDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional()
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.')).describe('The Admin\'s documents, carried through from the master task at\nsnapshot time. Empty on an ad-hoc task unless one was attached\nto it directly.\n'),
+  "submissions": zod.array(zod.object({
+  "attachmentId": zod.number(),
+  "fileName": zod.string(),
+  "sizeBytes": zod.number(),
+  "uploadedByType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
+  "uploadedAt": zod.string().datetime({})
+})).describe('What the client sent back — `ob_attachments` with `kind:\nSUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an\nimplementor recorded a document that arrived by email.\n')
+})).describe('CP-04 and the OB-05 task row expanded. One schema for both principals\n— see `getObClientPrereqTask` for why a prerequisite is the one object\nin this module that needs no separate portal serializer.\n')
+})
+
+/**
+ * Staff only, and only the three fields below. `dueAt` is recomputed
+against the working calendar when `tatDays` moves, never taken
+literally from the client — CLAUDE.md's rule that all duration maths
+goes through the calendar, on the one clock in this module that runs
+against the client rather than against us.
+
+**`status` is not a field here**, exactly as it is not one on
+`updateObJourneyStep`. Moving a task between states is what the four
+transition routes below are for, each with its own required reason and
+its own refusals. A status field here would be a second way to make
+the same move with none of them — and one of those moves opens the
+gate for every journey the client has.
+
+**`isMandatory` is not a field here either**, and that is the sharper
+one. Flipping it is not an edit, it is a change to whether the gate
+can open: false→true re-locks a cleared gate, true→false clears one
+that was holding. Both are reachable through the routes that own those
+consequences — `skipObClientPrereqTask` for the valve plan §5.3
+allows, and adding a task for the other direction. Neither belongs in
+a field update whose contract says nothing about journeys.
+
+ * @summary Edit a task's wording or due date (OB-05)
+ */
+export const updateObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const updateObClientPrereqTaskHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObClientPrereqTaskBodyTitleMax = 200;
+
+export const updateObClientPrereqTaskBodyDescriptionMax = 4000;
+
+export const updateObClientPrereqTaskBodyTatDaysMax = 365;
+
+
+
+export const updateObClientPrereqTaskBody = zod.object({
+  "title": zod.string().min(1).max(updateObClientPrereqTaskBodyTitleMax).optional(),
+  "description": zod.string().max(updateObClientPrereqTaskBodyDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(updateObClientPrereqTaskBodyTatDaysMax).optional().describe('`dueAt` is recomputed against the working calendar; it is not sent.')
+}).describe('Three fields, and deliberately not `status` or `isMandatory` — see\n`updateObClientPrereqTask` for what each of those would let a field\nupdate do to a gate.\n')
+
+export const updateObClientPrereqTaskResponseDataTitleMax = 200;
+
+export const updateObClientPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const updateObClientPrereqTaskResponseDataSkipReasonMax = 2000;
+
+
+
+export const updateObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(updateObClientPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(updateObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(updateObClientPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.')
+})
+
+/**
+ * `PENDING` → `SUBMITTED`, and notifies the verifier (plan §7).
+
+Callable by **the client principal and by staff**, which is the one
+place in this module where that is true, and it is not a convenience:
+plan §4 records `submitted_via` precisely because a SPOC frequently
+emails a document to their implementor instead of using the portal.
+Without a staff path the implementor would have to leave it
+outstanding or log in as the client, and the second is how shared
+credentials start. Who submitted is recorded either way.
+
+`422` if the task is already `SUBMITTED`, `VERIFIED` or `SKIPPED`.
+Re-submitting a returned task is the normal loop and is allowed —
+that is `PENDING` again.
+
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const submitObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const submitObClientPrereqTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const submitObClientPrereqTaskBodyNoteMax = 4000;
+
+
+
+export const submitObClientPrereqTaskBody = zod.object({
+  "note": zod.string().max(submitObClientPrereqTaskBodyNoteMax).nullish(),
+  "attachmentIds": zod.array(zod.number()).optional().describe('Files already uploaded through the module\'s attachment route.\nOptional: plan §4 lists uploads, comments and marking done as\nthree separate things a client may do, and a task whose whole\nrequirement is \"confirm you have done this\" has nothing to attach.\n')
+})
+
+export const submitObClientPrereqTaskResponseDataTitleMax = 200;
+
+export const submitObClientPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const submitObClientPrereqTaskResponseDataSkipReasonMax = 2000;
+
+
+
+export const submitObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(submitObClientPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(submitObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(submitObClientPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.')
+})
+
+/**
+ * `SUBMITTED` → `VERIFIED`. Staff only — a client cannot verify their
+own work, which is the entire point of the state existing.
+
+## This is the route that starts the module
+
+Plan §5.3 evaluates the gate on **every** prerequisite transition, and
+this is the transition that clears the last mandatory task. In the
+same transaction, if the gate is then satisfied:
+
+1. every `LOCKED` journey on this client flips `OPEN`;
+2. every dependency-free step activates — several at once, because
+   plan §5.6 makes dependency-free steps parallel;
+3. clocks start, and the scanner begins seeing these steps for the
+   first time;
+4. the kickoff automation fires to the SPOC and the step owners.
+
+`data.gateOpened` says whether that happened, so OB-05 can re-read the
+journeys rather than guessing from a task count it would have to
+recompute. A journey held behind a sibling (plan §5.5) stays held —
+the gate and the service dependency are two different holds and
+clearing one does not clear the other.
+
+None of that is reachable any other way. There is no
+`POST /onboarding/clients/{id}/gate` and there will not be one.
+
+ * @summary Accept a submission — and, on the last one, open the gate (OB-05)
+ */
+export const verifyObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const verifyObClientPrereqTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const verifyObClientPrereqTaskBodyNoteMax = 4000;
+
+
+
+export const verifyObClientPrereqTaskBody = zod.object({
+  "note": zod.string().max(verifyObClientPrereqTaskBodyNoteMax).nullish()
+})
+
+export const verifyObClientPrereqTaskResponseDataTaskTitleMax = 200;
+
+export const verifyObClientPrereqTaskResponseDataTaskDescriptionMax = 4000;
+
+export const verifyObClientPrereqTaskResponseDataTaskSkipReasonMax = 2000;
+
+
+
+export const verifyObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "task": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(verifyObClientPrereqTaskResponseDataTaskTitleMax),
+  "description": zod.string().max(verifyObClientPrereqTaskResponseDataTaskDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(verifyObClientPrereqTaskResponseDataTaskSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "gateOpened": zod.boolean().describe('\*\*This transition is what opened it.\*\* True at most once in a\nclient\'s life, on the verification or skip that cleared the last\noutstanding task.\n\nIt is here so OB-05 knows to re-read the journeys rather than\ninferring it from a count it would have to recompute — and\ninferring it wrongly is a live hazard, because `gateStatus` is\n`OPEN` on every subsequent call too. A screen that refreshed the\nribbon whenever the gate reads open would refresh it forever.\n'),
+  "openedJourneyIds": zod.array(zod.number()).optional().describe('The journeys that flipped `LOCKED` → `OPEN` in this transaction.\nEmpty unless `gateOpened`.\n\n\*\*Not necessarily every journey the client has.\*\* One held behind\na sibling journey (plan §5.5) stays held: the gate and the service\ndependency are two different holds, and clearing one does not\nclear the other. Naming the ids rather than saying \"all of them\"\nis what keeps that distinction visible to the screen.\n'),
+  "mandatoryTotal": zod.number(),
+  "mandatoryVerified": zod.number()
+}).describe('What `verifyObClientPrereqTask` and `skipObClientPrereqTask` answer:\nthe task as it now stands, plus what that did to the gate.\n')
+})
+
+/**
+ * `SUBMITTED` → `PENDING`, with a **mandatory comment** saying what is
+wrong. Staff only.
+
+The comment is required rather than encouraged because this is the one
+message the client is guaranteed to read, and "returned" with no
+reason is a round trip that teaches them nothing. It is written to the
+task's thread, so it lands in the same place as everything else said
+about the task rather than only in the notification.
+
+The clock is **not** reset. Plan §5.4 attributes prerequisite time to
+the client, and a return that restarted it would let an incomplete
+submission buy an extension.
+
+ * @summary Send a submission back to the client (OB-05)
+ */
+export const returnObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const returnObClientPrereqTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const returnObClientPrereqTaskBodyCommentMax = 2000;
+
+
+
+export const returnObClientPrereqTaskBody = zod.object({
+  "comment": zod.string().min(1).max(returnObClientPrereqTaskBodyCommentMax).describe('What is wrong. Mandatory — see `returnObClientPrereqTask`. Written\nto the task\'s thread as well as into the notification, so it is\nreadable in the place everything else about the task is.\n')
+})
+
+export const returnObClientPrereqTaskResponseDataTitleMax = 200;
+
+export const returnObClientPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const returnObClientPrereqTaskResponseDataSkipReasonMax = 2000;
+
+
+
+export const returnObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(returnObClientPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(returnObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(returnObClientPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.')
+})
+
+/**
+ * → `SKIPPED`, reason mandatory, OB Admin and Onboarding Manager only.
+
+## The only valve, and it is deliberately narrow
+
+Plan §5.3 leaves exactly one way to move a gate that a client cannot
+clear, and this is it. **Mandatory tasks cannot be skipped** — `422`,
+not a permission the right role unlocks — because a skippable
+mandatory task is not a mandatory task, and the gate would then be a
+convention rather than a guarantee. Plan §14's mitigation for the
+stalling risk is "the mandatory list kept short in the master", which
+is a decision made in OB-14 at authoring time, not one made per client
+under pressure.
+
+Skipping the last outstanding non-mandatory task can open the gate,
+with all four consequences `verifyObClientPrereqTask` lists — so this
+answers the same `ObPrereqGateResult`.
+
+The skip notifies the manager digest (plan §7) rather than silently
+clearing. A waiver nobody sees is how the short mandatory list stops
+being short.
+
+ * @summary Waive a non-mandatory task — the gate's only valve (OB-05)
+ */
+export const skipObClientPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const skipObClientPrereqTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const skipObClientPrereqTaskBodyReasonMax = 2000;
+
+
+
+export const skipObClientPrereqTaskBody = zod.object({
+  "reason": zod.string().min(1).max(skipObClientPrereqTaskBodyReasonMax)
+})
+
+export const skipObClientPrereqTaskResponseDataTaskTitleMax = 200;
+
+export const skipObClientPrereqTaskResponseDataTaskDescriptionMax = 4000;
+
+export const skipObClientPrereqTaskResponseDataTaskSkipReasonMax = 2000;
+
+
+
+export const skipObClientPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "task": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(skipObClientPrereqTaskResponseDataTaskTitleMax),
+  "description": zod.string().max(skipObClientPrereqTaskResponseDataTaskDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(skipObClientPrereqTaskResponseDataTaskSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "gateOpened": zod.boolean().describe('\*\*This transition is what opened it.\*\* True at most once in a\nclient\'s life, on the verification or skip that cleared the last\noutstanding task.\n\nIt is here so OB-05 knows to re-read the journeys rather than\ninferring it from a count it would have to recompute — and\ninferring it wrongly is a live hazard, because `gateStatus` is\n`OPEN` on every subsequent call too. A screen that refreshed the\nribbon whenever the gate reads open would refresh it forever.\n'),
+  "openedJourneyIds": zod.array(zod.number()).optional().describe('The journeys that flipped `LOCKED` → `OPEN` in this transaction.\nEmpty unless `gateOpened`.\n\n\*\*Not necessarily every journey the client has.\*\* One held behind\na sibling journey (plan §5.5) stays held: the gate and the service\ndependency are two different holds, and clearing one does not\nclear the other. Naming the ids rather than saying \"all of them\"\nis what keeps that distinction visible to the screen.\n'),
+  "mandatoryTotal": zod.number(),
+  "mandatoryVerified": zod.number()
+}).describe('What `verifyObClientPrereqTask` and `skipObClientPrereqTask` answer:\nthe task as it now stands, plus what that did to the gate.\n')
+})
+
+/**
+ * `ob_prereq_comments` is **append-only** — two author columns, one for
+a staff `users` row and one for an `ob_client_contacts` row, exactly
+as `ob_step_communications` carries two. Exactly one is set on any
+row, and `authorType` says which.
+
+No `PATCH` or `DELETE` on this path, and there will not be one
+(CONVENTIONS §8). This thread is half of the record of what a client
+was asked for and what they said back; a deletable comment is a
+conversation either side can rewrite after a dispute starts.
+
+ * @summary The task's comment thread, oldest first (CP-04, OB-05)
+ */
+export const listObPrereqCommentsParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const listObPrereqCommentsQueryLimitDefault = 50;
+export const listObPrereqCommentsQueryLimitMax = 200;
+
+
+
+export const listObPrereqCommentsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObPrereqCommentsQueryLimitMax).default(listObPrereqCommentsQueryLimitDefault)
+})
+
+export const listObPrereqCommentsResponseDataItemClientAuthorNameMax = 160;
+
+export const listObPrereqCommentsResponseDataItemClientAuthorDesignationMax = 120;
+
+export const listObPrereqCommentsResponseDataItemClientAuthorPhoneMax = 32;
+
+export const listObPrereqCommentsResponseDataItemBodyMax = 4000;
+
+
+
+export const listObPrereqCommentsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "prereqTaskId": zod.number(),
+  "authorType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
+  "staffAuthor": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Set when `authorType` is `STAFF`, null otherwise.'),
+  "clientAuthor": zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObPrereqCommentsResponseDataItemClientAuthorNameMax),
+  "designation": zod.string().max(listObPrereqCommentsResponseDataItemClientAuthorDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(listObPrereqCommentsResponseDataItemClientAuthorPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional().describe('Set when `authorType` is `CLIENT`, null otherwise.'),
+  "body": zod.string().max(listObPrereqCommentsResponseDataItemBodyMax),
+  "isSystem": zod.boolean().optional().describe('Written by a transition rather than typed — the mandatory comment\n`returnObClientPrereqTask` requires is the only one so far. Marked\nso CP-04 can render it as an event rather than as something a\nperson chose to say, and so a client cannot be answered by a\nstring the server composed.\n'),
+  "createdAt": zod.string().datetime({})
+}).describe('`ob_prereq_comments` — append-only. Two author columns, exactly one\nset, the shape `ob_step_communications` already uses.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Both principals. The author is taken from the token and is never in
+the body — a client who could name their own author id could write as
+a member of staff.
+
+ * @summary Say something about this task (CP-04, OB-05)
+ */
+export const addObPrereqCommentParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const addObPrereqCommentHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addObPrereqCommentBodyBodyMax = 4000;
+
+
+
+export const addObPrereqCommentBody = zod.object({
+  "body": zod.string().min(1).max(addObPrereqCommentBodyBodyMax)
+})
+
+/**
+ * `ob_prereq_history` is append-only and hash-chained, on the same
+trigger pattern as `ob_step_history` (PHASE-2-BUILD-PLAN §9). **No
+`PATCH`, `PUT` or `DELETE` on this path, ever** — CONVENTIONS §8.
+
+This is the chain that makes a waiver defensible months later: who
+skipped a mandatory-adjacent task, when, and with what reason. A
+correction is a new compensating entry naming the one it corrects,
+never an edit.
+
+ * @summary Every state change on this task, oldest first (OB-05)
+ */
+export const listObPrereqHistoryParams = zod.object({
+  "prereqTaskId": zod.number().describe('A-118 · an `ob_client_prereq_tasks` id — one task on one client\'s\nchecklist, snapshotted from `ObPrereqTemplateTaskId` or added ad-hoc.\nNot the same id space as the master task it came from, for the reason\n`ObJourneyStepId` is not the same space as `ObJourneyTemplateStepId`:\nthe instance outlives revisions of the thing it was copied from.\n')
+})
+
+export const listObPrereqHistoryQueryLimitDefault = 50;
+export const listObPrereqHistoryQueryLimitMax = 200;
+
+
+
+export const listObPrereqHistoryQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObPrereqHistoryQueryLimitMax).default(listObPrereqHistoryQueryLimitDefault)
+})
+
+export const listObPrereqHistoryResponseDataItemClientActorNameMax = 160;
+
+export const listObPrereqHistoryResponseDataItemClientActorDesignationMax = 120;
+
+export const listObPrereqHistoryResponseDataItemClientActorPhoneMax = 32;
+
+export const listObPrereqHistoryResponseDataItemReasonMax = 2000;
+
+
+
+export const listObPrereqHistoryResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "prereqTaskId": zod.number(),
+  "at": zod.string().datetime({}),
+  "actorType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
+  "staffActor": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "clientActor": zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObPrereqHistoryResponseDataItemClientActorNameMax),
+  "designation": zod.string().max(listObPrereqHistoryResponseDataItemClientActorDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(listObPrereqHistoryResponseDataItemClientActorPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
+  "fromStatus": zod.union([zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),zod.null()]).optional().describe('Null on the first entry — instantiation has nothing to come from.'),
+  "toStatus": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "reason": zod.string().max(listObPrereqHistoryResponseDataItemReasonMax).nullish().describe('The skip reason or the return comment, copied here at the moment\nit was given. Copied rather than referenced because the chain has\nto be readable on its own: a history that pointed at a comment row\nwould be a hash-chained record whose meaning lived in a table with\nno chain of its own.\n'),
+  "isCorrection": zod.boolean().describe('A compensating entry — the only way to correct this log. The entry\nit corrects stays exactly where it is, named in\n`correctsEntryId`. An accounting reversal, not an edit.\n'),
+  "correctsEntryId": zod.number().nullish()
+}).describe('One row of `ob_prereq_history`, append-only and hash-chained on the\nsame trigger pattern as `ob_step_history`. Read-only on the wire\nbecause it is read-only in the database.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Seven counters, one round trip. The board's whole first paint.
+
+**Every number here is read from `ob_dashboard_summary` and
+`ob_client_escalations`' own aggregate, never counted live** —
+CLAUDE.md's rule, and the reason `computedAt` is on the response: a
+dashboard that cannot say how stale it is invites somebody to compare
+it against a list and file a bug about the difference.
+
+Counting is **journey-counted with a product dimension** (plan §9), so
+a client who bought three products contributes three to
+`ongoingProjects`. The two exceptions are stated on the fields
+themselves and are both client-counted on purpose: `overdueClients`
+and `clientEscalations`, because a client late on four services is one
+client to chase, not four.
+
+Scoped by A-112's `OnboardingScopeResolver` like every other read. A
+Step Owner's board counts the journeys containing their steps — the
+same set `listObJourneys` would return them — so the card and the
+slide-over it opens can never disagree.
+
+ * @summary The OB-02 card board (OB-02)
+ */
+export const getObDashboardSummaryQueryParams = zod.object({
+  "productId": zod.number().optional().describe('One product\'s column of the summary table. Omit for every product\nthe caller can see — which is a sum over rows, not a separate\nstored total, so the two cannot drift.\n')
+})
+
+export const getObDashboardSummaryHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getObDashboardSummaryResponse = zod.object({
+  "data": zod.object({
+  "cards": zod.array(zod.object({
+  "key": zod.enum(['ongoing-projects', 'this-weeks-deadlines', 'todays-delivery', 'overdue-clients', 'live', 'at-risk', 'client-escalations']).describe('A-118 · plan §9\'s seven cards, as a closed vocabulary.\n\nClosed here where `reportKey` is deliberately open, and the difference\nis which document owns the list. The card board is a \*\*fixed layout\*\*\nthe design draws — an eighth card is a change to OB-02\'s composition\nand to this contract, and gets read. The report catalogue is a\n\*catalogue\*: §3 #8 already knows five more are coming, so an enum\nthere would make each arrival a breaking client change.\n\nThe same distinction `\/dashboard\/widget\/{widgetKey}` and `\/reports`\nalready make one module over, and it holds for the same reason.\n'),
+  "count": zod.number(),
+  "deltaFromYesterday": zod.number().nullish().describe('Change against the previous computed day, or null on the first day\na deployment has data. A count with no direction says nothing\nabout whether anybody is winning.\n')
+}).describe('One card on the OB-02 board.')).describe('All seven, always, in `ObDashboardCardKey` order — a card whose\ncount is zero is drawn as zero rather than omitted. An absent card\nand a card reading nought are different claims, and only one of\nthem is true when nothing is overdue.\n'),
+  "computedAt": zod.string().datetime({}).describe('When `ob_dashboard_summary` was last refreshed. On the response\nbecause these numbers are pre-aggregated and a board that cannot\nsay how stale it is invites a bug report about the difference\nbetween it and a list.\n'),
+  "appliedScope": zod.string().optional().describe('What A-112 narrowed the counts to, in a sentence — \"journeys\ncontaining your services\", \"clients you created\", \"all clients\".\nThe same honesty `runReport.meta.appliedScope` provides: a Step\nOwner comparing their board against a colleague\'s should be able\nto see why the numbers differ without asking.\n')
+}).describe('The OB-02 card board. Read from `ob_dashboard_summary`, never counted\nlive — CLAUDE.md.\n')
+})
+
+/**
+ * Plan §9: "every card clicks open a right slide-over listing the
+matching clients with product, item, owner, due and status, each row
+opening the client" — the S-06 pattern.
+
+## Why this is not a `drillDown` query string
+
+The ticketing dashboard deep-links each series point to a pre-filtered
+ticket list, because there *is* a ticket list and every point is a set
+of tickets. Here the rows are **items, not clients and not journeys**:
+`thisWeeksDeadlines` mixes services with prerequisite tasks, which
+plan §9 requires by name ("all client tasks — services *and*
+prerequisites"), and no existing list returns both. `listObJourneys`
+cannot answer it; a client list certainly cannot.
+
+So the slide-over is its own read, and `ObDashboardItem` is
+deliberately a union with an `itemType` rather than two lists the
+screen would have to interleave by date itself.
+
+**The count comes from the summary table and this list does not.** A
+card's number is pre-aggregated; its rows are a bounded query run when
+somebody clicks. They can therefore differ by up to one refresh
+interval, and that is the honest trade rather than a defect — the
+alternative is a live `COUNT(*)` behind every card on every paint,
+which CLAUDE.md forbids for exactly the reason it would be slow. The
+response repeats `computedAt` from the card so a screen can say which
+number it is showing.
+
+ * @summary The slide-over behind one card (OB-02)
+ */
+export const listObDashboardCardItemsParams = zod.object({
+  "cardKey": zod.enum(['ongoing-projects', 'this-weeks-deadlines', 'todays-delivery', 'overdue-clients', 'live', 'at-risk', 'client-escalations'])
+})
+
+export const listObDashboardCardItemsQueryLimitDefault = 50;
+export const listObDashboardCardItemsQueryLimitMax = 200;
+
+
+
+export const listObDashboardCardItemsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObDashboardCardItemsQueryLimitMax).default(listObDashboardCardItemsQueryLimitDefault),
+  "productId": zod.number().optional(),
+  "ownerUserId": zod.number().optional().describe('Narrows to one implementor — how the workload grid\'s cells open\ninto this same slide-over. Matches owner \*\*or backup owner\*\*, the\nreading `listObJourneys` takes and for the same reason: a backup\nexists to cover a step, so excluding them would under-report the\nperson actually covering it.\n')
+})
+
+export const listObDashboardCardItemsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "itemType": zod.enum(['SERVICE', 'PREREQUISITE']).describe('A-118 · which kind of thing a slide-over row is. Plan §9 requires the\ndeadline cards to count \"all client tasks — services \*\*and\*\*\nprerequisites\", so the list behind them mixes two tables and the row\nhas to say which one it came from.\n\nThe alternative — two lists the screen interleaves by due date — was\nrejected because the interleaving is the whole point of the card, and\ndoing it client-side means paginating two cursors in lockstep.\n'),
+  "itemId": zod.number().describe('An `ob_journey_steps` id when `itemType` is `SERVICE`, an\n`ob_client_prereq_tasks` id when it is `PREREQUISITE`. \*\*Two id\nspaces behind one field\*\*, which is why `itemType` is required and\nwhy a row cannot be acted on without reading it first.\n'),
+  "obClientId": zod.number(),
+  "obClientName": zod.string(),
+  "journeyId": zod.number().nullish().describe('Null on a prerequisite — the gate sits in front of every journey, not inside one.'),
+  "product": zod.union([zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),zod.null()]).optional().describe('Null on a prerequisite, for the same reason `journeyId` is.'),
+  "title": zod.string().describe('The service name or the prerequisite task title — plan §9\'s \"item\" column.'),
+  "owner": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null on a prerequisite, whose counterparty is the client rather\nthan an implementor. The grid\'s \"owner\" column is empty on those\nrows rather than filled with whoever will verify it — verification\nis not ownership, and naming a verifier here would make the\nworkload grid double-count them.\n'),
+  "status": zod.string().describe('An `ObJourneyStepStatus` or an `ObPrereqTaskStatus` depending on\n`itemType`. A plain string rather than a union of the two enums:\nthis is a display column on a slide-over, and a generated client\nforced to discriminate between two enums to render a chip would\ngain nothing it could act on.\n'),
+  "dueAt": zod.string().datetime({}),
+  "isOverdue": zod.boolean().optional()
+}).describe('One row of an OB-02 slide-over. Deliberately a union across services\nand prerequisites — see `ObDashboardItemType`.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).describe('Carries `computedAt` alongside the cursor, repeating the card\'s\nown so a screen can say which number these rows belong to. The\ncount is pre-aggregated and this list is live, so they may differ\nby up to one refresh interval — see `listObDashboardCardItems`.\n')
+})
+
+/**
+ * Plan §9's first grid, below the card board: client, start date,
+products bought, module in progress, current stage, responsible,
+expected completion, delayed-by days.
+
+One row per **journey**, not per client, which is what makes "module
+in progress" and "current stage" answerable — a client with an ERP
+journey three weeks late and a Biometric journey on track is one
+delayed project, not a client with an averaged status. `productsBought`
+is on the row anyway, because the grid names it as a column and it is
+a fact about the client rather than the journey.
+
+Ordered by `delayedByDays` descending: the grid exists to be worked
+from the top.
+
+ * @summary The Delayed Projects grid (OB-02)
+ */
+export const listObDelayedProjectsQueryLimitDefault = 50;
+export const listObDelayedProjectsQueryLimitMax = 200;
+
+
+
+
+export const listObDelayedProjectsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObDelayedProjectsQueryLimitMax).default(listObDelayedProjectsQueryLimitDefault),
+  "productId": zod.number().optional(),
+  "ownerUserId": zod.number().optional(),
+  "minDelayDays": zod.number().min(1).optional().describe('Hide the barely-late. A grid that lists everything one day over\ngets ignored, which costs more than it shows.\n')
+})
+
+
+
+
+export const listObDelayedProjectsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "journeyId": zod.number(),
+  "obClientId": zod.number(),
+  "obClientName": zod.string(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "productsBought": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n')).optional().describe('Every product this client bought, not just this journey\'s — plan\n§9 names it as a column and it is a fact about the client. The\nrow\'s own product is `product`.\n'),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "currentStep": zod.union([zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('Plan §9\'s \"current stage\". Null on a journey whose every step is\nblocked or not yet activated — which is itself the interesting\ncase, and rendering it as a gap is more honest than picking an\narbitrary step to name.\n'),
+  "responsible": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "expectedCompletionAt": zod.string().datetime({}).nullish(),
+  "delayedByDays": zod.number().min(1).describe('\*\*Working days, through the calendar\*\* — CLAUDE.md, and the one\nnumber on this grid that a naive subtraction would get visibly\nwrong. A journey due Friday and unfinished on Monday is one\nworking day late, not three, and a grid that said three would\nspike every Monday until readers learned to discount it. The same\ncorrection A-073\'s handoff-latency chart had to make.\n')
+}).describe('One row of plan §9\'s Delayed Projects grid.')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Plan §9's second grid, reading `ob_implementor_daily_stats`.
+
+## Two things this route must do that its schema cannot enforce
+
+**A row is returned for an implementor with zero clients.** Plan §9
+says so explicitly — "one row per implementor *including those with
+zero clients*" — and A-108's migration comment flags it as the
+requirement most likely to be lost, because the natural query groups
+by owner over open steps and produces nothing at all for somebody who
+has just finished everything. The grid would then show a
+fully-delivered implementor as *absent* rather than as clear, which is
+the opposite reading. The population is everyone holding an
+`OB_STEP_OWNER` grant in `user_module_access`, left-joined to their
+stats.
+
+**`performanceScore` is computed on read, never stored.** A-108 again,
+and the reason is that the weighting is a product decision that will
+be tuned: a score stored under last month's weights cannot be
+recomputed under this month's, so every historical row would quietly
+mean something different from the ones beside it. The four completion
+counters are the inputs and are on the row, so a caller can check the
+arithmetic — or ignore the score entirely and sort on the counters.
+
+The six workload columns **partition** `clientsOpen` and sum to it.
+That is an arithmetic contract, stated in A-108's DDL and repeated
+here because it is the property a screen will assume and nothing
+checks at runtime.
+
+ * @summary The Implementor workload & performance grid (OB-02)
+ */
+export const listObImplementorWorkloadQueryLimitDefault = 50;
+export const listObImplementorWorkloadQueryLimitMax = 200;
+
+export const listObImplementorWorkloadQueryIncludeInactiveDefault = false;
+
+export const listObImplementorWorkloadQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObImplementorWorkloadQueryLimitMax).default(listObImplementorWorkloadQueryLimitDefault),
+  "statDate": zod.string().date().optional().describe('Defaults to the most recent computed day. An explicit date reads\nhistory — the grid\'s own trend, and the only way to ask \"what did\nthis look like before the reallocation\".\n'),
+  "includeInactive": zod.boolean().optional().describe('Include implementors whose module grant has been revoked. Off by\ndefault; on when reading a historical `statDate`, where excluding\nthem would silently drop the workload of somebody who has since\nleft and make the past look lighter than it was.\n')
+})
+
+export const listObImplementorWorkloadResponse = zod.object({
+  "data": zod.array(zod.object({
+  "user": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "isActive": zod.boolean().optional().describe('Whether this implementor still holds a live `OB_STEP_OWNER` grant.\nFalse rows appear only with `includeInactive`, or on a historical\n`statDate` where dropping them would make the past look lighter\nthan it was.\n'),
+  "clientsOpen": zod.number().describe('\*\*The six columns below partition this and sum to it.\*\* An\narithmetic contract, stated in A-108\'s DDL and repeated here\nbecause it is the property a screen will assume and nothing checks\nat runtime. Zero is a real and expected value — see\n`listObImplementorWorkload` on why a row exists at all for\nsomebody with no clients.\n'),
+  "onTrack": zod.number(),
+  "notStarted": zod.number(),
+  "delayed": zod.number(),
+  "atRisk": zod.number(),
+  "blockedWaiting": zod.number(),
+  "aheadOfSchedule": zod.number(),
+  "completedOnTime": zod.number(),
+  "completedEarly": zod.number(),
+  "completedLate": zod.number(),
+  "blockedHours": zod.number().optional().describe('Working hours this implementor\'s services spent blocked or waiting.'),
+  "performanceScore": zod.number().nullish().describe('Plan §9\'s chip — on-time and early completions weighted against\ndelays and blocks, on a 0–100 scale.\n\n\*\*Derived on read, never stored\*\*, and A-108\'s DDL says why at\nlength: the weighting is a product decision that will be tuned,\nand a score stored under last month\'s weights cannot be recomputed\nunder this month\'s, so history would stratify. The inputs are the\nfour counters above, so a caller can check it — or ignore it and\nsort on them.\n\nNull for an implementor with no completions yet. Scoring somebody\nwho has finished nothing produces a number that looks like\njudgement and is arithmetic on an empty set.\n'),
+  "statDate": zod.string().date().describe('Which day\'s stats this row is. Echoed so a screen reading history cannot mislabel it.')
+}).describe('One row of plan §9\'s Implementor workload & performance grid, from\n`ob_implementor_daily_stats`.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * What this deployment can run, so the hub's card grid does not have to
+know — `listReports`' argument, applied to the module's own set.
+
+**Served rather than hardcoded, and unbuilt reports are listed with
+`available: false` and a reason.** Both are A-063's calls and both
+matter more here than there, because this catalogue is *known* to be
+arriving in two parts: PHASE-2-BUILD-PLAN §3 #8 builds the seven the
+design draws, and holds the other five — breach log, escalation log,
+owner workload, communication audit, CSAT summary — as OB4b pending a
+client decision (§11.6). A hub that hid them would make an undecided
+report indistinguishable from one that does not exist, which is the
+state the decision is about.
+
+**`reportKey` is a string here and everywhere, never an enum.** The
+same reason `NotificationTemplate.eventCode` is not one: the list
+grows by a release, and a closed enum in the contract would make each
+addition a breaking change to every generated client.
+
+ * @summary The onboarding report catalogue (OB-10)
+ */
+export const listObReportsResponse = zod.object({
+  "data": zod.object({
+  "reports": zod.array(zod.object({
+  "key": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional().describe('One line, on the card. What question the report answers.'),
+  "category": zod.enum(['DELIVERY', 'CLIENT', 'QUALITY', 'PIPELINE']).describe('A-118 · how OB-10 groups its cards. Four rather than the ticketing\nhub\'s set, because plan §10\'s twelve reports do not divide the same\nway: funnel and time-to-live are about `DELIVERY`, stuck-and-aging and\nsign-off-pending about a `CLIENT`, TAT compliance and CSAT about\n`QUALITY`, and the sales pipeline about `PIPELINE`.\n'),
+  "chart": zod.union([zod.literal('line'),zod.literal('bar'),zod.literal('stacked-bar'),zod.literal('funnel'),zod.literal('donut'),zod.literal(null)]).nullish().describe('The visual, or null for a table-only report. The viewer shows a\nchart \*\*and\*\* a table when this is set, never a chart alone — a\nchart cannot be read for exact values and this is a reporting\nscreen.\n'),
+  "filters": zod.array(zod.enum(['dateRange', 'product', 'client', 'owner', 'rag']).describe('Which controls a report honours. The viewer renders exactly these, so\na control the runner would ignore is never drawn — `ReportFilterKind`\'s\nargument, on the module\'s own five.\n')),
+  "available": zod.boolean().describe('False for a report declared but not built. The five of\nPHASE-2-BUILD-PLAN §3 #8 held as OB4b are declared and unavailable\nrather than absent — see `listObReports`.\n'),
+  "unavailableReason": zod.string().nullish().describe('Why it cannot be run yet, in a sentence a user can read. Present\nexactly when `available` is false.\n')
+})),
+  "scopeNote": zod.string().nullish().describe('What this caller\'s rows will be narrowed to, if anything —\n\"your services only\" for a Step Owner. Null for a role that\nsees everything.\n')
+})
+})
+
+/**
+ * One parameterised runner, as on the ticketing side. `?export=` streams
+the file instead of returning JSON, through the **existing** export
+infrastructure — plan §10 says so, and it is the one piece of the
+reports stack the two modules genuinely share, because a workbook
+writer has no domain in it.
+
+Returns an `ETag`. These reads are expensive and are re-run every time
+somebody toggles a filter back and forth.
+
+**Row scope is applied server-side and the request cannot widen it.**
+A Step Owner's funnel covers the journeys containing their steps; a
+Sales user's covers the clients they created. `ownerUserId` is
+**ignored rather than refused** for a Step Owner, on `runReport`'s
+precedent: answering it would let one implementor read a colleague's
+scorecard by guessing a user id, and `403` would wrongly imply a grant
+exists that could be given. `meta.appliedScope` states what was
+actually applied.
+
+**`404` for a key that does not exist and for one that is not built
+yet.** The catalogue is where "exists but unbuilt" is expressed with a
+reason a person can read; by the time a caller is running a key there
+are no rows to describe and no columns to name.
+
+`export=pdf` is deliberately absent from the enum. The module's only
+PDF is B-116's archived sign-off certificate, which is a legal record
+generated once and stored, not a rendering of a filtered grid.
+
+ * @summary Run an onboarding report (OB-10)
+ */
+export const runObReportParams = zod.object({
+  "reportKey": zod.string()
+})
+
+export const runObReportQueryParams = zod.object({
+  "export": zod.enum(['xlsx', 'csv']).optional(),
+  "productId": zod.number().optional(),
+  "obClientId": zod.number().optional(),
+  "ownerUserId": zod.number().optional(),
+  "from": zod.string().date().optional(),
+  "to": zod.string().date().optional(),
+  "rag": zod.enum(['GREEN', 'AMBER', 'RED']).optional()
+})
+
+export const runObReportHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const runObReportResponse = zod.object({
+  "data": zod.object({
+  "reportKey": zod.string(),
+  "columns": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "type": zod.enum(['string', 'number', 'percent', 'duration', 'date', 'rag']).describe('`rag` renders as a chip rather than as text, and\n`duration` is \*\*working hours\*\* throughout this module —\nevery duration here has already been through the\ncalendar, so a client formatting it must not re-derive\nit from two timestamps.\n')
+})),
+  "rows": zod.array(zod.record(zod.string(), zod.unknown()))
+}),
+  "meta": zod.object({
+  "appliedScope": zod.string().optional().describe('What the rows were actually narrowed to. On the response\nbecause a filter the caller sent may have been ignored — see\n`runObReport` on `ownerUserId`.\n'),
+  "computedAt": zod.string().datetime({}).nullish()
+}).optional()
+})
+
+/**
+ * `ob_signoffs`, scoped by A-112 like every other read. Feeds the
+sign-off-pending report and the OB-05 panel.
+
+**Nothing here exposes `tokenHash` or `otpHash`, on any response in
+this document.** The token is emailed once and is not recoverable from
+the table — A-107's DDL stores only its SHA-256 precisely so a leak of
+the row does not yield a working link, and putting the hash on the
+wire would hand an attacker the one value they need to brute-force
+offline. `resendObSignoff` mints a new token rather than re-reading
+the old one, which is why there is no operation that returns it.
+
+ * @summary Sign-offs across clients (OB-05, OB-10)
+ */
+export const listObSignoffsQueryLimitDefault = 50;
+export const listObSignoffsQueryLimitMax = 200;
+
+
+
+export const listObSignoffsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObSignoffsQueryLimitMax).default(listObSignoffsQueryLimitDefault),
+  "obClientId": zod.number().optional(),
+  "journeyId": zod.number().optional(),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).optional(),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).optional()
+})
+
+export const listObSignoffsResponseDataItemSentToContactNameMax = 160;
+
+export const listObSignoffsResponseDataItemSentToContactDesignationMax = 120;
+
+export const listObSignoffsResponseDataItemSentToContactPhoneMax = 32;
+
+
+
+export const listObSignoffsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObSignoffsResponseDataItemSentToContactNameMax),
+  "designation": zod.string().max(listObSignoffsResponseDataItemSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(listObSignoffsResponseDataItemSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Mints a single-use token, stores only its SHA-256, and emails the link
+to a contact on this client. The token is in the response to **nobody**
+— not to the requester either. A staff member who could read it could
+sign on the client's behalf, which is the one thing this record exists
+to make impossible.
+
+`kind: STEP` names a `stepId`; `kind: GO_LIVE` must not — A-107's
+`ck_ob_signoffs_step_matches_kind` enforces the pairing and this
+answers `400` before it gets there.
+
+`422` for a `GO_LIVE` request while any service on the journey is
+unfinished. Plan §5.9 makes Live-Green require every journey complete;
+asking a client to sign off a delivery that is still running is how a
+sign-off record stops meaning anything.
+
+ * @summary Ask a client to sign off a service, or the go-live (OB-05)
+ */
+export const requestObSignoffParams = zod.object({
+  "journeyId": zod.number().describe('A-118 · an `ob_journeys` id — one client\'s instance of one product\'s\ntemplate, \*\*not\*\* a template id. The two are different tables and a\njourney pins the template \*version\* it was created from, so a journey\noutlives the template being revised underneath it.\n')
+})
+
+export const requestObSignoffHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const requestObSignoffBody = zod.object({
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "stepId": zod.number().nullish().describe('Required for `STEP`, must be absent for `GO_LIVE`.'),
+  "sentToContactId": zod.number().describe('An `ob_client_contacts` id on this client. Named explicitly rather\nthan defaulted to the primary SPOC, because the person who signs\noff a data migration is frequently not the person who signs the\ncontract, and a default that is usually right is one nobody\nchecks.\n')
+})
+
+/**
+ * The recorded-acceptance evidence — who signed, when, from what IP and
+user agent. PHASE-2-BUILD-PLAN decision 5 chose recorded acceptance
+over statutory e-sign for v1, and **this response is what that
+decision produces**: the four fields below are the legal record, so
+they are read-only everywhere and there is no operation that edits
+them.
+
+ * @summary One sign-off, with its acceptance record (OB-05)
+ */
+export const getObSignoffParams = zod.object({
+  "signoffId": zod.number().describe('A-118 · an `ob_signoffs` id. Addresses the row from the \*\*staff\*\* side\nonly; the client reaches the same row by a token in a request body and\nnever by this id — see the block comment above the public routes.\n')
+})
+
+export const getObSignoffResponseDataSentToContactNameMax = 160;
+
+export const getObSignoffResponseDataSentToContactDesignationMax = 120;
+
+export const getObSignoffResponseDataSentToContactPhoneMax = 32;
+
+export const getObSignoffResponseDataSignedByContactNameMax = 160;
+
+export const getObSignoffResponseDataSignedByContactDesignationMax = 120;
+
+export const getObSignoffResponseDataSignedByContactPhoneMax = 32;
+
+export const getObSignoffResponseDataSignedIpMax = 45;
+
+export const getObSignoffResponseDataSignedUserAgentMax = 500;
+
+export const getObSignoffResponseDataObjectionNoteMax = 2000;
+
+
+
+export const getObSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getObSignoffResponseDataSentToContactNameMax),
+  "designation": zod.string().max(getObSignoffResponseDataSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(getObSignoffResponseDataSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n').and(zod.object({
+  "signedByContact": zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getObSignoffResponseDataSignedByContactNameMax),
+  "designation": zod.string().max(getObSignoffResponseDataSignedByContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(getObSignoffResponseDataSignedByContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
+  "signedIp": zod.string().max(getObSignoffResponseDataSignedIpMax).nullish().describe('Recorded acceptance, half one. PHASE-2-BUILD-PLAN decision 5\nchose this over statutory e-sign for v1: what makes the record\nstand up is that we can say who accepted, when, and from\nwhere. Read-only — no operation writes these after the fact.\n'),
+  "signedUserAgent": zod.string().max(getObSignoffResponseDataSignedUserAgentMax).nullish().describe('Recorded acceptance, half two.'),
+  "objectionNote": zod.string().max(getObSignoffResponseDataObjectionNoteMax).nullish()
+}))
+})
+
+/**
+ * **Mints a new token and invalidates the previous one in the same
+transaction.** Not "sends the same link again", which is what the word
+resend suggests and would be wrong: `uq_ob_signoffs_token` is unique
+because two sign-offs sharing a token is a cross-client leak, and a
+reissue that left the old hash live would leave two working links to
+one decision with nothing to say which was used.
+
+The OTP attempt counter resets with it. A contact who mistyped a code
+three times and asked for a new link should not inherit their own
+lockout — the lockout exists to slow an attacker guessing at a link
+they hold, and the link they held is now dead.
+
+ * @summary Send a fresh link — the old one stops working (OB-05)
+ */
+export const resendObSignoffParams = zod.object({
+  "signoffId": zod.number().describe('A-118 · an `ob_signoffs` id. Addresses the row from the \*\*staff\*\* side\nonly; the client reaches the same row by a token in a request body and\nnever by this id — see the block comment above the public routes.\n')
+})
+
+export const resendObSignoffHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const resendObSignoffResponseDataSentToContactNameMax = 160;
+
+export const resendObSignoffResponseDataSentToContactDesignationMax = 120;
+
+export const resendObSignoffResponseDataSentToContactPhoneMax = 32;
+
+
+
+export const resendObSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(resendObSignoffResponseDataSentToContactNameMax),
+  "designation": zod.string().max(resendObSignoffResponseDataSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(resendObSignoffResponseDataSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n')
+})
+
+/**
+ * → `CANCELLED`, and the token stops working immediately.
+
+The row is **not** deleted, and the status is `CANCELLED` rather than
+the row disappearing, because "we asked and then withdrew" is a fact a
+client may remember and ask about. Deleting it would leave the staff
+side unable to answer.
+
+ * @summary Withdraw a request that should not have been sent (OB-05)
+ */
+export const cancelObSignoffParams = zod.object({
+  "signoffId": zod.number().describe('A-118 · an `ob_signoffs` id. Addresses the row from the \*\*staff\*\* side\nonly; the client reaches the same row by a token in a request body and\nnever by this id — see the block comment above the public routes.\n')
+})
+
+export const cancelObSignoffHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const cancelObSignoffBodyReasonMax = 2000;
+
+
+
+export const cancelObSignoffBody = zod.object({
+  "reason": zod.string().min(1).max(cancelObSignoffBodyReasonMax)
+})
+
+export const cancelObSignoffResponseDataSentToContactNameMax = 160;
+
+export const cancelObSignoffResponseDataSentToContactDesignationMax = 120;
+
+export const cancelObSignoffResponseDataSentToContactPhoneMax = 32;
+
+
+
+export const cancelObSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(cancelObSignoffResponseDataSentToContactNameMax),
+  "designation": zod.string().max(cancelObSignoffResponseDataSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(cancelObSignoffResponseDataSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n')
+})
+
+/**
+ * B-116's document, streamed from object storage. `pdf_storage_key`
+holds the key, never the bytes, and this route is the only way to
+reach it — the key is not on any response, so a caller cannot address
+the bucket directly.
+
+`404` until the sign-off is `SIGNED`. A certificate for a decision
+nobody has made does not exist, and generating a placeholder would put
+an unsigned document into the one place people look for signed ones.
+
+ * @summary The archived acceptance PDF (OB-05)
+ */
+export const getObSignoffCertificateParams = zod.object({
+  "signoffId": zod.number().describe('A-118 · an `ob_signoffs` id. Addresses the row from the \*\*staff\*\* side\nonly; the client reaches the same row by a token in a request body and\nnever by this id — see the block comment above the public routes.\n')
+})
+
+/**
+ * A-121 · hashes the supplied token, finds the `PENDING` sign-off it
+addresses, and emails a code to `sentToContactId` — **the contact on
+the row, never an address in the request.** A body that could name its
+own recipient would let anyone holding a leaked link redirect the code
+to themselves, which would make the second factor a formality.
+
+`202` whatever happens, with no body. It does not say whether a code
+was sent, because saying so is the enumeration oracle point 2 above
+exists to close.
+
+ * @summary Send the one-time code for a sign-off link (OB-09)
+ */
+export const requestObSignoffOtpBodyTokenMax = 200;
+
+
+
+export const requestObSignoffOtpBody = zod.object({
+  "token": zod.string().min(1).max(requestObSignoffOtpBodyTokenMax).describe('The value from the emailed link. \*\*In the body, never in the URL\*\*\n— see the block comment above `\/public\/onboarding\/signoff\/otp` for\nwhy a query string would leak it to browser history, `Referer`\nheaders and every access log in between.\n')
+})
+
+/**
+ * A-121 · the point at which the caller becomes identified and the page
+can be rendered. Returns a **session token, not a JWT**: it is opaque,
+it is good for this one sign-off, it expires in minutes, and it is not
+a principal — it authorises three operations on one row and nothing
+else. A CLIENT-principal login is a different thing entirely and is
+A-125's.
+
+`otp_attempts` is persisted rather than held in Redis, which A-107's
+DDL argues at the schema: a lockout that resets when the process
+restarts is not a lockout. Attempts are per sign-off, and exhausting
+them kills the token — a fresh one needs `resendObSignoff` from the
+staff side, which is a human deciding to re-ask rather than a counter
+healing itself.
+
+The response carries what OB-09 renders: the client, the product, the
+service and its checklist. That is the first moment any of it leaves
+the building, and it is after the code has been proved.
+
+ * @summary Exchange the code for a short-lived session, and the page (OB-09)
+ */
+export const verifyObSignoffOtpBodyTokenMax = 200;
+
+export const verifyObSignoffOtpBodyOtpRegExp = new RegExp('^[0-9]{6}$');
+
+
+export const verifyObSignoffOtpBody = zod.object({
+  "token": zod.string().min(1).max(verifyObSignoffOtpBodyTokenMax),
+  "otp": zod.string().regex(verifyObSignoffOtpBodyOtpRegExp).describe('Six digits. Attempts are counted on the sign-off row and persisted\n— A-107: a lockout that resets when the process restarts is not a\nlockout.\n')
+})
+
+export const verifyObSignoffOtpResponse = zod.object({
+  "data": zod.object({
+  "sessionToken": zod.string().describe('Opaque, short-lived, and good for this one sign-off. \*\*Not a JWT\nand not a principal\*\* — it authorises `accept`, `object` and\n`csat` on one row. A CLIENT login that can read journeys is\nA-125\'s `client_accounts`, which is a different thing with a\ndifferent lifetime.\n'),
+  "expiresAt": zod.string().datetime({}),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "obClientName": zod.string(),
+  "productName": zod.string().nullish(),
+  "stepTitle": zod.string().nullish(),
+  "checklist": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean(),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('What the client is being asked to accept. Empty for a `GO_LIVE`\nsign-off, which is about the journey rather than one service.\n'),
+  "csatOffered": zod.boolean().describe('Whether `submitObCsat` will be accepted after acceptance — true\nonly on a `GO_LIVE` session that has not already been surveyed.\nOn the session rather than discovered by a `422`, so OB-09 knows\nwhether to render the question before the client clicks.\n')
+}).describe('What OB-09 renders, returned only after the OTP is proved. Nothing\nhere is available from the link alone — see point 4 of the block\ncomment above the public routes.\n')
+})
+
+/**
+ * Records the acceptance — contact, timestamp, IP and user agent — and
+then puts the step through **the same completion gate every other
+route uses**.
+
+## The gate, and why acceptance can succeed while the step does not
+
+PHASE-2-BUILD-PLAN §3 #4 found the prototype's bug and ruled on it:
+`stComplete` enforced three gates (every checklist item answered,
+every required document attached, sign-off accepted) and `signoffAccept`
+enforced none, so a client could accept a service whose required
+documents were never attached and it would go `DONE`.
+
+The ruling is *one* gate, server-side, and acceptance routes through
+it. So this operation has two outcomes and the response distinguishes
+them:
+
+- gate satisfied → the sign-off is `SIGNED` **and** the step completes;
+- gate not satisfied → the sign-off is `SIGNED` and **the step stays
+  `IN_PROGRESS`**, with `gateFailures` naming what is missing.
+
+The acceptance is **never discarded** in the second case. The client
+did accept, they are not the ones who left a document unattached, and
+asking them to click twice for our own incomplete record is the
+version of this that loses a signature. `data.stepCompleted` is what
+the page renders on.
+
+For a `GO_LIVE` sign-off the same shape applies to the client's
+overall status: accepting the last one flips them Live-Green, and
+`data.clientWentLive` says whether this call was that one.
+
+ * @summary The client accepts (OB-09)
+ */
+export const acceptObSignoffBodyAcceptedNameMax = 160;
+
+export const acceptObSignoffBodyNoteMax = 2000;
+
+
+
+export const acceptObSignoffBody = zod.object({
+  "sessionToken": zod.string(),
+  "acceptedName": zod.string().min(1).max(acceptObSignoffBodyAcceptedNameMax).describe('Typed by the signatory. Part of the recorded-acceptance record\nalongside the IP and user agent the server captures — a name the\nperson entered themselves is what distinguishes acceptance from a\nclick.\n'),
+  "note": zod.string().max(acceptObSignoffBodyNoteMax).nullish()
+})
+
+export const acceptObSignoffResponseDataSignoffSentToContactNameMax = 160;
+
+export const acceptObSignoffResponseDataSignoffSentToContactDesignationMax = 120;
+
+export const acceptObSignoffResponseDataSignoffSentToContactPhoneMax = 32;
+
+export const acceptObSignoffResponseDataSignoffSignedByContactNameMax = 160;
+
+export const acceptObSignoffResponseDataSignoffSignedByContactDesignationMax = 120;
+
+export const acceptObSignoffResponseDataSignoffSignedByContactPhoneMax = 32;
+
+export const acceptObSignoffResponseDataSignoffSignedIpMax = 45;
+
+export const acceptObSignoffResponseDataSignoffSignedUserAgentMax = 500;
+
+export const acceptObSignoffResponseDataSignoffObjectionNoteMax = 2000;
+
+
+
+export const acceptObSignoffResponse = zod.object({
+  "data": zod.object({
+  "signoff": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(acceptObSignoffResponseDataSignoffSentToContactNameMax),
+  "designation": zod.string().max(acceptObSignoffResponseDataSignoffSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(acceptObSignoffResponseDataSignoffSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n').and(zod.object({
+  "signedByContact": zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(acceptObSignoffResponseDataSignoffSignedByContactNameMax),
+  "designation": zod.string().max(acceptObSignoffResponseDataSignoffSignedByContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(acceptObSignoffResponseDataSignoffSignedByContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
+  "signedIp": zod.string().max(acceptObSignoffResponseDataSignoffSignedIpMax).nullish().describe('Recorded acceptance, half one. PHASE-2-BUILD-PLAN decision 5\nchose this over statutory e-sign for v1: what makes the record\nstand up is that we can say who accepted, when, and from\nwhere. Read-only — no operation writes these after the fact.\n'),
+  "signedUserAgent": zod.string().max(acceptObSignoffResponseDataSignoffSignedUserAgentMax).nullish().describe('Recorded acceptance, half two.'),
+  "objectionNote": zod.string().max(acceptObSignoffResponseDataSignoffObjectionNoteMax).nullish()
+})),
+  "stepCompleted": zod.boolean().describe('Whether the service actually completed. \*\*False is a normal\noutcome, not an error\*\* — the acceptance is recorded either way\nand the sign-off is `SIGNED`; what failed is our own completion\ngate. PHASE-2-BUILD-PLAN §3 #4 is the ruling this implements.\n'),
+  "gateFailures": zod.array(zod.string()).describe('Stable reason codes for what the gate refused —\n`ob-step-items-unanswered`, `ob-step-docs-missing`. Empty when\n`stepCompleted` is true.\n\nA code rather than a sentence, because OB-09 shows the client \"your\nacceptance is recorded; we are finishing our side\" while the same\ncodes tell the owner exactly what to attach. One field, two\naudiences, and only the internal one needs the detail.\n'),
+  "clientWentLive": zod.boolean().describe('This acceptance was the last one, every journey is complete, and\nthe client is Live-Green (plan §5.9). At most once in a client\'s\nlife; false on every `STEP` sign-off.\n')
+})
+})
+
+/**
+ * → `OBJECTED`, with a mandatory note, and **the step reverts** — plan
+§8: "objection reverts the step". It goes back to `IN_PROGRESS` with
+the objection written to its communication timeline and its owner
+notified immediately, because an objection nobody sees is a delivery
+everybody believes is finished.
+
+The note is required. An objection with no reason gives the owner
+nothing to fix and guarantees a second round trip.
+
+There is no un-object. A client who changes their mind is a new
+sign-off request, which is a staff action with its own record — the
+alternative is a row whose final state depends on how many times
+somebody clicked.
+
+ * @summary The client objects, and the service reverts (OB-09)
+ */
+export const objectObSignoffBodyNoteMax = 2000;
+
+
+
+export const objectObSignoffBody = zod.object({
+  "sessionToken": zod.string(),
+  "note": zod.string().min(1).max(objectObSignoffBodyNoteMax).describe('Mandatory — an objection with no reason guarantees a second round trip.')
+})
+
+export const objectObSignoffResponseDataSentToContactNameMax = 160;
+
+export const objectObSignoffResponseDataSentToContactDesignationMax = 120;
+
+export const objectObSignoffResponseDataSentToContactPhoneMax = 32;
+
+
+
+export const objectObSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number().nullish().describe('Set for `STEP`, null for `GO_LIVE`.'),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "requestedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "requestedAt": zod.string().datetime({}),
+  "sentToContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(objectObSignoffResponseDataSentToContactNameMax),
+  "designation": zod.string().max(objectObSignoffResponseDataSentToContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(objectObSignoffResponseDataSentToContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.'),
+  "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "hasCertificate": zod.boolean().optional().describe('Whether `getObSignoffCertificate` will return a PDF. Derived from\n`pdf_storage_key` being set — the key itself is never on the wire,\nso a caller cannot address object storage directly.\n')
+}).describe('`ob_signoffs`, minus every secret on it. \*\*`tokenHash`, `otpHash`,\n`otpExpiresAt` and `otpAttempts` appear on no response.\*\* A-107 stores\nthe token only as a SHA-256 so that reading the table does not yield a\nworking link; serialising the hash would undo that for an attacker\nwith an offline dictionary.\n')
+})
+
+/**
+ * Plan §1.1 #9's CSAT, and PHASE-2-BUILD-PLAN §3 #9's finding that it
+had no capture surface at all — the prototype fired a toast saying a
+survey had been sent and nothing rendered a question or stored an
+answer.
+
+It rides this token surface rather than getting one of its own,
+because the moment to ask is the moment the client accepts the
+go-live, and a second link emailed afterwards is a second thing to
+ignore. Offered **only** after a `GO_LIVE` acceptance; `422` on a step
+sign-off's session.
+
+Optional by construction: `acceptObSignoff` completes without it, and
+a client who closes the tab has still gone live. A survey that blocks
+a delivery is a survey that gets answered dishonestly.
+
+ * @summary The one-question go-live survey (OB-09)
+ */
+export const submitObCsatBodyScoreMax = 5;
+
+export const submitObCsatBodyCommentMax = 2000;
+
+
+
+export const submitObCsatBody = zod.object({
+  "sessionToken": zod.string(),
+  "score": zod.number().min(1).max(submitObCsatBodyScoreMax).describe('Plan §1.1 #9\'s one question. Five points rather than ten: this is\nasked once, at the end, of somebody who is finished with us, and\nthe difference between a 6 and a 7 out of ten is noise nobody can\nact on.\n'),
+  "comment": zod.string().max(submitObCsatBodyCommentMax).nullish()
+})
+
+/**
+ * `ob_escalations`, open ones first and oldest first within that — the
+list exists to be cleared from the top.
+
+Scoped by A-112. `escalatedTo` is the natural filter for "what has
+been escalated to me", which is the query
+`ix_ob_escalations_to (escalated_to, open_key)` was shaped for.
+
+A rung with `escalatedTo` null is one the matrix resolved nobody for.
+A-107's DDL calls that "itself worth seeing on the dashboard", so it
+is returned rather than hidden — an escalation addressed to nobody is
+a configuration error, and suppressing it would make the ladder look
+like it was working.
+
+ * @summary The internal escalation ladder (OB-02, OB-10)
+ */
+export const listObEscalationsQueryLimitDefault = 50;
+export const listObEscalationsQueryLimitMax = 200;
+
+
+
+export const listObEscalationsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObEscalationsQueryLimitMax).default(listObEscalationsQueryLimitDefault),
+  "obClientId": zod.number().optional(),
+  "journeyId": zod.number().optional(),
+  "escalatedTo": zod.number().optional(),
+  "level": zod.enum(['L1', 'L2', 'L3']).optional(),
+  "state": zod.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED']).optional().describe('Defaults to `OPEN`, which here means unresolved — an acknowledged\nrung is still open, because acknowledging says somebody has seen\nit and not that anything is fixed. `ACKNOWLEDGED` narrows to that\nsubset; the two are not alternatives.\n')
+})
+
+export const listObEscalationsResponseDataItemResolutionNoteMax = 2000;
+
+
+
+export const listObEscalationsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number(),
+  "stepTitle": zod.string().optional(),
+  "obClientName": zod.string().optional(),
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "reason": zod.string().describe('`TAT_BREACH`, `AMBER`, `BLOCKED_TOO_LONG` and whatever C\'s scanner\nadds. A string rather than an enum for the reason\n`NotificationTemplate.eventCode` is one: the producer owns the\nlist and it grows with the scanner, so a closed enum here would\nmake each new trigger a breaking change to every client.\n'),
+  "escalatedTo": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null when the matrix resolved nobody — returned rather than\nhidden, because an escalation addressed to nobody is a\nconfiguration error and suppressing it makes the ladder look like\nit is working. A-107\'s DDL calls this out by name.\n'),
+  "escalatedAt": zod.string().datetime({}),
+  "acknowledgedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "acknowledgedAt": zod.string().datetime({}).nullish(),
+  "resolvedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "resolvedAt": zod.string().datetime({}).nullish(),
+  "resolutionNote": zod.string().max(listObEscalationsResponseDataItemResolutionNoteMax).nullish()
+}).describe('`ob_escalations` — one rung of the internal ladder. Never visible to a client.')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Stamps `acknowledgedBy` and `acknowledgedAt`. **It does not stop the
+ladder.** L2 still follows at +4 working hours and L3 at +8 unless the
+underlying breach is actually resolved — acknowledging is a claim
+about attention, not about the service, and a ladder an acknowledgement
+could silence would be one a busy person silences by reflex.
+
+Idempotent in effect: acknowledging an already-acknowledged rung
+returns it unchanged rather than moving the timestamp, so the record
+keeps saying when it was *first* seen.
+
+ * @summary Say you have seen this rung (OB-02)
+ */
+export const acknowledgeObEscalationParams = zod.object({
+  "escalationId": zod.number().describe('A-118 · an `ob_escalations` id — a rung of the internal ladder. Not\nthe same id space as `ObClientEscalationId`, and the two tables are\ndeliberately separate; see the block comment above\n`\/onboarding\/escalations`.\n')
+})
+
+export const acknowledgeObEscalationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const acknowledgeObEscalationResponseDataResolutionNoteMax = 2000;
+
+
+
+export const acknowledgeObEscalationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number(),
+  "stepTitle": zod.string().optional(),
+  "obClientName": zod.string().optional(),
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "reason": zod.string().describe('`TAT_BREACH`, `AMBER`, `BLOCKED_TOO_LONG` and whatever C\'s scanner\nadds. A string rather than an enum for the reason\n`NotificationTemplate.eventCode` is one: the producer owns the\nlist and it grows with the scanner, so a closed enum here would\nmake each new trigger a breaking change to every client.\n'),
+  "escalatedTo": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null when the matrix resolved nobody — returned rather than\nhidden, because an escalation addressed to nobody is a\nconfiguration error and suppressing it makes the ladder look like\nit is working. A-107\'s DDL calls this out by name.\n'),
+  "escalatedAt": zod.string().datetime({}),
+  "acknowledgedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "acknowledgedAt": zod.string().datetime({}).nullish(),
+  "resolvedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "resolvedAt": zod.string().datetime({}).nullish(),
+  "resolutionNote": zod.string().max(acknowledgeObEscalationResponseDataResolutionNoteMax).nullish()
+}).describe('`ob_escalations` — one rung of the internal ladder. Never visible to a client.')
+})
+
+/**
+ * Resolution note mandatory — this is the row a breach review reads
+afterwards, and "resolved" with no account of what was done answers
+none of the questions such a review asks.
+
+Resolving L1 does **not** resolve L2 or L3.
+`uq_ob_escalations_open (step_id, level, open_key)` lets the ladder
+hold all three rungs at once by design, and each was sent to a
+different person: closing a manager's rung because the owner closed
+theirs would tell the manager the problem was handled when nobody told
+them it was.
+
+ * @summary Close a rung of the ladder (OB-02)
+ */
+export const resolveObEscalationParams = zod.object({
+  "escalationId": zod.number().describe('A-118 · an `ob_escalations` id — a rung of the internal ladder. Not\nthe same id space as `ObClientEscalationId`, and the two tables are\ndeliberately separate; see the block comment above\n`\/onboarding\/escalations`.\n')
+})
+
+export const resolveObEscalationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const resolveObEscalationBodyNoteMax = 2000;
+
+
+
+export const resolveObEscalationBody = zod.object({
+  "note": zod.string().min(1).max(resolveObEscalationBodyNoteMax).describe('Mandatory. On `resolveObClientEscalation` this note \*\*goes to the\nclient\*\*; on `resolveObEscalation` it does not. Same field, two\naudiences — worth knowing before writing one.\n')
+})
+
+export const resolveObEscalationResponseDataResolutionNoteMax = 2000;
+
+
+
+export const resolveObEscalationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "stepId": zod.number(),
+  "stepTitle": zod.string().optional(),
+  "obClientName": zod.string().optional(),
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "reason": zod.string().describe('`TAT_BREACH`, `AMBER`, `BLOCKED_TOO_LONG` and whatever C\'s scanner\nadds. A string rather than an enum for the reason\n`NotificationTemplate.eventCode` is one: the producer owns the\nlist and it grows with the scanner, so a closed enum here would\nmake each new trigger a breaking change to every client.\n'),
+  "escalatedTo": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null when the matrix resolved nobody — returned rather than\nhidden, because an escalation addressed to nobody is a\nconfiguration error and suppressing it makes the ladder look like\nit is working. A-107\'s DDL calls this out by name.\n'),
+  "escalatedAt": zod.string().datetime({}),
+  "acknowledgedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "acknowledgedAt": zod.string().datetime({}).nullish(),
+  "resolvedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "resolvedAt": zod.string().datetime({}).nullish(),
+  "resolutionNote": zod.string().max(resolveObEscalationResponseDataResolutionNoteMax).nullish()
+}).describe('`ob_escalations` — one rung of the internal ladder. Never visible to a client.')
+})
+
+/**
+ * `ob_client_escalations` — the OB-02 card, and the red chips on OB-05.
+
+**Raising one is not on this route tree.** The client does it from
+CP-03, which lives under `/portal/onboarding/**` with its own
+principal type and its own DTOs — plan §2.3 forks at the route tree
+rather than with per-endpoint conditionals, and A-125's
+`client_accounts` and A-126's `ClientScopeResolver` are what define
+that principal. Declaring a half of it here, before the principal
+exists, would be a contract for a caller nothing can authenticate.
+This is the staff side: see them, and resolve them.
+
+One open escalation per service, enforced by
+`uq_ob_client_escalations_open`, so a client cannot flood a queue by
+clicking twice.
+
+ * @summary Escalations raised by clients from the portal (OB-02)
+ */
+export const listObClientEscalationsQueryLimitDefault = 50;
+export const listObClientEscalationsQueryLimitMax = 200;
+
+
+
+export const listObClientEscalationsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObClientEscalationsQueryLimitMax).default(listObClientEscalationsQueryLimitDefault),
+  "obClientId": zod.number().optional(),
+  "journeyId": zod.number().optional(),
+  "state": zod.enum(['OPEN', 'RESOLVED']).optional().describe('Defaults to `OPEN`.')
+})
+
+export const listObClientEscalationsResponseDataItemRaisedByContactNameMax = 160;
+
+export const listObClientEscalationsResponseDataItemRaisedByContactDesignationMax = 120;
+
+export const listObClientEscalationsResponseDataItemRaisedByContactPhoneMax = 32;
+
+export const listObClientEscalationsResponseDataItemCommentMax = 2000;
+
+export const listObClientEscalationsResponseDataItemResolutionNoteMax = 2000;
+
+
+
+export const listObClientEscalationsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "obClientName": zod.string().optional(),
+  "journeyId": zod.number(),
+  "stepId": zod.number(),
+  "stepTitle": zod.string().optional(),
+  "raisedByContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObClientEscalationsResponseDataItemRaisedByContactNameMax),
+  "designation": zod.string().max(listObClientEscalationsResponseDataItemRaisedByContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(listObClientEscalationsResponseDataItemRaisedByContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.').describe('An `ob_client_contacts` row, \*\*not\*\* a `UserRef` — an external\nprincipal. A-128\'s DDL keeps a separate column for exactly this\nreason, the same split `ob_prereq_comments` makes between its two\nauthor columns.\n'),
+  "comment": zod.string().max(listObClientEscalationsResponseDataItemCommentMax),
+  "raisedAt": zod.string().datetime({}),
+  "resolvedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "resolvedAt": zod.string().datetime({}).nullish(),
+  "resolutionNote": zod.string().max(listObClientEscalationsResponseDataItemResolutionNoteMax).nullish()
+}).describe('`ob_client_escalations` — raised by a client from CP-03 against one\nservice. One open per service, so a client cannot flood the queue.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Resolution note mandatory, and **it goes to the client** — plan §7
+makes resolving acknowledge back to them, and plan §4 mirrors the
+escalation into the service's communication timeline as an
+`ESCALATION` entry. So this note is outward-facing in a way
+`resolveObEscalation`'s is not, which is the one difference worth
+knowing between two operations that otherwise look identical.
+
+There is no acknowledge step. The internal ladder has one because a
+rung travels between colleagues; a client wants an answer, and
+"somebody has seen this" is not one.
+
+ * @summary Answer a client's escalation (OB-05)
+ */
+export const resolveObClientEscalationParams = zod.object({
+  "escalationId": zod.number().describe('A-118 · an `ob_client_escalations` id — one raised by a client from CP-03.')
+})
+
+export const resolveObClientEscalationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const resolveObClientEscalationBodyNoteMax = 2000;
+
+
+
+export const resolveObClientEscalationBody = zod.object({
+  "note": zod.string().min(1).max(resolveObClientEscalationBodyNoteMax).describe('Mandatory. On `resolveObClientEscalation` this note \*\*goes to the\nclient\*\*; on `resolveObEscalation` it does not. Same field, two\naudiences — worth knowing before writing one.\n')
+})
+
+export const resolveObClientEscalationResponseDataRaisedByContactNameMax = 160;
+
+export const resolveObClientEscalationResponseDataRaisedByContactDesignationMax = 120;
+
+export const resolveObClientEscalationResponseDataRaisedByContactPhoneMax = 32;
+
+export const resolveObClientEscalationResponseDataCommentMax = 2000;
+
+export const resolveObClientEscalationResponseDataResolutionNoteMax = 2000;
+
+
+
+export const resolveObClientEscalationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "obClientName": zod.string().optional(),
+  "journeyId": zod.number(),
+  "stepId": zod.number(),
+  "stepTitle": zod.string().optional(),
+  "raisedByContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(resolveObClientEscalationResponseDataRaisedByContactNameMax),
+  "designation": zod.string().max(resolveObClientEscalationResponseDataRaisedByContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(resolveObClientEscalationResponseDataRaisedByContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+}).describe('`ob_client_contacts` — the SPOCs.').describe('An `ob_client_contacts` row, \*\*not\*\* a `UserRef` — an external\nprincipal. A-128\'s DDL keeps a separate column for exactly this\nreason, the same split `ob_prereq_comments` makes between its two\nauthor columns.\n'),
+  "comment": zod.string().max(resolveObClientEscalationResponseDataCommentMax),
+  "raisedAt": zod.string().datetime({}),
+  "resolvedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "resolvedAt": zod.string().datetime({}).nullish(),
+  "resolutionNote": zod.string().max(resolveObClientEscalationResponseDataResolutionNoteMax).nullish()
+}).describe('`ob_client_escalations` — raised by a client from CP-03 against one\nservice. One open per service, so a client cannot flood the queue.\n')
+})
+

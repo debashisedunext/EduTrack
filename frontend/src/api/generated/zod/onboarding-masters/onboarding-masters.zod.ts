@@ -211,3 +211,819 @@ export const updateObProductResponse = zod.object({
 }).describe('`ob_products` — the catalogue journey templates bind to.')
 })
 
+/**
+ * B-124's screen, and the set `createObClient` snapshots at boarding.
+
+Defaults to the **active** version. `version` asks for an older one —
+the reason to want it is a client boarded months ago whose instance
+pins a version nobody can otherwise read, which is the same question
+`ObJourney.templateVersion` raises on the journey side.
+
+Tasks are **not paginated**. This is one version's set, and every
+caller needs all of it: the wizard snapshots the whole thing, the
+OB-14 editor draws the whole thing, and a partial answer would let a
+client be boarded against half a checklist. `/masters/task-types`'
+argument, on a set the product deliberately keeps short — plan §14
+names "mandatory list kept short in the master" as the mitigation for
+the gate stalling every journey.
+
+ * @summary The prerequisites master, one version (OB-14)
+ */
+
+
+
+export const getObPrereqTemplateQueryParams = zod.object({
+  "version": zod.number().min(1).optional().describe('Omit for the active version. There is no way to ask for \"the\ndraft\" by name — a draft is whatever `isDraft` is true on, and\n`beginObPrereqTemplateRevision` returns it directly.\n')
+})
+
+export const getObPrereqTemplateHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+
+export const getObPrereqTemplateResponseDataTasksItemTitleMax = 200;
+
+export const getObPrereqTemplateResponseDataTasksItemDescriptionMax = 4000;
+
+
+export const getObPrereqTemplateResponseDataTasksItemDocsItemLabelMax = 200;
+
+
+
+export const getObPrereqTemplateResponse = zod.object({
+  "data": zod.object({
+  "version": zod.number().min(1),
+  "isDraft": zod.boolean().describe('Editable. At most one draft exists at a time — see\n`beginObPrereqTemplateRevision` for why two would be ambiguous\nrather than merely untidy.\n'),
+  "isActive": zod.boolean().describe('The version new clients are snapshotted from. Exactly one version\nis active; a draft is not active, and publishing swaps them in one\ntransaction.\n'),
+  "publishedAt": zod.string().datetime({}).nullish(),
+  "publishedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "mandatoryCount": zod.number().optional().describe('How many of `tasks` are mandatory. Derived, and on the response\nbecause OB-14 states it above the list — an Admin adding a\nfifteenth mandatory task should see the number they are making\nworse while they do it, given plan §14 names a long mandatory list\nas the way the gate stalls.\n'),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number().describe('Display order within the version. Presentation only — see\n`reorderObPrereqTemplateTasks`: prerequisites have no dependency\nmodel, so nothing activates anything else and the number decides\nonly what is drawn first.\n'),
+  "title": zod.string().max(getObPrereqTemplateResponseDataTasksItemTitleMax),
+  "description": zod.string().max(getObPrereqTemplateResponseDataTasksItemDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).describe('Working \*\*days\*\*, per the v1.2 rename recorded in the module\nplan\'s terminology note — the same unit journey step TATs are\ndefined and displayed in. `dueAt` on an instance is this many\nworking days from instantiation, against the org calendar and the\nclient\'s own, never a naive date addition.\n'),
+  "isMandatory": zod.boolean().describe('The gate cannot open while a mandatory task is outstanding, and\n\*\*a mandatory task cannot be skipped\*\* — `skipObClientPrereqTask`\nanswers `422` rather than checking a role. That is what makes this\nflag a guarantee instead of a default.\n\nWhich is why it is set here, at authoring time, and never on an\ninstance: plan §14\'s mitigation for \"the gate stalls all journeys\non a slow client\" is keeping the mandatory list short in the\nmaster. A flag editable per client under delivery pressure would\nnot be that mitigation.\n'),
+  "isActive": zod.boolean(),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(getObPrereqTemplateResponseDataTasksItemDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional()
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
+}).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
+}).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
+})
+
+/**
+ * Tasks and their reference docs are cloned. The source version is never
+written, so every client already boarded against it keeps rendering
+exactly the checklist they agreed to — plan §1.1 #2, stated there for
+journey templates and applying here word for word.
+
+`409` if a draft already exists. One draft at a time, because two
+would each be "the next version" and publishing either would silently
+discard the other.
+
+ * @summary Clone the active version into an editable draft (OB-14)
+ */
+export const beginObPrereqTemplateRevisionHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+/**
+ * The version it supersedes is retired in the same transaction.
+
+**Clients already boarded are untouched**, including those whose gate
+is still locked. It is tempting to migrate an in-flight client onto a
+newer checklist — they have not finished the old one — and it is the
+wrong call: a task the client has already submitted would be replaced
+by one they have never seen, and a mandatory addition would re-lock a
+gate that had opened. Plan §1.1 #2 makes snapshotting apply to the
+prerequisites master by name.
+
+ * @summary The draft becomes the active version (OB-14)
+ */
+export const publishObPrereqTemplateHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+
+export const publishObPrereqTemplateResponseDataTasksItemTitleMax = 200;
+
+export const publishObPrereqTemplateResponseDataTasksItemDescriptionMax = 4000;
+
+
+export const publishObPrereqTemplateResponseDataTasksItemDocsItemLabelMax = 200;
+
+
+
+export const publishObPrereqTemplateResponse = zod.object({
+  "data": zod.object({
+  "version": zod.number().min(1),
+  "isDraft": zod.boolean().describe('Editable. At most one draft exists at a time — see\n`beginObPrereqTemplateRevision` for why two would be ambiguous\nrather than merely untidy.\n'),
+  "isActive": zod.boolean().describe('The version new clients are snapshotted from. Exactly one version\nis active; a draft is not active, and publishing swaps them in one\ntransaction.\n'),
+  "publishedAt": zod.string().datetime({}).nullish(),
+  "publishedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "mandatoryCount": zod.number().optional().describe('How many of `tasks` are mandatory. Derived, and on the response\nbecause OB-14 states it above the list — an Admin adding a\nfifteenth mandatory task should see the number they are making\nworse while they do it, given plan §14 names a long mandatory list\nas the way the gate stalls.\n'),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number().describe('Display order within the version. Presentation only — see\n`reorderObPrereqTemplateTasks`: prerequisites have no dependency\nmodel, so nothing activates anything else and the number decides\nonly what is drawn first.\n'),
+  "title": zod.string().max(publishObPrereqTemplateResponseDataTasksItemTitleMax),
+  "description": zod.string().max(publishObPrereqTemplateResponseDataTasksItemDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).describe('Working \*\*days\*\*, per the v1.2 rename recorded in the module\nplan\'s terminology note — the same unit journey step TATs are\ndefined and displayed in. `dueAt` on an instance is this many\nworking days from instantiation, against the org calendar and the\nclient\'s own, never a naive date addition.\n'),
+  "isMandatory": zod.boolean().describe('The gate cannot open while a mandatory task is outstanding, and\n\*\*a mandatory task cannot be skipped\*\* — `skipObClientPrereqTask`\nanswers `422` rather than checking a role. That is what makes this\nflag a guarantee instead of a default.\n\nWhich is why it is set here, at authoring time, and never on an\ninstance: plan §14\'s mitigation for \"the gate stalls all journeys\non a slow client\" is keeping the mandatory list short in the\nmaster. A flag editable per client under delivery pressure would\nnot be that mitigation.\n'),
+  "isActive": zod.boolean(),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(publishObPrereqTemplateResponseDataTasksItemDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional()
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
+}).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
+}).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
+})
+
+/**
+ * Appended at the end; use `reorderObPrereqTemplateTasks` to place it.
+
+`409` if there is no draft. Editing an active version in place would
+change what an in-flight client is being asked for, which is the whole
+thing versioning exists to prevent.
+
+ * @summary Add a task to the draft (OB-14)
+ */
+export const addObPrereqTemplateTaskHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addObPrereqTemplateTaskBodyTitleMax = 200;
+
+export const addObPrereqTemplateTaskBodyDescriptionMax = 4000;
+
+export const addObPrereqTemplateTaskBodyTatDaysMax = 365;
+
+export const addObPrereqTemplateTaskBodyIsActiveDefault = true;
+
+export const addObPrereqTemplateTaskBody = zod.object({
+  "title": zod.string().min(1).max(addObPrereqTemplateTaskBodyTitleMax),
+  "description": zod.string().max(addObPrereqTemplateTaskBodyDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(addObPrereqTemplateTaskBodyTatDaysMax),
+  "isMandatory": zod.boolean(),
+  "isActive": zod.boolean().default(addObPrereqTemplateTaskBodyIsActiveDefault)
+})
+
+/**
+ * The whole set, in the order wanted. A partial list is `400` rather
+than a silent partial reorder — the request names positions, and
+positions only mean anything against the complete set.
+
+Order here is presentation only. **Prerequisites have no dependency
+model**: unlike journey steps (plan §5.6) every task is available from
+the moment the instance exists, because the client works their own
+checklist in whatever order suits them and nothing on it activates
+anything else. The sequence decides what OB-14 and CP-03 draw first,
+nothing more.
+
+ * @summary Re-sequence the draft's tasks (OB-14)
+ */
+export const reorderObPrereqTemplateTasksHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+
+
+
+export const reorderObPrereqTemplateTasksBody = zod.object({
+  "taskIds": zod.array(zod.number()).min(1).describe('Every task in the draft, in the order wanted. A list missing any\nof them is `400` — positions only mean something against the\ncomplete set, and accepting a partial one would silently reorder\naround tasks the caller could not see.\n')
+})
+
+
+export const reorderObPrereqTemplateTasksResponseDataTasksItemTitleMax = 200;
+
+export const reorderObPrereqTemplateTasksResponseDataTasksItemDescriptionMax = 4000;
+
+
+export const reorderObPrereqTemplateTasksResponseDataTasksItemDocsItemLabelMax = 200;
+
+
+
+export const reorderObPrereqTemplateTasksResponse = zod.object({
+  "data": zod.object({
+  "version": zod.number().min(1),
+  "isDraft": zod.boolean().describe('Editable. At most one draft exists at a time — see\n`beginObPrereqTemplateRevision` for why two would be ambiguous\nrather than merely untidy.\n'),
+  "isActive": zod.boolean().describe('The version new clients are snapshotted from. Exactly one version\nis active; a draft is not active, and publishing swaps them in one\ntransaction.\n'),
+  "publishedAt": zod.string().datetime({}).nullish(),
+  "publishedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "mandatoryCount": zod.number().optional().describe('How many of `tasks` are mandatory. Derived, and on the response\nbecause OB-14 states it above the list — an Admin adding a\nfifteenth mandatory task should see the number they are making\nworse while they do it, given plan §14 names a long mandatory list\nas the way the gate stalls.\n'),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number().describe('Display order within the version. Presentation only — see\n`reorderObPrereqTemplateTasks`: prerequisites have no dependency\nmodel, so nothing activates anything else and the number decides\nonly what is drawn first.\n'),
+  "title": zod.string().max(reorderObPrereqTemplateTasksResponseDataTasksItemTitleMax),
+  "description": zod.string().max(reorderObPrereqTemplateTasksResponseDataTasksItemDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).describe('Working \*\*days\*\*, per the v1.2 rename recorded in the module\nplan\'s terminology note — the same unit journey step TATs are\ndefined and displayed in. `dueAt` on an instance is this many\nworking days from instantiation, against the org calendar and the\nclient\'s own, never a naive date addition.\n'),
+  "isMandatory": zod.boolean().describe('The gate cannot open while a mandatory task is outstanding, and\n\*\*a mandatory task cannot be skipped\*\* — `skipObClientPrereqTask`\nanswers `422` rather than checking a role. That is what makes this\nflag a guarantee instead of a default.\n\nWhich is why it is set here, at authoring time, and never on an\ninstance: plan §14\'s mitigation for \"the gate stalls all journeys\non a slow client\" is keeping the mandatory list short in the\nmaster. A flag editable per client under delivery pressure would\nnot be that mitigation.\n'),
+  "isActive": zod.boolean(),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(reorderObPrereqTemplateTasksResponseDataTasksItemDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional()
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
+}).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
+}).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
+})
+
+/**
+ * **This is where OB-14 diverges from OB-07, and the divergence is
+deliberate rather than an inconsistency to tidy up later.** A journey
+template's steps have no `PATCH` — C-102 composes a draft by adding,
+removing and reordering, and changing a step's TAT means removing it
+and adding it back. That works there because a journey template is
+per-product and one Admin owns one product's design.
+
+The prerequisites master is org-wide and singular. There is exactly
+one draft for the whole organisation, so two Admins editing it at once
+is the normal case rather than the unlucky one — and delete-plus-re-add
+would lose the task's position, its reference docs and, on a set where
+`isMandatory` decides whether a gate can ever open, is a heavier
+operation than the edit it stands in for.
+
+So: a real `PATCH`, and a real `If-Match`. The tag comes from
+`getObPrereqTemplate` — the pairing CONVENTIONS §5 insists be made by
+hand, since the tag is on the parent rather than on this row. A stale
+editor is refused with `412` instead of quietly overwriting a
+colleague's change to the same checklist.
+
+ * @summary Edit a draft task (OB-14)
+ */
+export const updateObPrereqTemplateTaskParams = zod.object({
+  "templateTaskId": zod.number().describe('A-118 · an `ob_prereq_template_tasks` id — a task on a \*version of the\nmaster\*, not on anybody\'s checklist. Editing one changes what future\nclients are asked for and nothing about a client already boarded.\n')
+})
+
+export const updateObPrereqTemplateTaskHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObPrereqTemplateTaskBodyTitleMax = 200;
+
+export const updateObPrereqTemplateTaskBodyDescriptionMax = 4000;
+
+export const updateObPrereqTemplateTaskBodyTatDaysMax = 365;
+
+export const updateObPrereqTemplateTaskBodyIsActiveDefault = true;
+
+export const updateObPrereqTemplateTaskBody = zod.object({
+  "title": zod.string().min(1).max(updateObPrereqTemplateTaskBodyTitleMax),
+  "description": zod.string().max(updateObPrereqTemplateTaskBodyDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(updateObPrereqTemplateTaskBodyTatDaysMax),
+  "isMandatory": zod.boolean(),
+  "isActive": zod.boolean().default(updateObPrereqTemplateTaskBodyIsActiveDefault)
+})
+
+export const updateObPrereqTemplateTaskResponseDataTitleMax = 200;
+
+export const updateObPrereqTemplateTaskResponseDataDescriptionMax = 4000;
+
+
+export const updateObPrereqTemplateTaskResponseDataDocsItemLabelMax = 200;
+
+
+
+export const updateObPrereqTemplateTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "sequence": zod.number().describe('Display order within the version. Presentation only — see\n`reorderObPrereqTemplateTasks`: prerequisites have no dependency\nmodel, so nothing activates anything else and the number decides\nonly what is drawn first.\n'),
+  "title": zod.string().max(updateObPrereqTemplateTaskResponseDataTitleMax),
+  "description": zod.string().max(updateObPrereqTemplateTaskResponseDataDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).describe('Working \*\*days\*\*, per the v1.2 rename recorded in the module\nplan\'s terminology note — the same unit journey step TATs are\ndefined and displayed in. `dueAt` on an instance is this many\nworking days from instantiation, against the org calendar and the\nclient\'s own, never a naive date addition.\n'),
+  "isMandatory": zod.boolean().describe('The gate cannot open while a mandatory task is outstanding, and\n\*\*a mandatory task cannot be skipped\*\* — `skipObClientPrereqTask`\nanswers `422` rather than checking a role. That is what makes this\nflag a guarantee instead of a default.\n\nWhich is why it is set here, at authoring time, and never on an\ninstance: plan §14\'s mitigation for \"the gate stalls all journeys\non a slow client\" is keeping the mandatory list short in the\nmaster. A flag editable per client under delivery pressure would\nnot be that mitigation.\n'),
+  "isActive": zod.boolean(),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(updateObPrereqTemplateTaskResponseDataDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional()
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
+}).describe('`ob_prereq_template_tasks` — one task on one version of the master.')
+})
+
+/**
+ * Reference documents on the task go with it. Nothing else points at a
+prerequisite task — there is no dependency graph here to re-point,
+which is why this has no equivalent of
+`removeObJourneyTemplateStep`'s `dependentStepIds` conflict.
+
+ * @summary Remove a task from the draft (OB-14)
+ */
+export const removeObPrereqTemplateTaskParams = zod.object({
+  "templateTaskId": zod.number().describe('A-118 · an `ob_prereq_template_tasks` id — a task on a \*version of the\nmaster\*, not on anybody\'s checklist. Editing one changes what future\nclients are asked for and nothing about a client already boarded.\n')
+})
+
+/**
+ * The Admin's own document, shown **to the client** on CP-04 — a sample
+filled form, a specimen letter, the format a data extract must arrive
+in. Plan §4 calls these "admin-attached reference documents" and they
+are the half of `ob_attachments` carrying `kind: REFERENCE`; what the
+client sends back is `SUBMISSION`, on the instance rather than here.
+
+The file is uploaded through the module's shared attachment route and
+this records the resulting `attachmentId` against the task. A document
+the client cannot open is worse than none, so the type policy and the
+AV scan are the same ones every other upload passes.
+
+ * @summary Attach a reference document to a draft task (OB-14)
+ */
+export const addObPrereqTemplateTaskDocParams = zod.object({
+  "templateTaskId": zod.number().describe('A-118 · an `ob_prereq_template_tasks` id — a task on a \*version of the\nmaster\*, not on anybody\'s checklist. Editing one changes what future\nclients are asked for and nothing about a client already boarded.\n')
+})
+
+export const addObPrereqTemplateTaskDocHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addObPrereqTemplateTaskDocBodyLabelMax = 200;
+
+
+
+export const addObPrereqTemplateTaskDocBody = zod.object({
+  "label": zod.string().min(1).max(addObPrereqTemplateTaskDocBodyLabelMax),
+  "attachmentId": zod.number()
+})
+
+/**
+ * @summary Detach a reference document from a draft task (OB-14)
+ */
+export const removeObPrereqTemplateTaskDocParams = zod.object({
+  "docId": zod.number().describe('A-118 · an `ob_prereq_template_task_docs` id.')
+})
+
+/**
+ * A-117 · `user_module_access`, the table A-111's `ModuleGuard` and
+A-110's `modules` claim are both built from.
+
+**Revoked grants are returned, not hidden**, when `includeRevoked` is
+set. A-109's DDL revokes rather than deletes for a reason it states
+plainly: an access audit has to answer "who could see this module in
+August", and that question is asked *after* something has been seen
+that should not have been. A screen that could only show live grants
+would be unable to answer it.
+
+Listing is Admin-only, and the module is a query parameter rather than
+a path segment because OB-08 shows both modules' grants for one person
+side by side — a dual-access user is the case the screen exists for.
+
+ * @summary Who can reach a module, and as what (OB-08)
+ */
+export const listObModuleAccessQueryLimitDefault = 50;
+export const listObModuleAccessQueryLimitMax = 200;
+
+export const listObModuleAccessQueryIncludeRevokedDefault = false;
+
+export const listObModuleAccessQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObModuleAccessQueryLimitMax).default(listObModuleAccessQueryLimitDefault),
+  "module": zod.enum(['TICKETING', 'ONBOARDING']).optional(),
+  "userId": zod.number().optional(),
+  "moduleRole": zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).optional(),
+  "includeRevoked": zod.boolean().optional().describe('Off by default: the everyday question is who has access now. On\nfor an audit, where the answer must include grants that have since\nbeen withdrawn.\n')
+})
+
+export const listObModuleAccessResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "user": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "module": zod.enum(['TICKETING', 'ONBOARDING']).describe('A-118 · `user_module_access.module`. A `CHECK` constraint rather than a\nforeign key, and A-109\'s DDL calls it platform-defined for that\nreason: a module is a deployment fact, not a row somebody adds.\n\nSo an enum here is right where `reportKey` and `eventCode` are open\nstrings — a third module arrives by a release and a migration, and it\nshould break every generated client until each has been looked at.\n'),
+  "moduleRole": zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).describe('A-118 · the module\'s own role vocabulary, \*\*independent of\n`users.role_id`\*\*. A user\'s platform role says what they are in\nticketing; this says what they are here, and the two do not have to\nagree — plan §3\'s six onboarding roles are not blueprint §2\'s six.\n\n`TICKETING_MEMBER` is the degenerate value on the other module\'s\ngrants: ticketing distinguishes its roles through `users.role_id`\nalready, so a second vocabulary for it would be two places to change\none fact. Its presence in this enum is what lets one table serve both\nmodules without a nullable column.\n\nClosed, because `ck_user_module_access_module_role` is closed. A\nseventh value is a migration.\n'),
+  "grantedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null on a grant made by a migration rather than by a person — the\nseed data that gives the first administrator their own access.\nKept nullable rather than pointing at a synthetic system user,\nwhich would read as a person in an audit.\n'),
+  "grantedAt": zod.string().datetime({}),
+  "isLive": zod.boolean().describe('Not revoked. Mirrors `live_key`, which is the generated column the\npartial unique index is built on — one live grant per (user,\nmodule), because two would mean two `moduleRole`s and nothing says\nwhich the guard should believe.\n'),
+  "revokedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "revokedAt": zod.string().datetime({}).nullish(),
+  "tokenLagSeconds": zod.number().optional().describe('How long a token minted before this change can still carry the old\nentitlement — the access-token lifetime. On the response so OB-08\ncan tell an admin that a revoke is not instantaneous and offer to\nend the user\'s sessions, rather than leaving them to conclude the\nrevoke failed. See `revokeObModuleAccess`.\n')
+}).describe('`user_module_access` — one grant, live or revoked.')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Audited: `grantedBy` and `grantedAt` are stamped from the token and
+are not in the body.
+
+**The new grant does not reach the user until their next token.** The
+`modules` claim is minted at login (A-110) and access tokens live
+fifteen minutes, so a grant made now is effective within fifteen
+minutes rather than instantly. That is a deliberate consequence of
+putting entitlement in the claim rather than reading the table on
+every request, and it is stated here because the OB-08 screen should
+say so rather than let an admin conclude the grant failed.
+
+The reverse direction is the one that matters and it is not
+symmetrical: a **revoke** is likewise not instant, so
+`revokeObModuleAccess` says what to do when it needs to be.
+
+`409` if the user already holds a live grant for this module.
+`uq_user_module_access_live` allows exactly one, because two would
+mean two `module_role`s and nothing says which the guard should
+believe. Changing somebody's role is revoke-then-grant, which leaves
+both facts in the audit trail rather than overwriting the first.
+
+ * @summary Grant a user access to a module (OB-08)
+ */
+export const grantObModuleAccessHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const grantObModuleAccessBody = zod.object({
+  "userId": zod.number(),
+  "module": zod.enum(['TICKETING', 'ONBOARDING']).describe('A-118 · `user_module_access.module`. A `CHECK` constraint rather than a\nforeign key, and A-109\'s DDL calls it platform-defined for that\nreason: a module is a deployment fact, not a row somebody adds.\n\nSo an enum here is right where `reportKey` and `eventCode` are open\nstrings — a third module arrives by a release and a migration, and it\nshould break every generated client until each has been looked at.\n'),
+  "moduleRole": zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).describe('A-118 · the module\'s own role vocabulary, \*\*independent of\n`users.role_id`\*\*. A user\'s platform role says what they are in\nticketing; this says what they are here, and the two do not have to\nagree — plan §3\'s six onboarding roles are not blueprint §2\'s six.\n\n`TICKETING_MEMBER` is the degenerate value on the other module\'s\ngrants: ticketing distinguishes its roles through `users.role_id`\nalready, so a second vocabulary for it would be two places to change\none fact. Its presence in this enum is what lets one table serve both\nmodules without a nullable column.\n\nClosed, because `ck_user_module_access_module_role` is closed. A\nseventh value is a migration.\n')
+})
+
+/**
+ * `POST .../revoke`, **not `DELETE`**, and the row survives. A-109
+revokes by stamping `revokedAt` and `revokedBy` so the audit can say
+who withdrew access and when; a `DELETE` would leave nothing to answer
+with, which is precisely the question asked after an incident.
+
+`live_key` goes null in the same statement, so the partial unique
+index stops counting this grant and the user may be granted the module
+again later without colliding with their own history.
+
+## Revocation is not instant, and this is the one place that matters
+
+The `modules` claim is in the access token, so a user holding a valid
+token keeps the entitlement until it expires — up to fifteen minutes.
+For an ordinary role change that is fine. For a revocation prompted by
+something going wrong it is not, and the answer is not to make
+`ModuleGuard` hit the database on every request: it is to revoke the
+user's refresh-token family, which the auth kernel already exposes and
+which ends the session rather than narrowing it. `data.tokenLagSeconds`
+states the worst case so OB-08 can offer that as the next action
+instead of leaving an admin to assume the revoke did not work.
+
+ * @summary Withdraw a grant (OB-08)
+ */
+export const revokeObModuleAccessParams = zod.object({
+  "grantId": zod.number().describe('A-118 · a `user_module_access` id. Addresses \*\*one grant\*\*, not a\nuser\'s access in general: a user may hold a live grant for one module\nand a revoked one for another, and revoking is done to a grant rather\nthan to a person.\n')
+})
+
+export const revokeObModuleAccessHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const revokeObModuleAccessResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "user": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),
+  "module": zod.enum(['TICKETING', 'ONBOARDING']).describe('A-118 · `user_module_access.module`. A `CHECK` constraint rather than a\nforeign key, and A-109\'s DDL calls it platform-defined for that\nreason: a module is a deployment fact, not a row somebody adds.\n\nSo an enum here is right where `reportKey` and `eventCode` are open\nstrings — a third module arrives by a release and a migration, and it\nshould break every generated client until each has been looked at.\n'),
+  "moduleRole": zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).describe('A-118 · the module\'s own role vocabulary, \*\*independent of\n`users.role_id`\*\*. A user\'s platform role says what they are in\nticketing; this says what they are here, and the two do not have to\nagree — plan §3\'s six onboarding roles are not blueprint §2\'s six.\n\n`TICKETING_MEMBER` is the degenerate value on the other module\'s\ngrants: ticketing distinguishes its roles through `users.role_id`\nalready, so a second vocabulary for it would be two places to change\none fact. Its presence in this enum is what lets one table serve both\nmodules without a nullable column.\n\nClosed, because `ck_user_module_access_module_role` is closed. A\nseventh value is a migration.\n'),
+  "grantedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null on a grant made by a migration rather than by a person — the\nseed data that gives the first administrator their own access.\nKept nullable rather than pointing at a synthetic system user,\nwhich would read as a person in an audit.\n'),
+  "grantedAt": zod.string().datetime({}),
+  "isLive": zod.boolean().describe('Not revoked. Mirrors `live_key`, which is the generated column the\npartial unique index is built on — one live grant per (user,\nmodule), because two would mean two `moduleRole`s and nothing says\nwhich the guard should believe.\n'),
+  "revokedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "revokedAt": zod.string().datetime({}).nullish(),
+  "tokenLagSeconds": zod.number().optional().describe('How long a token minted before this change can still carry the old\nentitlement — the access-token lifetime. On the response so OB-08\ncan tell an admin that a revoke is not instantaneous and offer to\nend the user\'s sessions, rather than leaving them to conclude the\nrevoke failed. See `revokeObModuleAccess`.\n')
+}).describe('`user_module_access` — one grant, live or revoked.')
+})
+
+/**
+ * B-113 · the constants PHASE-2-BUILD-PLAN §2 locked, **as
+configuration rather than as constants**: amber at 75% of TAT, the
+scanner every 5 minutes, and the ladder at breach → +4 working hours →
++8.
+
+Those are the seeded values, not the contract. The reason they are
+editable at all is that every one of them is a judgement about a
+particular organisation's pace, and the version that is wrong for a
+client is the version nobody can change without a release.
+
+Returns an `ETag`, and it is the only source of the tag `PUT
+/onboarding/settings` requires — the pairing CONVENTIONS §5 says to
+make by hand, and the gap B-016 closed on `/projects/{id}` after the
+precondition had been declared for months with nowhere to satisfy it.
+
+ * @summary TAT thresholds, scanner cadence and the escalation matrix (OB-11)
+ */
+export const getObSettingsHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getObSettingsResponseDataAmberThresholdPercentMax = 99;
+
+export const getObSettingsResponseDataScannerIntervalMinutesMax = 60;
+
+export const getObSettingsResponseDataLadderItemAfterWorkingHoursMin = 0;
+
+export const getObSettingsResponseDataLadderMin = 3;
+export const getObSettingsResponseDataLadderMax = 3;
+
+
+
+export const getObSettingsResponse = zod.object({
+  "data": zod.object({
+  "amberThresholdPercent": zod.number().min(1).max(getObSettingsResponseDataAmberThresholdPercentMax).describe('Warn at this percentage of a step\'s TAT. Seeded at 75\n(PHASE-2-BUILD-PLAN §2), and plan §1.1 #3\'s \"Amber before Red\".\n\nCapped below 100 rather than at it: an amber threshold of 100%\nfires at the same moment as the breach it is supposed to precede,\nwhich is a warning with no warning in it.\n'),
+  "scannerIntervalMinutes": zod.number().min(1).max(getObSettingsResponseDataScannerIntervalMinutesMax).describe('How often the TAT sweep runs. Seeded at 5. Takes effect at the\nnext sweep, not immediately.\n'),
+  "ladder": zod.array(zod.object({
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "afterWorkingHours": zod.number().min(getObSettingsResponseDataLadderItemAfterWorkingHoursMin).describe('Working hours after the breach, \*\*not wall-clock\*\* — CLAUDE.md\'s\ncalendar rule, and the reason a Friday-evening breach escalates on\nMonday morning rather than at two on Saturday. Zero on L1, which\nfires at the breach itself.\n\nPHASE-2-BUILD-PLAN §2 seeds 0 \/ 4 \/ 8.\n'),
+  "recipient": zod.enum(['STEP_OWNER', 'BACKUP_OWNER', 'ONBOARDING_MANAGER', 'OB_ADMIN']).describe('\*\*A role, resolved when the rung fires, not a user id.\*\* Storing a\nperson would send L2 to somebody who has since left, and would\nneed re-editing every time the team changed. Resolution is\nleave-aware against the working calendar — plan §1.1 #4\'s backup\nowner is the whole point of `BACKUP_OWNER` being a distinct value\nrather than a fallback baked into `STEP_OWNER`.\n\nResolving to nobody is allowed and is visible:\n`ObEscalation.escalatedTo` is null and the rung still exists, so a\nmisconfigured matrix shows up on OB-02 instead of silently\nswallowing breaches.\n')
+}).describe('One rung of the ladder, as configuration.')).min(getObSettingsResponseDataLadderMin).max(getObSettingsResponseDataLadderMax).describe('Exactly three rungs, one per `ObEscalationLevel`. Fixed at three\nbecause `ObEscalationLevel` is closed and\n`uq_ob_escalations_open (step_id, level, open_key)` is keyed on\nit — a fourth rung would have no level to be, and a matrix\nallowing one would be configuration the database cannot store.\n\nThe \*\*intervals\*\* are configuration; the number of rungs is not.\n'),
+  "updatedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "updatedAt": zod.string().datetime({}).nullish()
+}).describe('OB-11. The constants PHASE-2-BUILD-PLAN §2 locked, held as\nconfiguration — see `getObSettings` for why they are editable at all.\n')
+})
+
+/**
+ * A **wholesale replace behind one Save button**, which is why it is a
+`PUT` and why `If-Match` is not optional here — the worst case for a
+lost update, exactly as `PUT /projects/{id}/settings` argues. Two
+admins on OB-11 at once would otherwise have the second silently
+discard the first's escalation matrix along with the threshold they
+did not touch.
+
+## What changing these does to work already in flight
+
+**Thresholds are read forward, never retroactively.** Lowering amber
+from 75% to 60% re-colours every open step on the scanner's next pass;
+it does not re-open a step that already breached under the old
+setting, and it does not re-send an escalation that has already gone.
+A settings change that reissued historical notifications would mail
+every owner in the organisation about steps they closed last week.
+
+`scannerIntervalMinutes` takes effect at the next sweep rather than
+immediately, for the same reason a cron does.
+
+ * @summary Replace the onboarding settings (OB-11)
+ */
+export const updateObSettingsHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObSettingsBodyAmberThresholdPercentMax = 99;
+
+export const updateObSettingsBodyScannerIntervalMinutesMax = 60;
+
+export const updateObSettingsBodyLadderItemAfterWorkingHoursMin = 0;
+
+export const updateObSettingsBodyLadderMin = 3;
+export const updateObSettingsBodyLadderMax = 3;
+
+
+
+export const updateObSettingsBody = zod.object({
+  "amberThresholdPercent": zod.number().min(1).max(updateObSettingsBodyAmberThresholdPercentMax),
+  "scannerIntervalMinutes": zod.number().min(1).max(updateObSettingsBodyScannerIntervalMinutesMax),
+  "ladder": zod.array(zod.object({
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "afterWorkingHours": zod.number().min(updateObSettingsBodyLadderItemAfterWorkingHoursMin).describe('Working hours after the breach, \*\*not wall-clock\*\* — CLAUDE.md\'s\ncalendar rule, and the reason a Friday-evening breach escalates on\nMonday morning rather than at two on Saturday. Zero on L1, which\nfires at the breach itself.\n\nPHASE-2-BUILD-PLAN §2 seeds 0 \/ 4 \/ 8.\n'),
+  "recipient": zod.enum(['STEP_OWNER', 'BACKUP_OWNER', 'ONBOARDING_MANAGER', 'OB_ADMIN']).describe('\*\*A role, resolved when the rung fires, not a user id.\*\* Storing a\nperson would send L2 to somebody who has since left, and would\nneed re-editing every time the team changed. Resolution is\nleave-aware against the working calendar — plan §1.1 #4\'s backup\nowner is the whole point of `BACKUP_OWNER` being a distinct value\nrather than a fallback baked into `STEP_OWNER`.\n\nResolving to nobody is allowed and is visible:\n`ObEscalation.escalatedTo` is null and the rung still exists, so a\nmisconfigured matrix shows up on OB-02 instead of silently\nswallowing breaches.\n')
+}).describe('One rung of the ladder, as configuration.')).min(updateObSettingsBodyLadderMin).max(updateObSettingsBodyLadderMax)
+}).describe('The whole settings object. A wholesale replace rather than a patch —\nsee `updateObSettings` on why that makes `If-Match` load-bearing here.\n\n`400` if the rungs are not in ascending `afterWorkingHours` order. A\nladder whose L3 fires before its L2 is not a ladder, and the failure\nwould show up weeks later as an escalation that reached a manager\nbefore the owner it was meant to give a chance to.\n')
+
+export const updateObSettingsResponseDataAmberThresholdPercentMax = 99;
+
+export const updateObSettingsResponseDataScannerIntervalMinutesMax = 60;
+
+export const updateObSettingsResponseDataLadderItemAfterWorkingHoursMin = 0;
+
+export const updateObSettingsResponseDataLadderMin = 3;
+export const updateObSettingsResponseDataLadderMax = 3;
+
+
+
+export const updateObSettingsResponse = zod.object({
+  "data": zod.object({
+  "amberThresholdPercent": zod.number().min(1).max(updateObSettingsResponseDataAmberThresholdPercentMax).describe('Warn at this percentage of a step\'s TAT. Seeded at 75\n(PHASE-2-BUILD-PLAN §2), and plan §1.1 #3\'s \"Amber before Red\".\n\nCapped below 100 rather than at it: an amber threshold of 100%\nfires at the same moment as the breach it is supposed to precede,\nwhich is a warning with no warning in it.\n'),
+  "scannerIntervalMinutes": zod.number().min(1).max(updateObSettingsResponseDataScannerIntervalMinutesMax).describe('How often the TAT sweep runs. Seeded at 5. Takes effect at the\nnext sweep, not immediately.\n'),
+  "ladder": zod.array(zod.object({
+  "level": zod.enum(['L1', 'L2', 'L3']).describe('A-118 · `ob_escalations.level`. PHASE-2-BUILD-PLAN §2 fixes the\ntimings and makes them admin-editable: L1 at breach, L2 at +4 working\nhours, L3 at +8. The intervals are configuration\n(`ObEscalationSettings`); the three rungs are not.\n'),
+  "afterWorkingHours": zod.number().min(updateObSettingsResponseDataLadderItemAfterWorkingHoursMin).describe('Working hours after the breach, \*\*not wall-clock\*\* — CLAUDE.md\'s\ncalendar rule, and the reason a Friday-evening breach escalates on\nMonday morning rather than at two on Saturday. Zero on L1, which\nfires at the breach itself.\n\nPHASE-2-BUILD-PLAN §2 seeds 0 \/ 4 \/ 8.\n'),
+  "recipient": zod.enum(['STEP_OWNER', 'BACKUP_OWNER', 'ONBOARDING_MANAGER', 'OB_ADMIN']).describe('\*\*A role, resolved when the rung fires, not a user id.\*\* Storing a\nperson would send L2 to somebody who has since left, and would\nneed re-editing every time the team changed. Resolution is\nleave-aware against the working calendar — plan §1.1 #4\'s backup\nowner is the whole point of `BACKUP_OWNER` being a distinct value\nrather than a fallback baked into `STEP_OWNER`.\n\nResolving to nobody is allowed and is visible:\n`ObEscalation.escalatedTo` is null and the rung still exists, so a\nmisconfigured matrix shows up on OB-02 instead of silently\nswallowing breaches.\n')
+}).describe('One rung of the ladder, as configuration.')).min(updateObSettingsResponseDataLadderMin).max(updateObSettingsResponseDataLadderMax).describe('Exactly three rungs, one per `ObEscalationLevel`. Fixed at three\nbecause `ObEscalationLevel` is closed and\n`uq_ob_escalations_open (step_id, level, open_key)` is keyed on\nit — a fourth rung would have no level to be, and a matrix\nallowing one would be configuration the database cannot store.\n\nThe \*\*intervals\*\* are configuration; the number of rungs is not.\n'),
+  "updatedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "updatedAt": zod.string().datetime({}).nullish()
+}).describe('OB-11. The constants PHASE-2-BUILD-PLAN §2 locked, held as\nconfiguration — see `getObSettings` for why they are editable at all.\n')
+})
+
+/**
+ * B-113 · one row per `(eventCode, channel)`, the identity
+`NotificationTemplate` uses one module over and for the same reasons.
+
+## Why this is not `/masters/notification-templates`
+
+The ticketing surface is genuinely close, and reusing it was the first
+thing considered. Three things stop it, and only the third is fatal on
+its own:
+
+1. **The channels differ.** `NotificationChannel` is
+   `IN_APP · EMAIL · PUSH`. This module's `ObChannel` is
+   `EMAIL · WHATSAPP · IN_APP` — no push, and a `WHATSAPP` value that
+   A-107 keeps deliberately (PHASE-2-BUILD-PLAN §6.1: the enum value
+   costs nothing now and adding it later is a migration against a
+   table with production rows). Neither enum is a subset of the other.
+2. **The categories differ.** `MENTION` and `STATUS_REQUEST` mean
+   nothing here; `PREREQUISITE` and `SIGNOFF` mean nothing there.
+3. **A-115 forbids the import.** ArchUnit asserts the two modules stay
+   separable, and one screen writing rows another module's renderer
+   resolves is the coupling it exists to refuse.
+
+**Phase 2 sends email only.** PHASE-2-BUILD-PLAN §6.1 defers WhatsApp
+entirely — no provider, no adapter, no webhook — so a `WHATSAPP`
+template can be authored and stored and nothing will dispatch it.
+`isDeliverable` says so per row, rather than letting OB-12 present a
+template that will sit in `PENDING` forever looking configured.
+
+ * @summary The module's notification wording (OB-12)
+ */
+export const listObNotificationTemplatesQueryParams = zod.object({
+  "channel": zod.enum(['EMAIL', 'WHATSAPP', 'IN_APP']).optional(),
+  "category": zod.enum(['PREREQUISITE', 'SERVICE', 'ESCALATION', 'SIGNOFF', 'ACCOUNT']).optional()
+})
+
+
+export const listObNotificationTemplatesResponseDataItemSubjectTemplateMax = 255;
+
+
+
+export const listObNotificationTemplatesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "eventCode": zod.string().describe('One of plan §7\'s events. A string rather than an enum, for the\nreason `NotificationTemplate.eventCode` is one: the producers own\nthe list and it grows with them. Served by\n`getObNotificationTemplateVocabulary`.\n'),
+  "category": zod.enum(['PREREQUISITE', 'SERVICE', 'ESCALATION', 'SIGNOFF', 'ACCOUNT']).describe('A-118 · what kind of thing happened. OB-13\'s tabs group on it and\nOB-12\'s mandatory-mail rule is stated over it: `ESCALATION` and\n`SIGNOFF` mail cannot be switched off.\n\nFive values, none of them shared with `NotificationTemplate.category`\'s\nfive — `MENTION` and `STATUS_REQUEST` mean nothing here, and\n`PREREQUISITE` and `SIGNOFF` mean nothing there. That non-overlap is\none of the three reasons `listObNotificationTemplates` gives for not\nreusing the ticketing surface.\n'),
+  "channel": zod.enum(['EMAIL', 'WHATSAPP', 'IN_APP']).describe('A-118 · `ob_notification_outbox.channel`, and deliberately \*\*not\*\*\n`NotificationChannel`, which is `IN_APP · EMAIL · PUSH`. Neither is a\nsubset of the other and the two modules stay separable (A-115); the\nbackend has held them apart since A-107\'s `ObChannel`.\n\n\*\*`WHATSAPP` is here while nothing sends it.\*\* PHASE-2-BUILD-PLAN §6.1\ndefers WhatsApp out of phase 2 entirely — no provider account, no\ntemplate submission, no adapter, no webhook — and keeps the enum value\nanyway, because the value costs nothing now and adding it later is a\nmigration against a table with production rows. A `WHATSAPP` template\ncan be authored and stored; `ObNotificationTemplate.isDeliverable`\nsays nothing will dispatch it.\n'),
+  "recipients": zod.array(zod.string()).min(1).optional().describe('Never empty. A template with no recipients is a row that looks\nconfigured and sends nothing; switching it off says so instead.\n'),
+  "subjectTemplate": zod.string().max(listObNotificationTemplatesResponseDataItemSubjectTemplateMax).nullish().describe('Required for `EMAIL`; null on `IN_APP`, which has a title rather than a subject.'),
+  "bodyTemplate": zod.string().describe('HTML for `EMAIL`, plain text otherwise. May contain any merge tag\nfrom the vocabulary and is refused at write time if it contains\none that is not — an unknown tag renders as literal braces in a\nclient\'s inbox, and this is the last place to catch it.\n'),
+  "isActive": zod.boolean(),
+  "isMandatory": zod.boolean().describe('\*\*Derived, never stored\*\* — `channel == EMAIL` and the category is\n`ESCALATION` or `SIGNOFF`. True means `isActive` cannot be set\nfalse. A stored column would be a second copy of a rule\ndeliberately stated over the category, so that an escalation event\nadded next month is covered the moment it is declared.\n'),
+  "isDeliverable": zod.boolean().describe('Whether an adapter exists for this channel in this deployment.\n\*\*False for every `WHATSAPP` row in phase 2\*\* (PHASE-2-BUILD-PLAN\n§6.1), so OB-12 can render it as \"authored, not yet sending\"\nrather than presenting a template that will queue forever looking\nconfigured. B-110\'s dispatcher leaves such rows `PENDING` by\ndesign; this is that fact, made visible on the screen where\nsomebody would otherwise wonder.\n')
+}))
+})
+
+/**
+ * What OB-12's editor may offer, served rather than hardcoded — the
+argument `getNotificationTemplateVocabulary` makes: a client holding
+its own copy of the vocabulary is a second copy of the server's, and a
+new event would silently fail to appear.
+
+Plan §7 lists the module's new events, and they are the reason this
+matters more here than one module over: the list is still growing
+while OB3 is built. A body containing a merge tag that is not in this
+vocabulary is refused at write time rather than rendering as literal
+text in a client's inbox.
+
+ * @summary Event codes, channels, recipients and merge tags (OB-12)
+ */
+export const getObNotificationTemplateVocabularyResponse = zod.object({
+  "data": zod.object({
+  "events": zod.array(zod.object({
+  "code": zod.string(),
+  "category": zod.enum(['PREREQUISITE', 'SERVICE', 'ESCALATION', 'SIGNOFF', 'ACCOUNT']).describe('A-118 · what kind of thing happened. OB-13\'s tabs group on it and\nOB-12\'s mandatory-mail rule is stated over it: `ESCALATION` and\n`SIGNOFF` mail cannot be switched off.\n\nFive values, none of them shared with `NotificationTemplate.category`\'s\nfive — `MENTION` and `STATUS_REQUEST` mean nothing here, and\n`PREREQUISITE` and `SIGNOFF` mean nothing there. That non-overlap is\none of the three reasons `listObNotificationTemplates` gives for not\nreusing the ticketing surface.\n'),
+  "mandatoryMail": zod.boolean().describe('The `EMAIL` template for this event cannot be switched off. Lets\nOB-12 lock the toggle before the click rather than after the\n`409`.\n')
+})),
+  "channels": zod.array(zod.enum(['EMAIL', 'WHATSAPP', 'IN_APP']).describe('A-118 · `ob_notification_outbox.channel`, and deliberately \*\*not\*\*\n`NotificationChannel`, which is `IN_APP · EMAIL · PUSH`. Neither is a\nsubset of the other and the two modules stay separable (A-115); the\nbackend has held them apart since A-107\'s `ObChannel`.\n\n\*\*`WHATSAPP` is here while nothing sends it.\*\* PHASE-2-BUILD-PLAN §6.1\ndefers WhatsApp out of phase 2 entirely — no provider account, no\ntemplate submission, no adapter, no webhook — and keeps the enum value\nanyway, because the value costs nothing now and adding it later is a\nmigration against a table with production rows. A `WHATSAPP` template\ncan be authored and stored; `ObNotificationTemplate.isDeliverable`\nsays nothing will dispatch it.\n')),
+  "recipients": zod.array(zod.string()),
+  "mergeTags": zod.array(zod.string()).describe('Every tag a body may contain. Served rather than documented,\nso a tag added with a new event is offered the same day.\n')
+})
+})
+
+/**
+ * `If-Match` for the reason `/masters/notification-templates/{id}`
+carries one, restated because it is the strongest case in either
+module: the field most likely to be edited is a long body two admins
+can plausibly be rewording at once, and a lost update here is silent
+**and outward-facing** — the losing edit vanishes and what reaches a
+client is wording nobody chose.
+
+`(eventCode, channel)` is the row's identity and is immutable. Neither
+is in the request body; changing either is a different template.
+
+`409` on switching off a mandatory one. `isMandatory` is derived from
+the category rather than stored — `ESCALATION` and `SIGNOFF` mail
+cannot be silenced — so the screen should render the toggle as a
+locked statement rather than a control whose only outcome is a
+refusal.
+
+ * @summary Reword a notification (OB-12)
+ */
+export const updateObNotificationTemplateParams = zod.object({
+  "templateId": zod.number().describe('A-118 · an onboarding notification-template id. Not the same id space\nas `\/masters\/notification-templates\/{templateId}` — see\n`listObNotificationTemplates` for why the two modules keep separate\ntables.\n')
+})
+
+export const updateObNotificationTemplateHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObNotificationTemplateBodySubjectTemplateMax = 255;
+
+export const updateObNotificationTemplateBodyBodyTemplateMax = 20000;
+
+
+
+
+export const updateObNotificationTemplateBody = zod.object({
+  "subjectTemplate": zod.string().max(updateObNotificationTemplateBodySubjectTemplateMax).nullish(),
+  "bodyTemplate": zod.string().min(1).max(updateObNotificationTemplateBodyBodyTemplateMax).optional(),
+  "recipients": zod.array(zod.string()).min(1).optional(),
+  "isActive": zod.boolean().optional()
+}).describe('`eventCode` and `channel` are absent: together they are the row\'s\nidentity, the unique key is over them, and the renderer resolves by\nthem. Changing either is a different template.\n')
+
+
+export const updateObNotificationTemplateResponseDataSubjectTemplateMax = 255;
+
+
+
+export const updateObNotificationTemplateResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "eventCode": zod.string().describe('One of plan §7\'s events. A string rather than an enum, for the\nreason `NotificationTemplate.eventCode` is one: the producers own\nthe list and it grows with them. Served by\n`getObNotificationTemplateVocabulary`.\n'),
+  "category": zod.enum(['PREREQUISITE', 'SERVICE', 'ESCALATION', 'SIGNOFF', 'ACCOUNT']).describe('A-118 · what kind of thing happened. OB-13\'s tabs group on it and\nOB-12\'s mandatory-mail rule is stated over it: `ESCALATION` and\n`SIGNOFF` mail cannot be switched off.\n\nFive values, none of them shared with `NotificationTemplate.category`\'s\nfive — `MENTION` and `STATUS_REQUEST` mean nothing here, and\n`PREREQUISITE` and `SIGNOFF` mean nothing there. That non-overlap is\none of the three reasons `listObNotificationTemplates` gives for not\nreusing the ticketing surface.\n'),
+  "channel": zod.enum(['EMAIL', 'WHATSAPP', 'IN_APP']).describe('A-118 · `ob_notification_outbox.channel`, and deliberately \*\*not\*\*\n`NotificationChannel`, which is `IN_APP · EMAIL · PUSH`. Neither is a\nsubset of the other and the two modules stay separable (A-115); the\nbackend has held them apart since A-107\'s `ObChannel`.\n\n\*\*`WHATSAPP` is here while nothing sends it.\*\* PHASE-2-BUILD-PLAN §6.1\ndefers WhatsApp out of phase 2 entirely — no provider account, no\ntemplate submission, no adapter, no webhook — and keeps the enum value\nanyway, because the value costs nothing now and adding it later is a\nmigration against a table with production rows. A `WHATSAPP` template\ncan be authored and stored; `ObNotificationTemplate.isDeliverable`\nsays nothing will dispatch it.\n'),
+  "recipients": zod.array(zod.string()).min(1).optional().describe('Never empty. A template with no recipients is a row that looks\nconfigured and sends nothing; switching it off says so instead.\n'),
+  "subjectTemplate": zod.string().max(updateObNotificationTemplateResponseDataSubjectTemplateMax).nullish().describe('Required for `EMAIL`; null on `IN_APP`, which has a title rather than a subject.'),
+  "bodyTemplate": zod.string().describe('HTML for `EMAIL`, plain text otherwise. May contain any merge tag\nfrom the vocabulary and is refused at write time if it contains\none that is not — an unknown tag renders as literal braces in a\nclient\'s inbox, and this is the last place to catch it.\n'),
+  "isActive": zod.boolean(),
+  "isMandatory": zod.boolean().describe('\*\*Derived, never stored\*\* — `channel == EMAIL` and the category is\n`ESCALATION` or `SIGNOFF`. True means `isActive` cannot be set\nfalse. A stored column would be a second copy of a rule\ndeliberately stated over the category, so that an escalation event\nadded next month is covered the moment it is declared.\n'),
+  "isDeliverable": zod.boolean().describe('Whether an adapter exists for this channel in this deployment.\n\*\*False for every `WHATSAPP` row in phase 2\*\* (PHASE-2-BUILD-PLAN\n§6.1), so OB-12 can render it as \"authored, not yet sending\"\nrather than presenting a template that will queue forever looking\nconfigured. B-110\'s dispatcher leaves such rows `PENDING` by\ndesign; this is that fact, made visible on the screen where\nsomebody would otherwise wonder.\n')
+})
+})
+

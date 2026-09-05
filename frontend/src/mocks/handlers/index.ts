@@ -4,6 +4,8 @@ import { fileHandlers } from './files';
 import { onboardingHandlers } from './onboarding';
 import { onboardingJourneyInstanceHandlers } from './onboardingJourneyInstances';
 import { onboardingJourneyHandlers } from './onboardingJourneys';
+import { obAdminHandlers } from './onboardingAdmin';
+import { obPrereqHandlers } from './onboardingPrereqs';
 import { obJourneyHandlers } from './onboardingSteps';
 import { obNotificationHandlers } from './obNotifications';
 import { ribbonHandlers } from './ribbon';
@@ -52,8 +54,20 @@ export const handlers = [
   // A-118 · the reads C-104's transitions do not cover — the journey list and
   // ribbon, the step panel, checklist, communications and history.
   ...obJourneyHandlers,
+  // A-118 · the prerequisites layer (OB-14) — the master, the per-client
+  // instances, and the gate they open. See onboardingPrereqs.ts.
+  ...obPrereqHandlers,
+  // A-118 · OB-02, OB-08, OB-09, OB-10, OB-11 and OB-12, plus the
+  // unauthenticated public sign-off surface. See onboardingAdmin.ts.
+  //
+  // `/public/onboarding/**` sits under the /api/v1 prefix like everything else
+  // here — "public" describes the absence of a bearer token, not a different
+  // origin, and the 501 catch-all below still has to be able to reach it.
+  ...obAdminHandlers,
   // B-112 · OB-13. Its own file rather than rows in onboarding.ts, because the
-  // notification centre is its own store and its own tab vocabulary.
+  // notification centre is its own store and its own tab vocabulary. It owns
+  // `/onboarding/notifications/**`; A-118 above owns the OB-12 templates the
+  // centre renders, which is a different resource under a similar name.
   ...obNotificationHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the

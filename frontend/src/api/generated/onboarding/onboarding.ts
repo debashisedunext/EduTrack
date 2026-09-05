@@ -67,14 +67,63 @@ import type {
 
 import type {
   ConflictResponse,
+  GetObDashboardSummaryParams,
+  ListObClientEscalationsParams,
   ListObClientsParams,
+  ListObDashboardCardItemsParams,
+  ListObDelayedProjectsParams,
+  ListObEscalationsParams,
+  ListObImplementorWorkloadParams,
+  ListObPrereqCommentsParams,
+  ListObPrereqHistoryParams,
+  ListObSignoffsParams,
   ObClientCreateRequest,
   ObClientDetailResponse,
+  ObClientEscalationListResponse,
+  ObClientEscalationResponse,
   ObClientListResponse,
+  ObClientPrereqTaskCreateRequest,
+  ObClientPrereqTaskDetailResponse,
+  ObClientPrereqTaskResponse,
+  ObClientPrereqTaskUpdateRequest,
+  ObClientPrereqsResponse,
   ObClientUpdateRequest,
+  ObCsatRequest,
+  ObDashboardCardKey,
+  ObDashboardItemListResponse,
+  ObDashboardSummaryResponse,
+  ObDelayedProjectListResponse,
+  ObEscalationListResponse,
+  ObEscalationResolveRequest,
+  ObEscalationResponse,
+  ObImplementorWorkloadListResponse,
   ObModuleGatedResponse,
+  ObPrereqCommentCreateRequest,
+  ObPrereqCommentListResponse,
+  ObPrereqCommentResponse,
+  ObPrereqGateResultResponse,
+  ObPrereqHistoryListResponse,
+  ObPrereqReturnRequest,
+  ObPrereqSkipRequest,
+  ObPrereqSubmitRequest,
+  ObPrereqVerifyRequest,
+  ObReportCatalogueResponse,
+  ObReportResponse,
+  ObSignoffAcceptRequest,
+  ObSignoffAcceptResultResponse,
+  ObSignoffCancelRequest,
+  ObSignoffDetailResponse,
+  ObSignoffListResponse,
+  ObSignoffObjectRequest,
+  ObSignoffOtpVerifyRequest,
+  ObSignoffRequestBody,
+  ObSignoffResponse,
+  ObSignoffSessionResponse,
+  ObSignoffTokenRequest,
   PreconditionFailedResponse,
   Problem,
+  RunObReportParams,
+  TooManyRequestsResponse,
   UnauthorizedResponse,
   ValidationFailedResponse
 } from '.././model';
@@ -486,6 +535,3102 @@ export const useUpdateObClient = <TError = ValidationFailedResponse | ObModuleGa
       > => {
 
       const mutationOptions = getUpdateObClientMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The accordion that sits **above** the journey accordions on OB-05, and
+the interactive half of CP-03. Its strip is `gateStatus` plus
+`mandatoryVerified / mandatoryTotal`; expanded, it is `tasks`.
+
+Tasks are **not paginated** — the instance is a snapshot of one
+template version, so the bound is the master's own (see
+`getObPrereqTemplate`), and both the progress bar and the gate
+arithmetic need the complete set to mean anything. A page-two task
+nobody fetched is a mandatory task nobody knows is outstanding.
+
+## The gate is reported here, not decided here
+
+`gateStatus` is the same value every journey on this client carries,
+and it is derived by C-118's `PrerequisiteGateService` from the task
+rows below — every mandatory task `VERIFIED`, every non-mandatory one
+`VERIFIED` or `SKIPPED`. It is repeated on this response so the
+accordion strip can render without reading a journey, not because
+there is a second copy of the truth.
+
+**There is no endpoint that opens the gate**, and that is a deliberate
+absence rather than a slice still to come. Plan §5.3: "There is no
+'open gate anyway' override — the only valve is skipping non-mandatory
+tasks." The gate opens as a *consequence* of the last mandatory
+verification, inside the same transaction as
+`verifyObClientPrereqTask`. The same shape `ObGateStatus` already
+states for journeys, and the same reasoning
+`getObJourneyStep`'s panel gives for having no status field on its
+`PATCH`: one way to make a move, with its own rules, rather than two.
+
+ * @summary One client's prerequisites, and the state of their gate (OB-05, CP-03)
+ */
+export const getObClientPrereqs = (
+    obClientId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqsResponse>(
+      {url: `/onboarding/clients/${obClientId}/prereqs`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObClientPrereqsQueryKey = (obClientId?: number,) => {
+    return [
+    `/onboarding/clients/${obClientId}/prereqs`
+    ] as const;
+    }
+
+    
+export const getGetObClientPrereqsQueryOptions = <TData = Awaited<ReturnType<typeof getObClientPrereqs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObClientPrereqsQueryKey(obClientId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObClientPrereqs>>> = ({ signal }) => getObClientPrereqs(obClientId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(obClientId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObClientPrereqsQueryResult = NonNullable<Awaited<ReturnType<typeof getObClientPrereqs>>>
+export type GetObClientPrereqsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObClientPrereqs<TData = Awaited<ReturnType<typeof getObClientPrereqs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientPrereqs>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientPrereqs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientPrereqs<TData = Awaited<ReturnType<typeof getObClientPrereqs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientPrereqs>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientPrereqs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientPrereqs<TData = Awaited<ReturnType<typeof getObClientPrereqs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One client's prerequisites, and the state of their gate (OB-05, CP-03)
+ */
+
+export function useGetObClientPrereqs<TData = Awaited<ReturnType<typeof getObClientPrereqs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqs>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObClientPrereqsQueryOptions(obClientId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Plan §4 allows "snapshot instances **and ad-hoc per-client tasks**" —
+a client whose situation needs something the master does not ask
+everybody for. It does not go back into the master; this client's
+instance is the only place it exists.
+
+## Why a create takes `If-Match`, which CONVENTIONS §5 does not require
+
+Because an ad-hoc task can be mandatory, and adding a mandatory task
+**re-locks a gate that may have just opened**. The precondition is
+against the client's prerequisite `ETag`, so an Admin adding a task
+from a screen rendered before another Admin verified the last
+mandatory one is refused with `412` rather than silently reversing a
+gate-open — which would stop clocks that had already started and
+contradict a kickoff mail already sent.
+
+That is a lost-update in every sense the convention cares about; what
+makes it unusual is only that the row being lost is not the one being
+written. Listing it here rather than exempting it: the tag exists,
+`getObClientPrereqs` serves it, and the race is real.
+
+ * @summary Add an ad-hoc task to one client's checklist (OB-05)
+ */
+export const addObClientPrereqTask = (
+    obClientId: number,
+    obClientPrereqTaskCreateRequest: ObClientPrereqTaskCreateRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskResponse>(
+      {url: `/onboarding/clients/${obClientId}/prereq-tasks`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obClientPrereqTaskCreateRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientPrereqTask>>, TError,{obClientId: number;data: ObClientPrereqTaskCreateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObClientPrereqTask>>, TError,{obClientId: number;data: ObClientPrereqTaskCreateRequest}, TContext> => {
+
+const mutationKey = ['addObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObClientPrereqTask>>, {obClientId: number;data: ObClientPrereqTaskCreateRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  addObClientPrereqTask(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof addObClientPrereqTask>>>
+    export type AddObClientPrereqTaskMutationBody = ObClientPrereqTaskCreateRequest
+    export type AddObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Add an ad-hoc task to one client's checklist (OB-05)
+ */
+export const useAddObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientPrereqTask>>, TError,{obClientId: number;data: ObClientPrereqTaskCreateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObClientPrereqTask>>,
+        TError,
+        {obClientId: number;data: ObClientPrereqTaskCreateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The client's task page: description, the Admin's reference documents,
+their own submissions, and the comment thread. Staff read the same
+shape from OB-05.
+
+**Identical for both principals, and that is on purpose.** A
+prerequisite is the one object in this module a client and a staff
+member genuinely share — plan §11's never-visible list (owners,
+internal comms, block reasons, TAT internals) is about *journeys*, and
+none of it is on this row. There is nothing here to hide, so there is
+no second serializer to drift.
+
+ * @summary One prerequisite task in full (CP-04)
+ */
+export const getObClientPrereqTask = (
+    prereqTaskId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskDetailResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObClientPrereqTaskQueryKey = (prereqTaskId?: number,) => {
+    return [
+    `/onboarding/prereq-tasks/${prereqTaskId}`
+    ] as const;
+    }
+
+    
+export const getGetObClientPrereqTaskQueryOptions = <TData = Awaited<ReturnType<typeof getObClientPrereqTask>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObClientPrereqTaskQueryKey(prereqTaskId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObClientPrereqTask>>> = ({ signal }) => getObClientPrereqTask(prereqTaskId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(prereqTaskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObClientPrereqTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getObClientPrereqTask>>>
+export type GetObClientPrereqTaskQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObClientPrereqTask<TData = Awaited<ReturnType<typeof getObClientPrereqTask>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientPrereqTask>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientPrereqTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientPrereqTask<TData = Awaited<ReturnType<typeof getObClientPrereqTask>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientPrereqTask>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientPrereqTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientPrereqTask<TData = Awaited<ReturnType<typeof getObClientPrereqTask>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One prerequisite task in full (CP-04)
+ */
+
+export function useGetObClientPrereqTask<TData = Awaited<ReturnType<typeof getObClientPrereqTask>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientPrereqTask>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObClientPrereqTaskQueryOptions(prereqTaskId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Staff only, and only the three fields below. `dueAt` is recomputed
+against the working calendar when `tatDays` moves, never taken
+literally from the client — CLAUDE.md's rule that all duration maths
+goes through the calendar, on the one clock in this module that runs
+against the client rather than against us.
+
+**`status` is not a field here**, exactly as it is not one on
+`updateObJourneyStep`. Moving a task between states is what the four
+transition routes below are for, each with its own required reason and
+its own refusals. A status field here would be a second way to make
+the same move with none of them — and one of those moves opens the
+gate for every journey the client has.
+
+**`isMandatory` is not a field here either**, and that is the sharper
+one. Flipping it is not an edit, it is a change to whether the gate
+can open: false→true re-locks a cleared gate, true→false clears one
+that was holding. Both are reachable through the routes that own those
+consequences — `skipObClientPrereqTask` for the valve plan §5.3
+allows, and adding a task for the other direction. Neither belongs in
+a field update whose contract says nothing about journeys.
+
+ * @summary Edit a task's wording or due date (OB-05)
+ */
+export const updateObClientPrereqTask = (
+    prereqTaskId: number,
+    obClientPrereqTaskUpdateRequest: ObClientPrereqTaskUpdateRequest,
+ ) => {
+      
+      
+      return http<ObClientPrereqTaskResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obClientPrereqTaskUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObClientPrereqTaskUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObClientPrereqTaskUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObClientPrereqTask>>, {prereqTaskId: number;data: ObClientPrereqTaskUpdateRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  updateObClientPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClientPrereqTask>>>
+    export type UpdateObClientPrereqTaskMutationBody = ObClientPrereqTaskUpdateRequest
+    export type UpdateObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem
+
+    /**
+ * @summary Edit a task's wording or due date (OB-05)
+ */
+export const useUpdateObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | PreconditionFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObClientPrereqTaskUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObClientPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: ObClientPrereqTaskUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `PENDING` → `SUBMITTED`, and notifies the verifier (plan §7).
+
+Callable by **the client principal and by staff**, which is the one
+place in this module where that is true, and it is not a convenience:
+plan §4 records `submitted_via` precisely because a SPOC frequently
+emails a document to their implementor instead of using the portal.
+Without a staff path the implementor would have to leave it
+outstanding or log in as the client, and the second is how shared
+credentials start. Who submitted is recorded either way.
+
+`422` if the task is already `SUBMITTED`, `VERIFIED` or `SKIPPED`.
+Re-submitting a returned task is the normal loop and is allowed —
+that is `PENDING` again.
+
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const submitObClientPrereqTask = (
+    prereqTaskId: number,
+    obPrereqSubmitRequest?: ObPrereqSubmitRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/submit`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqSubmitRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSubmitRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSubmitRequest}, TContext> => {
+
+const mutationKey = ['submitObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitObClientPrereqTask>>, {prereqTaskId: number;data: ObPrereqSubmitRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  submitObClientPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof submitObClientPrereqTask>>>
+    export type SubmitObClientPrereqTaskMutationBody = ObPrereqSubmitRequest
+    export type SubmitObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const useSubmitObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSubmitRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitObClientPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqSubmitRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `SUBMITTED` → `VERIFIED`. Staff only — a client cannot verify their
+own work, which is the entire point of the state existing.
+
+## This is the route that starts the module
+
+Plan §5.3 evaluates the gate on **every** prerequisite transition, and
+this is the transition that clears the last mandatory task. In the
+same transaction, if the gate is then satisfied:
+
+1. every `LOCKED` journey on this client flips `OPEN`;
+2. every dependency-free step activates — several at once, because
+   plan §5.6 makes dependency-free steps parallel;
+3. clocks start, and the scanner begins seeing these steps for the
+   first time;
+4. the kickoff automation fires to the SPOC and the step owners.
+
+`data.gateOpened` says whether that happened, so OB-05 can re-read the
+journeys rather than guessing from a task count it would have to
+recompute. A journey held behind a sibling (plan §5.5) stays held —
+the gate and the service dependency are two different holds and
+clearing one does not clear the other.
+
+None of that is reachable any other way. There is no
+`POST /onboarding/clients/{id}/gate` and there will not be one.
+
+ * @summary Accept a submission — and, on the last one, open the gate (OB-05)
+ */
+export const verifyObClientPrereqTask = (
+    prereqTaskId: number,
+    obPrereqVerifyRequest?: ObPrereqVerifyRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqGateResultResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/verify`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqVerifyRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getVerifyObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqVerifyRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof verifyObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqVerifyRequest}, TContext> => {
+
+const mutationKey = ['verifyObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyObClientPrereqTask>>, {prereqTaskId: number;data: ObPrereqVerifyRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  verifyObClientPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof verifyObClientPrereqTask>>>
+    export type VerifyObClientPrereqTaskMutationBody = ObPrereqVerifyRequest
+    export type VerifyObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Accept a submission — and, on the last one, open the gate (OB-05)
+ */
+export const useVerifyObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqVerifyRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifyObClientPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqVerifyRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getVerifyObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `SUBMITTED` → `PENDING`, with a **mandatory comment** saying what is
+wrong. Staff only.
+
+The comment is required rather than encouraged because this is the one
+message the client is guaranteed to read, and "returned" with no
+reason is a round trip that teaches them nothing. It is written to the
+task's thread, so it lands in the same place as everything else said
+about the task rather than only in the notification.
+
+The clock is **not** reset. Plan §5.4 attributes prerequisite time to
+the client, and a return that restarted it would let an incomplete
+submission buy an extension.
+
+ * @summary Send a submission back to the client (OB-05)
+ */
+export const returnObClientPrereqTask = (
+    prereqTaskId: number,
+    obPrereqReturnRequest: ObPrereqReturnRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/return`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqReturnRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getReturnObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof returnObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqReturnRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof returnObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqReturnRequest}, TContext> => {
+
+const mutationKey = ['returnObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof returnObClientPrereqTask>>, {prereqTaskId: number;data: ObPrereqReturnRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  returnObClientPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReturnObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof returnObClientPrereqTask>>>
+    export type ReturnObClientPrereqTaskMutationBody = ObPrereqReturnRequest
+    export type ReturnObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Send a submission back to the client (OB-05)
+ */
+export const useReturnObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof returnObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqReturnRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof returnObClientPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqReturnRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReturnObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * → `SKIPPED`, reason mandatory, OB Admin and Onboarding Manager only.
+
+## The only valve, and it is deliberately narrow
+
+Plan §5.3 leaves exactly one way to move a gate that a client cannot
+clear, and this is it. **Mandatory tasks cannot be skipped** — `422`,
+not a permission the right role unlocks — because a skippable
+mandatory task is not a mandatory task, and the gate would then be a
+convention rather than a guarantee. Plan §14's mitigation for the
+stalling risk is "the mandatory list kept short in the master", which
+is a decision made in OB-14 at authoring time, not one made per client
+under pressure.
+
+Skipping the last outstanding non-mandatory task can open the gate,
+with all four consequences `verifyObClientPrereqTask` lists — so this
+answers the same `ObPrereqGateResult`.
+
+The skip notifies the manager digest (plan §7) rather than silently
+clearing. A waiver nobody sees is how the short mandatory list stops
+being short.
+
+ * @summary Waive a non-mandatory task — the gate's only valve (OB-05)
+ */
+export const skipObClientPrereqTask = (
+    prereqTaskId: number,
+    obPrereqSkipRequest: ObPrereqSkipRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqGateResultResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/skip`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqSkipRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSkipObClientPrereqTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSkipRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof skipObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSkipRequest}, TContext> => {
+
+const mutationKey = ['skipObClientPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof skipObClientPrereqTask>>, {prereqTaskId: number;data: ObPrereqSkipRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  skipObClientPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SkipObClientPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof skipObClientPrereqTask>>>
+    export type SkipObClientPrereqTaskMutationBody = ObPrereqSkipRequest
+    export type SkipObClientPrereqTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Waive a non-mandatory task — the gate's only valve (OB-05)
+ */
+export const useSkipObClientPrereqTask = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipObClientPrereqTask>>, TError,{prereqTaskId: number;data: ObPrereqSkipRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof skipObClientPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqSkipRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSkipObClientPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_prereq_comments` is **append-only** — two author columns, one for
+a staff `users` row and one for an `ob_client_contacts` row, exactly
+as `ob_step_communications` carries two. Exactly one is set on any
+row, and `authorType` says which.
+
+No `PATCH` or `DELETE` on this path, and there will not be one
+(CONVENTIONS §8). This thread is half of the record of what a client
+was asked for and what they said back; a deletable comment is a
+conversation either side can rewrite after a dispute starts.
+
+ * @summary The task's comment thread, oldest first (CP-04, OB-05)
+ */
+export const listObPrereqComments = (
+    prereqTaskId: number,
+    params?: ListObPrereqCommentsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqCommentListResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/comments`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObPrereqCommentsQueryKey = (prereqTaskId?: number,
+    params?: ListObPrereqCommentsParams,) => {
+    return [
+    `/onboarding/prereq-tasks/${prereqTaskId}/comments`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObPrereqCommentsQueryOptions = <TData = Awaited<ReturnType<typeof listObPrereqComments>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(prereqTaskId: number,
+    params?: ListObPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObPrereqCommentsQueryKey(prereqTaskId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObPrereqComments>>> = ({ signal }) => listObPrereqComments(prereqTaskId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(prereqTaskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObPrereqCommentsQueryResult = NonNullable<Awaited<ReturnType<typeof listObPrereqComments>>>
+export type ListObPrereqCommentsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObPrereqComments<TData = Awaited<ReturnType<typeof listObPrereqComments>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params: undefined |  ListObPrereqCommentsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObPrereqComments>>,
+          TError,
+          Awaited<ReturnType<typeof listObPrereqComments>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObPrereqComments<TData = Awaited<ReturnType<typeof listObPrereqComments>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObPrereqComments>>,
+          TError,
+          Awaited<ReturnType<typeof listObPrereqComments>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObPrereqComments<TData = Awaited<ReturnType<typeof listObPrereqComments>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The task's comment thread, oldest first (CP-04, OB-05)
+ */
+
+export function useListObPrereqComments<TData = Awaited<ReturnType<typeof listObPrereqComments>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqComments>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObPrereqCommentsQueryOptions(prereqTaskId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Both principals. The author is taken from the token and is never in
+the body — a client who could name their own author id could write as
+a member of staff.
+
+ * @summary Say something about this task (CP-04, OB-05)
+ */
+export const addObPrereqComment = (
+    prereqTaskId: number,
+    obPrereqCommentCreateRequest: ObPrereqCommentCreateRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqCommentResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/comments`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqCommentCreateRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObPrereqCommentMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext> => {
+
+const mutationKey = ['addObPrereqComment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObPrereqComment>>, {prereqTaskId: number;data: ObPrereqCommentCreateRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  addObPrereqComment(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObPrereqCommentMutationResult = NonNullable<Awaited<ReturnType<typeof addObPrereqComment>>>
+    export type AddObPrereqCommentMutationBody = ObPrereqCommentCreateRequest
+    export type AddObPrereqCommentMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse
+
+    /**
+ * @summary Say something about this task (CP-04, OB-05)
+ */
+export const useAddObPrereqComment = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObPrereqComment>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqCommentCreateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObPrereqCommentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_prereq_history` is append-only and hash-chained, on the same
+trigger pattern as `ob_step_history` (PHASE-2-BUILD-PLAN §9). **No
+`PATCH`, `PUT` or `DELETE` on this path, ever** — CONVENTIONS §8.
+
+This is the chain that makes a waiver defensible months later: who
+skipped a mandatory-adjacent task, when, and with what reason. A
+correction is a new compensating entry naming the one it corrects,
+never an edit.
+
+ * @summary Every state change on this task, oldest first (OB-05)
+ */
+export const listObPrereqHistory = (
+    prereqTaskId: number,
+    params?: ListObPrereqHistoryParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqHistoryListResponse>(
+      {url: `/onboarding/prereq-tasks/${prereqTaskId}/history`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObPrereqHistoryQueryKey = (prereqTaskId?: number,
+    params?: ListObPrereqHistoryParams,) => {
+    return [
+    `/onboarding/prereq-tasks/${prereqTaskId}/history`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObPrereqHistoryQueryOptions = <TData = Awaited<ReturnType<typeof listObPrereqHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(prereqTaskId: number,
+    params?: ListObPrereqHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObPrereqHistoryQueryKey(prereqTaskId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObPrereqHistory>>> = ({ signal }) => listObPrereqHistory(prereqTaskId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(prereqTaskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObPrereqHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof listObPrereqHistory>>>
+export type ListObPrereqHistoryQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObPrereqHistory<TData = Awaited<ReturnType<typeof listObPrereqHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params: undefined |  ListObPrereqHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObPrereqHistory>>,
+          TError,
+          Awaited<ReturnType<typeof listObPrereqHistory>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObPrereqHistory<TData = Awaited<ReturnType<typeof listObPrereqHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObPrereqHistory>>,
+          TError,
+          Awaited<ReturnType<typeof listObPrereqHistory>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObPrereqHistory<TData = Awaited<ReturnType<typeof listObPrereqHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Every state change on this task, oldest first (OB-05)
+ */
+
+export function useListObPrereqHistory<TData = Awaited<ReturnType<typeof listObPrereqHistory>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ prereqTaskId: number,
+    params?: ListObPrereqHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObPrereqHistory>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObPrereqHistoryQueryOptions(prereqTaskId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Seven counters, one round trip. The board's whole first paint.
+
+**Every number here is read from `ob_dashboard_summary` and
+`ob_client_escalations`' own aggregate, never counted live** —
+CLAUDE.md's rule, and the reason `computedAt` is on the response: a
+dashboard that cannot say how stale it is invites somebody to compare
+it against a list and file a bug about the difference.
+
+Counting is **journey-counted with a product dimension** (plan §9), so
+a client who bought three products contributes three to
+`ongoingProjects`. The two exceptions are stated on the fields
+themselves and are both client-counted on purpose: `overdueClients`
+and `clientEscalations`, because a client late on four services is one
+client to chase, not four.
+
+Scoped by A-112's `OnboardingScopeResolver` like every other read. A
+Step Owner's board counts the journeys containing their steps — the
+same set `listObJourneys` would return them — so the card and the
+slide-over it opens can never disagree.
+
+ * @summary The OB-02 card board (OB-02)
+ */
+export const getObDashboardSummary = (
+    params?: GetObDashboardSummaryParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObDashboardSummaryResponse>(
+      {url: `/onboarding/dashboard/summary`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObDashboardSummaryQueryKey = (params?: GetObDashboardSummaryParams,) => {
+    return [
+    `/onboarding/dashboard/summary`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetObDashboardSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getObDashboardSummary>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(params?: GetObDashboardSummaryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObDashboardSummaryQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObDashboardSummary>>> = ({ signal }) => getObDashboardSummary(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObDashboardSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getObDashboardSummary>>>
+export type GetObDashboardSummaryQueryError = void | UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObDashboardSummary<TData = Awaited<ReturnType<typeof getObDashboardSummary>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  GetObDashboardSummaryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObDashboardSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getObDashboardSummary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObDashboardSummary<TData = Awaited<ReturnType<typeof getObDashboardSummary>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObDashboardSummaryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObDashboardSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getObDashboardSummary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObDashboardSummary<TData = Awaited<ReturnType<typeof getObDashboardSummary>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObDashboardSummaryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The OB-02 card board (OB-02)
+ */
+
+export function useGetObDashboardSummary<TData = Awaited<ReturnType<typeof getObDashboardSummary>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObDashboardSummaryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObDashboardSummary>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObDashboardSummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Plan §9: "every card clicks open a right slide-over listing the
+matching clients with product, item, owner, due and status, each row
+opening the client" — the S-06 pattern.
+
+## Why this is not a `drillDown` query string
+
+The ticketing dashboard deep-links each series point to a pre-filtered
+ticket list, because there *is* a ticket list and every point is a set
+of tickets. Here the rows are **items, not clients and not journeys**:
+`thisWeeksDeadlines` mixes services with prerequisite tasks, which
+plan §9 requires by name ("all client tasks — services *and*
+prerequisites"), and no existing list returns both. `listObJourneys`
+cannot answer it; a client list certainly cannot.
+
+So the slide-over is its own read, and `ObDashboardItem` is
+deliberately a union with an `itemType` rather than two lists the
+screen would have to interleave by date itself.
+
+**The count comes from the summary table and this list does not.** A
+card's number is pre-aggregated; its rows are a bounded query run when
+somebody clicks. They can therefore differ by up to one refresh
+interval, and that is the honest trade rather than a defect — the
+alternative is a live `COUNT(*)` behind every card on every paint,
+which CLAUDE.md forbids for exactly the reason it would be slow. The
+response repeats `computedAt` from the card so a screen can say which
+number it is showing.
+
+ * @summary The slide-over behind one card (OB-02)
+ */
+export const listObDashboardCardItems = (
+    cardKey: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObDashboardItemListResponse>(
+      {url: `/onboarding/dashboard/cards/${cardKey}/items`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObDashboardCardItemsQueryKey = (cardKey?: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams,) => {
+    return [
+    `/onboarding/dashboard/cards/${cardKey}/items`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObDashboardCardItemsQueryOptions = <TData = Awaited<ReturnType<typeof listObDashboardCardItems>>, TError = Problem | UnauthorizedResponse | ObModuleGatedResponse>(cardKey: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObDashboardCardItemsQueryKey(cardKey,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObDashboardCardItems>>> = ({ signal }) => listObDashboardCardItems(cardKey,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(cardKey), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObDashboardCardItemsQueryResult = NonNullable<Awaited<ReturnType<typeof listObDashboardCardItems>>>
+export type ListObDashboardCardItemsQueryError = Problem | UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObDashboardCardItems<TData = Awaited<ReturnType<typeof listObDashboardCardItems>>, TError = Problem | UnauthorizedResponse | ObModuleGatedResponse>(
+ cardKey: ObDashboardCardKey,
+    params: undefined |  ListObDashboardCardItemsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObDashboardCardItems>>,
+          TError,
+          Awaited<ReturnType<typeof listObDashboardCardItems>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObDashboardCardItems<TData = Awaited<ReturnType<typeof listObDashboardCardItems>>, TError = Problem | UnauthorizedResponse | ObModuleGatedResponse>(
+ cardKey: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObDashboardCardItems>>,
+          TError,
+          Awaited<ReturnType<typeof listObDashboardCardItems>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObDashboardCardItems<TData = Awaited<ReturnType<typeof listObDashboardCardItems>>, TError = Problem | UnauthorizedResponse | ObModuleGatedResponse>(
+ cardKey: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The slide-over behind one card (OB-02)
+ */
+
+export function useListObDashboardCardItems<TData = Awaited<ReturnType<typeof listObDashboardCardItems>>, TError = Problem | UnauthorizedResponse | ObModuleGatedResponse>(
+ cardKey: ObDashboardCardKey,
+    params?: ListObDashboardCardItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDashboardCardItems>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObDashboardCardItemsQueryOptions(cardKey,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Plan §9's first grid, below the card board: client, start date,
+products bought, module in progress, current stage, responsible,
+expected completion, delayed-by days.
+
+One row per **journey**, not per client, which is what makes "module
+in progress" and "current stage" answerable — a client with an ERP
+journey three weeks late and a Biometric journey on track is one
+delayed project, not a client with an averaged status. `productsBought`
+is on the row anyway, because the grid names it as a column and it is
+a fact about the client rather than the journey.
+
+Ordered by `delayedByDays` descending: the grid exists to be worked
+from the top.
+
+ * @summary The Delayed Projects grid (OB-02)
+ */
+export const listObDelayedProjects = (
+    params?: ListObDelayedProjectsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObDelayedProjectListResponse>(
+      {url: `/onboarding/dashboard/delayed-projects`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObDelayedProjectsQueryKey = (params?: ListObDelayedProjectsParams,) => {
+    return [
+    `/onboarding/dashboard/delayed-projects`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObDelayedProjectsQueryOptions = <TData = Awaited<ReturnType<typeof listObDelayedProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObDelayedProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObDelayedProjectsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObDelayedProjects>>> = ({ signal }) => listObDelayedProjects(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObDelayedProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof listObDelayedProjects>>>
+export type ListObDelayedProjectsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObDelayedProjects<TData = Awaited<ReturnType<typeof listObDelayedProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObDelayedProjectsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObDelayedProjects>>,
+          TError,
+          Awaited<ReturnType<typeof listObDelayedProjects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObDelayedProjects<TData = Awaited<ReturnType<typeof listObDelayedProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObDelayedProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObDelayedProjects>>,
+          TError,
+          Awaited<ReturnType<typeof listObDelayedProjects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObDelayedProjects<TData = Awaited<ReturnType<typeof listObDelayedProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObDelayedProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The Delayed Projects grid (OB-02)
+ */
+
+export function useListObDelayedProjects<TData = Awaited<ReturnType<typeof listObDelayedProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObDelayedProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObDelayedProjects>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObDelayedProjectsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Plan §9's second grid, reading `ob_implementor_daily_stats`.
+
+## Two things this route must do that its schema cannot enforce
+
+**A row is returned for an implementor with zero clients.** Plan §9
+says so explicitly — "one row per implementor *including those with
+zero clients*" — and A-108's migration comment flags it as the
+requirement most likely to be lost, because the natural query groups
+by owner over open steps and produces nothing at all for somebody who
+has just finished everything. The grid would then show a
+fully-delivered implementor as *absent* rather than as clear, which is
+the opposite reading. The population is everyone holding an
+`OB_STEP_OWNER` grant in `user_module_access`, left-joined to their
+stats.
+
+**`performanceScore` is computed on read, never stored.** A-108 again,
+and the reason is that the weighting is a product decision that will
+be tuned: a score stored under last month's weights cannot be
+recomputed under this month's, so every historical row would quietly
+mean something different from the ones beside it. The four completion
+counters are the inputs and are on the row, so a caller can check the
+arithmetic — or ignore the score entirely and sort on the counters.
+
+The six workload columns **partition** `clientsOpen` and sum to it.
+That is an arithmetic contract, stated in A-108's DDL and repeated
+here because it is the property a screen will assume and nothing
+checks at runtime.
+
+ * @summary The Implementor workload & performance grid (OB-02)
+ */
+export const listObImplementorWorkload = (
+    params?: ListObImplementorWorkloadParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObImplementorWorkloadListResponse>(
+      {url: `/onboarding/dashboard/implementor-workload`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObImplementorWorkloadQueryKey = (params?: ListObImplementorWorkloadParams,) => {
+    return [
+    `/onboarding/dashboard/implementor-workload`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObImplementorWorkloadQueryOptions = <TData = Awaited<ReturnType<typeof listObImplementorWorkload>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObImplementorWorkloadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObImplementorWorkloadQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObImplementorWorkload>>> = ({ signal }) => listObImplementorWorkload(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObImplementorWorkloadQueryResult = NonNullable<Awaited<ReturnType<typeof listObImplementorWorkload>>>
+export type ListObImplementorWorkloadQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObImplementorWorkload<TData = Awaited<ReturnType<typeof listObImplementorWorkload>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObImplementorWorkloadParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObImplementorWorkload>>,
+          TError,
+          Awaited<ReturnType<typeof listObImplementorWorkload>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObImplementorWorkload<TData = Awaited<ReturnType<typeof listObImplementorWorkload>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementorWorkloadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObImplementorWorkload>>,
+          TError,
+          Awaited<ReturnType<typeof listObImplementorWorkload>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObImplementorWorkload<TData = Awaited<ReturnType<typeof listObImplementorWorkload>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementorWorkloadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The Implementor workload & performance grid (OB-02)
+ */
+
+export function useListObImplementorWorkload<TData = Awaited<ReturnType<typeof listObImplementorWorkload>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementorWorkloadParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementorWorkload>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObImplementorWorkloadQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * What this deployment can run, so the hub's card grid does not have to
+know — `listReports`' argument, applied to the module's own set.
+
+**Served rather than hardcoded, and unbuilt reports are listed with
+`available: false` and a reason.** Both are A-063's calls and both
+matter more here than there, because this catalogue is *known* to be
+arriving in two parts: PHASE-2-BUILD-PLAN §3 #8 builds the seven the
+design draws, and holds the other five — breach log, escalation log,
+owner workload, communication audit, CSAT summary — as OB4b pending a
+client decision (§11.6). A hub that hid them would make an undecided
+report indistinguishable from one that does not exist, which is the
+state the decision is about.
+
+**`reportKey` is a string here and everywhere, never an enum.** The
+same reason `NotificationTemplate.eventCode` is not one: the list
+grows by a release, and a closed enum in the contract would make each
+addition a breaking change to every generated client.
+
+ * @summary The onboarding report catalogue (OB-10)
+ */
+export const listObReports = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObReportCatalogueResponse>(
+      {url: `/onboarding/reports`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObReportsQueryKey = () => {
+    return [
+    `/onboarding/reports`
+    ] as const;
+    }
+
+    
+export const getListObReportsQueryOptions = <TData = Awaited<ReturnType<typeof listObReports>>, TError = UnauthorizedResponse | ObModuleGatedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObReportsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObReports>>> = ({ signal }) => listObReports(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listObReports>>>
+export type ListObReportsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObReports<TData = Awaited<ReturnType<typeof listObReports>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObReports>>,
+          TError,
+          Awaited<ReturnType<typeof listObReports>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObReports<TData = Awaited<ReturnType<typeof listObReports>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObReports>>,
+          TError,
+          Awaited<ReturnType<typeof listObReports>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObReports<TData = Awaited<ReturnType<typeof listObReports>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The onboarding report catalogue (OB-10)
+ */
+
+export function useListObReports<TData = Awaited<ReturnType<typeof listObReports>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObReports>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObReportsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * One parameterised runner, as on the ticketing side. `?export=` streams
+the file instead of returning JSON, through the **existing** export
+infrastructure — plan §10 says so, and it is the one piece of the
+reports stack the two modules genuinely share, because a workbook
+writer has no domain in it.
+
+Returns an `ETag`. These reads are expensive and are re-run every time
+somebody toggles a filter back and forth.
+
+**Row scope is applied server-side and the request cannot widen it.**
+A Step Owner's funnel covers the journeys containing their steps; a
+Sales user's covers the clients they created. `ownerUserId` is
+**ignored rather than refused** for a Step Owner, on `runReport`'s
+precedent: answering it would let one implementor read a colleague's
+scorecard by guessing a user id, and `403` would wrongly imply a grant
+exists that could be given. `meta.appliedScope` states what was
+actually applied.
+
+**`404` for a key that does not exist and for one that is not built
+yet.** The catalogue is where "exists but unbuilt" is expressed with a
+reason a person can read; by the time a caller is running a key there
+are no rows to describe and no columns to name.
+
+`export=pdf` is deliberately absent from the enum. The module's only
+PDF is B-116's archived sign-off certificate, which is a legal record
+generated once and stored, not a rendering of a filtered grid.
+
+ * @summary Run an onboarding report (OB-10)
+ */
+export const runObReport = (
+    reportKey: string,
+    params?: RunObReportParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObReportResponse | Blob>(
+      {url: `/onboarding/reports/${reportKey}`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getRunObReportQueryKey = (reportKey?: string,
+    params?: RunObReportParams,) => {
+    return [
+    `/onboarding/reports/${reportKey}`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getRunObReportQueryOptions = <TData = Awaited<ReturnType<typeof runObReport>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(reportKey: string,
+    params?: RunObReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRunObReportQueryKey(reportKey,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof runObReport>>> = ({ signal }) => runObReport(reportKey,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(reportKey), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RunObReportQueryResult = NonNullable<Awaited<ReturnType<typeof runObReport>>>
+export type RunObReportQueryError = void | UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useRunObReport<TData = Awaited<ReturnType<typeof runObReport>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ reportKey: string,
+    params: undefined |  RunObReportParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof runObReport>>,
+          TError,
+          Awaited<ReturnType<typeof runObReport>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRunObReport<TData = Awaited<ReturnType<typeof runObReport>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ reportKey: string,
+    params?: RunObReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof runObReport>>,
+          TError,
+          Awaited<ReturnType<typeof runObReport>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRunObReport<TData = Awaited<ReturnType<typeof runObReport>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ reportKey: string,
+    params?: RunObReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Run an onboarding report (OB-10)
+ */
+
+export function useRunObReport<TData = Awaited<ReturnType<typeof runObReport>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ reportKey: string,
+    params?: RunObReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof runObReport>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRunObReportQueryOptions(reportKey,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * `ob_signoffs`, scoped by A-112 like every other read. Feeds the
+sign-off-pending report and the OB-05 panel.
+
+**Nothing here exposes `tokenHash` or `otpHash`, on any response in
+this document.** The token is emailed once and is not recoverable from
+the table — A-107's DDL stores only its SHA-256 precisely so a leak of
+the row does not yield a working link, and putting the hash on the
+wire would hand an attacker the one value they need to brute-force
+offline. `resendObSignoff` mints a new token rather than re-reading
+the old one, which is why there is no operation that returns it.
+
+ * @summary Sign-offs across clients (OB-05, OB-10)
+ */
+export const listObSignoffs = (
+    params?: ListObSignoffsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffListResponse>(
+      {url: `/onboarding/signoffs`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObSignoffsQueryKey = (params?: ListObSignoffsParams,) => {
+    return [
+    `/onboarding/signoffs`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObSignoffsQueryOptions = <TData = Awaited<ReturnType<typeof listObSignoffs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObSignoffsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObSignoffsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObSignoffs>>> = ({ signal }) => listObSignoffs(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObSignoffsQueryResult = NonNullable<Awaited<ReturnType<typeof listObSignoffs>>>
+export type ListObSignoffsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObSignoffs<TData = Awaited<ReturnType<typeof listObSignoffs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObSignoffsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listObSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObSignoffs<TData = Awaited<ReturnType<typeof listObSignoffs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObSignoffsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listObSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObSignoffs<TData = Awaited<ReturnType<typeof listObSignoffs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObSignoffsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Sign-offs across clients (OB-05, OB-10)
+ */
+
+export function useListObSignoffs<TData = Awaited<ReturnType<typeof listObSignoffs>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObSignoffsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObSignoffsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Mints a single-use token, stores only its SHA-256, and emails the link
+to a contact on this client. The token is in the response to **nobody**
+— not to the requester either. A staff member who could read it could
+sign on the client's behalf, which is the one thing this record exists
+to make impossible.
+
+`kind: STEP` names a `stepId`; `kind: GO_LIVE` must not — A-107's
+`ck_ob_signoffs_step_matches_kind` enforces the pairing and this
+answers `400` before it gets there.
+
+`422` for a `GO_LIVE` request while any service on the journey is
+unfinished. Plan §5.9 makes Live-Green require every journey complete;
+asking a client to sign off a delivery that is still running is how a
+sign-off record stops meaning anything.
+
+ * @summary Ask a client to sign off a service, or the go-live (OB-05)
+ */
+export const requestObSignoff = (
+    journeyId: number,
+    obSignoffRequestBody: ObSignoffRequestBody,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffResponse>(
+      {url: `/onboarding/journeys/${journeyId}/signoffs`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffRequestBody, signal
+    },
+      );
+    }
+  
+
+
+export const getRequestObSignoffMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestObSignoff>>, TError,{journeyId: number;data: ObSignoffRequestBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof requestObSignoff>>, TError,{journeyId: number;data: ObSignoffRequestBody}, TContext> => {
+
+const mutationKey = ['requestObSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestObSignoff>>, {journeyId: number;data: ObSignoffRequestBody}> = (props) => {
+          const {journeyId,data} = props ?? {};
+
+          return  requestObSignoff(journeyId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestObSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof requestObSignoff>>>
+    export type RequestObSignoffMutationBody = ObSignoffRequestBody
+    export type RequestObSignoffMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Ask a client to sign off a service, or the go-live (OB-05)
+ */
+export const useRequestObSignoff = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestObSignoff>>, TError,{journeyId: number;data: ObSignoffRequestBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof requestObSignoff>>,
+        TError,
+        {journeyId: number;data: ObSignoffRequestBody},
+        TContext
+      > => {
+
+      const mutationOptions = getRequestObSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The recorded-acceptance evidence — who signed, when, from what IP and
+user agent. PHASE-2-BUILD-PLAN decision 5 chose recorded acceptance
+over statutory e-sign for v1, and **this response is what that
+decision produces**: the four fields below are the legal record, so
+they are read-only everywhere and there is no operation that edits
+them.
+
+ * @summary One sign-off, with its acceptance record (OB-05)
+ */
+export const getObSignoff = (
+    signoffId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffDetailResponse>(
+      {url: `/onboarding/signoffs/${signoffId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObSignoffQueryKey = (signoffId?: number,) => {
+    return [
+    `/onboarding/signoffs/${signoffId}`
+    ] as const;
+    }
+
+    
+export const getGetObSignoffQueryOptions = <TData = Awaited<ReturnType<typeof getObSignoff>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObSignoffQueryKey(signoffId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObSignoff>>> = ({ signal }) => getObSignoff(signoffId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(signoffId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObSignoffQueryResult = NonNullable<Awaited<ReturnType<typeof getObSignoff>>>
+export type GetObSignoffQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObSignoff<TData = Awaited<ReturnType<typeof getObSignoff>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSignoff>>,
+          TError,
+          Awaited<ReturnType<typeof getObSignoff>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSignoff<TData = Awaited<ReturnType<typeof getObSignoff>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSignoff>>,
+          TError,
+          Awaited<ReturnType<typeof getObSignoff>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSignoff<TData = Awaited<ReturnType<typeof getObSignoff>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One sign-off, with its acceptance record (OB-05)
+ */
+
+export function useGetObSignoff<TData = Awaited<ReturnType<typeof getObSignoff>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoff>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObSignoffQueryOptions(signoffId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * **Mints a new token and invalidates the previous one in the same
+transaction.** Not "sends the same link again", which is what the word
+resend suggests and would be wrong: `uq_ob_signoffs_token` is unique
+because two sign-offs sharing a token is a cross-client leak, and a
+reissue that left the old hash live would leave two working links to
+one decision with nothing to say which was used.
+
+The OTP attempt counter resets with it. A contact who mistyped a code
+three times and asked for a new link should not inherit their own
+lockout — the lockout exists to slow an attacker guessing at a link
+they hold, and the link they held is now dead.
+
+ * @summary Send a fresh link — the old one stops working (OB-05)
+ */
+export const resendObSignoff = (
+    signoffId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffResponse>(
+      {url: `/onboarding/signoffs/${signoffId}/resend`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getResendObSignoffMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendObSignoff>>, TError,{signoffId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof resendObSignoff>>, TError,{signoffId: number}, TContext> => {
+
+const mutationKey = ['resendObSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resendObSignoff>>, {signoffId: number}> = (props) => {
+          const {signoffId} = props ?? {};
+
+          return  resendObSignoff(signoffId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResendObSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof resendObSignoff>>>
+    
+    export type ResendObSignoffMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Send a fresh link — the old one stops working (OB-05)
+ */
+export const useResendObSignoff = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendObSignoff>>, TError,{signoffId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resendObSignoff>>,
+        TError,
+        {signoffId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getResendObSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * → `CANCELLED`, and the token stops working immediately.
+
+The row is **not** deleted, and the status is `CANCELLED` rather than
+the row disappearing, because "we asked and then withdrew" is a fact a
+client may remember and ask about. Deleting it would leave the staff
+side unable to answer.
+
+ * @summary Withdraw a request that should not have been sent (OB-05)
+ */
+export const cancelObSignoff = (
+    signoffId: number,
+    obSignoffCancelRequest: ObSignoffCancelRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffResponse>(
+      {url: `/onboarding/signoffs/${signoffId}/cancel`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffCancelRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCancelObSignoffMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelObSignoff>>, TError,{signoffId: number;data: ObSignoffCancelRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof cancelObSignoff>>, TError,{signoffId: number;data: ObSignoffCancelRequest}, TContext> => {
+
+const mutationKey = ['cancelObSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelObSignoff>>, {signoffId: number;data: ObSignoffCancelRequest}> = (props) => {
+          const {signoffId,data} = props ?? {};
+
+          return  cancelObSignoff(signoffId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelObSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof cancelObSignoff>>>
+    export type CancelObSignoffMutationBody = ObSignoffCancelRequest
+    export type CancelObSignoffMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Withdraw a request that should not have been sent (OB-05)
+ */
+export const useCancelObSignoff = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelObSignoff>>, TError,{signoffId: number;data: ObSignoffCancelRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof cancelObSignoff>>,
+        TError,
+        {signoffId: number;data: ObSignoffCancelRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCancelObSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-116's document, streamed from object storage. `pdf_storage_key`
+holds the key, never the bytes, and this route is the only way to
+reach it — the key is not on any response, so a caller cannot address
+the bucket directly.
+
+`404` until the sign-off is `SIGNED`. A certificate for a decision
+nobody has made does not exist, and generating a placeholder would put
+an unsigned document into the one place people look for signed ones.
+
+ * @summary The archived acceptance PDF (OB-05)
+ */
+export const getObSignoffCertificate = (
+    signoffId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<Blob>(
+      {url: `/onboarding/signoffs/${signoffId}/certificate`, method: 'GET',
+        responseType: 'blob', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObSignoffCertificateQueryKey = (signoffId?: number,) => {
+    return [
+    `/onboarding/signoffs/${signoffId}/certificate`
+    ] as const;
+    }
+
+    
+export const getGetObSignoffCertificateQueryOptions = <TData = Awaited<ReturnType<typeof getObSignoffCertificate>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObSignoffCertificateQueryKey(signoffId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObSignoffCertificate>>> = ({ signal }) => getObSignoffCertificate(signoffId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(signoffId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObSignoffCertificateQueryResult = NonNullable<Awaited<ReturnType<typeof getObSignoffCertificate>>>
+export type GetObSignoffCertificateQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObSignoffCertificate<TData = Awaited<ReturnType<typeof getObSignoffCertificate>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSignoffCertificate>>,
+          TError,
+          Awaited<ReturnType<typeof getObSignoffCertificate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSignoffCertificate<TData = Awaited<ReturnType<typeof getObSignoffCertificate>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSignoffCertificate>>,
+          TError,
+          Awaited<ReturnType<typeof getObSignoffCertificate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSignoffCertificate<TData = Awaited<ReturnType<typeof getObSignoffCertificate>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The archived acceptance PDF (OB-05)
+ */
+
+export function useGetObSignoffCertificate<TData = Awaited<ReturnType<typeof getObSignoffCertificate>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSignoffCertificate>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObSignoffCertificateQueryOptions(signoffId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * A-121 · hashes the supplied token, finds the `PENDING` sign-off it
+addresses, and emails a code to `sentToContactId` — **the contact on
+the row, never an address in the request.** A body that could name its
+own recipient would let anyone holding a leaked link redirect the code
+to themselves, which would make the second factor a formality.
+
+`202` whatever happens, with no body. It does not say whether a code
+was sent, because saying so is the enumeration oracle point 2 above
+exists to close.
+
+ * @summary Send the one-time code for a sign-off link (OB-09)
+ */
+export const requestObSignoffOtp = (
+    obSignoffTokenRequest: ObSignoffTokenRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/public/onboarding/signoff/otp`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffTokenRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRequestObSignoffOtpMutationOptions = <TError = ValidationFailedResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestObSignoffOtp>>, TError,{data: ObSignoffTokenRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof requestObSignoffOtp>>, TError,{data: ObSignoffTokenRequest}, TContext> => {
+
+const mutationKey = ['requestObSignoffOtp'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestObSignoffOtp>>, {data: ObSignoffTokenRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  requestObSignoffOtp(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestObSignoffOtpMutationResult = NonNullable<Awaited<ReturnType<typeof requestObSignoffOtp>>>
+    export type RequestObSignoffOtpMutationBody = ObSignoffTokenRequest
+    export type RequestObSignoffOtpMutationError = ValidationFailedResponse | TooManyRequestsResponse
+
+    /**
+ * @summary Send the one-time code for a sign-off link (OB-09)
+ */
+export const useRequestObSignoffOtp = <TError = ValidationFailedResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestObSignoffOtp>>, TError,{data: ObSignoffTokenRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof requestObSignoffOtp>>,
+        TError,
+        {data: ObSignoffTokenRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRequestObSignoffOtpMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * A-121 · the point at which the caller becomes identified and the page
+can be rendered. Returns a **session token, not a JWT**: it is opaque,
+it is good for this one sign-off, it expires in minutes, and it is not
+a principal — it authorises three operations on one row and nothing
+else. A CLIENT-principal login is a different thing entirely and is
+A-125's.
+
+`otp_attempts` is persisted rather than held in Redis, which A-107's
+DDL argues at the schema: a lockout that resets when the process
+restarts is not a lockout. Attempts are per sign-off, and exhausting
+them kills the token — a fresh one needs `resendObSignoff` from the
+staff side, which is a human deciding to re-ask rather than a counter
+healing itself.
+
+The response carries what OB-09 renders: the client, the product, the
+service and its checklist. That is the first moment any of it leaves
+the building, and it is after the code has been proved.
+
+ * @summary Exchange the code for a short-lived session, and the page (OB-09)
+ */
+export const verifyObSignoffOtp = (
+    obSignoffOtpVerifyRequest: ObSignoffOtpVerifyRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffSessionResponse>(
+      {url: `/public/onboarding/signoff/otp/verify`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffOtpVerifyRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getVerifyObSignoffOtpMutationOptions = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyObSignoffOtp>>, TError,{data: ObSignoffOtpVerifyRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof verifyObSignoffOtp>>, TError,{data: ObSignoffOtpVerifyRequest}, TContext> => {
+
+const mutationKey = ['verifyObSignoffOtp'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyObSignoffOtp>>, {data: ObSignoffOtpVerifyRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyObSignoffOtp(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyObSignoffOtpMutationResult = NonNullable<Awaited<ReturnType<typeof verifyObSignoffOtp>>>
+    export type VerifyObSignoffOtpMutationBody = ObSignoffOtpVerifyRequest
+    export type VerifyObSignoffOtpMutationError = ValidationFailedResponse | Problem | TooManyRequestsResponse
+
+    /**
+ * @summary Exchange the code for a short-lived session, and the page (OB-09)
+ */
+export const useVerifyObSignoffOtp = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyObSignoffOtp>>, TError,{data: ObSignoffOtpVerifyRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifyObSignoffOtp>>,
+        TError,
+        {data: ObSignoffOtpVerifyRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getVerifyObSignoffOtpMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Records the acceptance — contact, timestamp, IP and user agent — and
+then puts the step through **the same completion gate every other
+route uses**.
+
+## The gate, and why acceptance can succeed while the step does not
+
+PHASE-2-BUILD-PLAN §3 #4 found the prototype's bug and ruled on it:
+`stComplete` enforced three gates (every checklist item answered,
+every required document attached, sign-off accepted) and `signoffAccept`
+enforced none, so a client could accept a service whose required
+documents were never attached and it would go `DONE`.
+
+The ruling is *one* gate, server-side, and acceptance routes through
+it. So this operation has two outcomes and the response distinguishes
+them:
+
+- gate satisfied → the sign-off is `SIGNED` **and** the step completes;
+- gate not satisfied → the sign-off is `SIGNED` and **the step stays
+  `IN_PROGRESS`**, with `gateFailures` naming what is missing.
+
+The acceptance is **never discarded** in the second case. The client
+did accept, they are not the ones who left a document unattached, and
+asking them to click twice for our own incomplete record is the
+version of this that loses a signature. `data.stepCompleted` is what
+the page renders on.
+
+For a `GO_LIVE` sign-off the same shape applies to the client's
+overall status: accepting the last one flips them Live-Green, and
+`data.clientWentLive` says whether this call was that one.
+
+ * @summary The client accepts (OB-09)
+ */
+export const acceptObSignoff = (
+    obSignoffAcceptRequest: ObSignoffAcceptRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffAcceptResultResponse>(
+      {url: `/public/onboarding/signoff/accept`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffAcceptRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAcceptObSignoffMutationOptions = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptObSignoff>>, TError,{data: ObSignoffAcceptRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof acceptObSignoff>>, TError,{data: ObSignoffAcceptRequest}, TContext> => {
+
+const mutationKey = ['acceptObSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptObSignoff>>, {data: ObSignoffAcceptRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  acceptObSignoff(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptObSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof acceptObSignoff>>>
+    export type AcceptObSignoffMutationBody = ObSignoffAcceptRequest
+    export type AcceptObSignoffMutationError = ValidationFailedResponse | Problem | TooManyRequestsResponse
+
+    /**
+ * @summary The client accepts (OB-09)
+ */
+export const useAcceptObSignoff = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptObSignoff>>, TError,{data: ObSignoffAcceptRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acceptObSignoff>>,
+        TError,
+        {data: ObSignoffAcceptRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAcceptObSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * → `OBJECTED`, with a mandatory note, and **the step reverts** — plan
+§8: "objection reverts the step". It goes back to `IN_PROGRESS` with
+the objection written to its communication timeline and its owner
+notified immediately, because an objection nobody sees is a delivery
+everybody believes is finished.
+
+The note is required. An objection with no reason gives the owner
+nothing to fix and guarantees a second round trip.
+
+There is no un-object. A client who changes their mind is a new
+sign-off request, which is a staff action with its own record — the
+alternative is a row whose final state depends on how many times
+somebody clicked.
+
+ * @summary The client objects, and the service reverts (OB-09)
+ */
+export const objectObSignoff = (
+    obSignoffObjectRequest: ObSignoffObjectRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSignoffResponse>(
+      {url: `/public/onboarding/signoff/object`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obSignoffObjectRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getObjectObSignoffMutationOptions = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof objectObSignoff>>, TError,{data: ObSignoffObjectRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof objectObSignoff>>, TError,{data: ObSignoffObjectRequest}, TContext> => {
+
+const mutationKey = ['objectObSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof objectObSignoff>>, {data: ObSignoffObjectRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  objectObSignoff(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ObjectObSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof objectObSignoff>>>
+    export type ObjectObSignoffMutationBody = ObSignoffObjectRequest
+    export type ObjectObSignoffMutationError = ValidationFailedResponse | Problem | TooManyRequestsResponse
+
+    /**
+ * @summary The client objects, and the service reverts (OB-09)
+ */
+export const useObjectObSignoff = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof objectObSignoff>>, TError,{data: ObSignoffObjectRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof objectObSignoff>>,
+        TError,
+        {data: ObSignoffObjectRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getObjectObSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Plan §1.1 #9's CSAT, and PHASE-2-BUILD-PLAN §3 #9's finding that it
+had no capture surface at all — the prototype fired a toast saying a
+survey had been sent and nothing rendered a question or stored an
+answer.
+
+It rides this token surface rather than getting one of its own,
+because the moment to ask is the moment the client accepts the
+go-live, and a second link emailed afterwards is a second thing to
+ignore. Offered **only** after a `GO_LIVE` acceptance; `422` on a step
+sign-off's session.
+
+Optional by construction: `acceptObSignoff` completes without it, and
+a client who closes the tab has still gone live. A survey that blocks
+a delivery is a survey that gets answered dishonestly.
+
+ * @summary The one-question go-live survey (OB-09)
+ */
+export const submitObCsat = (
+    obCsatRequest: ObCsatRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/public/onboarding/signoff/csat`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obCsatRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitObCsatMutationOptions = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObCsat>>, TError,{data: ObCsatRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitObCsat>>, TError,{data: ObCsatRequest}, TContext> => {
+
+const mutationKey = ['submitObCsat'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitObCsat>>, {data: ObCsatRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  submitObCsat(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitObCsatMutationResult = NonNullable<Awaited<ReturnType<typeof submitObCsat>>>
+    export type SubmitObCsatMutationBody = ObCsatRequest
+    export type SubmitObCsatMutationError = ValidationFailedResponse | Problem | TooManyRequestsResponse
+
+    /**
+ * @summary The one-question go-live survey (OB-09)
+ */
+export const useSubmitObCsat = <TError = ValidationFailedResponse | Problem | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObCsat>>, TError,{data: ObCsatRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitObCsat>>,
+        TError,
+        {data: ObCsatRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitObCsatMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_escalations`, open ones first and oldest first within that — the
+list exists to be cleared from the top.
+
+Scoped by A-112. `escalatedTo` is the natural filter for "what has
+been escalated to me", which is the query
+`ix_ob_escalations_to (escalated_to, open_key)` was shaped for.
+
+A rung with `escalatedTo` null is one the matrix resolved nobody for.
+A-107's DDL calls that "itself worth seeing on the dashboard", so it
+is returned rather than hidden — an escalation addressed to nobody is
+a configuration error, and suppressing it would make the ladder look
+like it was working.
+
+ * @summary The internal escalation ladder (OB-02, OB-10)
+ */
+export const listObEscalations = (
+    params?: ListObEscalationsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObEscalationListResponse>(
+      {url: `/onboarding/escalations`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObEscalationsQueryKey = (params?: ListObEscalationsParams,) => {
+    return [
+    `/onboarding/escalations`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObEscalationsQueryOptions = <TData = Awaited<ReturnType<typeof listObEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObEscalationsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObEscalations>>> = ({ signal }) => listObEscalations(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObEscalationsQueryResult = NonNullable<Awaited<ReturnType<typeof listObEscalations>>>
+export type ListObEscalationsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObEscalations<TData = Awaited<ReturnType<typeof listObEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObEscalationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObEscalations>>,
+          TError,
+          Awaited<ReturnType<typeof listObEscalations>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObEscalations<TData = Awaited<ReturnType<typeof listObEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObEscalations>>,
+          TError,
+          Awaited<ReturnType<typeof listObEscalations>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObEscalations<TData = Awaited<ReturnType<typeof listObEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The internal escalation ladder (OB-02, OB-10)
+ */
+
+export function useListObEscalations<TData = Awaited<ReturnType<typeof listObEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObEscalations>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObEscalationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Stamps `acknowledgedBy` and `acknowledgedAt`. **It does not stop the
+ladder.** L2 still follows at +4 working hours and L3 at +8 unless the
+underlying breach is actually resolved — acknowledging is a claim
+about attention, not about the service, and a ladder an acknowledgement
+could silence would be one a busy person silences by reflex.
+
+Idempotent in effect: acknowledging an already-acknowledged rung
+returns it unchanged rather than moving the timestamp, so the record
+keeps saying when it was *first* seen.
+
+ * @summary Say you have seen this rung (OB-02)
+ */
+export const acknowledgeObEscalation = (
+    escalationId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObEscalationResponse>(
+      {url: `/onboarding/escalations/${escalationId}/acknowledge`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getAcknowledgeObEscalationMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeObEscalation>>, TError,{escalationId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof acknowledgeObEscalation>>, TError,{escalationId: number}, TContext> => {
+
+const mutationKey = ['acknowledgeObEscalation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acknowledgeObEscalation>>, {escalationId: number}> = (props) => {
+          const {escalationId} = props ?? {};
+
+          return  acknowledgeObEscalation(escalationId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcknowledgeObEscalationMutationResult = NonNullable<Awaited<ReturnType<typeof acknowledgeObEscalation>>>
+    
+    export type AcknowledgeObEscalationMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Say you have seen this rung (OB-02)
+ */
+export const useAcknowledgeObEscalation = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeObEscalation>>, TError,{escalationId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acknowledgeObEscalation>>,
+        TError,
+        {escalationId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getAcknowledgeObEscalationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Resolution note mandatory — this is the row a breach review reads
+afterwards, and "resolved" with no account of what was done answers
+none of the questions such a review asks.
+
+Resolving L1 does **not** resolve L2 or L3.
+`uq_ob_escalations_open (step_id, level, open_key)` lets the ladder
+hold all three rungs at once by design, and each was sent to a
+different person: closing a manager's rung because the owner closed
+theirs would tell the manager the problem was handled when nobody told
+them it was.
+
+ * @summary Close a rung of the ladder (OB-02)
+ */
+export const resolveObEscalation = (
+    escalationId: number,
+    obEscalationResolveRequest: ObEscalationResolveRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObEscalationResponse>(
+      {url: `/onboarding/escalations/${escalationId}/resolve`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obEscalationResolveRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getResolveObEscalationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveObEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof resolveObEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext> => {
+
+const mutationKey = ['resolveObEscalation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveObEscalation>>, {escalationId: number;data: ObEscalationResolveRequest}> = (props) => {
+          const {escalationId,data} = props ?? {};
+
+          return  resolveObEscalation(escalationId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveObEscalationMutationResult = NonNullable<Awaited<ReturnType<typeof resolveObEscalation>>>
+    export type ResolveObEscalationMutationBody = ObEscalationResolveRequest
+    export type ResolveObEscalationMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Close a rung of the ladder (OB-02)
+ */
+export const useResolveObEscalation = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveObEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resolveObEscalation>>,
+        TError,
+        {escalationId: number;data: ObEscalationResolveRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getResolveObEscalationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_client_escalations` — the OB-02 card, and the red chips on OB-05.
+
+**Raising one is not on this route tree.** The client does it from
+CP-03, which lives under `/portal/onboarding/**` with its own
+principal type and its own DTOs — plan §2.3 forks at the route tree
+rather than with per-endpoint conditionals, and A-125's
+`client_accounts` and A-126's `ClientScopeResolver` are what define
+that principal. Declaring a half of it here, before the principal
+exists, would be a contract for a caller nothing can authenticate.
+This is the staff side: see them, and resolve them.
+
+One open escalation per service, enforced by
+`uq_ob_client_escalations_open`, so a client cannot flood a queue by
+clicking twice.
+
+ * @summary Escalations raised by clients from the portal (OB-02)
+ */
+export const listObClientEscalations = (
+    params?: ListObClientEscalationsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientEscalationListResponse>(
+      {url: `/onboarding/client-escalations`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObClientEscalationsQueryKey = (params?: ListObClientEscalationsParams,) => {
+    return [
+    `/onboarding/client-escalations`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObClientEscalationsQueryOptions = <TData = Awaited<ReturnType<typeof listObClientEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObClientEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObClientEscalationsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObClientEscalations>>> = ({ signal }) => listObClientEscalations(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObClientEscalationsQueryResult = NonNullable<Awaited<ReturnType<typeof listObClientEscalations>>>
+export type ListObClientEscalationsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObClientEscalations<TData = Awaited<ReturnType<typeof listObClientEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObClientEscalationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObClientEscalations>>,
+          TError,
+          Awaited<ReturnType<typeof listObClientEscalations>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObClientEscalations<TData = Awaited<ReturnType<typeof listObClientEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObClientEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObClientEscalations>>,
+          TError,
+          Awaited<ReturnType<typeof listObClientEscalations>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObClientEscalations<TData = Awaited<ReturnType<typeof listObClientEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObClientEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Escalations raised by clients from the portal (OB-02)
+ */
+
+export function useListObClientEscalations<TData = Awaited<ReturnType<typeof listObClientEscalations>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObClientEscalationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientEscalations>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObClientEscalationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Resolution note mandatory, and **it goes to the client** — plan §7
+makes resolving acknowledge back to them, and plan §4 mirrors the
+escalation into the service's communication timeline as an
+`ESCALATION` entry. So this note is outward-facing in a way
+`resolveObEscalation`'s is not, which is the one difference worth
+knowing between two operations that otherwise look identical.
+
+There is no acknowledge step. The internal ladder has one because a
+rung travels between colleagues; a client wants an answer, and
+"somebody has seen this" is not one.
+
+ * @summary Answer a client's escalation (OB-05)
+ */
+export const resolveObClientEscalation = (
+    escalationId: number,
+    obEscalationResolveRequest: ObEscalationResolveRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientEscalationResponse>(
+      {url: `/onboarding/client-escalations/${escalationId}/resolve`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obEscalationResolveRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getResolveObClientEscalationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveObClientEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof resolveObClientEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext> => {
+
+const mutationKey = ['resolveObClientEscalation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveObClientEscalation>>, {escalationId: number;data: ObEscalationResolveRequest}> = (props) => {
+          const {escalationId,data} = props ?? {};
+
+          return  resolveObClientEscalation(escalationId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveObClientEscalationMutationResult = NonNullable<Awaited<ReturnType<typeof resolveObClientEscalation>>>
+    export type ResolveObClientEscalationMutationBody = ObEscalationResolveRequest
+    export type ResolveObClientEscalationMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Answer a client's escalation (OB-05)
+ */
+export const useResolveObClientEscalation = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveObClientEscalation>>, TError,{escalationId: number;data: ObEscalationResolveRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resolveObClientEscalation>>,
+        TError,
+        {escalationId: number;data: ObEscalationResolveRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getResolveObClientEscalationMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

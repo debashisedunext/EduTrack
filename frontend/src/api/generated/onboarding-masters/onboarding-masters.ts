@@ -67,14 +67,34 @@ import type {
 
 import type {
   ConflictResponse,
+  GetObPrereqTemplateParams,
+  ListObModuleAccessParams,
+  ListObNotificationTemplatesParams,
   ListObProductsParams,
+  ObModuleAccessGrantRequest,
+  ObModuleAccessListResponse,
+  ObModuleAccessResponse,
   ObModuleGatedResponse,
+  ObNotificationTemplateListResponse,
+  ObNotificationTemplateResponse,
+  ObNotificationTemplateUpdateRequest,
+  ObNotificationVocabularyResponse,
+  ObPrereqTemplateResponse,
+  ObPrereqTemplateTaskDocResponse,
+  ObPrereqTemplateTaskDocWriteRequest,
+  ObPrereqTemplateTaskOrderRequest,
+  ObPrereqTemplateTaskResponse,
+  ObPrereqTemplateTaskWriteRequest,
   ObProductListResponse,
   ObProductResponse,
   ObProductWriteRequest,
+  ObSettingsResponse,
+  ObSettingsWriteRequest,
   PreconditionFailedResponse,
+  Problem,
   UnauthorizedResponse,
-  ValidationFailedResponse
+  ValidationFailedResponse,
+  ValidationProblem
 } from '.././model';
 
 import { http } from '../../http';
@@ -440,6 +460,1455 @@ export const useUpdateObProduct = <TError = ValidationFailedResponse | ObModuleG
       > => {
 
       const mutationOptions = getUpdateObProductMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-124's screen, and the set `createObClient` snapshots at boarding.
+
+Defaults to the **active** version. `version` asks for an older one —
+the reason to want it is a client boarded months ago whose instance
+pins a version nobody can otherwise read, which is the same question
+`ObJourney.templateVersion` raises on the journey side.
+
+Tasks are **not paginated**. This is one version's set, and every
+caller needs all of it: the wizard snapshots the whole thing, the
+OB-14 editor draws the whole thing, and a partial answer would let a
+client be boarded against half a checklist. `/masters/task-types`'
+argument, on a set the product deliberately keeps short — plan §14
+names "mandatory list kept short in the master" as the mitigation for
+the gate stalling every journey.
+
+ * @summary The prerequisites master, one version (OB-14)
+ */
+export const getObPrereqTemplate = (
+    params?: GetObPrereqTemplateParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqTemplateResponse>(
+      {url: `/onboarding/prereq-template`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObPrereqTemplateQueryKey = (params?: GetObPrereqTemplateParams,) => {
+    return [
+    `/onboarding/prereq-template`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getGetObPrereqTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getObPrereqTemplate>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(params?: GetObPrereqTemplateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObPrereqTemplateQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObPrereqTemplate>>> = ({ signal }) => getObPrereqTemplate(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObPrereqTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getObPrereqTemplate>>>
+export type GetObPrereqTemplateQueryError = void | UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObPrereqTemplate<TData = Awaited<ReturnType<typeof getObPrereqTemplate>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  GetObPrereqTemplateParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObPrereqTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getObPrereqTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObPrereqTemplate<TData = Awaited<ReturnType<typeof getObPrereqTemplate>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObPrereqTemplateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObPrereqTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getObPrereqTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObPrereqTemplate<TData = Awaited<ReturnType<typeof getObPrereqTemplate>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObPrereqTemplateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The prerequisites master, one version (OB-14)
+ */
+
+export function useGetObPrereqTemplate<TData = Awaited<ReturnType<typeof getObPrereqTemplate>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: GetObPrereqTemplateParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObPrereqTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObPrereqTemplateQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Tasks and their reference docs are cloned. The source version is never
+written, so every client already boarded against it keeps rendering
+exactly the checklist they agreed to — plan §1.1 #2, stated there for
+journey templates and applying here word for word.
+
+`409` if a draft already exists. One draft at a time, because two
+would each be "the next version" and publishing either would silently
+discard the other.
+
+ * @summary Clone the active version into an editable draft (OB-14)
+ */
+export const beginObPrereqTemplateRevision = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqTemplateResponse>(
+      {url: `/onboarding/prereq-template/revisions`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getBeginObPrereqTemplateRevisionMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>, TError,void, TContext> => {
+
+const mutationKey = ['beginObPrereqTemplateRevision'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>, void> = () => {
+          
+
+          return  beginObPrereqTemplateRevision()
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BeginObPrereqTemplateRevisionMutationResult = NonNullable<Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>>
+    
+    export type BeginObPrereqTemplateRevisionMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Clone the active version into an editable draft (OB-14)
+ */
+export const useBeginObPrereqTemplateRevision = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof beginObPrereqTemplateRevision>>,
+        TError,
+        void,
+        TContext
+      > => {
+
+      const mutationOptions = getBeginObPrereqTemplateRevisionMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The version it supersedes is retired in the same transaction.
+
+**Clients already boarded are untouched**, including those whose gate
+is still locked. It is tempting to migrate an in-flight client onto a
+newer checklist — they have not finished the old one — and it is the
+wrong call: a task the client has already submitted would be replaced
+by one they have never seen, and a mandatory addition would re-lock a
+gate that had opened. Plan §1.1 #2 makes snapshotting apply to the
+prerequisites master by name.
+
+ * @summary The draft becomes the active version (OB-14)
+ */
+export const publishObPrereqTemplate = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqTemplateResponse>(
+      {url: `/onboarding/prereq-template/publish`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getPublishObPrereqTemplateMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishObPrereqTemplate>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof publishObPrereqTemplate>>, TError,void, TContext> => {
+
+const mutationKey = ['publishObPrereqTemplate'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishObPrereqTemplate>>, void> = () => {
+          
+
+          return  publishObPrereqTemplate()
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishObPrereqTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof publishObPrereqTemplate>>>
+    
+    export type PublishObPrereqTemplateMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary The draft becomes the active version (OB-14)
+ */
+export const usePublishObPrereqTemplate = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishObPrereqTemplate>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof publishObPrereqTemplate>>,
+        TError,
+        void,
+        TContext
+      > => {
+
+      const mutationOptions = getPublishObPrereqTemplateMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Appended at the end; use `reorderObPrereqTemplateTasks` to place it.
+
+`409` if there is no draft. Editing an active version in place would
+change what an in-flight client is being asked for, which is the whole
+thing versioning exists to prevent.
+
+ * @summary Add a task to the draft (OB-14)
+ */
+export const addObPrereqTemplateTask = (
+    obPrereqTemplateTaskWriteRequest: ObPrereqTemplateTaskWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqTemplateTaskResponse>(
+      {url: `/onboarding/prereq-template/tasks`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqTemplateTaskWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObPrereqTemplateTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTask>>, TError,{data: ObPrereqTemplateTaskWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTask>>, TError,{data: ObPrereqTemplateTaskWriteRequest}, TContext> => {
+
+const mutationKey = ['addObPrereqTemplateTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObPrereqTemplateTask>>, {data: ObPrereqTemplateTaskWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  addObPrereqTemplateTask(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObPrereqTemplateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof addObPrereqTemplateTask>>>
+    export type AddObPrereqTemplateTaskMutationBody = ObPrereqTemplateTaskWriteRequest
+    export type AddObPrereqTemplateTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Add a task to the draft (OB-14)
+ */
+export const useAddObPrereqTemplateTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTask>>, TError,{data: ObPrereqTemplateTaskWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObPrereqTemplateTask>>,
+        TError,
+        {data: ObPrereqTemplateTaskWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObPrereqTemplateTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The whole set, in the order wanted. A partial list is `400` rather
+than a silent partial reorder — the request names positions, and
+positions only mean anything against the complete set.
+
+Order here is presentation only. **Prerequisites have no dependency
+model**: unlike journey steps (plan §5.6) every task is available from
+the moment the instance exists, because the client works their own
+checklist in whatever order suits them and nothing on it activates
+anything else. The sequence decides what OB-14 and CP-03 draw first,
+nothing more.
+
+ * @summary Re-sequence the draft's tasks (OB-14)
+ */
+export const reorderObPrereqTemplateTasks = (
+    obPrereqTemplateTaskOrderRequest: ObPrereqTemplateTaskOrderRequest,
+ ) => {
+      
+      
+      return http<ObPrereqTemplateResponse>(
+      {url: `/onboarding/prereq-template/tasks/order`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqTemplateTaskOrderRequest
+    },
+      );
+    }
+  
+
+
+export const getReorderObPrereqTemplateTasksMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>, TError,{data: ObPrereqTemplateTaskOrderRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>, TError,{data: ObPrereqTemplateTaskOrderRequest}, TContext> => {
+
+const mutationKey = ['reorderObPrereqTemplateTasks'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>, {data: ObPrereqTemplateTaskOrderRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  reorderObPrereqTemplateTasks(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReorderObPrereqTemplateTasksMutationResult = NonNullable<Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>>
+    export type ReorderObPrereqTemplateTasksMutationBody = ObPrereqTemplateTaskOrderRequest
+    export type ReorderObPrereqTemplateTasksMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse
+
+    /**
+ * @summary Re-sequence the draft's tasks (OB-14)
+ */
+export const useReorderObPrereqTemplateTasks = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>, TError,{data: ObPrereqTemplateTaskOrderRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reorderObPrereqTemplateTasks>>,
+        TError,
+        {data: ObPrereqTemplateTaskOrderRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReorderObPrereqTemplateTasksMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **This is where OB-14 diverges from OB-07, and the divergence is
+deliberate rather than an inconsistency to tidy up later.** A journey
+template's steps have no `PATCH` — C-102 composes a draft by adding,
+removing and reordering, and changing a step's TAT means removing it
+and adding it back. That works there because a journey template is
+per-product and one Admin owns one product's design.
+
+The prerequisites master is org-wide and singular. There is exactly
+one draft for the whole organisation, so two Admins editing it at once
+is the normal case rather than the unlucky one — and delete-plus-re-add
+would lose the task's position, its reference docs and, on a set where
+`isMandatory` decides whether a gate can ever open, is a heavier
+operation than the edit it stands in for.
+
+So: a real `PATCH`, and a real `If-Match`. The tag comes from
+`getObPrereqTemplate` — the pairing CONVENTIONS §5 insists be made by
+hand, since the tag is on the parent rather than on this row. A stale
+editor is refused with `412` instead of quietly overwriting a
+colleague's change to the same checklist.
+
+ * @summary Edit a draft task (OB-14)
+ */
+export const updateObPrereqTemplateTask = (
+    templateTaskId: number,
+    obPrereqTemplateTaskWriteRequest: ObPrereqTemplateTaskWriteRequest,
+ ) => {
+      
+      
+      return http<ObPrereqTemplateTaskResponse>(
+      {url: `/onboarding/prereq-template-tasks/${templateTaskId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqTemplateTaskWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObPrereqTemplateTaskMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObPrereqTemplateTask>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObPrereqTemplateTask>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskWriteRequest}, TContext> => {
+
+const mutationKey = ['updateObPrereqTemplateTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObPrereqTemplateTask>>, {templateTaskId: number;data: ObPrereqTemplateTaskWriteRequest}> = (props) => {
+          const {templateTaskId,data} = props ?? {};
+
+          return  updateObPrereqTemplateTask(templateTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObPrereqTemplateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof updateObPrereqTemplateTask>>>
+    export type UpdateObPrereqTemplateTaskMutationBody = ObPrereqTemplateTaskWriteRequest
+    export type UpdateObPrereqTemplateTaskMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a draft task (OB-14)
+ */
+export const useUpdateObPrereqTemplateTask = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObPrereqTemplateTask>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObPrereqTemplateTask>>,
+        TError,
+        {templateTaskId: number;data: ObPrereqTemplateTaskWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObPrereqTemplateTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Reference documents on the task go with it. Nothing else points at a
+prerequisite task — there is no dependency graph here to re-point,
+which is why this has no equivalent of
+`removeObJourneyTemplateStep`'s `dependentStepIds` conflict.
+
+ * @summary Remove a task from the draft (OB-14)
+ */
+export const removeObPrereqTemplateTask = (
+    templateTaskId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/prereq-template-tasks/${templateTaskId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getRemoveObPrereqTemplateTaskMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTask>>, TError,{templateTaskId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTask>>, TError,{templateTaskId: number}, TContext> => {
+
+const mutationKey = ['removeObPrereqTemplateTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeObPrereqTemplateTask>>, {templateTaskId: number}> = (props) => {
+          const {templateTaskId} = props ?? {};
+
+          return  removeObPrereqTemplateTask(templateTaskId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveObPrereqTemplateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof removeObPrereqTemplateTask>>>
+    
+    export type RemoveObPrereqTemplateTaskMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Remove a task from the draft (OB-14)
+ */
+export const useRemoveObPrereqTemplateTask = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTask>>, TError,{templateTaskId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removeObPrereqTemplateTask>>,
+        TError,
+        {templateTaskId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getRemoveObPrereqTemplateTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The Admin's own document, shown **to the client** on CP-04 — a sample
+filled form, a specimen letter, the format a data extract must arrive
+in. Plan §4 calls these "admin-attached reference documents" and they
+are the half of `ob_attachments` carrying `kind: REFERENCE`; what the
+client sends back is `SUBMISSION`, on the instance rather than here.
+
+The file is uploaded through the module's shared attachment route and
+this records the resulting `attachmentId` against the task. A document
+the client cannot open is worse than none, so the type policy and the
+AV scan are the same ones every other upload passes.
+
+ * @summary Attach a reference document to a draft task (OB-14)
+ */
+export const addObPrereqTemplateTaskDoc = (
+    templateTaskId: number,
+    obPrereqTemplateTaskDocWriteRequest: ObPrereqTemplateTaskDocWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObPrereqTemplateTaskDocResponse>(
+      {url: `/onboarding/prereq-template-tasks/${templateTaskId}/docs`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqTemplateTaskDocWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObPrereqTemplateTaskDocMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskDocWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskDocWriteRequest}, TContext> => {
+
+const mutationKey = ['addObPrereqTemplateTaskDoc'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>, {templateTaskId: number;data: ObPrereqTemplateTaskDocWriteRequest}> = (props) => {
+          const {templateTaskId,data} = props ?? {};
+
+          return  addObPrereqTemplateTaskDoc(templateTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObPrereqTemplateTaskDocMutationResult = NonNullable<Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>>
+    export type AddObPrereqTemplateTaskDocMutationBody = ObPrereqTemplateTaskDocWriteRequest
+    export type AddObPrereqTemplateTaskDocMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Attach a reference document to a draft task (OB-14)
+ */
+export const useAddObPrereqTemplateTaskDoc = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>, TError,{templateTaskId: number;data: ObPrereqTemplateTaskDocWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObPrereqTemplateTaskDoc>>,
+        TError,
+        {templateTaskId: number;data: ObPrereqTemplateTaskDocWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObPrereqTemplateTaskDocMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * @summary Detach a reference document from a draft task (OB-14)
+ */
+export const removeObPrereqTemplateTaskDoc = (
+    docId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/prereq-template-task-docs/${docId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getRemoveObPrereqTemplateTaskDocMutationOptions = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>, TError,{docId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>, TError,{docId: number}, TContext> => {
+
+const mutationKey = ['removeObPrereqTemplateTaskDoc'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>, {docId: number}> = (props) => {
+          const {docId} = props ?? {};
+
+          return  removeObPrereqTemplateTaskDoc(docId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveObPrereqTemplateTaskDocMutationResult = NonNullable<Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>>
+    
+    export type RemoveObPrereqTemplateTaskDocMutationError = UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Detach a reference document from a draft task (OB-14)
+ */
+export const useRemoveObPrereqTemplateTaskDoc = <TError = UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>, TError,{docId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removeObPrereqTemplateTaskDoc>>,
+        TError,
+        {docId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getRemoveObPrereqTemplateTaskDocMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * A-117 · `user_module_access`, the table A-111's `ModuleGuard` and
+A-110's `modules` claim are both built from.
+
+**Revoked grants are returned, not hidden**, when `includeRevoked` is
+set. A-109's DDL revokes rather than deletes for a reason it states
+plainly: an access audit has to answer "who could see this module in
+August", and that question is asked *after* something has been seen
+that should not have been. A screen that could only show live grants
+would be unable to answer it.
+
+Listing is Admin-only, and the module is a query parameter rather than
+a path segment because OB-08 shows both modules' grants for one person
+side by side — a dual-access user is the case the screen exists for.
+
+ * @summary Who can reach a module, and as what (OB-08)
+ */
+export const listObModuleAccess = (
+    params?: ListObModuleAccessParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObModuleAccessListResponse>(
+      {url: `/onboarding/module-access`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObModuleAccessQueryKey = (params?: ListObModuleAccessParams,) => {
+    return [
+    `/onboarding/module-access`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObModuleAccessQueryOptions = <TData = Awaited<ReturnType<typeof listObModuleAccess>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(params?: ListObModuleAccessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObModuleAccessQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObModuleAccess>>> = ({ signal }) => listObModuleAccess(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObModuleAccessQueryResult = NonNullable<Awaited<ReturnType<typeof listObModuleAccess>>>
+export type ListObModuleAccessQueryError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+
+export function useListObModuleAccess<TData = Awaited<ReturnType<typeof listObModuleAccess>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params: undefined |  ListObModuleAccessParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObModuleAccess>>,
+          TError,
+          Awaited<ReturnType<typeof listObModuleAccess>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObModuleAccess<TData = Awaited<ReturnType<typeof listObModuleAccess>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObModuleAccessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObModuleAccess>>,
+          TError,
+          Awaited<ReturnType<typeof listObModuleAccess>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObModuleAccess<TData = Awaited<ReturnType<typeof listObModuleAccess>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObModuleAccessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Who can reach a module, and as what (OB-08)
+ */
+
+export function useListObModuleAccess<TData = Awaited<ReturnType<typeof listObModuleAccess>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObModuleAccessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObModuleAccess>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObModuleAccessQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Audited: `grantedBy` and `grantedAt` are stamped from the token and
+are not in the body.
+
+**The new grant does not reach the user until their next token.** The
+`modules` claim is minted at login (A-110) and access tokens live
+fifteen minutes, so a grant made now is effective within fifteen
+minutes rather than instantly. That is a deliberate consequence of
+putting entitlement in the claim rather than reading the table on
+every request, and it is stated here because the OB-08 screen should
+say so rather than let an admin conclude the grant failed.
+
+The reverse direction is the one that matters and it is not
+symmetrical: a **revoke** is likewise not instant, so
+`revokeObModuleAccess` says what to do when it needs to be.
+
+`409` if the user already holds a live grant for this module.
+`uq_user_module_access_live` allows exactly one, because two would
+mean two `module_role`s and nothing says which the guard should
+believe. Changing somebody's role is revoke-then-grant, which leaves
+both facts in the audit trail rather than overwriting the first.
+
+ * @summary Grant a user access to a module (OB-08)
+ */
+export const grantObModuleAccess = (
+    obModuleAccessGrantRequest: ObModuleAccessGrantRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObModuleAccessResponse>(
+      {url: `/onboarding/module-access`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obModuleAccessGrantRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getGrantObModuleAccessMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantObModuleAccess>>, TError,{data: ObModuleAccessGrantRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof grantObModuleAccess>>, TError,{data: ObModuleAccessGrantRequest}, TContext> => {
+
+const mutationKey = ['grantObModuleAccess'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof grantObModuleAccess>>, {data: ObModuleAccessGrantRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  grantObModuleAccess(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GrantObModuleAccessMutationResult = NonNullable<Awaited<ReturnType<typeof grantObModuleAccess>>>
+    export type GrantObModuleAccessMutationBody = ObModuleAccessGrantRequest
+    export type GrantObModuleAccessMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Grant a user access to a module (OB-08)
+ */
+export const useGrantObModuleAccess = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantObModuleAccess>>, TError,{data: ObModuleAccessGrantRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof grantObModuleAccess>>,
+        TError,
+        {data: ObModuleAccessGrantRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getGrantObModuleAccessMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `POST .../revoke`, **not `DELETE`**, and the row survives. A-109
+revokes by stamping `revokedAt` and `revokedBy` so the audit can say
+who withdrew access and when; a `DELETE` would leave nothing to answer
+with, which is precisely the question asked after an incident.
+
+`live_key` goes null in the same statement, so the partial unique
+index stops counting this grant and the user may be granted the module
+again later without colliding with their own history.
+
+## Revocation is not instant, and this is the one place that matters
+
+The `modules` claim is in the access token, so a user holding a valid
+token keeps the entitlement until it expires — up to fifteen minutes.
+For an ordinary role change that is fine. For a revocation prompted by
+something going wrong it is not, and the answer is not to make
+`ModuleGuard` hit the database on every request: it is to revoke the
+user's refresh-token family, which the auth kernel already exposes and
+which ends the session rather than narrowing it. `data.tokenLagSeconds`
+states the worst case so OB-08 can offer that as the next action
+instead of leaving an admin to assume the revoke did not work.
+
+ * @summary Withdraw a grant (OB-08)
+ */
+export const revokeObModuleAccess = (
+    grantId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObModuleAccessResponse>(
+      {url: `/onboarding/module-access/${grantId}/revoke`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getRevokeObModuleAccessMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeObModuleAccess>>, TError,{grantId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof revokeObModuleAccess>>, TError,{grantId: number}, TContext> => {
+
+const mutationKey = ['revokeObModuleAccess'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeObModuleAccess>>, {grantId: number}> = (props) => {
+          const {grantId} = props ?? {};
+
+          return  revokeObModuleAccess(grantId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeObModuleAccessMutationResult = NonNullable<Awaited<ReturnType<typeof revokeObModuleAccess>>>
+    
+    export type RevokeObModuleAccessMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Withdraw a grant (OB-08)
+ */
+export const useRevokeObModuleAccess = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeObModuleAccess>>, TError,{grantId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof revokeObModuleAccess>>,
+        TError,
+        {grantId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getRevokeObModuleAccessMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-113 · the constants PHASE-2-BUILD-PLAN §2 locked, **as
+configuration rather than as constants**: amber at 75% of TAT, the
+scanner every 5 minutes, and the ladder at breach → +4 working hours →
++8.
+
+Those are the seeded values, not the contract. The reason they are
+editable at all is that every one of them is a judgement about a
+particular organisation's pace, and the version that is wrong for a
+client is the version nobody can change without a release.
+
+Returns an `ETag`, and it is the only source of the tag `PUT
+/onboarding/settings` requires — the pairing CONVENTIONS §5 says to
+make by hand, and the gap B-016 closed on `/projects/{id}` after the
+precondition had been declared for months with nowhere to satisfy it.
+
+ * @summary TAT thresholds, scanner cadence and the escalation matrix (OB-11)
+ */
+export const getObSettings = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObSettingsResponse>(
+      {url: `/onboarding/settings`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObSettingsQueryKey = () => {
+    return [
+    `/onboarding/settings`
+    ] as const;
+    }
+
+    
+export const getGetObSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getObSettings>>, TError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObSettingsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObSettings>>> = ({ signal }) => getObSettings(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getObSettings>>>
+export type GetObSettingsQueryError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+
+export function useGetObSettings<TData = Awaited<ReturnType<typeof getObSettings>>, TError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getObSettings>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSettings<TData = Awaited<ReturnType<typeof getObSettings>>, TError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getObSettings>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObSettings<TData = Awaited<ReturnType<typeof getObSettings>>, TError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary TAT thresholds, scanner cadence and the escalation matrix (OB-11)
+ */
+
+export function useGetObSettings<TData = Awaited<ReturnType<typeof getObSettings>>, TError = void | UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObSettings>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * A **wholesale replace behind one Save button**, which is why it is a
+`PUT` and why `If-Match` is not optional here — the worst case for a
+lost update, exactly as `PUT /projects/{id}/settings` argues. Two
+admins on OB-11 at once would otherwise have the second silently
+discard the first's escalation matrix along with the threshold they
+did not touch.
+
+## What changing these does to work already in flight
+
+**Thresholds are read forward, never retroactively.** Lowering amber
+from 75% to 60% re-colours every open step on the scanner's next pass;
+it does not re-open a step that already breached under the old
+setting, and it does not re-send an escalation that has already gone.
+A settings change that reissued historical notifications would mail
+every owner in the organisation about steps they closed last week.
+
+`scannerIntervalMinutes` takes effect at the next sweep rather than
+immediately, for the same reason a cron does.
+
+ * @summary Replace the onboarding settings (OB-11)
+ */
+export const updateObSettings = (
+    obSettingsWriteRequest: ObSettingsWriteRequest,
+ ) => {
+      
+      
+      return http<ObSettingsResponse>(
+      {url: `/onboarding/settings`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: obSettingsWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObSettingsMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObSettings>>, TError,{data: ObSettingsWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObSettings>>, TError,{data: ObSettingsWriteRequest}, TContext> => {
+
+const mutationKey = ['updateObSettings'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObSettings>>, {data: ObSettingsWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateObSettings(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateObSettings>>>
+    export type UpdateObSettingsMutationBody = ObSettingsWriteRequest
+    export type UpdateObSettingsMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Replace the onboarding settings (OB-11)
+ */
+export const useUpdateObSettings = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObSettings>>, TError,{data: ObSettingsWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObSettings>>,
+        TError,
+        {data: ObSettingsWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObSettingsMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-113 · one row per `(eventCode, channel)`, the identity
+`NotificationTemplate` uses one module over and for the same reasons.
+
+## Why this is not `/masters/notification-templates`
+
+The ticketing surface is genuinely close, and reusing it was the first
+thing considered. Three things stop it, and only the third is fatal on
+its own:
+
+1. **The channels differ.** `NotificationChannel` is
+   `IN_APP · EMAIL · PUSH`. This module's `ObChannel` is
+   `EMAIL · WHATSAPP · IN_APP` — no push, and a `WHATSAPP` value that
+   A-107 keeps deliberately (PHASE-2-BUILD-PLAN §6.1: the enum value
+   costs nothing now and adding it later is a migration against a
+   table with production rows). Neither enum is a subset of the other.
+2. **The categories differ.** `MENTION` and `STATUS_REQUEST` mean
+   nothing here; `PREREQUISITE` and `SIGNOFF` mean nothing there.
+3. **A-115 forbids the import.** ArchUnit asserts the two modules stay
+   separable, and one screen writing rows another module's renderer
+   resolves is the coupling it exists to refuse.
+
+**Phase 2 sends email only.** PHASE-2-BUILD-PLAN §6.1 defers WhatsApp
+entirely — no provider, no adapter, no webhook — so a `WHATSAPP`
+template can be authored and stored and nothing will dispatch it.
+`isDeliverable` says so per row, rather than letting OB-12 present a
+template that will sit in `PENDING` forever looking configured.
+
+ * @summary The module's notification wording (OB-12)
+ */
+export const listObNotificationTemplates = (
+    params?: ListObNotificationTemplatesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObNotificationTemplateListResponse>(
+      {url: `/onboarding/notification-templates`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObNotificationTemplatesQueryKey = (params?: ListObNotificationTemplatesParams,) => {
+    return [
+    `/onboarding/notification-templates`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObNotificationTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listObNotificationTemplates>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(params?: ListObNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObNotificationTemplatesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObNotificationTemplates>>> = ({ signal }) => listObNotificationTemplates(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObNotificationTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listObNotificationTemplates>>>
+export type ListObNotificationTemplatesQueryError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+
+export function useListObNotificationTemplates<TData = Awaited<ReturnType<typeof listObNotificationTemplates>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params: undefined |  ListObNotificationTemplatesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listObNotificationTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObNotificationTemplates<TData = Awaited<ReturnType<typeof listObNotificationTemplates>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listObNotificationTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObNotificationTemplates<TData = Awaited<ReturnType<typeof listObNotificationTemplates>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The module's notification wording (OB-12)
+ */
+
+export function useListObNotificationTemplates<TData = Awaited<ReturnType<typeof listObNotificationTemplates>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+ params?: ListObNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObNotificationTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObNotificationTemplatesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * What OB-12's editor may offer, served rather than hardcoded — the
+argument `getNotificationTemplateVocabulary` makes: a client holding
+its own copy of the vocabulary is a second copy of the server's, and a
+new event would silently fail to appear.
+
+Plan §7 lists the module's new events, and they are the reason this
+matters more here than one module over: the list is still growing
+while OB3 is built. A body containing a merge tag that is not in this
+vocabulary is refused at write time rather than rendering as literal
+text in a client's inbox.
+
+ * @summary Event codes, channels, recipients and merge tags (OB-12)
+ */
+export const getObNotificationTemplateVocabulary = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObNotificationVocabularyResponse>(
+      {url: `/onboarding/notification-templates/vocabulary`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObNotificationTemplateVocabularyQueryKey = () => {
+    return [
+    `/onboarding/notification-templates/vocabulary`
+    ] as const;
+    }
+
+    
+export const getGetObNotificationTemplateVocabularyQueryOptions = <TData = Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObNotificationTemplateVocabularyQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>> = ({ signal }) => getObNotificationTemplateVocabulary(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObNotificationTemplateVocabularyQueryResult = NonNullable<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>>
+export type GetObNotificationTemplateVocabularyQueryError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+
+export function useGetObNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>,
+          TError,
+          Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>,
+          TError,
+          Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Event codes, channels, recipients and merge tags (OB-12)
+ */
+
+export function useGetObNotificationTemplateVocabulary<TData = Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError = UnauthorizedResponse | Problem | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObNotificationTemplateVocabulary>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObNotificationTemplateVocabularyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * `If-Match` for the reason `/masters/notification-templates/{id}`
+carries one, restated because it is the strongest case in either
+module: the field most likely to be edited is a long body two admins
+can plausibly be rewording at once, and a lost update here is silent
+**and outward-facing** — the losing edit vanishes and what reaches a
+client is wording nobody chose.
+
+`(eventCode, channel)` is the row's identity and is immutable. Neither
+is in the request body; changing either is a different template.
+
+`409` on switching off a mandatory one. `isMandatory` is derived from
+the category rather than stored — `ESCALATION` and `SIGNOFF` mail
+cannot be silenced — so the screen should render the toggle as a
+locked statement rather than a control whose only outcome is a
+refusal.
+
+ * @summary Reword a notification (OB-12)
+ */
+export const updateObNotificationTemplate = (
+    templateId: number,
+    obNotificationTemplateUpdateRequest: ObNotificationTemplateUpdateRequest,
+ ) => {
+      
+      
+      return http<ObNotificationTemplateResponse>(
+      {url: `/onboarding/notification-templates/${templateId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obNotificationTemplateUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObNotificationTemplateMutationOptions = <TError = ValidationProblem | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObNotificationTemplate>>, TError,{templateId: number;data: ObNotificationTemplateUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObNotificationTemplate>>, TError,{templateId: number;data: ObNotificationTemplateUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObNotificationTemplate'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObNotificationTemplate>>, {templateId: number;data: ObNotificationTemplateUpdateRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  updateObNotificationTemplate(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObNotificationTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof updateObNotificationTemplate>>>
+    export type UpdateObNotificationTemplateMutationBody = ObNotificationTemplateUpdateRequest
+    export type UpdateObNotificationTemplateMutationError = ValidationProblem | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Reword a notification (OB-12)
+ */
+export const useUpdateObNotificationTemplate = <TError = ValidationProblem | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObNotificationTemplate>>, TError,{templateId: number;data: ObNotificationTemplateUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObNotificationTemplate>>,
+        TError,
+        {templateId: number;data: ObNotificationTemplateUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObNotificationTemplateMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
