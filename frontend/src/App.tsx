@@ -36,6 +36,8 @@ import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
 import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
 import { ObNotificationCentrePage } from './features/onboarding/notifications/ObNotificationCentrePage'
+import { ObReportsHubPage } from './features/onboarding/reports/ObReportsHubPage'
+import { ObReportViewerPage } from './features/onboarding/reports/ObReportViewerPage'
 import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
 import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
 import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
@@ -274,6 +276,24 @@ export default function App() {
               popover mounts on that shell when it lands.
             */}
             <Route path="/onboarding/notifications" element={<ObNotificationCentrePage />} />
+            {/*
+              B-122 · OB-10's two routes, beside the notification centre and for
+              the same reason the designer and that page are not under
+              `/masters/**`: the Onboarding module's screens are disjoint from
+              the ticketing masters (plan §1.2), and this hub is emphatically
+              not S-27's. Separate catalogue, separate categories, separate
+              column vocabulary — a shared `/reports` prefix would put twelve
+              onboarding cards into a grid of eighteen ticketing ones with
+              nothing to tell them apart.
+
+              Two routes rather than one, because the viewer is the thing people
+              bookmark and send: its filters live in the URL, so a report
+              narrowed to one product and a quarter has to be a path somebody
+              can paste. There is still no onboarding nav section, so both are
+              reached by link until B-108/B-109 build one.
+            */}
+            <Route path="/onboarding/reports" element={<ObReportsHubPage />} />
+            <Route path="/onboarding/reports/:reportKey" element={<ObReportViewerPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a

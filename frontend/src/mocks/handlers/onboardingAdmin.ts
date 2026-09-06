@@ -165,10 +165,12 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
 
 // ── reports (OB-10) ─────────────────────────────────────────────────────────
 //
-// Twelve descriptors: plan §10's set. Seven `available`, five not — the OB4b
-// group PHASE-2-BUILD-PLAN §3 #8 holds pending the §11.6 call. They are listed
-// rather than hidden so an undecided report is distinguishable from one that
-// does not exist, which is what the decision is about.
+// Twelve descriptors: plan §10's set. Six `available`, six not, and the six
+// split into two groups with different reasons — five are the OB4b group
+// PHASE-2-BUILD-PLAN §3 #8 holds pending the §11.6 call, and prerequisite
+// aging is waiting on tables B-124/B-125 create. They are listed rather than
+// hidden so an undecided report is distinguishable from one that does not
+// exist, which is what the decision is about.
 const OB_REPORTS = [
   { key: 'journey-funnel', title: 'Journey funnel by product', description: 'Where journeys sit, per product.', category: 'DELIVERY', chart: 'funnel', filters: ['dateRange', 'product'], available: true },
   { key: 'tat-compliance', title: 'TAT compliance by service and owner', description: 'On-time delivery against pinned TATs.', category: 'QUALITY', chart: 'bar', filters: ['dateRange', 'product', 'owner'], available: true },
@@ -176,7 +178,13 @@ const OB_REPORTS = [
   { key: 'time-to-live', title: 'Time to live, per product', description: 'How long boarding actually takes.', category: 'DELIVERY', chart: 'line', filters: ['dateRange', 'product'], available: true },
   { key: 'sales-pipeline', title: 'Sales pipeline', description: 'Boarded clients by sales person.', category: 'PIPELINE', chart: 'bar', filters: ['dateRange'], available: true },
   { key: 'signoff-pending', title: 'Sign-offs pending', description: 'Requested and unanswered, oldest first.', category: 'CLIENT', chart: null, filters: ['dateRange', 'client'], available: true },
-  { key: 'prereq-aging', title: 'Prerequisite aging', description: 'Client-attributed time before the gate.', category: 'CLIENT', chart: 'bar', filters: ['dateRange', 'client'], available: true },
+  // B-122 · unavailable, and the reason is not the OB4b one. This report reads
+  // `ob_client_prereq_tasks`, which is B-124/B-125's table and is in no applied
+  // migration — so the real server declares it unbuilt, and a mock that said
+  // otherwise would have the frontend exercising a state no deployment can
+  // produce. Flagged to Stream A: A-118 wrote this row before the build order
+  // was settled.
+  { key: 'prereq-aging', title: 'Prerequisite aging', description: 'Client-attributed time before the gate.', category: 'CLIENT', chart: 'bar', filters: ['dateRange', 'client'], available: false, unavailableReason: 'The prerequisites master and its per-client tasks are not built yet (B-124, B-125), so there is nothing to age.' },
   { key: 'breach-log', title: 'Breach log', description: 'Every TAT breach, with its ladder.', category: 'QUALITY', chart: null, filters: ['dateRange', 'product', 'owner'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
   { key: 'escalation-log', title: 'Escalation log', description: 'Internal and client escalations side by side.', category: 'QUALITY', chart: null, filters: ['dateRange', 'client'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
   { key: 'owner-workload', title: 'Owner workload', description: 'Open services per implementor over time.', category: 'DELIVERY', chart: 'stacked-bar', filters: ['dateRange', 'owner'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
