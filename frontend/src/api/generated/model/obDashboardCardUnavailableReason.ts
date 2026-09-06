@@ -46,40 +46,31 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObDashboardCard } from './obDashboardCard';
-import type { ObDashboardSummaryComputedAt } from './obDashboardSummaryComputedAt';
 
 /**
- * The OB-02 card board. Read from `ob_dashboard_summary`, never counted
-live — CLAUDE.md.
+ * B-121 · non-null when the caller's scope has no table that can
+answer this card, with the reason in plain words. `count` is then
+0 and means nothing; a client renders the sentence instead of the
+number.
+
+**This exists because `ob_dashboard_summary` is keyed
+`(stat_date, product_id)` and carries no scope dimension.** A-112's
+resolver narrows OB_SALES to "clients they created" and
+OB_STEP_OWNER to "journeys containing their steps", and neither is
+a predicate a product-keyed pre-aggregate can express — so for
+those two roles the board is not merely unfiltered, it is
+unanswerable from the only source CLAUDE.md permits. The fix is a
+scope dimension on the table, which is a schema change; until then
+this says so rather than showing an org-wide number to a caller
+whose every other read is narrowed.
+
+**Not an empty board and not a 404.** A zero count renders as "you
+have nothing overdue", which is a factual claim about the data and
+is false; a 404 on a route the role legitimately holds reads to the
+client as a bug and would have it retry. This is `Widget`'s
+`unavailableReason` (A-056) transferred whole, including the reason
+it is stated on the wire rather than re-derived by the SPA — a role
+rule stated twice is a role rule that drifts.
 
  */
-export interface ObDashboardSummary {
-  /** All seven, always, in `ObDashboardCardKey` order — a card whose
-count is zero is drawn as zero rather than omitted. An absent card
-and a card reading nought are different claims, and only one of
-them is true when nothing is overdue.
- */
-  cards: ObDashboardCard[];
-  /** When `ob_dashboard_summary` was last refreshed. On the response
-because these numbers are pre-aggregated and a board that cannot
-say how stale it is invites a bug report about the difference
-between it and a list.
-
-**Null means B-120's refresh has never run**, which A-108 makes a
-reachable state on purpose: both summary tables "start empty and
-fill forward from the day they land", so a board blank for its
-first days is correct rather than broken. Required and nullable
-rather than optional, because the distinction that matters is
-*computed and empty* against *never computed* — and a field a
-client may not find at all is one it will render as neither.
- */
-  computedAt: ObDashboardSummaryComputedAt;
-  /** What A-112 narrowed the counts to, in a sentence — "journeys
-containing your services", "clients you created", "all clients".
-The same honesty `runReport.meta.appliedScope` provides: a Step
-Owner comparing their board against a colleague's should be able
-to see why the numbers differ without asking.
- */
-  appliedScope?: string;
-}
+export type ObDashboardCardUnavailableReason = string | null;
