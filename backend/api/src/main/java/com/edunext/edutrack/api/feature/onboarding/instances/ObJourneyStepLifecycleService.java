@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.journal.ObStepJournal;
+import com.edunext.edutrack.domain.masters.WorkingCalendarRepository;
+import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -19,10 +21,17 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepositor
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepClockAttribution;
+import com.edunext.edutrack.domain.onboarding.ObStepClockActorType;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEvent;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEventRepository;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEventType;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -49,11 +58,18 @@ import java.util.stream.Collectors;
  *       blocker", is C-119's own line in the backlog — adding a partial
  *       version of it here would be exactly the kind of design C-119 would
  *       then have to unpick rather than build on.</li>
- *   <li><b>No {@code due_at} maths.</b> The working-calendar computation
- *       from {@code tatDays}, and pause/resume as clock-event rows, are
- *       C-105's. {@code due_at} is left exactly as it was on every
- *       transition here.</li>
  * </ul>
+ *
+ * <h2>C-105 · the clock</h2>
+ *
+ * <p>{@link #start} now computes {@code due_at} working-calendar-aware from
+ * {@code tatDays} (see {@link #computeDueAt}); {@link #waitOnClient} and
+ * {@link #resume} record pause and resume as {@code ob_step_clock_events}
+ * rows rather than leaving the wait a bare status flip, and {@link #resume}
+ * recomputes {@code due_at} when the pause it is closing actually stopped
+ * the clock (see {@link #recomputeDueAtOnResume}). {@link #block} is
+ * unchanged: internal {@code BLOCKED} does not pause the clock, per plan
+ * §5.7, so it writes no event and touches no date.
  *
  * <h2>C-106 · the completion gate</h2>
  *
@@ -89,6 +105,14 @@ public class ObJourneyStepLifecycleService {
     /** Plan §3's "override steps with logged reason" — {@link #skip}'s own capability. */
     private static final Set<String> MODERATOR_ROLES = Set.of("OB_MANAGER", "OB_ADMIN");
 
+    /**
+     * C-105 · the only pausing reason written today — {@code
+     * ck_ob_clock_pause_reason}'s mandatory value on a {@code PAUSED} row.
+     * See {@link ObStepClockEvent#getPauseReason()} for why the column
+     * itself stays a plain string rather than an enum with one member.
+     */
+    private static final String WAITING_ON_CLIENT_PAUSE_REASON = "WAITING_ON_CLIENT";
+
     private final ObJourneyStepRepository journeySteps;
     private final ObJourneyRepository journeys;
     private final ObJourneyStepItemRepository stepItems;
@@ -97,11 +121,17 @@ public class ObJourneyStepLifecycleService {
     private final ObAttachmentRepository attachments;
     private final ObSignoffRepository signoffs;
     private final ObStepJournal stepJournal;
+    private final WorkingHoursService workingHours;
+    private final WorkingCalendarRepository workingCalendars;
+    private final ObStepClockEventRepository clockEvents;
+    private final ObStepClockRecorder clockRecorder;
 
     public ObJourneyStepLifecycleService(ObJourneyStepRepository journeySteps, ObJourneyRepository journeys,
             ObJourneyStepItemRepository stepItems, ObJourneyTemplateStepItemRepository templateStepItems,
             ObJourneyTemplateStepDocRepository templateStepDocs, ObAttachmentRepository attachments,
-            ObSignoffRepository signoffs, ObStepJournal stepJournal) {
+            ObSignoffRepository signoffs, ObStepJournal stepJournal, WorkingHoursService workingHours,
+            WorkingCalendarRepository workingCalendars, ObStepClockEventRepository clockEvents,
+            ObStepClockRecorder clockRecorder) {
         this.journeySteps = journeySteps;
         this.journeys = journeys;
         this.stepItems = stepItems;
@@ -110,6 +140,10 @@ public class ObJourneyStepLifecycleService {
         this.attachments = attachments;
         this.signoffs = signoffs;
         this.stepJournal = stepJournal;
+        this.workingHours = workingHours;
+        this.workingCalendars = workingCalendars;
+        this.clockEvents = clockEvents;
+        this.clockRecorder = clockRecorder;
     }
 
     /**
@@ -117,6 +151,13 @@ public class ObJourneyStepLifecycleService {
      * still {@code LOCKED} or the journey is held by another
      * ({@code held_by_journey_id}) — "clocks dead until the gate opens" is
      * literal, not merely about the initial instantiation.
+     *
+     * <p>C-105 · {@code due_at} is computed here, working-calendar aware,
+     * from {@link ObJourneyStep#getTatDays()} — see {@link
+     * #computeDueAt(Instant, int)}. No clock-event row accompanies it: {@link
+     * ObStepClockEventType#STARTED} is reserved rather than written, on that
+     * enum's own javadoc — {@code startedAt} already answers "when did the
+     * clock start".
      *
      * @throws JourneyStepNotFoundException     no such step
      * @throws NotStepOwnerException             caller is neither owner nor backup owner
@@ -137,8 +178,10 @@ public class ObJourneyStepLifecycleService {
                     journey.getGateStatus() != ObGateStatus.OPEN, journey.getHeldByJourneyId());
         }
 
+        Instant startedAt = Instant.now();
         step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
-        step.setStartedAt(Instant.now());
+        step.setStartedAt(startedAt);
+        step.setDueAt(computeDueAt(startedAt, step.getTatDays()));
         return step;
     }
 
@@ -251,9 +294,12 @@ public class ObJourneyStepLifecycleService {
 
     /**
      * {@code IN_PROGRESS → WAITING_ON_CLIENT}. Plan's own line: "internal
-     * BLOCKED does not [pause the clock]; WAITING_ON_CLIENT pauses." This
-     * method only flips the status column the scanner and TAT maths read —
-     * the clock-event row that actually pauses is C-105's.
+     * BLOCKED does not [pause the clock]; WAITING_ON_CLIENT pauses." C-105 ·
+     * this is the pause, recorded as a {@link ObStepClockEventType#PAUSED}
+     * row rather than inferred from the status column — {@code
+     * attributedTo(CLIENT)} is the module plan §1.1 item 1 mitigation for
+     * TAT disputes, fixed at the moment the wait began rather than derived
+     * later from {@code pauseReason}.
      *
      * @throws JourneyStepNotFoundException  no such step
      * @throws NotStepOwnerException          caller is neither owner nor backup owner
@@ -266,6 +312,18 @@ public class ObJourneyStepLifecycleService {
         requireStatus(step, "mark waiting-on-client", ObJourneyStepStatus.IN_PROGRESS);
 
         step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+
+        ObStepClockEvent paused = new ObStepClockEvent();
+        paused.setStepId(step.getId());
+        paused.setJourneyId(step.getJourneyId());
+        paused.setEventType(ObStepClockEventType.PAUSED);
+        paused.setPauseReason(WAITING_ON_CLIENT_PAUSE_REASON);
+        paused.setAttributedTo(ObStepClockAttribution.CLIENT);
+        paused.setOccurredAt(Instant.now());
+        paused.setActorId(callerId);
+        paused.setActorType(ObStepClockActorType.USER);
+        clockRecorder.record(paused);
+
         return step;
     }
 
@@ -273,8 +331,15 @@ public class ObJourneyStepLifecycleService {
      * {@code BLOCKED → IN_PROGRESS} or {@code WAITING_ON_CLIENT → IN_PROGRESS}.
      * Clears {@code blockedReasonCode}/{@code blockedNote} — a resumed step
      * is no longer blocked, and a stale reason left on the row would read as
-     * though it still were. {@code due_at} is left untouched; recomputing it
-     * against the working calendar is C-105's own line in the backlog.
+     * though it still were.
+     *
+     * <p>C-105 · {@code due_at} is recomputed <b>only</b> when the step is
+     * resuming from {@code WAITING_ON_CLIENT}. A resume from {@code BLOCKED}
+     * leaves it untouched, on the module plan's own §5.7 line: "internal
+     * BLOCKED does not [pause the clock]" — nothing paused, so there is
+     * nothing to give back. See {@link #recomputeDueAtOnResume} for the
+     * maths and {@link ObStepClockEventRepository}'s own javadoc for why the
+     * most recent, unmatched {@code PAUSED} row is the one this reads.
      *
      * @throws JourneyStepNotFoundException  no such step
      * @throws NotStepOwnerException          caller is neither owner nor backup owner
@@ -284,13 +349,30 @@ public class ObJourneyStepLifecycleService {
     public ObJourneyStep resume(long stepId, long callerId) {
         ObJourneyStep step = requireStep(stepId);
         requireOwnership(step, callerId);
-        if (step.getStatus() != ObJourneyStepStatus.BLOCKED && step.getStatus() != ObJourneyStepStatus.WAITING_ON_CLIENT) {
-            throw new InvalidStepTransitionException(stepId, "resume", step.getStatus());
+        ObJourneyStepStatus previousStatus = step.getStatus();
+        if (previousStatus != ObJourneyStepStatus.BLOCKED && previousStatus != ObJourneyStepStatus.WAITING_ON_CLIENT) {
+            throw new InvalidStepTransitionException(stepId, "resume", previousStatus);
         }
 
         step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
         step.setBlockedReasonCode(null);
         step.setBlockedNote(null);
+
+        if (previousStatus == ObJourneyStepStatus.WAITING_ON_CLIENT) {
+            Instant resumedAt = Instant.now();
+            recomputeDueAtOnResume(step, resumedAt);
+
+            ObStepClockEvent resumed = new ObStepClockEvent();
+            resumed.setStepId(step.getId());
+            resumed.setJourneyId(step.getJourneyId());
+            resumed.setEventType(ObStepClockEventType.RESUMED);
+            resumed.setAttributedTo(ObStepClockAttribution.INTERNAL);
+            resumed.setOccurredAt(resumedAt);
+            resumed.setActorId(callerId);
+            resumed.setActorType(ObStepClockActorType.USER);
+            clockRecorder.record(resumed);
+        }
+
         return step;
     }
 
@@ -347,6 +429,60 @@ public class ObJourneyStepLifecycleService {
     /** C-107 · a plain read, for the controller's {@code ETag} precondition check — no transition, no lock. */
     public ObJourneyStep getStep(long stepId) {
         return requireStep(stepId);
+    }
+
+    /**
+     * C-105 · where a step's TAT budget lands, through the working calendar
+     * — {@link WorkingHoursService#addWorkingHours} against {@code tatDays}
+     * converted to hours via one working day's length ({@link
+     * com.edunext.edutrack.domain.masters.WorkingCalendar#workDayLength()}).
+     *
+     * <p>Precise hours rather than {@code OnboardingFixtureSchedule}'s own
+     * whole-day walk (start date + N working days, landing at day-end): that
+     * generator seeds demo data ahead of this method existing and its own
+     * comment says as much. A step that starts mid-morning earns credit for
+     * the rest of that day rather than being charged a full one, which is
+     * the more defensible answer once the real calculation is available —
+     * flagged here rather than silently diverging from the seed corpus.
+     */
+    private Instant computeDueAt(Instant startedAt, int tatDays) {
+        return workingHours.addWorkingHours(startedAt, tatHoursBudget(tatDays));
+    }
+
+    /**
+     * C-105 · {@code due_at} recomputation on resume from {@code
+     * WAITING_ON_CLIENT}. The step's own {@code due_at} — untouched since it
+     * was set, since neither {@link #block} nor {@link #waitOnClient} write
+     * it — is exactly what remained of the TAT budget as of the most recent
+     * {@code PAUSED} row's {@code occurredAt}: {@link
+     * WorkingHoursService#workingHoursBetween} between that instant and the
+     * old {@code due_at} gives the working hours still owed, and {@link
+     * WorkingHoursService#addWorkingHours} lands them from {@code resumedAt}
+     * instead. A step already breached when it paused ({@code pausedAt} at
+     * or after the old {@code due_at}) owes zero hours and resumes exactly
+     * at {@code resumedAt} — still breached, not handed a fresh grace
+     * period it did not earn.
+     *
+     * @throws IllegalStateException no {@code PAUSED} row exists for this
+     *         step — a step cannot reach {@code WAITING_ON_CLIENT} without
+     *         {@link #waitOnClient} having written one first
+     */
+    private void recomputeDueAtOnResume(ObJourneyStep step, Instant resumedAt) {
+        ObStepClockEvent lastPause = clockEvents
+                .findFirstByStepIdAndEventTypeOrderByOccurredAtDescIdDesc(step.getId(), ObStepClockEventType.PAUSED)
+                .orElseThrow(() -> new IllegalStateException(
+                        "step " + step.getId() + " is WAITING_ON_CLIENT with no PAUSED clock event on record"));
+
+        BigDecimal hoursOwed = workingHours.workingHoursBetween(lastPause.getOccurredAt(), step.getDueAt());
+        step.setDueAt(workingHours.addWorkingHours(resumedAt, hoursOwed));
+    }
+
+    /** {@code tatDays} working days, expressed as hours of the org's own working day length. */
+    private BigDecimal tatHoursBudget(int tatDays) {
+        long workDayMinutes = workingCalendars.getCalendar().workDayLength().toMinutes();
+        return BigDecimal.valueOf(tatDays)
+                .multiply(BigDecimal.valueOf(workDayMinutes))
+                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
     }
 
     private ObJourneyStep requireStep(long stepId) {
