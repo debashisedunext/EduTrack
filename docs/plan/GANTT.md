@@ -182,8 +182,8 @@ gantt
     M4 — Tickets — weeks 3–14 :active, c1, 2026-08-08, 22d
     section Phase 2 — Client Onboarding
     OB2 — Journey engine & ribbon :active, c2, 2026-09-03, 30d
-    OB3 — TAT & escalation :active, c3, 2026-09-06, -36d
-    OB5 — Hardening :c4, 2026-09-11, 21d
+    OB3 — TAT & escalation :active, c3, 2026-09-06, -37d
+    OB5 — Hardening :c4, 2026-09-10, 22d
     OB5 — Client portal :c5, 2026-10-15, 8d
 ```
 
@@ -227,10 +227,10 @@ gantt
 |  | `A-007` | Flyway baseline 5/5 — masters & ops | 1.5 | `A-005` | Tue 08 Sep | Tue 08 Sep | 2 | ✅ done |
 |  | `A-008` | Immutability triggers — two per table | 1 | `A-004` `A-005` | Tue 08 Sep | Tue 08 Sep | 1 | ✅ done |
 |  | `A-009` | Generated columns + indexes replacing PostgreSQL partial indexes | 0.5 | `A-006` | Tue 08 Sep | Tue 08 Sep | 2 | ✅ done |
-|  | `A-010` | Two DB users: edutrack_app | 0.5 | `A-009` ᶦ | Thu 06 Aug | Thu 06 Aug | 6 | ✅ done |
+|  | `A-010` | Two DB users: edutrack_app | 0.5 | `A-009` ᶦ | Thu 06 Aug | Thu 06 Aug | 7 | ✅ done |
 |  | `A-011` | CI pipeline | 1.5 | `A-001` | Tue 08 Sep | Tue 08 Sep | 3 | ✅ done |
 | 🔴 | `A-012` | dev-noauth Spring profile — injects a configurable fake principal | 1.5 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
-|  | `A-013` | Negative tests proving triggers reject UPDATE and DELETE on each… | 1 | `A-008` | Thu 06 Aug | Fri 07 Aug | 5 | ✅ done |
+|  | `A-013` | Negative tests proving triggers reject UPDATE and DELETE on each… | 1 | `A-008` | Thu 06 Aug | Fri 07 Aug | 6 | ✅ done |
 |  | `A-020` | Login endpoint — Argon2id | 1.5 | `A-003` `A-012` ᶦ | Fri 07 Aug | Sat 22 Aug | 0 | ✅ done |
 |  | `A-021` | failed_attempts counter, 15-minute lockout at 5, email to Admin on… | 0.5 | `A-020` ᶦ | Sat 08 Aug | Sat 08 Aug | 24 | ✅ done |
 |  | `A-022` | JWT access token, 15 min, claims sub, role, permissions[]… | 1 | `A-020` ᶦ | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
@@ -249,9 +249,9 @@ gantt
 |  | `A-035` | Out-of-scope IDs return 404, not 403, on /tickets/{id} and every… | 0.5 | `A-034` | Thu 13 Aug | Thu 13 Aug | 7 | ✅ done |
 | 🔴 | `A-036` | Permission test matrix | 2 | `A-035` | Thu 13 Aug | Thu 13 Aug | 8 | ✅ done |
 |  | `A-037` | ArchUnit rules | 1 | `A-034` ᶦ | Thu 13 Aug | Thu 13 Aug | 21 | ✅ done |
-|  | `A-040` | Append-only services for the three protected tables | 1.5 | `A-010` `A-013` | Fri 14 Aug | Fri 14 Aug | 1 | ✅ done |
-|  | `A-041` | Canonical JSON serialiser — fixed key order, fixed timestamp format | 1.5 | `A-040` | Fri 14 Aug | Fri 14 Aug | 2 | ✅ done |
-| 🔴 | `A-042` | Per-ticket hash chain with SELECT … FOR UPDATE on the ticket row… | 2.5 | `A-041` | Fri 14 Aug | Fri 14 Aug | 3 | ✅ done |
+|  | `A-040` | Append-only services for the three protected tables | 1.5 | `A-010` `A-013` | Fri 14 Aug | Fri 14 Aug | 2 | ✅ done |
+|  | `A-041` | Canonical JSON serialiser — fixed key order, fixed timestamp format | 1.5 | `A-040` | Fri 14 Aug | Fri 14 Aug | 3 | ✅ done |
+| 🔴 | `A-042` | Per-ticket hash chain with SELECT … FOR UPDATE on the ticket row… | 2.5 | `A-041` | Fri 14 Aug | Fri 14 Aug | 4 | ✅ done |
 |  | `A-043` | Compensating-entry pattern — is_correction, corrects_entry_id | 1 | `A-042` | Fri 14 Aug | Fri 14 Aug | 20 | ✅ done |
 |  | `A-044` | Nightly chain verifier in worker, admin alert on break… | 2 | `A-042` | Fri 14 Aug | Fri 14 Aug | 20 | ✅ done |
 |  | `A-045` | Concurrency test | 1.5 | `A-042` | Fri 14 Aug | Fri 14 Aug | 20 | ✅ done |
@@ -321,7 +321,7 @@ gantt
 |---|---|---|---:|---|---|---|---:|---|
 |  | `B-001` | Seed: 6 roles + the full permission matrix from blueprint §2 | 1 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 23 | ✅ done |
-|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 6 | ✅ done |
+|  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 7 | ✅ done |
 |  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 10 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -356,8 +356,8 @@ gantt
 |  | `B-036` | Error report generation | 1 | `B-034` ᶦ | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
 |  | `B-037` | import_batches traceability | 1 | `B-035` ᶦ | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
 |  | `B-038` | Resource bulk import — the second registration, not a second build | 1 | `B-035` | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
-|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Tue 18 Aug | Tue 18 Aug | 0 | ✅ done |
-|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Tue 18 Aug | Tue 18 Aug | 1 | ✅ done |
+|  | `B-039` | Status/stage/workflow master tab 1 | 2 | `B-003` `C-003` ᶦ | Tue 18 Aug | Tue 18 Aug | 1 | ✅ done |
+|  | `B-040` | Tab 2 — stages | 2 | `B-039` | Tue 18 Aug | Tue 18 Aug | 2 | ✅ done |
 |  | `B-041` | Tab 3 | 2.5 | `B-040` `B-050` | Fri 21 Aug | Fri 21 Aug | 14 | ✅ done |
 | 🔴 | `B-042` | Stages in use may be deprecated, never deleted | 1 | `B-040` | Wed 19 Aug | Wed 19 Aug | 16 | ✅ done |
 |  | `B-043` | Workflow template designer | 3 | `B-041` `B-042` | Fri 21 Aug | Fri 21 Aug | 15 | ✅ done |
@@ -447,7 +447,7 @@ gantt
 |  | `C-039` | Reopen dialog — mandatory reason, restart stage | 1.5 | `C-038` ᶦ | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
 |  | `C-040` | Close/resolve dialog | 1.5 | `C-038` ᶦ | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
 |  | `C-041` | Materialised total_effort_hrs, refreshed on every effort insert | 1 | `C-035` ᶦ | Tue 18 Aug | Tue 18 Aug | 16 | ✅ done |
-|  | `C-042` | Transition service | 2.5 | `A-042` `B-040` | Wed 19 Aug | Wed 19 Aug | 1 | ✅ done |
+|  | `C-042` | Transition service | 2.5 | `A-042` `B-040` | Wed 19 Aug | Wed 19 Aug | 2 | ✅ done |
 | 🔴 | `C-043` | The golden rule — only the current stage owner | 1.5 | `C-042` `A-033` | Wed 19 Aug | Wed 19 Aug | 17 | ✅ done |
 |  | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Wed 19 Aug | Wed 19 Aug | 12 | ✅ done |
 |  | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Wed 19 Aug | 13 | ✅ done |
@@ -482,11 +482,11 @@ gantt
 |  | `C-112` | Communications timeline | 2 | `C-111` ᶦ | Tue 06 Oct | Wed 07 Oct | 2 | ▫️ to do |
 | 🔴 | `C-113` | TAT scanner worker job | 3 | `C-105` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
 |  | `C-114` | RAG computation | 2 | `C-113` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
-|  | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Wed 09 Sep | Thu 10 Sep | 0 | 🟡 50% |
+|  | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | 🔵 in review |
 |  | `C-116` | Ribbon accessibility pass | 2 | `C-111` ᶦ | Thu 08 Oct | Fri 09 Oct | 2 | ▫️ to do |
-|  | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Fri 11 Sep | Sat 12 Sep | 2 | ▫️ to do |
+|  | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Thu 10 Sep | Fri 11 Sep | 3 | ▫️ to do |
 | 🔴 | `C-118` | PrerequisiteGateService — every mandatory task VERIFIED | 3 | `C-103` `B-125` ᶦ | Fri 18 Sep | Tue 22 Sep | 2 | ▫️ to do |
-|  | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Tue 15 Sep | Thu 17 Sep | 2 | ▫️ to do |
+|  | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Sat 12 Sep | Wed 16 Sep | 3 | ▫️ to do |
 |  | `C-120` | Journey TAT roll-up — total TAT | 1 | `C-110` ᶦ | Sat 10 Oct | Sat 10 Oct | 2 | ▫️ to do |
 |  | `C-121` | CP-01..CP-04 | 4 | `A-126` `B-125` ᶦ | Thu 15 Oct | Tue 20 Oct | 2 | ▫️ to do |
 |  | `C-122` | CP-05..CP-07 | 2 | `C-121` `A-127` ᶦ | Fri 23 Oct | Sat 24 Oct | 2 | ▫️ to do |
