@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObDashboardCardKey } from './obDashboardCardKey';
 import type { ObDashboardCardDeltaFromYesterday } from './obDashboardCardDeltaFromYesterday';
+import type { ObDashboardCardUnavailableReason } from './obDashboardCardUnavailableReason';
 
 /**
  * One card on the OB-02 board.
@@ -60,4 +61,55 @@ a deployment has data. A count with no direction says nothing
 about whether anybody is winning.
  */
   deltaFromYesterday?: ObDashboardCardDeltaFromYesterday;
+  /** B-121 · true when `count` may overstate, because it was summed
+across `ob_dashboard_summary`'s product rows and this card counts
+**clients**.
+
+`overdue-clients`, `live` and `client-escalations` are stored as
+`COUNT(DISTINCT ob_client_id)` *within a product* — which is what
+makes the per-product figure right, and is A-108's own stated
+intent ("a client late on several services" is one client to
+chase). Adding those rows up therefore counts a client once per
+product they bought, and plan §4 makes multi-product the normal
+case ("multi-select products → N locked journeys"). The true
+distinct count is not recoverable from per-group distinct counts at
+any cost; the information is gone at write time.
+
+So the figure is the honest upper bound and says that it is one,
+rather than a number that is silently three times too large on a
+headline card. **Always false when `productId` is supplied** — one
+row is selected, nothing is summed, and every card is then exact.
+
+The fix is storage, not arithmetic: an org-wide row (blocked today
+by the `product_id` foreign key) or a client-keyed table beside the
+two A-108 created, which is the shape ticketing landed on with
+`client_daily_stats`. Until one exists, this flag is what stops the
+board overstating quietly.
+ */
+  countIsUpperBound?: boolean;
+  /** B-121 · non-null when the caller's scope has no table that can
+answer this card, with the reason in plain words. `count` is then
+0 and means nothing; a client renders the sentence instead of the
+number.
+
+**This exists because `ob_dashboard_summary` is keyed
+`(stat_date, product_id)` and carries no scope dimension.** A-112's
+resolver narrows OB_SALES to "clients they created" and
+OB_STEP_OWNER to "journeys containing their steps", and neither is
+a predicate a product-keyed pre-aggregate can express — so for
+those two roles the board is not merely unfiltered, it is
+unanswerable from the only source CLAUDE.md permits. The fix is a
+scope dimension on the table, which is a schema change; until then
+this says so rather than showing an org-wide number to a caller
+whose every other read is narrowed.
+
+**Not an empty board and not a 404.** A zero count renders as "you
+have nothing overdue", which is a factual claim about the data and
+is false; a 404 on a route the role legitimately holds reads to the
+client as a bug and would have it retry. This is `Widget`'s
+`unavailableReason` (A-056) transferred whole, including the reason
+it is stated on the wire rather than re-derived by the SPA — a role
+rule stated twice is a role rule that drifts.
+ */
+  unavailableReason?: ObDashboardCardUnavailableReason;
 }
