@@ -36,32 +36,32 @@ Each phase is counted on its own. A phase's *working days available* is the span
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 32 of 82 (39%) | 68.0 of 177.0 (38%) |
-| In flight | 3 | 7.0 |
-| On the driving chain | 16 | 39.0 |
-| Zero float (no slack at all) | 47 | 103.0 |
+| Complete | 33 of 82 (40%) | 70.0 of 177.0 (40%) |
+| In flight | 2 | 5.0 |
+| On the driving chain | 15 | 37.0 |
+| Zero float (no slack at all) | 46 | 101.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 28 | 16 | 57.0 | 40 | 142% ⚠️ | Tue 20 Oct |
 | **B** | Ayush | 27 | 7 | 52.0 | 40 | 130% ⚠️ | Wed 28 Oct |
-| **C** | Divyansh | 25 | 9 | 64.0 | 40 | 160% ⚠️ | Wed 28 Oct |
+| **C** | Divyansh | 25 | 10 | 64.0 | 40 | 160% ⚠️ | Wed 28 Oct |
 | **D** | Debashis | 2 | 0 | 4.0 | 40 | 10% | Fri 11 Sep |
 
 ### Whole plan
 
 | | Tasks | Effort (days) |
 |---|---:|---:|
-| Complete | 273 of 326 (84%) | 428.8 of 542.8 (79%) |
-| In flight | 3 | 7.0 |
-| On the driving chain | 17 | 40.0 |
-| Zero float (no slack at all) | 50 | 108.0 |
+| Complete | 274 of 326 (84%) | 430.8 of 542.8 (79%) |
+| In flight | 2 | 5.0 |
+| On the driving chain | 16 | 38.0 |
+| Zero float (no slack at all) | 49 | 106.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 93 | 79 | 152.0 | 62 | 245% ⚠️ | Tue 20 Oct |
 | **B** | Ayush | 82 | 62 | 141.8 | 62 | 229% ⚠️ | Wed 28 Oct |
-| **C** | Divyansh | 84 | 67 | 154.0 | 62 | 248% ⚠️ | Wed 28 Oct |
+| **C** | Divyansh | 84 | 68 | 154.0 | 62 | 248% ⚠️ | Wed 28 Oct |
 | **D** | Debashis | 67 | 65 | 95.0 | 62 | 153% ⚠️ | Fri 11 Sep |
 
 
@@ -90,7 +90,7 @@ Each phase is counted on its own. A phase's *working days available* is the span
 | `C-030` @mention type-ahead over project members, firing | Divyansh | Wed 23 Sep | Mon 17 Aug | +29d |
 | `C-031` Visibility toggle — default internal, always | Divyansh | Thu 24 Sep | Mon 17 Aug | +28d |
 
-*…and 33 more — see the interactive chart.*
+*…and 34 more — see the interactive chart.*
 
 ---
 
@@ -102,21 +102,20 @@ Each of these is held up either by the one before it or by the fact that the sam
 |---:|---|---|---|---:|---|---|---|
 | 1 | `C-047` | Divyansh | Skip a stage | 1 | Tue 08 Sep | Tue 08 Sep | — |
 | 2 | `C-108` | Divyansh | Backup owner | 2 | Wed 09 Sep | Wed 09 Sep | Divyansh was busy on `C-047` |
-| 3 | `C-114` | Divyansh | RAG computation | 2 | Wed 09 Sep | Wed 09 Sep | Divyansh was busy on `C-108` |
-| 4 | `C-115` | Divyansh | Escalation matrix | 3 | Thu 10 Sep | Sat 12 Sep | `C-114` finished |
-| 5 | `C-117` | Divyansh | Scanner load pass | 2 | Tue 15 Sep | Wed 16 Sep | `C-115` finished |
-| 6 | `C-119` | Divyansh | Step dependency graph — depends_on_step_id | 3 | Thu 17 Sep | Sat 19 Sep | Divyansh was busy on `C-117` |
-| 7 | `C-118` | Divyansh | PrerequisiteGateService — every mandatory task VERIF | 3 | Tue 22 Sep | Thu 24 Sep | Divyansh was busy on `C-119` |
-| 8 | `C-123` | Divyansh | Service-level dependency engine | 3 | Fri 25 Sep | Tue 29 Sep | `C-118` finished |
-| 9 | `C-110` | Divyansh | OB-05 | 3 | Wed 30 Sep | Fri 02 Oct | Divyansh was busy on `C-123` |
-| 10 | `C-111` | Divyansh | OB-06 | 3 | Sat 03 Oct | Wed 07 Oct | `C-110` finished |
-| 11 | `C-112` | Divyansh | Communications timeline | 2 | Thu 08 Oct | Fri 09 Oct | `C-111` finished |
-| 12 | `C-116` | Divyansh | Ribbon accessibility pass | 2 | Sat 10 Oct | Tue 13 Oct | Divyansh was busy on `C-112` |
-| 13 | `C-120` | Divyansh | Journey TAT roll-up — total TAT | 1 | Wed 14 Oct | Wed 14 Oct | Divyansh was busy on `C-116` |
-| 14 | `C-125` | Divyansh | Ribbon SD/FD + animated status emojis + v1.2 termino | 2 | Thu 15 Oct | Fri 16 Oct | Divyansh was busy on `C-120` |
-| 15 | `C-121` | Divyansh | CP-01..CP-04 | 4 | Sat 17 Oct | Thu 22 Oct | Divyansh was busy on `C-125` |
-| 16 | `C-126` | Divyansh | Portal escalation flow | 2 | Fri 23 Oct | Sat 24 Oct | `C-121` finished |
-| 17 | `C-122` | Divyansh | CP-05..CP-07 | 2 | Tue 27 Oct | Wed 28 Oct | Divyansh was busy on `C-126` |
+| 3 | `C-115` | Divyansh | Escalation matrix | 3 | Wed 09 Sep | Sat 12 Sep | Divyansh was busy on `C-108` |
+| 4 | `C-117` | Divyansh | Scanner load pass | 2 | Sat 12 Sep | Wed 16 Sep | `C-115` finished |
+| 5 | `C-119` | Divyansh | Step dependency graph — depends_on_step_id | 3 | Wed 16 Sep | Sat 19 Sep | Divyansh was busy on `C-117` |
+| 6 | `C-118` | Divyansh | PrerequisiteGateService — every mandatory task VERIF | 3 | Sat 19 Sep | Thu 24 Sep | Divyansh was busy on `C-119` |
+| 7 | `C-123` | Divyansh | Service-level dependency engine | 3 | Thu 24 Sep | Tue 29 Sep | `C-118` finished |
+| 8 | `C-110` | Divyansh | OB-05 | 3 | Tue 29 Sep | Fri 02 Oct | Divyansh was busy on `C-123` |
+| 9 | `C-111` | Divyansh | OB-06 | 3 | Fri 02 Oct | Wed 07 Oct | `C-110` finished |
+| 10 | `C-112` | Divyansh | Communications timeline | 2 | Wed 07 Oct | Fri 09 Oct | `C-111` finished |
+| 11 | `C-116` | Divyansh | Ribbon accessibility pass | 2 | Fri 09 Oct | Tue 13 Oct | Divyansh was busy on `C-112` |
+| 12 | `C-120` | Divyansh | Journey TAT roll-up — total TAT | 1 | Tue 13 Oct | Wed 14 Oct | Divyansh was busy on `C-116` |
+| 13 | `C-125` | Divyansh | Ribbon SD/FD + animated status emojis + v1.2 termino | 2 | Wed 14 Oct | Fri 16 Oct | Divyansh was busy on `C-120` |
+| 14 | `C-121` | Divyansh | CP-01..CP-04 | 4 | Sat 17 Oct | Thu 22 Oct | Divyansh was busy on `C-125` |
+| 15 | `C-126` | Divyansh | Portal escalation flow | 2 | Fri 23 Oct | Sat 24 Oct | `C-121` finished |
+| 16 | `C-122` | Divyansh | CP-05..CP-07 | 2 | Tue 27 Oct | Wed 28 Oct | Divyansh was busy on `C-126` |
 
 ---
 
@@ -178,8 +177,8 @@ gantt
     M4 — Tickets — weeks 3–14 :active, c1, 2026-08-08, 22d
     section Phase 2 — Client Onboarding
     OB2 — Journey engine & ribbon :active, c2, 2026-09-03, 32d
-    OB3 — TAT & escalation :active, c3, 2026-09-06, -33d
-    OB5 — Hardening :c4, 2026-09-15, 21d
+    OB3 — TAT & escalation :active, c3, 2026-09-06, -34d
+    OB5 — Hardening :c4, 2026-09-12, 22d
     OB5 — Client portal :c5, 2026-10-17, 8d
 ```
 
@@ -306,7 +305,7 @@ gantt
 |  | `A-125` | client_accounts + CLIENT principal — identity-layer table | 3 | `A-110` ᶦ | Fri 09 Oct | Tue 13 Oct | 0 | ▫️ to do |
 |  | `A-126` | Portal route trees + ClientScopeResolver | 3 | `A-125` ᶦ | Wed 14 Oct | Fri 16 Oct | 0 | ▫️ to do |
 |  | `A-127` | is_client_visible activation | 2 | `A-126` ᶦ | Sat 17 Oct | Tue 20 Oct | 4 | ▫️ to do |
-|  | `A-128` | Service dependency & escalation schema | 1 | `A-103` ᶦ | Thu 03 Sep | Thu 03 Sep | 15 | ✅ done |
+|  | `A-128` | Service dependency & escalation schema | 1 | `A-103` ᶦ | Thu 03 Sep | Thu 03 Sep | 8 | ✅ done |
 
 </details>
 
@@ -469,25 +468,25 @@ gantt
 | 🔴 | `C-103` | Instantiation | 3 | `C-101` `A-104` ᶦ | Fri 04 Sep | Fri 04 Sep | 0 | ✅ done |
 | 🔴 | `C-104` | Step lifecycle | 3 | `C-103` ᶦ | Fri 04 Sep | Sat 05 Sep | 0 | ✅ done |
 | 🔴 | `C-105` | Clock events and working-calendar due_at | 3 | `C-104` `A-105` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
-| 🔴 | `C-106` | Sub-category answers and the completion gate — one server-side gate | 2 | `C-104` ᶦ | Fri 04 Sep | Sat 05 Sep | 19 | ✅ done |
+| 🔴 | `C-106` | Sub-category answers and the completion gate — one server-side gate | 2 | `C-104` ᶦ | Fri 04 Sep | Sat 05 Sep | 14 | ✅ done |
 |  | `C-107` | Skip a step — Manager and Admin only, reason mandatory, history row | 1 | `C-104` ᶦ | Sat 05 Sep | Sat 05 Sep | 37 | ✅ done |
 | ▲ | `C-108` | Backup owner | 2 | `C-104` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | 🔵 in review |
-| 🔴 | `C-109` | The onboarding ribbon | 3 | — | Thu 03 Sep | Thu 03 Sep | 18 | ✅ done |
-| ▲ | `C-110` | OB-05 | 3 | `C-109` `B-102` ᶦ | Wed 30 Sep | Fri 02 Oct | 0 | ▫️ to do |
-| ▲ | `C-111` | OB-06 | 3 | `C-106` `C-110` ᶦ | Sat 03 Oct | Wed 07 Oct | 0 | ▫️ to do |
-| ▲ | `C-112` | Communications timeline | 2 | `C-111` ᶦ | Thu 08 Oct | Fri 09 Oct | 0 | ▫️ to do |
+| 🔴 | `C-109` | The onboarding ribbon | 3 | — | Thu 03 Sep | Thu 03 Sep | 12 | ✅ done |
+| ▲ | `C-110` | OB-05 | 3 | `C-109` `B-102` ᶦ | Tue 29 Sep | Fri 02 Oct | 0 | ▫️ to do |
+| ▲ | `C-111` | OB-06 | 3 | `C-106` `C-110` ᶦ | Fri 02 Oct | Wed 07 Oct | 0 | ▫️ to do |
+| ▲ | `C-112` | Communications timeline | 2 | `C-111` ᶦ | Wed 07 Oct | Fri 09 Oct | 0 | ▫️ to do |
 | 🔴 | `C-113` | TAT scanner worker job | 3 | `C-105` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
-| ▲ | `C-114` | RAG computation | 2 | `C-113` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | 🔵 in review |
-| ▲ | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Thu 10 Sep | Sat 12 Sep | 0 | ▫️ to do |
-| ▲ | `C-116` | Ribbon accessibility pass | 2 | `C-111` ᶦ | Sat 10 Oct | Tue 13 Oct | 0 | ▫️ to do |
-| ▲ | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Tue 15 Sep | Wed 16 Sep | 0 | ▫️ to do |
-| ▲🔴 | `C-118` | PrerequisiteGateService — every mandatory task VERIFIED | 3 | `C-103` `B-125` ᶦ | Tue 22 Sep | Thu 24 Sep | 0 | ▫️ to do |
-| ▲ | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Thu 17 Sep | Sat 19 Sep | 0 | ▫️ to do |
-| ▲ | `C-120` | Journey TAT roll-up — total TAT | 1 | `C-110` ᶦ | Wed 14 Oct | Wed 14 Oct | 0 | ▫️ to do |
+|  | `C-114` | RAG computation | 2 | `C-113` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
+| ▲ | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Wed 09 Sep | Sat 12 Sep | 0 | ▫️ to do |
+| ▲ | `C-116` | Ribbon accessibility pass | 2 | `C-111` ᶦ | Fri 09 Oct | Tue 13 Oct | 0 | ▫️ to do |
+| ▲ | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Sat 12 Sep | Wed 16 Sep | 0 | ▫️ to do |
+| ▲🔴 | `C-118` | PrerequisiteGateService — every mandatory task VERIFIED | 3 | `C-103` `B-125` ᶦ | Sat 19 Sep | Thu 24 Sep | 0 | ▫️ to do |
+| ▲ | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Wed 16 Sep | Sat 19 Sep | 0 | ▫️ to do |
+| ▲ | `C-120` | Journey TAT roll-up — total TAT | 1 | `C-110` ᶦ | Tue 13 Oct | Wed 14 Oct | 0 | ▫️ to do |
 | ▲ | `C-121` | CP-01..CP-04 | 4 | `A-126` `B-125` ᶦ | Sat 17 Oct | Thu 22 Oct | 0 | ▫️ to do |
 | ▲ | `C-122` | CP-05..CP-07 | 2 | `C-121` `A-127` ᶦ | Tue 27 Oct | Wed 28 Oct | 0 | ▫️ to do |
-| ▲ | `C-123` | Service-level dependency engine | 3 | `C-118` `A-128` ᶦ | Fri 25 Sep | Tue 29 Sep | 0 | ▫️ to do |
-| ▲ | `C-125` | Ribbon SD/FD + animated status emojis + v1.2 terminology sweep | 2 | `C-110` ᶦ | Thu 15 Oct | Fri 16 Oct | 0 | ▫️ to do |
+| ▲ | `C-123` | Service-level dependency engine | 3 | `C-118` `A-128` ᶦ | Thu 24 Sep | Tue 29 Sep | 0 | ▫️ to do |
+| ▲ | `C-125` | Ribbon SD/FD + animated status emojis + v1.2 terminology sweep | 2 | `C-110` ᶦ | Wed 14 Oct | Fri 16 Oct | 0 | ▫️ to do |
 | ▲ | `C-126` | Portal escalation flow | 2 | `C-121` `A-128` ᶦ | Fri 23 Oct | Sat 24 Oct | 0 | ▫️ to do |
 
 </details>
