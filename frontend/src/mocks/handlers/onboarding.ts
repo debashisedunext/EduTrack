@@ -1,5 +1,7 @@
 import { http } from 'msw';
-import type { Db, ObApplication, ObClient, ObContact, ObJourney, ObProduct, ObStep } from '../db';
+import type {
+  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct, ObStep,
+} from '../db';
 import { getDb, nextId } from '../db';
 import { notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
 
@@ -32,6 +34,11 @@ import { notFound, ok, paginate, problem, url, userRef, validationFailed } from 
  *    everyone is the safe direction to be wrong in.
  * 4. **A product with no active template cannot be bought** — `409`. A
  *    purchase with nothing to instantiate would board a client into nothing.
+ * 5. **B-103 · consent needs a basis, and the last primary cannot go.** A
+ *    `whatsappOptIn: true` with no `whatsappOptInSource` is a `400`, and
+ *    demoting or deactivating the client's only primary SPOC is a `409`. Both
+ *    are rules a panel built against a permissive mock would discover from the
+ *    real server, on the day it is wired up.
  */
 
 // ── mappers to the contract's shapes ────────────────────────────────────────
@@ -223,6 +230,108 @@ const normaliseName = (name: string): string =>
 
 // ── handlers ────────────────────────────────────────────────────────────────
 
+// ── B-103 · the SPOC rules ──────────────────────────────────────────────────
+
+/** `ObContactUpsertRequest`. The whole representation, not a sparse patch. */
+type ContactUpsert = Partial<{
+  name: string; designation: string | null; email: string; phone: string | null;
+  whatsappOptIn: boolean; whatsappOptInSource: ObConsentSource | null;
+  isPrimary: boolean; isActive: boolean;
+}>;
+
+const SETTABLE_SOURCES: ObConsentSource[] =
+  ['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL'];
+
+/**
+ * Everything the server refuses with a `400`, refused here too.
+ *
+ * The consent pair is the one worth modelling rather than waving through.
+ * `whatsappOptIn: true` with no basis is the exact state B-103 exists to
+ * prevent, and `UNRECORDED` is readable but never settable — it belongs to rows
+ * written before the capture existed. A mock that accepted either would let a
+ * form ship that the real server rejects.
+ */
+function contactErrors(body: ContactUpsert): Record<string, string[]> | null {
+  const errors: Record<string, string[]> = {};
+  if (!body.name) errors.name = ['A name is required'];
+  if (!body.email) errors.email = ['An email is required'];
+  if (body.isPrimary == null) errors.isPrimary = ['Say whether this is the primary SPOC'];
+
+  const source = body.whatsappOptInSource;
+  if (body.whatsappOptIn) {
+    if (!source || !SETTABLE_SOURCES.includes(source)) {
+      errors.whatsappOptInSource = [
+        `Say how this consent was given — one of ${SETTABLE_SOURCES.join(', ')}`,
+      ];
+    }
+  } else if (source) {
+    errors.whatsappOptInSource = ['There is no consent to attribute — whatsappOptIn is false'];
+  }
+
+  if (body.isPrimary && body.isActive === false) {
+    errors.isPrimary = ['A removed contact cannot be the primary SPOC'];
+  }
+  return Object.keys(errors).length ? errors : null;
+}
+
+/**
+ * The consent triple after this save.
+ *
+ * **An unchanged consent keeps its original date.** Correcting a phone number
+ * must not re-date a consent given months ago — the same evidence a missing
+ * basis destroys, reached by a routine edit. `current` is null on a create.
+ */
+function consentOf(body: ContactUpsert, current: ObContact | null) {
+  if (!body.whatsappOptIn) {
+    return { whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null };
+  }
+  const source = body.whatsappOptInSource!;
+  const unchanged = current?.whatsappOptIn && current.whatsappOptInSource === source;
+  return {
+    whatsappOptIn: true,
+    whatsappOptInAt: unchanged ? current!.whatsappOptInAt : new Date().toISOString(),
+    whatsappOptInSource: source,
+  };
+}
+
+/** Promotion demotes the incumbent in the same write, never in a second one. */
+function demoteOtherPrimaries(c: ObClient, exceptId?: number) {
+  for (const x of c.contacts) {
+    if (x.id !== exceptId && x.isPrimary && x.isActive) x.isPrimary = false;
+  }
+}
+
+/**
+ * `409` — the client would be left with no primary SPOC.
+ *
+ * Stricter than the ticketing master, which allows none: onboarding has no gate
+ * that reports a missing primary, and the kickoff mail, the portal password and
+ * every sign-off request address them. Not a dead end — add or promote a
+ * replacement first, which demotes the incumbent in one request.
+ */
+const lastPrimary = (contact: ObContact) =>
+  problem(409, 'ob-contact-primary-required', 'A client needs one primary SPOC', {
+    forceable: false,
+    errors: {
+      isPrimary: [
+        `${contact.name} is this client's only primary SPOC. Add or promote a replacement first.`,
+      ],
+    },
+  });
+
+/** `409` — scoped to the client. The same address at two clients is legitimate. */
+const duplicateEmail = (holder: ObContact) =>
+  problem(409, 'ob-contact-email-duplicate', 'That email is already a contact on this client', {
+    forceable: false,
+    errors: {
+      email: [
+        holder.isActive
+          ? `${holder.email} is already a contact on this client. One person, one row.`
+          : `${holder.email} belongs to a removed contact. Reactivate them rather than adding a second row.`,
+      ],
+    },
+  });
+
 export const onboardingHandlers = [
   // ── products ──────────────────────────────────────────────────────────────
   http.get(url('/onboarding/products'), ({ request }) => {
@@ -330,7 +439,7 @@ export const onboardingHandlers = [
       name?: string; description?: string | null; onboardingDate?: string;
       pan?: string | null; address?: string | null; salesPersonId?: number | null;
       licenseType?: string | null;
-      contacts?: ObContact[];
+      contacts?: ContactUpsert[];
       applications?: { productId: number; licenseType?: string | null; units?: number | null;
         licenseStart?: string | null; licenseEnd?: string | null }[];
       requirements?: string[];
@@ -397,7 +506,18 @@ export const onboardingHandlers = [
       status: 'ONBOARDING',
       liveAt: null,
       hasPortalLogin: body.createPortalLogin ?? false,
-      contacts: body.contacts!.map((c) => ({ ...c, id: ++contactId })),
+      // B-103 · the wizard's rows carry a consent basis and no stamp; the stamp
+      // is the server's to apply, which is why this maps rather than spreads.
+      contacts: body.contacts!.map((c) => ({
+        id: ++contactId,
+        name: c.name!,
+        designation: c.designation ?? null,
+        email: c.email!,
+        phone: c.phone ?? null,
+        ...consentOf(c, null),
+        isPrimary: Boolean(c.isPrimary),
+        isActive: true,
+      })),
       applications: body.applications!.map((a) => ({
         id: ++applicationId,
         productId: a.productId,
@@ -467,6 +587,100 @@ export const onboardingHandlers = [
     if (body.status != null) c.status = body.status;
     // `pan`, `contacts` and `applications` are absent deliberately — immutable,
     // and two operations with side effects a field update cannot carry.
+    return ok(obClientDetailDto(c, db));
+  }),
+
+  // ── B-103 · the SPOC panel ────────────────────────────────────────────────
+  //
+  // All three answer the WHOLE client document rather than the contact they
+  // wrote, exactly as the server does. `getObClient`'s ETag covers contacts, so
+  // a SPOC write invalidates it — a contact-shaped response would leave OB-05's
+  // Client info card holding a stale tag and make its next Save a 412. A mock
+  // that returned the contact would let a panel be built against a response
+  // shape the API never sends.
+
+  http.post(url('/onboarding/clients/:obClientId/contacts'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const body = (await request.json()) as ContactUpsert;
+    const invalid = contactErrors(body);
+    if (invalid) return validationFailed(invalid);
+
+    const clash = c.contacts.find((x) => x.email.toLowerCase() === body.email!.toLowerCase());
+    if (clash) return duplicateEmail(clash);
+
+    const active = body.isActive ?? true;
+    // Demote first, the way the server has to: uq_ob_client_contacts_primary
+    // refuses a second active primary, so the incumbent is out of the way
+    // before the new row exists.
+    if (body.isPrimary && active) demoteOtherPrimaries(c);
+
+    c.contacts.push({
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.contacts.map((y) => y.id))) + 1,
+      name: body.name!,
+      designation: body.designation ?? null,
+      email: body.email!,
+      phone: body.phone ?? null,
+      ...consentOf(body, null),
+      isPrimary: Boolean(body.isPrimary) && active,
+      isActive: active,
+    });
+    return ok(obClientDetailDto(c, db), undefined, { status: 201 });
+  }),
+
+  http.patch(
+    url('/onboarding/clients/:obClientId/contacts/:contactId'),
+    async ({ params, request }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      const contact = c.contacts.find((x) => x.id === Number(params.contactId));
+      // Resolved by BOTH ids: a real contact under another client is 404, not
+      // 403, so the nested route cannot enumerate the SPOC table.
+      if (!contact) return notFound('Contact');
+
+      const body = (await request.json()) as ContactUpsert;
+      const invalid = contactErrors(body);
+      if (invalid) return validationFailed(invalid);
+
+      const clash = c.contacts.find(
+        (x) => x.id !== contact.id && x.email.toLowerCase() === body.email!.toLowerCase(),
+      );
+      if (clash) return duplicateEmail(clash);
+
+      const active = body.isActive ?? contact.isActive;
+      const staysPrimary = Boolean(body.isPrimary) && active;
+      if (contact.isPrimary && contact.isActive && !staysPrimary) return lastPrimary(contact);
+
+      if (staysPrimary) demoteOtherPrimaries(c, contact.id);
+
+      // The whole representation, not a sparse patch — an absent designation is
+      // a cleared designation.
+      contact.name = body.name!;
+      contact.designation = body.designation ?? null;
+      contact.email = body.email!;
+      contact.phone = body.phone ?? null;
+      Object.assign(contact, consentOf(body, contact));
+      contact.isPrimary = staysPrimary;
+      contact.isActive = active;
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
+
+  http.delete(url('/onboarding/clients/:obClientId/contacts/:contactId'), ({ params }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+    const contact = c.contacts.find((x) => x.id === Number(params.contactId));
+    if (!contact) return notFound('Contact');
+
+    if (contact.isPrimary && contact.isActive) return lastPrimary(contact);
+    // Deactivates, never deletes — the row is what a past sign-off points at.
+    // Removing an already-removed contact is not an error: it is a setter, and
+    // the second half of a double-click must not fail.
+    contact.isActive = false;
     return ok(obClientDetailDto(c, db));
   }),
 ];

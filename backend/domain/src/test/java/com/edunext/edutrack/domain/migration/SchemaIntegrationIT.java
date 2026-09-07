@@ -249,7 +249,17 @@ class SchemaIntegrationIT {
                         // read as a mistake and "fixed" by deleting it. It is
                         // the TAT record every breach and every
                         // waiting-on-client attribution is computed from.
-                        "trg_ob_clock_no_update", "trg_ob_clock_no_delete");
+                        "trg_ob_clock_no_update", "trg_ob_clock_no_delete",
+                        // B-103 · the SPOC consent journal. Every grant and
+                        // every withdrawal, kept, because the columns on the
+                        // contact say where consent stands and cannot say it
+                        // ever stood elsewhere — which is the only thing that
+                        // answers "did consent cover the messages we already
+                        // sent". Nothing sends WhatsApp this phase; that is
+                        // precisely why these two are easy to read as
+                        // premature and delete. They are what makes the record
+                        // worth having by the time something does.
+                        "trg_ob_consent_no_update", "trg_ob_consent_no_delete");
             }
         }
     }
