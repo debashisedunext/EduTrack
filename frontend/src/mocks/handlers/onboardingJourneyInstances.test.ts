@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getDb } from '../db';
 
 /**
  * C-104 · mock-handler tests for the five step-lifecycle routes.
@@ -18,6 +19,22 @@ async function post(path: string, body?: unknown) {
     method: 'POST',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => null);
+  return { status: res.status, data };
+}
+
+async function get(path: string) {
+  const res = await fetch(`${BASE}${path}`);
+  const data = await res.json().catch(() => null);
+  return { status: res.status, data };
+}
+
+async function patch(path: string, body: unknown) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
   return { status: res.status, data };
@@ -121,5 +138,58 @@ describe('C-104 · step lifecycle', () => {
   it('404s an unknown step', async () => {
     const { status } = await post('/onboarding/journey-steps/999999/start');
     expect(status).toBe(404);
+  });
+});
+
+describe('C-108 · backup owner — assignment and leave-aware inheritance', () => {
+  it('effectiveOwnerUserId is the owner when nobody is on leave', async () => {
+    const { status, data } = await get('/onboarding/journey-steps/5');
+    expect(status).toBe(200);
+    expect(data.data.ownerUserId).toBe(3);
+    expect(data.data.effectiveOwnerUserId).toBe(3);
+  });
+
+  it('reassigns owner, backup owner, TAT and due date', async () => {
+    const { status, data } = await patch('/onboarding/journey-steps/5', {
+      backupOwnerUserId: 4, tatDays: 6, dueAt: '2026-11-01T00:00:00.000Z',
+    });
+    expect(status).toBe(200);
+    expect(data.data.ownerUserId).toBe(3);
+    expect(data.data.backupOwnerUserId).toBe(4);
+    expect(data.data.tatDays).toBe(6);
+    expect(data.data.dueAt).toBe('2026-11-01T00:00:00.000Z');
+  });
+
+  it('leaves fields the request omits unchanged', async () => {
+    await patch('/onboarding/journey-steps/5', { backupOwnerUserId: 4 });
+    const { data } = await patch('/onboarding/journey-steps/5', { tatDays: 7 });
+    expect(data.data.backupOwnerUserId).toBe(4);
+    expect(data.data.tatDays).toBe(7);
+  });
+
+  it('clears the backup owner on an explicit null', async () => {
+    await patch('/onboarding/journey-steps/5', { backupOwnerUserId: 4 });
+    const { data } = await patch('/onboarding/journey-steps/5', { backupOwnerUserId: null });
+    expect(data.data.backupOwnerUserId).toBeNull();
+  });
+
+  it('refuses to re-plan a step that is already closed', async () => {
+    const { status, data } = await patch('/onboarding/journey-steps/1', { tatDays: 1 });
+    expect(status).toBe(422);
+    expect(data.type).toBe('https://edutrack/errors/ob-step-terminal');
+  });
+
+  it('the backup owner becomes effective when the owner is on approved leave today', async () => {
+    await patch('/onboarding/journey-steps/5', { backupOwnerUserId: 4 });
+    const today = new Date().toISOString().slice(0, 10);
+    getDb().calendar.leaves.push({
+      id: 9001, userId: 3, startDate: today, endDate: today,
+      leaveType: 'CASUAL', isHalfDay: false, status: 'APPROVED', reason: null,
+    });
+
+    const { data } = await get('/onboarding/journey-steps/5');
+
+    expect(data.data.ownerUserId).toBe(3);
+    expect(data.data.effectiveOwnerUserId).toBe(4);
   });
 });
