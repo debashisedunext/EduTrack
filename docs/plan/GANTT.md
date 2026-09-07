@@ -20,7 +20,7 @@ Each phase is counted on its own. A phase's *working days available* is the span
 |---|---:|---:|
 | Complete | 242 of 244 (99%) | 362.8 of 365.8 (99%) |
 | In flight | 0 | 0.0 |
-| On the driving chain | 1 | 1.0 |
+| On the driving chain | 0 | 0.0 |
 | Zero float (no slack at all) | 2 | 3.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
@@ -37,9 +37,9 @@ Each phase is counted on its own. A phase's *working days available* is the span
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 37 of 82 (45%) | 82.0 of 177.0 (46%) |
-| In flight | 3 | 6.0 |
+| In flight | 4 | 8.0 |
 | On the driving chain | 14 | 34.0 |
-| Zero float (no slack at all) | 17 | 41.0 |
+| Zero float (no slack at all) | 16 | 38.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -53,9 +53,9 @@ Each phase is counted on its own. A phase's *working days available* is the span
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 279 of 326 (86%) | 444.8 of 542.8 (82%) |
-| In flight | 3 | 6.0 |
-| On the driving chain | 15 | 35.0 |
-| Zero float (no slack at all) | 19 | 44.0 |
+| In flight | 4 | 8.0 |
+| On the driving chain | 14 | 34.0 |
+| Zero float (no slack at all) | 18 | 41.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -100,11 +100,11 @@ Each of these is held up either by the one before it or by the fact that the sam
 
 | # | Task | Owner | Title | Est | Start | End | Held up by |
 |---:|---|---|---|---:|---|---|---|
-| 1 | `C-047` | Divyansh | Skip a stage | 1 | Tue 08 Sep | Tue 08 Sep | — |
-| 2 | `C-108` | Divyansh | Backup owner | 2 | Wed 09 Sep | Wed 09 Sep | Divyansh was busy on `C-047` |
-| 3 | `C-117` | Divyansh | Scanner load pass | 2 | Wed 09 Sep | Fri 11 Sep | Divyansh was busy on `C-108` |
-| 4 | `C-119` | Divyansh | Step dependency graph — depends_on_step_id | 3 | Fri 11 Sep | Wed 16 Sep | Divyansh was busy on `C-117` |
-| 5 | `C-118` | Divyansh | PrerequisiteGateService — every mandatory task VERIF | 3 | Thu 17 Sep | Sat 19 Sep | Divyansh was busy on `C-119` |
+| 1 | `B-122` | Ayush | OB-10 | 3 | Mon 07 Sep | Mon 07 Sep | — |
+| 2 | `B-123` | Ayush | Export redaction | 1 | Tue 08 Sep | Tue 08 Sep | `B-122` finished |
+| 3 | `B-124` | Ayush | Prerequisites master + OB-14 — versioned master task | 3 | Tue 08 Sep | Fri 11 Sep | Ayush was busy on `B-123` |
+| 4 | `B-125` | Ayush | Per-client prerequisite instances | 3 | Fri 11 Sep | Wed 16 Sep | `B-124` finished |
+| 5 | `C-118` | Divyansh | PrerequisiteGateService — every mandatory task VERIF | 3 | Thu 17 Sep | Sat 19 Sep | `B-125` finished |
 | 6 | `C-123` | Divyansh | Service-level dependency engine | 3 | Tue 22 Sep | Thu 24 Sep | `C-118` finished |
 | 7 | `C-110` | Divyansh | OB-05 | 3 | Fri 25 Sep | Tue 29 Sep | Divyansh was busy on `C-123` |
 | 8 | `C-111` | Divyansh | OB-06 | 3 | Wed 30 Sep | Fri 02 Oct | `C-110` finished |
@@ -389,9 +389,9 @@ gantt
 |  | `B-120` | ob_dashboard_summary refresh job | 2 | `A-108` ᶦ | Sat 05 Sep | Sat 05 Sep | 0 | ✅ done |
 |  | `B-121` | OB-02 | 3 | `B-120` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
 |  | `B-122` | OB-10 | 3 | `B-120` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
-|  | `B-123` | Export redaction | 1 | `B-122` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | 🔵 in review |
-|  | `B-124` | Prerequisites master + OB-14 — versioned master task set | 3 | `A-101` ᶦ | Tue 08 Sep | Fri 11 Sep | 0 | ▫️ to do |
-|  | `B-125` | Per-client prerequisite instances | 3 | `B-124` ᶦ | Fri 11 Sep | Wed 16 Sep | 0 | ▫️ to do |
+| ▲ | `B-123` | Export redaction | 1 | `B-122` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | 🔵 in review |
+| ▲ | `B-124` | Prerequisites master + OB-14 — versioned master task set | 3 | `A-101` ᶦ | Tue 08 Sep | Fri 11 Sep | 0 | ▫️ to do |
+| ▲ | `B-125` | Per-client prerequisite instances | 3 | `B-124` ᶦ | Fri 11 Sep | Wed 16 Sep | 0 | ▫️ to do |
 |  | `B-126` | Client-account panel | 2 | `A-125` ᶦ | Fri 02 Oct | Sat 03 Oct | 1 | ▫️ to do |
 |  | `B-127` | Dashboard v1.2 cards + drill slide-over | 3 | `B-119` `C-113` ᶦ | Fri 16 Oct | Tue 20 Oct | 1 | ▫️ to do |
 |  | `B-128` | Delayed-projects grid + implementor workload & performance grid | 2 | `B-127` ᶦ | Wed 21 Oct | Thu 22 Oct | 1 | ▫️ to do |
@@ -446,7 +446,7 @@ gantt
 |  | `C-044` | Handoff dialog — next stage | 2.5 | `C-042` `C-035` | Wed 19 Aug | Wed 19 Aug | 10 | ✅ done |
 |  | `C-045` | On submit: seal the current row | 2 | `C-044` `D-014` | Wed 19 Aug | Wed 19 Aug | 11 | ✅ done |
 |  | `C-046` | Backward moves | 1.5 | `C-042` ᶦ | Thu 20 Aug | Thu 20 Aug | 13 | ✅ done |
-| ▲ | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | ▫️ to do |
+|  | `C-047` | Skip a stage | 1 | `C-042` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | ▫️ to do |
 |  | `C-048` | Force-move (OVERRIDE) — PM/Admin, logged as an override | 1 | `C-042` ᶦ | Thu 20 Aug | Thu 20 Aug | 14 | ✅ done |
 |  | `C-049` | Reassignment within a stage does not create a new segment | 1.5 | `C-042` | Thu 20 Aug | Thu 20 Aug | 13 | ✅ done |
 |  | `C-050` | Unassigned receiving role → ticket falls to a project-level queue… | 1 | `C-044` ᶦ | Thu 20 Aug | Thu 20 Aug | 14 | ✅ done |
@@ -469,7 +469,7 @@ gantt
 | 🔴 | `C-105` | Clock events and working-calendar due_at | 3 | `C-104` `A-105` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
 | 🔴 | `C-106` | Sub-category answers and the completion gate — one server-side gate | 2 | `C-104` ᶦ | Fri 04 Sep | Sat 05 Sep | 16 | ✅ done |
 |  | `C-107` | Skip a step — Manager and Admin only, reason mandatory, history row | 1 | `C-104` ᶦ | Sat 05 Sep | Sat 05 Sep | 34 | ✅ done |
-| ▲ | `C-108` | Backup owner | 2 | `C-104` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | 🔵 in review |
+|  | `C-108` | Backup owner | 2 | `C-104` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | 🔵 in review |
 | 🔴 | `C-109` | The onboarding ribbon | 3 | — | Thu 03 Sep | Thu 03 Sep | 15 | ✅ done |
 | ▲ | `C-110` | OB-05 | 3 | `C-109` `B-102` ᶦ | Fri 25 Sep | Tue 29 Sep | 0 | ▫️ to do |
 | ▲ | `C-111` | OB-06 | 3 | `C-106` `C-110` ᶦ | Wed 30 Sep | Fri 02 Oct | 0 | ▫️ to do |
@@ -478,9 +478,9 @@ gantt
 |  | `C-114` | RAG computation | 2 | `C-113` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
 |  | `C-115` | Escalation matrix | 3 | `C-114` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
 | ▲ | `C-116` | Ribbon accessibility pass | 2 | `C-111` ᶦ | Wed 07 Oct | Thu 08 Oct | 0 | ▫️ to do |
-| ▲ | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Wed 09 Sep | Fri 11 Sep | 0 | ▫️ to do |
+|  | `C-117` | Scanner load pass | 2 | `C-115` ᶦ | Wed 09 Sep | Thu 10 Sep | 0 | 🟡 50% |
 | ▲🔴 | `C-118` | PrerequisiteGateService — every mandatory task VERIFIED | 3 | `C-103` `B-125` ᶦ | Thu 17 Sep | Sat 19 Sep | 0 | ▫️ to do |
-| ▲ | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Fri 11 Sep | Wed 16 Sep | 0 | ▫️ to do |
+|  | `C-119` | Step dependency graph — depends_on_step_id | 3 | `C-104` ᶦ | Thu 10 Sep | Tue 15 Sep | 1 | ▫️ to do |
 | ▲ | `C-120` | Journey TAT roll-up — total TAT | 1 | `C-110` ᶦ | Fri 09 Oct | Fri 09 Oct | 0 | ▫️ to do |
 | ▲ | `C-121` | CP-01..CP-04 | 4 | `A-126` `B-125` ᶦ | Wed 14 Oct | Sat 17 Oct | 0 | ▫️ to do |
 | ▲ | `C-122` | CP-05..CP-07 | 2 | `C-121` `A-127` ᶦ | Thu 22 Oct | Fri 23 Oct | 0 | ▫️ to do |
