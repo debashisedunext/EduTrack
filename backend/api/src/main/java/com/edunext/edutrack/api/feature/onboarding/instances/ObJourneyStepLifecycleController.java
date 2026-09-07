@@ -6,8 +6,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,10 +22,12 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * C-104 · {@code /onboarding/journey-steps} — start, complete,
  * block-with-mandatory-reason, waiting-on-client, resume, and (C-107)
- * {@code skip}; {@code complete} now runs C-106's completion gate. See
- * {@link ObJourneyStepLifecycleService}'s own class javadoc for exactly
- * which two later tasks (C-105's clock-event maths, C-119's dependency
- * graph) this still deliberately leaves alone.
+ * {@code skip}; {@code complete} now runs C-106's completion gate. (C-108)
+ * adds {@code GET} (the OB-06 panel read, and the only source of the
+ * {@code ETag}) and {@code PATCH} (reassign owner/backup owner, re-plan TAT
+ * and due date). See {@link ObJourneyStepLifecycleService}'s own class
+ * javadoc for exactly which two later tasks (C-105's clock-event maths,
+ * C-119's dependency graph) this still deliberately leaves alone.
  *
  * <h2>Auth: {@code authenticated()} only, deliberately not more</h2>
  *
@@ -58,9 +63,53 @@ import org.springframework.web.server.ResponseStatusException;
 class ObJourneyStepLifecycleController {
 
     private final ObJourneyStepLifecycleService service;
+    private final ObBackupOwnerResolver backupOwnerResolver;
 
-    ObJourneyStepLifecycleController(ObJourneyStepLifecycleService service) {
+    ObJourneyStepLifecycleController(ObJourneyStepLifecycleService service, ObBackupOwnerResolver backupOwnerResolver) {
         this.service = service;
+        this.backupOwnerResolver = backupOwnerResolver;
+    }
+
+    @GetMapping(value = "/{stepId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getObJourneyStep",
+            summary = "The step update panel (OB-06)",
+            description = """
+                    One service in full. **Also the only source of the `ETag`** that \
+                    `PATCH` and the transitions above require as `If-Match` \
+                    (CONVENTIONS.md §5). `items`/`docs` are always empty and `rag` is \
+                    always `null` here — see `ObJourneyStepDetail`'s own javadoc for \
+                    exactly which later tasks populate each.""")
+    ResponseEntity<ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse> getDetail(@PathVariable long stepId) {
+        ObJourneyStep step = service.getStep(stepId);
+        ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse body =
+                ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step, backupOwnerResolver.effectiveOwnerUserId(step));
+        return ResponseEntity.ok().eTag(etagOf(etagBasis(step))).body(body);
+    }
+
+    @PatchMapping(value = "/{stepId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "updateObJourneyStep",
+            summary = "Reassign or re-plan one service (OB-06) (C-108)",
+            description = """
+                    Owner, backup owner, TAT and due date — the fields a manager adjusts \
+                    without the step changing state. `status` is deliberately absent; \
+                    moving a step between states is what the transition routes are for. \
+                    One `FIELD_CHANGED` history row per field that actually changes. \
+                    `422` `ob-step-terminal` if the step is already `DONE` or `SKIPPED` — \
+                    its recorded TAT is what TAT reports are built on.
+
+                    `If-Match` is optional, on `skip`'s own precedent: sent, it must match \
+                    this step's current `ETag` or `412`; omitted, the write proceeds \
+                    unguarded.""")
+    ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse update(
+            Authentication caller, @PathVariable long stepId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ObJourneyStepLifecycleDtos.ObJourneyStepUpdateRequest request) {
+        requirePreconditionIfPresent(stepId, ifMatch);
+        ObJourneyStep step = service.update(stepId, CallerIdentityAccess.requireUserId(caller),
+                CallerIdentityAccess.onboardingModuleRole(caller),
+                request.ownerUserId(), request.backupOwnerUserId(), request.tatDays(), request.dueAt());
+        return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step, backupOwnerResolver.effectiveOwnerUserId(step));
     }
 
     @PostMapping(value = "/{stepId}/start", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -160,7 +209,7 @@ class ObJourneyStepLifecycleController {
         requirePreconditionIfPresent(stepId, ifMatch);
         ObJourneyStep step = service.skip(stepId, CallerIdentityAccess.requireUserId(caller),
                 CallerIdentityAccess.onboardingModuleRole(caller), request.reason());
-        return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step);
+        return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step, backupOwnerResolver.effectiveOwnerUserId(step));
     }
 
     // ------------------------------------------------------------------
@@ -177,7 +226,8 @@ class ObJourneyStepLifecycleController {
         if (ifMatch == null || ifMatch.isBlank()) {
             return;
         }
-        String current = etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(service.getStep(stepId)));
+        ObJourneyStep step = service.getStep(stepId);
+        String current = etagOf(etagBasis(step));
         if (!matches(ifMatch, current)) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
                     "This service changed since you read it. Reload and reapply.");
@@ -187,6 +237,19 @@ class ObJourneyStepLifecycleController {
     /** Content-derived, not timestamp-derived — {@code ObJourneyTemplateController}'s own reasoning. */
     private static String etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail detail) {
         return Integer.toHexString(detail.hashCode());
+    }
+
+    /**
+     * C-108 · the {@code ETag} basis deliberately excludes {@code
+     * effectiveOwnerUserId}: that field is derived from today's approved
+     * leave, not from anything {@code PATCH} writes, so hashing it in would
+     * make the tag drift overnight — a client holding yesterday's `ETag`
+     * would get a spurious `412` the morning the owner's leave starts,
+     * for a row nobody actually wrote. Always built with {@code null} in
+     * that slot; never returned to a caller, only hashed.
+     */
+    private static ObJourneyStepLifecycleDtos.ObJourneyStepDetail etagBasis(ObJourneyStep step) {
+        return ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(step, null);
     }
 
     /** {@code *} matches anything, per RFC 9110. */
