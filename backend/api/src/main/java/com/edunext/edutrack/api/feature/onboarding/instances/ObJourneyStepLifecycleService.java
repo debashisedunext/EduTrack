@@ -27,11 +27,11 @@ import com.edunext.edutrack.domain.onboarding.ObStepClockEvent;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEventRepository;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEventType;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
+import com.edunext.edutrack.domain.onboarding.ObStepTatBudget;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -434,8 +434,7 @@ public class ObJourneyStepLifecycleService {
     /**
      * C-105 · where a step's TAT budget lands, through the working calendar
      * — {@link WorkingHoursService#addWorkingHours} against {@code tatDays}
-     * converted to hours via one working day's length ({@link
-     * com.edunext.edutrack.domain.masters.WorkingCalendar#workDayLength()}).
+     * converted to hours via {@link ObStepTatBudget#hours}.
      *
      * <p>Precise hours rather than {@code OnboardingFixtureSchedule}'s own
      * whole-day walk (start date + N working days, landing at day-end): that
@@ -444,9 +443,14 @@ public class ObJourneyStepLifecycleService {
      * the rest of that day rather than being charged a full one, which is
      * the more defensible answer once the real calculation is available —
      * flagged here rather than silently diverging from the seed corpus.
+     *
+     * <p>C-114 · the hours-budget conversion moved to {@link ObStepTatBudget}
+     * (this method's own body, unchanged) so {@link ObJourneyStepRagService}
+     * can share it rather than recompute the same working-day-length maths
+     * a second way.
      */
     private Instant computeDueAt(Instant startedAt, int tatDays) {
-        return workingHours.addWorkingHours(startedAt, tatHoursBudget(tatDays));
+        return workingHours.addWorkingHours(startedAt, ObStepTatBudget.hours(workingCalendars, tatDays));
     }
 
     /**
@@ -475,14 +479,6 @@ public class ObJourneyStepLifecycleService {
 
         BigDecimal hoursOwed = workingHours.workingHoursBetween(lastPause.getOccurredAt(), step.getDueAt());
         step.setDueAt(workingHours.addWorkingHours(resumedAt, hoursOwed));
-    }
-
-    /** {@code tatDays} working days, expressed as hours of the org's own working day length. */
-    private BigDecimal tatHoursBudget(int tatDays) {
-        long workDayMinutes = workingCalendars.getCalendar().workDayLength().toMinutes();
-        return BigDecimal.valueOf(tatDays)
-                .multiply(BigDecimal.valueOf(workDayMinutes))
-                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
     }
 
     private ObJourneyStep requireStep(long stepId) {
