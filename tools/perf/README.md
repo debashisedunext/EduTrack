@@ -23,7 +23,8 @@ a local stack.
 | `explain.sql` | The index review, as a re-runnable script. 17 labelled `EXPLAIN ANALYZE` plans. |
 | `k6/dashboard.js` | Dashboard load test — the blocking call plus the ten-widget fan-out. |
 | `k6/tickets-list.js` | Ticket-list load test — first page, filtered, deep keyset page, drill-down. |
-| `run.sh` | Runs either k6 script via the `grafana/k6` Docker image. |
+| `first-paint.js` | **The browser half of first paint** — real Chromium, FCP/LCP on `/dashboard`. |
+| `run.sh` | Runs any of the three via the `grafana/k6` Docker images. |
 
 ## Running it
 
@@ -47,7 +48,17 @@ docker exec -i edutrack-mysql mysql -uroot -prootpw edutrack < tools/perf/explai
 
 # the load tests (API must be up on 8080 under local,dev-noauth)
 tools/perf/run.sh both
+
+# the browser half of first paint. NEEDS THE PRODUCTION BUNDLE, not the Vite
+# dev server: an unminified dev build measures a bundle nobody is served.
+#   cd frontend && npm run build
+#   cp -r frontend/dist/* backend/api/target/classes/static/
+# then, with the API up:
+tools/perf/run.sh first-paint
 ```
+
+`first-paint` pulls `grafana/k6:master-with-browser` the first time — the base
+image carries no Chromium. Only that target pays for it.
 
 ## The summary-table trap
 
@@ -359,6 +370,89 @@ with a 40 KB payload per page.
 
 ---
 
+# First paint — the browser half
+
+Run with `tools/perf/run.sh first-paint`. Ten navigations to `/dashboard` per
+run, one at a time, real Chromium, against the 50,000-ticket corpus with the
+summary tables rebuilt. FCP and LCP are read from the page's own Paint Timing
+and `largest-contentful-paint` entries.
+
+## The result: the browser budget is not being met
+
+| Run | FCP p95 | Verdict |
+|---|---|---|
+| 1 | 1.03 s | ✗ |
+| 2 | 883 ms | ✓ |
+| 3 | 1.29 s | ✗ |
+| 4 | 1.00 s | ✗ |
+| 5 | 1.07 s | ✗ |
+
+**Four of five runs exceed the 1000 ms this half was given.** Median FCP sits
+between 790 ms and 920 ms across runs, so this is not one bad sample — the
+budget is being spent almost entirely, with nothing left for slower hardware
+than a developer laptop on loopback.
+
+The run-to-run spread is the same phenomenon the dashboard section already
+records for the server half (719 ms / 1.45 s / 885 ms on three consecutive
+runs), and it has the same cause: one host running MySQL, Redis, MinIO, the API
+and Chromium at once. **Report the spread, not the best run.**
+
+## Where the time goes
+
+Averages across the five runs:
+
+| | Time | Note |
+|---|---|---|
+| Document | ~24 ms | The 1.5 kB `index.html`. Not the problem. |
+| DOM interactive | ~66 ms | |
+| Script transfer | **2,122,669 bytes** | Identical every run — one chunk |
+| Script execute | 225–285 ms | |
+| **FCP** | **790–920 ms** | |
+
+## The finding: one chunk holds the whole product
+
+`vite build` emits a single `index-*.js` of **2,122 kB raw / 548 kB gzipped**,
+and warns about it on every build. The cause is in `frontend/src/App.tsx`:
+**51 routes across 12 feature areas, every one a static import, zero
+`React.lazy`.** Somebody opening the dashboard downloads, parses and executes
+the workflow designer, the Excel import wizard, the chat panel and every master
+screen before their first frame.
+
+That is the browser half's budget, and no server-side change reaches it.
+
+**The fix is route-level code splitting, and it is deliberately not in this
+change.** `App.tsx` routes belong to all four streams — 17 masters (B), 7
+tickets (C), 9 auth/dashboard/reports (A), chat (D) — so converting them needs
+those owners' sign-off, Suspense boundaries, and a test pass per stream. It is
+its own task, not a rider on the measurement that found it. What is here is the
+instrument and the number, so that the change can be measured rather than
+asserted.
+
+## LCP is equal to FCP here, and that is real rather than a bug
+
+Every run reports identical FCP and LCP. The largest contentful element at that
+moment *is* the app shell: the dashboard's widgets have not drawn, because their
+data has not arrived. LCP would separate from FCP once the fan-out lands, which
+is what `k6/dashboard.js` already asserts on. **So LCP carries no information
+here that FCP does not**, and its 4000 ms threshold is a smoke alarm rather than
+a budget.
+
+## A note on how this file's own threshold was got wrong first
+
+The first version asserted on k6's built-in `browser_web_vital_fcp`. It reported
+`p(95)=0s` and **the threshold passed** — k6 collects vitals asynchronously and
+the iteration closed the page before they flushed, so a green run had measured
+nothing at all. Same shape as A-068's first-time-right showing 100% from a
+counter nothing incremented, and A-057's SLA gauge before it.
+
+Two changes came out of it, and both are why the numbers above can be trusted:
+the metrics are read from the page rather than taken from k6, where an absent
+value is `null` instead of `0`; and the `checks` threshold is part of the
+assertion rather than decoration, because a metric with no samples satisfies a
+percentile threshold trivially. A run is only meaningful if both are green.
+
+---
+
 # Known limitations of this harness
 
 Written down rather than discovered later.
@@ -370,10 +464,11 @@ restart the API with different properties. Unrestricted is the right default
 because it is the *pessimistic* scope: nothing narrows anything, so every query
 does the most work it can.
 
-**First paint is measured in two halves.** k6 measures the server; the browser
-half — bundle, parse, render — is not covered here. The 1.5 s budget is split
-~1000 ms browser / ~500 ms API, and **that split is a decision, not a
-measurement**. The API half is what `k6/dashboard.js` asserts.
+**First paint is measured in two halves**, and both halves are now measured —
+the server by `k6/dashboard.js`, the browser by `first-paint.js`. The 1.5 s
+budget is split ~1000 ms browser / ~500 ms API, and **that split is still a
+decision, not a measurement**; what has changed is that neither side of it is
+unobserved any more. See "First paint — the browser half" above.
 
 **The corpus has three projects.** A real org has more, and one project holding
 1% of tickets is a scope shape this corpus cannot produce. It is the case where
