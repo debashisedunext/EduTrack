@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -107,7 +106,7 @@ class ObReportService {
         }
 
         Instant now = clock.instant();
-        LocalDate end = to != null ? to : LocalDate.now(ZoneOffset.UTC);
+        LocalDate end = to != null ? to : LocalDate.now(clock);
         LocalDate start = from != null ? from : end.minusDays(DEFAULT_WINDOW_DAYS);
 
         ObReportScope scope = ObReportScope.of(caller);
