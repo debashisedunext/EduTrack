@@ -131,6 +131,18 @@ resources/templates/mail/onboarding.html  @Ayushedunext
 # parent that belongs to nobody is the header's "right path for unwritten work"
 # case, and it stays with the catch-all until whoever builds the shell claims it.
 /frontend/src/features/onboarding/notifications/  @Ayushedunext
+# B-121's OB-02 board, and B-127/B-128's slide-over and grids after it. Named
+# on the day the first of the three lands rather than on the day the third
+# does, which is B-110's own argument for listing worker/onboarding/stats/
+# before B-120 existed: an empty rule costs nothing and a missing one is only
+# noticed by whoever reviews the wrong person's pull request.
+#
+# The frontend rule is on the sub-directory for B-112's reason, restated
+# because it is the part that looks over-specific: `/frontend/src/features/
+# onboarding/` is deliberately *not* claimed whole, since C-102's journey
+# designer lives there too and is Stream C's.
+api/feature/onboarding/dashboard/       @Ayushedunext
+/frontend/src/features/onboarding/dashboard/  @Ayushedunext
 
 # B-122's OB-10 reports hub, on the same two patterns and for the same reason
 # the rule above is on a sub-directory rather than on the onboarding parent.
