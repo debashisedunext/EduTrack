@@ -2120,7 +2120,33 @@ final class PermissionMatrix {
             // entitlement a 404 before any of this is A-111's, still unwired,
             // exactly as above.
             everyRole("GET", "/api/v1/onboarding/reports"),
-            everyRole("GET", "/api/v1/onboarding/reports/{reportKey}"));
+            everyRole("GET", "/api/v1/onboarding/reports/{reportKey}"),
+
+            // ── B-121 · OB-02, the onboarding dashboard ───────────────────────
+            //
+            // Every role, and for the same reason the five journey routes above
+            // are: "Manager and Admin only" is an *onboarding* role, and this
+            // file cannot express one. It lives in the moduleRoles claim, which
+            // JwtAuthoritiesConverter does not turn into a Spring authority, so
+            // none of the six ticketing-role fixtures below carries any
+            // onboarding standing at all.
+            //
+            // What differs from the journey routes is the refusal. Those answer
+            // 404 from inside the service; this one answers 200 with seven cards
+            // that each carry an unavailableReason and no number. That is
+            // deliberate and is A-056's ruling for the ticketing widgets a
+            // Developer's summary table cannot serve: a 404 on a route the role
+            // legitimately holds reads to the client as a bug and would have it
+            // retry, and zeroes would claim nothing is overdue. Neither 200 nor
+            // 404 is a 403, so this is "everyRole" either way — and the fixtures
+            // reaching it prove the board never hands an unscoped number to a
+            // caller with no standing, which ObDashboardSummaryIT asserts
+            // against real rows.
+            //
+            // The module gate that would make a caller with no ONBOARDING
+            // entitlement a 404 before any of this is A-111's, still unwired,
+            // exactly as above.
+            everyRole("GET", "/api/v1/onboarding/dashboard/summary"));
 
     /**
      * One route and what each role may do with it.
