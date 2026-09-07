@@ -61,6 +61,7 @@ class ObTatScannerIT {
         // deadlock this avoids. Every test here drives scanOnce() directly.
         registry.add("edutrack.onboarding.tat.initial-delay", () -> "PT24H");
         registry.add("edutrack.sla.initial-delay", () -> "PT24H");
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.outbox.enabled", () -> "false");
         registry.add("edutrack.ob-outbox.enabled", () -> "false");

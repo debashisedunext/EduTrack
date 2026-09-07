@@ -81,6 +81,7 @@ class StatsRefreshIT {
         registry.add("edutrack.outbox.enabled", () -> "false");
         // Every scheduled job is pushed out of the way; each test drives its
         // worker directly so the assertions are about the query, not timing.
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.stats.refresh-interval", () -> "PT6H");
         registry.add("edutrack.chain.verify-cron", () -> "0 0 5 31 2 *");

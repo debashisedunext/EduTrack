@@ -94,6 +94,17 @@ class ObOutboxDispatcherIT {
         // fixtures is a race, and each of these has cost a re-run before.
         registry.add("edutrack.ob-outbox.enabled", () -> false);
         registry.add("edutrack.outbox.enabled", () -> false);
+        // `ob-stats` is its own key and not part of `stats` below. A-108 split
+        // them on purpose — application.yml argues that sharing one key would
+        // mean a test switching the ticketing refresh off silently switched
+        // this one off too — and that split is exactly what let this line go
+        // missing here. `ObStatsRefreshWorker` is a `fixedDelay`, so it fires
+        // once the instant the context is up whatever its interval, writes
+        // ob_dashboard_summary against this test's own ob_products, and the
+        // next reset() then cannot DELETE the parent. That is 20 of 21 tests
+        // erroring on fk_ob_summary_product; the first passes only because the
+        // summary table is still empty when it runs.
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.sla.initial-delay", () -> "PT24H");
     }
