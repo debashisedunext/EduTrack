@@ -85,6 +85,7 @@ class ObManagerDigestIT {
         // ticketing scanners write `tickets` at startup. Neither is under test.
         registry.add("edutrack.ob-outbox.enabled", () -> "false");
         registry.add("edutrack.outbox.enabled", () -> "false");
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.sla.initial-delay", () -> "PT24H");
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);

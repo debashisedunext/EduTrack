@@ -100,6 +100,7 @@ class OutboxWorkerIT {
         // trying to control its own fixtures. Fixed here rather than by adding
         // daily_ticket_stats to reset(), which would make every future summary
         // table one more line every worker IT has to remember.
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
     }
 

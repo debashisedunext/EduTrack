@@ -58,6 +58,7 @@ class DigestSchedulerIT {
         // startup and write `tickets`; this class's fixture writes the same
         // rows. See SlaScanner for the deadlock that produced.
         registry.add("edutrack.sla.initial-delay", () -> "PT24H");
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("edutrack.outbox.enabled", () -> "false");
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
