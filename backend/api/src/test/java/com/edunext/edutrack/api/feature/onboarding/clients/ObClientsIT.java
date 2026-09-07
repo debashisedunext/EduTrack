@@ -393,8 +393,18 @@ class ObClientsIT {
                                                               List<Long> productIds) {
         return new ObClientDtos.ObClientCreateRequest(
                 name, "Boarded by an integration test", BOARDED, pan, "12 Test Road", null, "ANNUAL",
+                // B-103 · whatsappOptIn is false here, and it is not an
+                // oversight. A consented SPOC opens ob_contact_consent_events,
+                // which is insert-only by trigger and referenced without a
+                // cascade — so the DELETE in seed() above could never tear this
+                // client down again, and every test after the first would fail
+                // in its fixture rather than in its subject. Consent capture is
+                // ObContactsIT's subject; it builds a fresh client per test and
+                // removes nothing, which is the shape any fixture touching a
+                // consented contact has to take.
                 List.of(new ObClientDtos.ObContactWriteRequest(
-                        "IT SPOC", "Principal", "it.spoc@example.com", "+911234567890", true, true)),
+                        "IT SPOC", "Principal", "it.spoc@example.com", "+911234567890", false,
+                        null, true)),
                 productIds.stream()
                         .map(id -> new ObClientDtos.ObApplicationWriteRequest(
                                 id, "ANNUAL", 100, BOARDED, BOARDED.plusYears(1)))

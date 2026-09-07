@@ -50,6 +50,7 @@ import type { ObClientDetailAllOfDescription } from './obClientDetailAllOfDescri
 import type { ObClientDetailAllOfAddress } from './obClientDetailAllOfAddress';
 import type { ObClientDetailAllOfLicenseType } from './obClientDetailAllOfLicenseType';
 import type { ObClientDetailAllOfPan } from './obClientDetailAllOfPan';
+import type { ObClientDetailAllOfStatusReason } from './obClientDetailAllOfStatusReason';
 import type { ObContact } from './obContact';
 import type { ObApplication } from './obApplication';
 import type { ObJourneyStrip } from './obJourneyStrip';
@@ -72,6 +73,17 @@ with A-113. Until then this is masked for everyone, which is
 the safe direction to be wrong in.
  */
   pan?: ObClientDetailAllOfPan;
+  /** Why the client was put `ON_HOLD` or `DROPPED`.
+`updateObClientRequest` has always taken it and there was
+nowhere to read it back — **B-102 raised the gap and B-103
+closes it**, an added optional field, which CONVENTIONS.md §1
+says is not breaking.
+ */
+  statusReason?: ObClientDetailAllOfStatusReason;
+  /** Active and inactive both, primary first. OB-05 administers this
+list, and a panel that could not see a departed SPOC could not
+reactivate one — nor explain whose name is on a past sign-off.
+ */
   contacts?: ObContact[];
   applications?: ObApplication[];
   /** Free-text capture from the wizard's requirements step. */

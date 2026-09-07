@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -307,7 +308,7 @@ public class OnboardingFixture {
                 userIds.get(spec.salesUserKey()), spec.licenseType(), spec.status(),
                 liveAt == null ? null : Timestamp.from(liveAt), userIds.get(spec.createdByUserKey()));
 
-        Map<String, Long> contactIds = createContacts(spec, clientId);
+        Map<String, Long> contactIds = createContacts(spec, clientId, userIds, onboardingDate);
         createApplications(spec, clientId, productIds, onboardingDate);
         createRequirements(spec, clientId, userIds);
 
@@ -318,18 +319,58 @@ public class OnboardingFixture {
         }
     }
 
-    /** SPOCs. One primary per client, which {@code is_primary_key} enforces. */
-    private Map<String, Long> createContacts(ClientSpec spec, long clientId) {
+    /**
+     * SPOCs. One primary per client, which {@code is_primary_key} enforces.
+     *
+     * <p><b>B-103 · the consent stamp is written, not left NULL.</b>
+     * {@code ck_ob_client_contacts_consent} refuses a {@code whatsapp_opt_in =
+     * 1} with no timestamp and no basis, so the corpus has to say where each of
+     * its consents came from — which is the right outcome rather than a tax:
+     * a fixture whose consented SPOCs carried no basis would be a corpus that
+     * cannot exercise the one query the capture exists for, "who still has to be
+     * re-approached".
+     *
+     * <p>The basis alternates {@code VERBAL} and {@code EMAIL} by position for
+     * exactly that reason — a single value would let a query that ignores the
+     * column pass — and the timestamp is the client's onboarding date, because
+     * the consent was given in the boarding conversation. Attributed to the
+     * client's own {@code created_by}, who is the person who had it.
+     *
+     * <p>Each one also opens {@code ob_contact_consent_events}, so the corpus
+     * carries a journal that agrees with its columns rather than columns whose
+     * history is empty.
+     */
+    private Map<String, Long> createContacts(ClientSpec spec, long clientId,
+                                             Map<String, Long> userIds, LocalDate onboardingDate) {
         Map<String, Long> byName = new LinkedHashMap<>();
+        Long boarder = userIds.get(spec.createdByUserKey());
+        // Timestamp.from(... UTC), never Timestamp.valueOf(LocalDateTime):
+        // the latter is read in the JVM's zone and the connection is UTC, so
+        // the corpus would carry consents dated by whoever loaded it.
+        Timestamp consentAt = Timestamp.from(onboardingDate.atTime(10, 0).toInstant(ZoneOffset.UTC));
+        int position = 0;
         for (ContactSpec contact : spec.contacts()) {
+            boolean optedIn = contact.whatsappOptIn();
+            String basis = optedIn ? (position++ % 2 == 0 ? "VERBAL" : "EMAIL") : null;
             long id = insert("""
                     INSERT INTO ob_client_contacts (ob_client_id, name, email, phone, whatsapp_opt_in,
-                                                    is_primary, is_active)
-                         VALUES (?, ?, ?, ?, ?, ?, 1)
+                                                    whatsapp_opt_in_at, whatsapp_opt_in_source,
+                                                    whatsapp_opt_in_by, is_primary, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     clientId, contact.name(), contact.email(), contact.phone(),
-                    contact.whatsappOptIn() ? 1 : 0, contact.primary() ? 1 : 0);
+                    optedIn ? 1 : 0, optedIn ? consentAt : null, basis, optedIn ? boarder : null,
+                    contact.primary() ? 1 : 0);
             byName.put(contact.name(), id);
+
+            if (optedIn) {
+                insert("""
+                        INSERT INTO ob_contact_consent_events (ob_client_contact_id, channel,
+                                                               opted_in, source, recorded_by, recorded_at)
+                             VALUES (?, 'WHATSAPP', 1, ?, ?, ?)
+                        """,
+                        id, basis, boarder, consentAt);
+            }
         }
         return byName;
     }

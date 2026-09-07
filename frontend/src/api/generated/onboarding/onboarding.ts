@@ -67,6 +67,7 @@ import type {
 
 import type {
   ConflictResponse,
+  ForbiddenResponse,
   GetObDashboardSummaryParams,
   ListObClientEscalationsParams,
   ListObClientsParams,
@@ -88,6 +89,7 @@ import type {
   ObClientPrereqTaskUpdateRequest,
   ObClientPrereqsResponse,
   ObClientUpdateRequest,
+  ObContactUpsertRequest,
   ObCsatRequest,
   ObDashboardCardKey,
   ObDashboardItemListResponse,
@@ -493,7 +495,7 @@ export const updateObClient = (
   
 
 
-export const getUpdateObClientMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+export const getUpdateObClientMutationOptions = <TError = ValidationFailedResponse | Problem | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClient>>, TError,{obClientId: number;data: ObClientUpdateRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof updateObClient>>, TError,{obClientId: number;data: ObClientUpdateRequest}, TContext> => {
 
@@ -520,12 +522,12 @@ const {mutation: mutationOptions} = options ?
 
     export type UpdateObClientMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClient>>>
     export type UpdateObClientMutationBody = ObClientUpdateRequest
-    export type UpdateObClientMutationError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse | Problem
+    export type UpdateObClientMutationError = ValidationFailedResponse | Problem | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse
 
     /**
  * @summary Edit client info (OB-05)
  */
-export const useUpdateObClient = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse | Problem,
+export const useUpdateObClient = <TError = ValidationFailedResponse | Problem | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClient>>, TError,{obClientId: number;data: ObClientUpdateRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateObClient>>,
@@ -535,6 +537,276 @@ export const useUpdateObClient = <TError = ValidationFailedResponse | ObModuleGa
       > => {
 
       const mutationOptions = getUpdateObClientMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-103 · OB-05's SPOC panel, adding.
+
+**`whatsappOptIn: true` requires `whatsappOptInSource`.** That pairing is
+the whole reason this capture is built in a phase that sends no WhatsApp
+at all (PHASE-2-BUILD-PLAN.md §6.1): consent is the one item in the
+deferral that cannot be reconstructed later, and a `true` with no basis
+recorded is a SPOC who has to be re-approached before a single message
+can go out. Both the flag and its basis are also written to
+`ob_contact_consent_events`, which is insert-only, so a later withdrawal
+does not erase the evidence that consent stood when it stood.
+
+**`isPrimary: true` promotes and demotes the incumbent** in the same
+transaction — the way to replace a SPOC who has left without the client
+ever having none.
+
+**A duplicate email under the same client is refused** (`409`,
+case-insensitively, agreeing with `utf8mb4_0900_ai_ci` and with
+`uq_ob_client_contacts_email`). The same address under a *different*
+client stays allowed: one consultant can be the SPOC at two.
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Add a SPOC (OB-05)
+ */
+export const addObClientContact = (
+    obClientId: number,
+    obContactUpsertRequest: ObContactUpsertRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/contacts`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obContactUpsertRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObClientContactMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientContact>>, TError,{obClientId: number;data: ObContactUpsertRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObClientContact>>, TError,{obClientId: number;data: ObContactUpsertRequest}, TContext> => {
+
+const mutationKey = ['addObClientContact'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObClientContact>>, {obClientId: number;data: ObContactUpsertRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  addObClientContact(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof addObClientContact>>>
+    export type AddObClientContactMutationBody = ObContactUpsertRequest
+    export type AddObClientContactMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse
+
+    /**
+ * @summary Add a SPOC (OB-05)
+ */
+export const useAddObClientContact = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientContact>>, TError,{obClientId: number;data: ObContactUpsertRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObClientContact>>,
+        TError,
+        {obClientId: number;data: ObContactUpsertRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-103 · OB-05's SPOC panel, editing — and the operation that promotes,
+demotes, deactivates and reactivates, because each of those is a field
+on this row rather than a verb of its own.
+
+**The `If-Match` comes from `getObClient`.** Unlike the ticketing
+contact patch, which had to be exempted because its list carried no tag,
+the SPOC list is *inside* a tagged document. A stale editor is refused
+rather than allowed to overwrite a promotion somebody else made while
+the panel was open.
+
+**The body is the whole representation, not a sparse patch** — an absent
+field is a cleared one. `ContactWriteRequest`'s call, one module over.
+
+**Consent is only restamped when it changes.** Sending
+`whatsappOptIn: true` again with the same source on an unrelated edit
+leaves the original date standing; a new consent event is written when
+the flag flips or the basis differs. Otherwise correcting a phone number
+would silently re-date the consent to today, which is the same evidence
+problem as not recording it.
+
+**Demoting the only primary is refused** with `409`
+`ob-contact-primary-required`, and so is deactivating them. This is
+where the module deliberately parts company with `updateClientContact`,
+which allows a client to have no primary because B-028's gate catches it
+at ticket creation. Onboarding has no such gate: the kickoff mail, the
+one-time portal password and every sign-off request address the primary
+SPOC, and with none they are addressed to nobody and nothing reports it.
+Promote the replacement first — one request, no window.
+
+ * @summary Edit a SPOC (OB-05)
+ */
+export const updateObClientContact = (
+    obClientId: number,
+    contactId: number,
+    obContactUpsertRequest: ObContactUpsertRequest,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/contacts/${contactId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obContactUpsertRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObClientContactMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientContact>>, TError,{obClientId: number;contactId: number;data: ObContactUpsertRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObClientContact>>, TError,{obClientId: number;contactId: number;data: ObContactUpsertRequest}, TContext> => {
+
+const mutationKey = ['updateObClientContact'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObClientContact>>, {obClientId: number;contactId: number;data: ObContactUpsertRequest}> = (props) => {
+          const {obClientId,contactId,data} = props ?? {};
+
+          return  updateObClientContact(obClientId,contactId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClientContact>>>
+    export type UpdateObClientContactMutationBody = ObContactUpsertRequest
+    export type UpdateObClientContactMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a SPOC (OB-05)
+ */
+export const useUpdateObClientContact = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientContact>>, TError,{obClientId: number;contactId: number;data: ObContactUpsertRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObClientContact>>,
+        TError,
+        {obClientId: number;contactId: number;data: ObContactUpsertRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-103 · **deactivates; it does not delete.**
+
+A contact is what `ob_signoff_requests.sent_to_contact_id` points at and
+what a client escalation is raised by. A real `DELETE` either fails as a
+constraint violation naming a MySQL index or — "fixed" with a cascade —
+destroys the record of who signed off on a live client's go-live. The
+row stays, `isActive` goes false, and it is still in `getObClient` so the
+panel can show it as removed and bring it back.
+
+It would also take the consent record with it, which
+`ob_contact_consent_events` exists to keep.
+
+**Removing an already-removed contact is `200`, not `404`.** It is a
+setter, and the second half of a double-click must not be an error about
+something that did happen — B-014's `UNCHANGED` argument. A contact id
+belonging to a *different* client is `404`.
+
+**Removing the only primary is refused**, `409`
+`ob-contact-primary-required` — see `updateObClientContact` for why
+onboarding differs from the ticketing master here.
+
+No `If-Match`: `DELETE` is a setter with one destination, so there is no
+lost update for a tag to prevent — the concurrent caller wanted the state
+the winner produced. The response still carries the client's new `ETag`,
+because everything else on OB-05 is editing against the old one.
+
+ * @summary Remove a SPOC (OB-05)
+ */
+export const removeObClientContact = (
+    obClientId: number,
+    contactId: number,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/contacts/${contactId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getRemoveObClientContactMutationOptions = <TError = ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObClientContact>>, TError,{obClientId: number;contactId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof removeObClientContact>>, TError,{obClientId: number;contactId: number}, TContext> => {
+
+const mutationKey = ['removeObClientContact'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeObClientContact>>, {obClientId: number;contactId: number}> = (props) => {
+          const {obClientId,contactId} = props ?? {};
+
+          return  removeObClientContact(obClientId,contactId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveObClientContactMutationResult = NonNullable<Awaited<ReturnType<typeof removeObClientContact>>>
+    
+    export type RemoveObClientContactMutationError = ForbiddenResponse | ObModuleGatedResponse | ConflictResponse
+
+    /**
+ * @summary Remove a SPOC (OB-05)
+ */
+export const useRemoveObClientContact = <TError = ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeObClientContact>>, TError,{obClientId: number;contactId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removeObClientContact>>,
+        TError,
+        {obClientId: number;contactId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getRemoveObClientContactMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

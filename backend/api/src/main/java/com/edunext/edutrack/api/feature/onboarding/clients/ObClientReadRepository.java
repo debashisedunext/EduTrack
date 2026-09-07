@@ -302,6 +302,54 @@ class ObClientReadRepository {
                 """).param("id", clientId).query(CONTACT_MAPPER).list();
     }
 
+    /**
+     * One SPOC of one client, resolved by both ids at once.
+     *
+     * <p>B-103 · the {@code ob_client_id} is in the {@code WHERE} clause rather
+     * than checked afterwards, so a real contact id belonging to a different
+     * client returns nothing and becomes a 404 — indistinguishable from an
+     * invented id, which is what stops the nested route enumerating the SPOC
+     * table one integer at a time.
+     *
+     * <p>Unscoped, deliberately: the caller's scope has already been applied to
+     * the <em>client</em> by {@code findDetail}, and applying it again here
+     * would express A-112's rule a third time over a table it says nothing
+     * about.
+     */
+    Optional<ContactRow> contactOf(long clientId, long contactId) {
+        return jdbc.sql(CONTACT_COLUMNS + """
+                 WHERE ct.ob_client_id = :clientId AND ct.id = :contactId
+                """)
+                .param("clientId", clientId)
+                .param("contactId", contactId)
+                .query(CONTACT_MAPPER)
+                .optional();
+    }
+
+    /**
+     * Whoever already holds this email at this client, active or not.
+     *
+     * <p>B-103 · {@code uq_ob_client_contacts_email} is on
+     * {@code (ob_client_id, email)} and excludes nobody, so an inactive contact
+     * still holds their address — which is the right answer as well as the
+     * enforced one: re-adding a departed SPOC as a second row would split what
+     * they have already signed off across two ids.
+     *
+     * <p>The comparison is left to {@code utf8mb4_0900_ai_ci}, which is
+     * case-insensitive, so this asks exactly the question the index will answer
+     * rather than a narrower one. A service check stricter than its index is
+     * confusing; one looser is decorative.
+     */
+    Optional<ContactRow> contactByEmail(long clientId, String email) {
+        return jdbc.sql(CONTACT_COLUMNS + """
+                 WHERE ct.ob_client_id = :clientId AND ct.email = :email
+                """)
+                .param("clientId", clientId)
+                .param("email", email.trim())
+                .query(CONTACT_MAPPER)
+                .optional();
+    }
+
     List<ApplicationRow> applicationsOf(long clientId) {
         return jdbc.sql("""
                 SELECT a.id AS id, a.license_type AS licenseType, a.units AS units,
@@ -441,8 +489,29 @@ class ObClientReadRepository {
     record ProductRow(long obClientId, long id, String code, String name) {
     }
 
+    /**
+     * @param whatsappOptInAt     B-103 · non-null exactly when {@code whatsappOptIn}
+     *                            — {@code ck_ob_client_contacts_consent} makes the
+     *                            two move together, so a stamp beside a false is a
+     *                            state the database refuses rather than one this
+     *                            mapper has to reconcile
+     * @param whatsappOptInSource the basis the consent was given on. May read
+     *                            {@code UNRECORDED} for a row written before
+     *                            V20260907_1130, which no caller can set and which
+     *                            means the SPOC has to be re-approached
+     * @param whatsappOptInBy     the staff user who recorded it, or null for a
+     *                            client-portal action. Internal to this package —
+     *                            it does not reach {@code ObContact}, because who
+     *                            in the organisation attested a consent is not
+     *                            something the client portal has any business
+     *                            rendering. It is projected here so an edit that
+     *                            leaves consent unchanged can carry the original
+     *                            attributor forward rather than blanking it
+     */
     record ContactRow(long obClientId, long id, String name, String designation, String email,
-                      String phone, boolean whatsappOptIn, boolean isPrimary, boolean isActive) {
+                      String phone, boolean whatsappOptIn, Instant whatsappOptInAt,
+                      String whatsappOptInSource, Long whatsappOptInBy,
+                      boolean isPrimary, boolean isActive) {
     }
 
     record ApplicationRow(long id, String licenseType, Integer units, LocalDate licenseStart,
@@ -469,6 +538,9 @@ class ObClientReadRepository {
                    ct.email           AS email,
                    ct.phone           AS phone,
                    ct.whatsapp_opt_in AS whatsappOptIn,
+                   ct.whatsapp_opt_in_at     AS whatsappOptInAt,
+                   ct.whatsapp_opt_in_source AS whatsappOptInSource,
+                   ct.whatsapp_opt_in_by     AS whatsappOptInBy,
                    ct.is_primary      AS isPrimary,
                    ct.is_active       AS isActive
               FROM ob_client_contacts ct
@@ -493,6 +565,8 @@ class ObClientReadRepository {
     private static final RowMapper<ContactRow> CONTACT_MAPPER = (rs, n) -> new ContactRow(
             rs.getLong("obClientId"), rs.getLong("id"), rs.getString("name"), rs.getString("designation"),
             rs.getString("email"), rs.getString("phone"), rs.getBoolean("whatsappOptIn"),
+            instant(rs, "whatsappOptInAt"), rs.getString("whatsappOptInSource"),
+            nullableLong(rs, "whatsappOptInBy"),
             rs.getBoolean("isPrimary"), rs.getBoolean("isActive"));
 
     private static final RowMapper<ApplicationRow> APPLICATION_MAPPER = (rs, n) -> new ApplicationRow(

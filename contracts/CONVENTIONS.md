@@ -218,6 +218,17 @@ project. So out-of-scope and non-existent are indistinguishable.
 `403` remains correct where the failure does not depend on a row: `/audit-logs` is
 Admin-only regardless of what is in it.
 
+The exemption list lives in `check-conventions.py` as `ROWLESS_403`, and adding one
+means editing that file **and** this paragraph, so the exception is reviewed rather
+than discovered. The onboarding module supplies most of them for one recurring
+reason: **A-112's scope guard is generous on reads and narrow on writes.** An OB
+Viewer can see a client, its journeys and its SPOCs on OB-05 and may change none of
+them, so a `404` on their write would deny a row the same caller just rendered —
+which teaches the reverse of what §7 is protecting. Where the caller has already
+been shown the row, `403` concedes nothing and `404` reads as a bug. Out-of-scope
+rows on those same routes remain `404`: that is the scope guard, and the services
+run the scoped read first so the two refusals cannot be confused.
+
 ### 8 · No mutation verb on append-only paths
 
 `/tickets/{id}/history`, `/tickets/{id}/effort-logs` and `/audit-logs` expose

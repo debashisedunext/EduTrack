@@ -123,7 +123,10 @@ export const listObClientsResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(listObClientsResponseDataItemPrimaryContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).optional().describe('`ob_client_contacts` — the SPOCs.'),
   "liveAt": zod.string().datetime({}).nullish(),
   "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
@@ -214,8 +217,9 @@ export const createObClientBody = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(createObClientBodyContactsItemPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional(),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*required when `whatsappOptIn` is true\*\*, and rejected with\n`400` when it is false. Consent without a recorded basis is the one\nthing that cannot be repaired later, so the wizard asks at the point\nthe box is ticked rather than leaving a column to be backfilled by\nsomebody who was not in the conversation.\n\n`UNRECORDED` is refused here.\n'),
   "isPrimary": zod.boolean()
-})).min(1).describe('At least one, and \*\*exactly one `isPrimary`\*\*. The primary SPOC is\nwhere the kickoff mail, the portal password and every sign-off\nrequest go; a client without one cannot be onboarded, only stored.\n'),
+}).describe('The wizard\'s contact rows. `addObClientContact` takes\n`ObContactUpsertRequest` instead — same fields plus `isActive`, which a\ncreate has no use for.\n')).min(1).describe('At least one, and \*\*exactly one `isPrimary`\*\*. The primary SPOC is\nwhere the kickoff mail, the portal password and every sign-off\nrequest go; a client without one cannot be onboarded, only stored.\n'),
   "applications": zod.array(zod.object({
   "productId": zod.number(),
   "licenseType": zod.string().max(createObClientBodyApplicationsItemLicenseTypeMax).nullish(),
@@ -303,7 +307,10 @@ export const getObClientResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(getObClientResponseDataPrimaryContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).optional().describe('`ob_client_contacts` — the SPOCs.'),
   "liveAt": zod.string().datetime({}).nullish(),
   "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
@@ -312,6 +319,7 @@ export const getObClientResponse = zod.object({
   "address": zod.string().nullish(),
   "licenseType": zod.string().max(getObClientResponseDataLicenseTypeMax).nullish(),
   "pan": zod.string().nullish().describe('\*\*Masked for every role except OB Admin and Onboarding\nManager\*\* — `ABCDE\*\*\*\*F` — and masked on the client portal too,\nwhere the client\'s own PAN is still identity data the page has\nno reason to carry.\n\nEncrypted at rest. The unmasked value is not a field anyone can\nwiden a query to reach: it comes from its own reveal operation,\nwhich writes an audit row per call, and that operation lands\nwith A-113. Until then this is masked for everyone, which is\nthe safe direction to be wrong in.\n'),
+  "statusReason": zod.string().nullish().describe('Why the client was put `ON_HOLD` or `DROPPED`.\n`updateObClientRequest` has always taken it and there was\nnowhere to read it back — \*\*B-102 raised the gap and B-103\ncloses it\*\*, an added optional field, which CONVENTIONS.md §1\nsays is not breaking.\n'),
   "contacts": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string().max(getObClientResponseDataContactsItemNameMax),
@@ -319,8 +327,11 @@ export const getObClientResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(getObClientResponseDataContactsItemPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
-}).describe('`ob_client_contacts` — the SPOCs.')).optional(),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).describe('`ob_client_contacts` — the SPOCs.')).optional().describe('Active and inactive both, primary first. OB-05 administers this\nlist, and a panel that could not see a departed SPOC could not\nreactivate one — nor explain whose name is on a past sign-off.\n'),
   "applications": zod.array(zod.object({
   "id": zod.number(),
   "product": zod.object({
@@ -468,7 +479,10 @@ export const updateObClientResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(updateObClientResponseDataPrimaryContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).optional().describe('`ob_client_contacts` — the SPOCs.'),
   "liveAt": zod.string().datetime({}).nullish(),
   "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
@@ -477,6 +491,7 @@ export const updateObClientResponse = zod.object({
   "address": zod.string().nullish(),
   "licenseType": zod.string().max(updateObClientResponseDataLicenseTypeMax).nullish(),
   "pan": zod.string().nullish().describe('\*\*Masked for every role except OB Admin and Onboarding\nManager\*\* — `ABCDE\*\*\*\*F` — and masked on the client portal too,\nwhere the client\'s own PAN is still identity data the page has\nno reason to carry.\n\nEncrypted at rest. The unmasked value is not a field anyone can\nwiden a query to reach: it comes from its own reveal operation,\nwhich writes an audit row per call, and that operation lands\nwith A-113. Until then this is masked for everyone, which is\nthe safe direction to be wrong in.\n'),
+  "statusReason": zod.string().nullish().describe('Why the client was put `ON_HOLD` or `DROPPED`.\n`updateObClientRequest` has always taken it and there was\nnowhere to read it back — \*\*B-102 raised the gap and B-103\ncloses it\*\*, an added optional field, which CONVENTIONS.md §1\nsays is not breaking.\n'),
   "contacts": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string().max(updateObClientResponseDataContactsItemNameMax),
@@ -484,8 +499,11 @@ export const updateObClientResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(updateObClientResponseDataContactsItemPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
-}).describe('`ob_client_contacts` — the SPOCs.')).optional(),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).describe('`ob_client_contacts` — the SPOCs.')).optional().describe('Active and inactive both, primary first. OB-05 administers this\nlist, and a panel that could not see a departed SPOC could not\nreactivate one — nor explain whose name is on a past sign-off.\n'),
   "applications": zod.array(zod.object({
   "id": zod.number(),
   "product": zod.object({
@@ -509,6 +527,401 @@ export const updateObClientResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(updateObClientResponseDataJourneysItemPercentCompleteMin).max(updateObClientResponseDataJourneysItemPercentCompleteMax),
+  "heldByJourneyId": zod.number().nullish().describe('Set when this journey is instantiated but held on a \*\*service-level\ndependency\*\* — another journey of the same client that has to\ncomplete first (plan §5.5). Distinct from `gateStatus`, which is\nabout the client\'s prerequisites: a journey can be past the gate\nand still held behind a sibling. Null when nothing holds it.\n'),
+  "totalTatDays": zod.number().optional().describe('Σ of this journey\'s service TATs from its \*\*pinned\*\* template version.'),
+  "utilizedHours": zod.number().optional().describe('Working hours consumed: completed services at their recorded\nconsumption, the active one at its running clock, waiting-on-client\ntime excluded. \*\*Derived from `ob_step_clock_events` at read time\*\*\nfor this one client — never a stored aggregate, which could\ndisagree with the parts it claims to sum.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n')).describe('Every service, in template order — the RAG dots on the collapsed\nstrip. Not paginated and not pageable: this is one journey\'s\nservices, bounded by what the ribbon can render, and the strip\nneeds all of them to draw any of them.\n')
+}).describe('One accordion strip on OB-05. \*\*Deliberately not the ribbon\*\* — the\nexpanded view and the step panel are their own reads, so a client with\nsix journeys does not pay for six ribbons on first paint.\n')).optional().describe('One per purchased product, in the admin-ordered service\nsequence. Not paginated — a client\'s purchases are a handful,\nand the accordion needs the set to render the page.\n'),
+  "createdBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})).describe('The OB-05 page in one document.')
+})
+
+/**
+ * B-103 · OB-05's SPOC panel, adding.
+
+**`whatsappOptIn: true` requires `whatsappOptInSource`.** That pairing is
+the whole reason this capture is built in a phase that sends no WhatsApp
+at all (PHASE-2-BUILD-PLAN.md §6.1): consent is the one item in the
+deferral that cannot be reconstructed later, and a `true` with no basis
+recorded is a SPOC who has to be re-approached before a single message
+can go out. Both the flag and its basis are also written to
+`ob_contact_consent_events`, which is insert-only, so a later withdrawal
+does not erase the evidence that consent stood when it stood.
+
+**`isPrimary: true` promotes and demotes the incumbent** in the same
+transaction — the way to replace a SPOC who has left without the client
+ever having none.
+
+**A duplicate email under the same client is refused** (`409`,
+case-insensitively, agreeing with `utf8mb4_0900_ai_ci` and with
+`uq_ob_client_contacts_email`). The same address under a *different*
+client stays allowed: one consultant can be the SPOC at two.
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Add a SPOC (OB-05)
+ */
+export const addObClientContactParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const addObClientContactHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addObClientContactBodyNameMax = 160;
+
+export const addObClientContactBodyDesignationMax = 120;
+
+export const addObClientContactBodyPhoneMax = 32;
+
+export const addObClientContactBodyWhatsappOptInDefault = false;export const addObClientContactBodyIsActiveDefault = true;
+
+export const addObClientContactBody = zod.object({
+  "name": zod.string().max(addObClientContactBodyNameMax),
+  "designation": zod.string().max(addObClientContactBodyDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(addObClientContactBodyPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional(),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('Required when `whatsappOptIn` is true, refused when it is false, and\n`UNRECORDED` is never accepted. As `ObContactWriteRequest`.\n\n\*\*Re-sending the same `true` does not restamp the consent.\*\* An\nunrelated edit — a corrected phone number — must not move the date\nthe consent is dated from, so a new event is written only when the\nflag or the basis actually changes.\n'),
+  "isPrimary": zod.boolean().describe('`true` promotes, demoting the current primary in the same\ntransaction. `false` on the client\'s \*\*only\*\* primary is refused\nwith `409 ob-contact-primary-required` — promote the replacement\nfirst, which is one request and leaves no window in which the client\nhas nobody.\n'),
+  "isActive": zod.boolean().default(addObClientContactBodyIsActiveDefault).describe('`false` deactivates, exactly as `removeObClientContact` does;\n`true` brings a departed contact back. Absent means unchanged on a\n`PATCH` and active on a `POST`.\n')
+}).describe('B-103 · the whole representation, not a sparse patch — the SPOC row\neditor sends every field on every save, so an absent one is a cleared\none. `ContactWriteRequest`\'s call one module over, for the same reason.\n')
+
+/**
+ * B-103 · OB-05's SPOC panel, editing — and the operation that promotes,
+demotes, deactivates and reactivates, because each of those is a field
+on this row rather than a verb of its own.
+
+**The `If-Match` comes from `getObClient`.** Unlike the ticketing
+contact patch, which had to be exempted because its list carried no tag,
+the SPOC list is *inside* a tagged document. A stale editor is refused
+rather than allowed to overwrite a promotion somebody else made while
+the panel was open.
+
+**The body is the whole representation, not a sparse patch** — an absent
+field is a cleared one. `ContactWriteRequest`'s call, one module over.
+
+**Consent is only restamped when it changes.** Sending
+`whatsappOptIn: true` again with the same source on an unrelated edit
+leaves the original date standing; a new consent event is written when
+the flag flips or the basis differs. Otherwise correcting a phone number
+would silently re-date the consent to today, which is the same evidence
+problem as not recording it.
+
+**Demoting the only primary is refused** with `409`
+`ob-contact-primary-required`, and so is deactivating them. This is
+where the module deliberately parts company with `updateClientContact`,
+which allows a client to have no primary because B-028's gate catches it
+at ticket creation. Onboarding has no such gate: the kickoff mail, the
+one-time portal password and every sign-off request address the primary
+SPOC, and with none they are addressed to nobody and nothing reports it.
+Promote the replacement first — one request, no window.
+
+ * @summary Edit a SPOC (OB-05)
+ */
+export const updateObClientContactParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n'),
+  "contactId": zod.number().describe('B-103 · an `ob_client_contacts` id, \*\*not\*\* a ticketing `ContactId`.\nNested under the client on purpose: a contact belonging to a \*different\*\n`ob_clients` row is `404`, not `403` — the id is a row this caller has\nno business knowing exists under that client.\n')
+})
+
+export const updateObClientContactHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObClientContactBodyNameMax = 160;
+
+export const updateObClientContactBodyDesignationMax = 120;
+
+export const updateObClientContactBodyPhoneMax = 32;
+
+export const updateObClientContactBodyWhatsappOptInDefault = false;export const updateObClientContactBodyIsActiveDefault = true;
+
+export const updateObClientContactBody = zod.object({
+  "name": zod.string().max(updateObClientContactBodyNameMax),
+  "designation": zod.string().max(updateObClientContactBodyDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(updateObClientContactBodyPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional(),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('Required when `whatsappOptIn` is true, refused when it is false, and\n`UNRECORDED` is never accepted. As `ObContactWriteRequest`.\n\n\*\*Re-sending the same `true` does not restamp the consent.\*\* An\nunrelated edit — a corrected phone number — must not move the date\nthe consent is dated from, so a new event is written only when the\nflag or the basis actually changes.\n'),
+  "isPrimary": zod.boolean().describe('`true` promotes, demoting the current primary in the same\ntransaction. `false` on the client\'s \*\*only\*\* primary is refused\nwith `409 ob-contact-primary-required` — promote the replacement\nfirst, which is one request and leaves no window in which the client\nhas nobody.\n'),
+  "isActive": zod.boolean().default(updateObClientContactBodyIsActiveDefault).describe('`false` deactivates, exactly as `removeObClientContact` does;\n`true` brings a departed contact back. Absent means unchanged on a\n`PATCH` and active on a `POST`.\n')
+}).describe('B-103 · the whole representation, not a sparse patch — the SPOC row\neditor sends every field on every save, so an absent one is a cleared\none. `ContactWriteRequest`\'s call one module over, for the same reason.\n')
+
+export const updateObClientContactResponseDataNameMax = 200;
+
+export const updateObClientContactResponseDataPrimaryContactNameMax = 160;
+
+export const updateObClientContactResponseDataPrimaryContactDesignationMax = 120;
+
+export const updateObClientContactResponseDataPrimaryContactPhoneMax = 32;
+
+export const updateObClientContactResponseDataLicenseTypeMax = 64;
+
+export const updateObClientContactResponseDataContactsItemNameMax = 160;
+
+export const updateObClientContactResponseDataContactsItemDesignationMax = 120;
+
+export const updateObClientContactResponseDataContactsItemPhoneMax = 32;
+
+export const updateObClientContactResponseDataApplicationsItemLicenseTypeMax = 64;
+
+
+export const updateObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
+export const updateObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
+
+
+
+export const updateObClientContactResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientContactResponseDataNameMax),
+  "onboardingDate": zod.string().date(),
+  "status": zod.enum(['ONBOARDING', 'LIVE', 'ON_HOLD', 'DROPPED']).describe('`ob_clients.overall_status`. \*\*`LIVE` is earned, never set\*\* — it is\nthe go-live flip that fires when every journey is complete with its\nsign-offs, and `PATCH \/onboarding\/clients\/{obClientId}` answers `422`\nto a request for it. The other three are judgements a person records.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Worst across the client\'s \*\*open\*\* journeys. Null while every\njourney is locked — OB-03 renders that as \"Prerequisites pending\",\nwhich is a gate state and not a colour.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "journeyCount": zod.number().describe('One per purchased product.'),
+  "journeysComplete": zod.number().optional(),
+  "products": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n')).optional(),
+  "salesPerson": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "primaryContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientContactResponseDataPrimaryContactNameMax),
+  "designation": zod.string().max(updateObClientContactResponseDataPrimaryContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(updateObClientContactResponseDataPrimaryContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).optional().describe('`ob_client_contacts` — the SPOCs.'),
+  "liveAt": zod.string().datetime({}).nullish(),
+  "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
+}).describe('The OB-03 list row. No PAN and no address: identity data belongs to the\ndetail read, where the masking rule and its audit apply, and a list is\nthe wrong place to leak it a page at a time.\n').and(zod.object({
+  "description": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "licenseType": zod.string().max(updateObClientContactResponseDataLicenseTypeMax).nullish(),
+  "pan": zod.string().nullish().describe('\*\*Masked for every role except OB Admin and Onboarding\nManager\*\* — `ABCDE\*\*\*\*F` — and masked on the client portal too,\nwhere the client\'s own PAN is still identity data the page has\nno reason to carry.\n\nEncrypted at rest. The unmasked value is not a field anyone can\nwiden a query to reach: it comes from its own reveal operation,\nwhich writes an audit row per call, and that operation lands\nwith A-113. Until then this is masked for everyone, which is\nthe safe direction to be wrong in.\n'),
+  "statusReason": zod.string().nullish().describe('Why the client was put `ON_HOLD` or `DROPPED`.\n`updateObClientRequest` has always taken it and there was\nnowhere to read it back — \*\*B-102 raised the gap and B-103\ncloses it\*\*, an added optional field, which CONVENTIONS.md §1\nsays is not breaking.\n'),
+  "contacts": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientContactResponseDataContactsItemNameMax),
+  "designation": zod.string().max(updateObClientContactResponseDataContactsItemDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(updateObClientContactResponseDataContactsItemPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).describe('`ob_client_contacts` — the SPOCs.')).optional().describe('Active and inactive both, primary first. OB-05 administers this\nlist, and a panel that could not see a departed SPOC could not\nreactivate one — nor explain whose name is on a past sign-off.\n'),
+  "applications": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "licenseType": zod.string().max(updateObClientContactResponseDataApplicationsItemLicenseTypeMax).nullish(),
+  "units": zod.number().min(1).nullish(),
+  "licenseStart": zod.string().date().nullish(),
+  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+}).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
+  "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
+  "journeys": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(updateObClientContactResponseDataJourneysItemPercentCompleteMin).max(updateObClientContactResponseDataJourneysItemPercentCompleteMax),
+  "heldByJourneyId": zod.number().nullish().describe('Set when this journey is instantiated but held on a \*\*service-level\ndependency\*\* — another journey of the same client that has to\ncomplete first (plan §5.5). Distinct from `gateStatus`, which is\nabout the client\'s prerequisites: a journey can be past the gate\nand still held behind a sibling. Null when nothing holds it.\n'),
+  "totalTatDays": zod.number().optional().describe('Σ of this journey\'s service TATs from its \*\*pinned\*\* template version.'),
+  "utilizedHours": zod.number().optional().describe('Working hours consumed: completed services at their recorded\nconsumption, the active one at its running clock, waiting-on-client\ntime excluded. \*\*Derived from `ob_step_clock_events` at read time\*\*\nfor this one client — never a stored aggregate, which could\ndisagree with the parts it claims to sum.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n')).describe('Every service, in template order — the RAG dots on the collapsed\nstrip. Not paginated and not pageable: this is one journey\'s\nservices, bounded by what the ribbon can render, and the strip\nneeds all of them to draw any of them.\n')
+}).describe('One accordion strip on OB-05. \*\*Deliberately not the ribbon\*\* — the\nexpanded view and the step panel are their own reads, so a client with\nsix journeys does not pay for six ribbons on first paint.\n')).optional().describe('One per purchased product, in the admin-ordered service\nsequence. Not paginated — a client\'s purchases are a handful,\nand the accordion needs the set to render the page.\n'),
+  "createdBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})).describe('The OB-05 page in one document.')
+})
+
+/**
+ * B-103 · **deactivates; it does not delete.**
+
+A contact is what `ob_signoff_requests.sent_to_contact_id` points at and
+what a client escalation is raised by. A real `DELETE` either fails as a
+constraint violation naming a MySQL index or — "fixed" with a cascade —
+destroys the record of who signed off on a live client's go-live. The
+row stays, `isActive` goes false, and it is still in `getObClient` so the
+panel can show it as removed and bring it back.
+
+It would also take the consent record with it, which
+`ob_contact_consent_events` exists to keep.
+
+**Removing an already-removed contact is `200`, not `404`.** It is a
+setter, and the second half of a double-click must not be an error about
+something that did happen — B-014's `UNCHANGED` argument. A contact id
+belonging to a *different* client is `404`.
+
+**Removing the only primary is refused**, `409`
+`ob-contact-primary-required` — see `updateObClientContact` for why
+onboarding differs from the ticketing master here.
+
+No `If-Match`: `DELETE` is a setter with one destination, so there is no
+lost update for a tag to prevent — the concurrent caller wanted the state
+the winner produced. The response still carries the client's new `ETag`,
+because everything else on OB-05 is editing against the old one.
+
+ * @summary Remove a SPOC (OB-05)
+ */
+export const removeObClientContactParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n'),
+  "contactId": zod.number().describe('B-103 · an `ob_client_contacts` id, \*\*not\*\* a ticketing `ContactId`.\nNested under the client on purpose: a contact belonging to a \*different\*\n`ob_clients` row is `404`, not `403` — the id is a row this caller has\nno business knowing exists under that client.\n')
+})
+
+export const removeObClientContactResponseDataNameMax = 200;
+
+export const removeObClientContactResponseDataPrimaryContactNameMax = 160;
+
+export const removeObClientContactResponseDataPrimaryContactDesignationMax = 120;
+
+export const removeObClientContactResponseDataPrimaryContactPhoneMax = 32;
+
+export const removeObClientContactResponseDataLicenseTypeMax = 64;
+
+export const removeObClientContactResponseDataContactsItemNameMax = 160;
+
+export const removeObClientContactResponseDataContactsItemDesignationMax = 120;
+
+export const removeObClientContactResponseDataContactsItemPhoneMax = 32;
+
+export const removeObClientContactResponseDataApplicationsItemLicenseTypeMax = 64;
+
+
+export const removeObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
+export const removeObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
+
+
+
+export const removeObClientContactResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(removeObClientContactResponseDataNameMax),
+  "onboardingDate": zod.string().date(),
+  "status": zod.enum(['ONBOARDING', 'LIVE', 'ON_HOLD', 'DROPPED']).describe('`ob_clients.overall_status`. \*\*`LIVE` is earned, never set\*\* — it is\nthe go-live flip that fires when every journey is complete with its\nsign-offs, and `PATCH \/onboarding\/clients\/{obClientId}` answers `422`\nto a request for it. The other three are judgements a person records.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Worst across the client\'s \*\*open\*\* journeys. Null while every\njourney is locked — OB-03 renders that as \"Prerequisites pending\",\nwhich is a gate state and not a colour.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "journeyCount": zod.number().describe('One per purchased product.'),
+  "journeysComplete": zod.number().optional(),
+  "products": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n')).optional(),
+  "salesPerson": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "primaryContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(removeObClientContactResponseDataPrimaryContactNameMax),
+  "designation": zod.string().max(removeObClientContactResponseDataPrimaryContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(removeObClientContactResponseDataPrimaryContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).optional().describe('`ob_client_contacts` — the SPOCs.'),
+  "liveAt": zod.string().datetime({}).nullish(),
+  "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
+}).describe('The OB-03 list row. No PAN and no address: identity data belongs to the\ndetail read, where the masking rule and its audit apply, and a list is\nthe wrong place to leak it a page at a time.\n').and(zod.object({
+  "description": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "licenseType": zod.string().max(removeObClientContactResponseDataLicenseTypeMax).nullish(),
+  "pan": zod.string().nullish().describe('\*\*Masked for every role except OB Admin and Onboarding\nManager\*\* — `ABCDE\*\*\*\*F` — and masked on the client portal too,\nwhere the client\'s own PAN is still identity data the page has\nno reason to carry.\n\nEncrypted at rest. The unmasked value is not a field anyone can\nwiden a query to reach: it comes from its own reveal operation,\nwhich writes an audit row per call, and that operation lands\nwith A-113. Until then this is masked for everyone, which is\nthe safe direction to be wrong in.\n'),
+  "statusReason": zod.string().nullish().describe('Why the client was put `ON_HOLD` or `DROPPED`.\n`updateObClientRequest` has always taken it and there was\nnowhere to read it back — \*\*B-102 raised the gap and B-103\ncloses it\*\*, an added optional field, which CONVENTIONS.md §1\nsays is not breaking.\n'),
+  "contacts": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(removeObClientContactResponseDataContactsItemNameMax),
+  "designation": zod.string().max(removeObClientContactResponseDataContactsItemDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(removeObClientContactResponseDataContactsItemPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).describe('`ob_client_contacts` — the SPOCs.')).optional().describe('Active and inactive both, primary first. OB-05 administers this\nlist, and a panel that could not see a departed SPOC could not\nreactivate one — nor explain whose name is on a past sign-off.\n'),
+  "applications": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "licenseType": zod.string().max(removeObClientContactResponseDataApplicationsItemLicenseTypeMax).nullish(),
+  "units": zod.number().min(1).nullish(),
+  "licenseStart": zod.string().date().nullish(),
+  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+}).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
+  "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
+  "journeys": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(removeObClientContactResponseDataJourneysItemPercentCompleteMin).max(removeObClientContactResponseDataJourneysItemPercentCompleteMax),
   "heldByJourneyId": zod.number().nullish().describe('Set when this journey is instantiated but held on a \*\*service-level\ndependency\*\* — another journey of the same client that has to\ncomplete first (plan §5.5). Distinct from `gateStatus`, which is\nabout the client\'s prerequisites: a journey can be past the gate\nand still held behind a sibling. Null when nothing holds it.\n'),
   "totalTatDays": zod.number().optional().describe('Σ of this journey\'s service TATs from its \*\*pinned\*\* template version.'),
   "utilizedHours": zod.number().optional().describe('Working hours consumed: completed services at their recorded\nconsumption, the active one at its running clock, waiting-on-client\ntime excluded. \*\*Derived from `ob_step_clock_events` at read time\*\*\nfor this one client — never a stored aggregate, which could\ndisagree with the parts it claims to sum.\n'),
@@ -1242,7 +1655,10 @@ export const listObPrereqCommentsResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(listObPrereqCommentsResponseDataItemClientAuthorPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional().describe('Set when `authorType` is `CLIENT`, null otherwise.'),
   "body": zod.string().max(listObPrereqCommentsResponseDataItemBodyMax),
   "isSystem": zod.boolean().optional().describe('Written by a transition rather than typed — the mandatory comment\n`returnObClientPrereqTask` requires is the only one so far. Marked\nso CP-04 can render it as an event rather than as something a\nperson chose to say, and so a client cannot be answered by a\nstring the server composed.\n'),
@@ -1334,7 +1750,10 @@ export const listObPrereqHistoryResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(listObPrereqHistoryResponseDataItemClientActorPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
   "fromStatus": zod.union([zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),zod.null()]).optional().describe('Null on the first entry — instantiation has nothing to come from.'),
   "toStatus": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -1782,7 +2201,10 @@ export const listObSignoffsResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(listObSignoffsResponseDataItemSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -1885,7 +2307,10 @@ export const getObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(getObSignoffResponseDataSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -1899,7 +2324,10 @@ export const getObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(getObSignoffResponseDataSignedByContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
   "signedIp": zod.string().max(getObSignoffResponseDataSignedIpMax).nullish().describe('Recorded acceptance, half one. PHASE-2-BUILD-PLAN decision 5\nchose this over statutory e-sign for v1: what makes the record\nstand up is that we can say who accepted, when, and from\nwhere. Read-only — no operation writes these after the fact.\n'),
   "signedUserAgent": zod.string().max(getObSignoffResponseDataSignedUserAgentMax).nullish().describe('Recorded acceptance, half two.'),
@@ -1961,7 +2389,10 @@ export const resendObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(resendObSignoffResponseDataSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -2027,7 +2458,10 @@ export const cancelObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(cancelObSignoffResponseDataSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -2221,7 +2655,10 @@ export const acceptObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(acceptObSignoffResponseDataSignoffSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -2235,7 +2672,10 @@ export const acceptObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(acceptObSignoffResponseDataSignoffSignedByContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),zod.null()]).optional(),
   "signedIp": zod.string().max(acceptObSignoffResponseDataSignoffSignedIpMax).nullish().describe('Recorded acceptance, half one. PHASE-2-BUILD-PLAN decision 5\nchose this over statutory e-sign for v1: what makes the record\nstand up is that we can say who accepted, when, and from\nwhere. Read-only — no operation writes these after the fact.\n'),
   "signedUserAgent": zod.string().max(acceptObSignoffResponseDataSignoffSignedUserAgentMax).nullish().describe('Recorded acceptance, half two.'),
@@ -2304,7 +2744,10 @@ export const objectObSignoffResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(objectObSignoffResponseDataSentToContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.'),
   "tokenExpiresAt": zod.string().datetime({}).describe('When the link stops working. On the response so OB-05 can say so;\nthe token it belongs to is not, on any response in this document —\nsee `listObSignoffs`.\n'),
   "signedAt": zod.string().datetime({}).nullish(),
@@ -2614,7 +3057,10 @@ export const listObClientEscalationsResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(listObClientEscalationsResponseDataItemRaisedByContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.').describe('An `ob_client_contacts` row, \*\*not\*\* a `UserRef` — an external\nprincipal. A-128\'s DDL keeps a separate column for exactly this\nreason, the same split `ob_prereq_comments` makes between its two\nauthor columns.\n'),
   "comment": zod.string().max(listObClientEscalationsResponseDataItemCommentMax),
   "raisedAt": zod.string().datetime({}),
@@ -2692,7 +3138,10 @@ export const resolveObClientEscalationResponse = zod.object({
   "email": zod.string().email(),
   "phone": zod.string().max(resolveObClientEscalationResponseDataRaisedByContactPhoneMax).nullish(),
   "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
-  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n')
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
 }).describe('`ob_client_contacts` — the SPOCs.').describe('An `ob_client_contacts` row, \*\*not\*\* a `UserRef` — an external\nprincipal. A-128\'s DDL keeps a separate column for exactly this\nreason, the same split `ob_prereq_comments` makes between its two\nauthor columns.\n'),
   "comment": zod.string().max(resolveObClientEscalationResponseDataCommentMax),
   "raisedAt": zod.string().datetime({}),

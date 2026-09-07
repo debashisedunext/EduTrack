@@ -218,9 +218,24 @@ class ObClientService {
                 primary, row.liveAt(), row.hasPortalLogin());
     }
 
+    /**
+     * <p>{@code isPrimary} is {@code is_primary AND is_active}, not the stored
+     * flag: {@code is_primary_key} — the generated column
+     * {@code uq_ob_client_contacts_primary} is on — is 1 only while a contact is
+     * also active, so this reports the fact the database enforces rather than a
+     * second one that could drift from it.
+     *
+     * <p>B-103 · {@code whatsappOptInBy} is on {@link
+     * ObClientReadRepository.ContactRow} and deliberately does not appear here.
+     * The client portal renders this same contact shape, and who inside the
+     * organisation attested a consent is not something to hand across that
+     * boundary — {@code ObStepDot}'s "absent by construction, not hidden
+     * client-side" argument, on a smaller field.
+     */
     private static ObClientDtos.ObContact contact(ObClientReadRepository.ContactRow row) {
         return new ObClientDtos.ObContact(row.id(), row.name(), row.designation(), row.email(),
-                row.phone(), row.whatsappOptIn(), row.isPrimary() && row.isActive());
+                row.phone(), row.whatsappOptIn(), row.whatsappOptInAt(), row.whatsappOptInSource(),
+                row.isPrimary() && row.isActive(), row.isActive());
     }
 
     private static ObClientDtos.ObApplication application(ObClientReadRepository.ApplicationRow row) {
