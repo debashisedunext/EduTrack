@@ -43,7 +43,7 @@ Each phase is counted on its own. A phase's *working days available* is the span
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
-| **A** | Shivendra | 28 | 16 | 57.0 | 40 | 142% ⚠️ | Sat 17 Oct |
+| **A** | Shivendra | 28 | 16 | 57.0 | 40 | 142% ⚠️ | Fri 16 Oct |
 | **B** | Ayush | 27 | 7 | 52.0 | 40 | 130% ⚠️ | Wed 28 Oct |
 | **C** | Divyansh | 25 | 10 | 64.0 | 40 | 160% ⚠️ | Wed 28 Oct |
 | **D** | Debashis | 2 | 0 | 4.0 | 40 | 10% | Fri 11 Sep |
@@ -59,7 +59,7 @@ Each phase is counted on its own. A phase's *working days available* is the span
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
-| **A** | Shivendra | 93 | 79 | 152.0 | 62 | 245% ⚠️ | Sat 17 Oct |
+| **A** | Shivendra | 93 | 79 | 152.0 | 62 | 245% ⚠️ | Fri 16 Oct |
 | **B** | Ayush | 82 | 62 | 141.8 | 62 | 229% ⚠️ | Wed 28 Oct |
 | **C** | Divyansh | 84 | 68 | 154.0 | 62 | 248% ⚠️ | Wed 28 Oct |
 | **D** | Debashis | 67 | 65 | 95.0 | 62 | 153% ⚠️ | Fri 11 Sep |
@@ -138,10 +138,10 @@ gantt
     M2 — Immutability core — weeks 8–9 :done, a3, 2026-08-14, 1d
     M6 — Dashboard & reports — weeks 10–16 :done, a4, 2026-08-15, 17d
     section Phase 2 — Client Onboarding
-    OB0 — Gate & schema :active, a5, 2026-09-03, 31d
-    OB5 — Hardening :active, a6, 2026-09-03, 24d
-    OB4 — Sign-off  dashboard  reports :a7, 2026-09-25, 6d
-    OB5 — Client portal :a8, 2026-10-15, 3d
+    OB0 — Gate & schema :active, a5, 2026-09-03, 30d
+    OB5 — Hardening :active, a6, 2026-09-03, 23d
+    OB4 — Sign-off  dashboard  reports :a7, 2026-09-24, 6d
+    OB5 — Client portal :a8, 2026-10-14, 3d
 ```
 
 ### Stream B — Masters & Clients · Ayush
@@ -159,7 +159,7 @@ gantt
     Weeks 10–11 — join Stream C on the ribbon :done, b3, 2026-08-20, 3d
     section Phase 2 — Client Onboarding
     OB1 — Client capture :active, b4, 2026-09-03, 40d
-    OB3 — Notifications :active, b5, 2026-09-04, 12d
+    OB3 — Notifications :active, b5, 2026-09-04, 24d
     OB4 — Sign-off  dashboard  reports :active, b6, 2026-09-05, 36d
     OB5 — Hardening :b7, 2026-09-08, 2d
 ```
@@ -216,8 +216,8 @@ gantt
 |  | `A-001` | Maven multi-module skeleton: common, domain, api, worker | 1 | — | Tue 08 Sep | Tue 08 Sep | 1 | ✅ done |
 |  | `A-002` | docker-compose.yml — MySQL 8.4, Redis 7, MinIO, Mailpit | 1 | `A-001` | Tue 08 Sep | Tue 08 Sep | 2 | ✅ done |
 |  | `A-003` | Flyway baseline 1/5 — identity | 1 | `A-002` | Wed 05 Aug | Wed 05 Aug | 0 | ✅ done |
-|  | `A-004` | Flyway baseline 2/5 — tickets | 1.5 | `A-003` | Wed 05 Aug | Wed 05 Aug | 8 | ✅ done |
-|  | `A-005` | Flyway baseline 3/5 — workflow | 1 | `A-004` | Wed 05 Aug | Wed 05 Aug | 9 | ✅ done |
+|  | `A-004` | Flyway baseline 2/5 — tickets | 1.5 | `A-003` | Wed 05 Aug | Wed 05 Aug | 7 | ✅ done |
+|  | `A-005` | Flyway baseline 3/5 — workflow | 1 | `A-004` | Wed 05 Aug | Wed 05 Aug | 8 | ✅ done |
 |  | `A-006` | Flyway baseline 4/5 — clients & content | 1.5 | `A-007` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `A-007` | Flyway baseline 5/5 — masters & ops | 1.5 | `A-005` | Tue 08 Sep | Tue 08 Sep | 2 | ✅ done |
 |  | `A-008` | Immutability triggers — two per table | 1 | `A-004` `A-005` | Tue 08 Sep | Tue 08 Sep | 1 | ✅ done |
@@ -241,8 +241,8 @@ gantt
 |  | `A-032` | Spring Security filter chain — token valid and unrevoked | 1 | `A-022` | Wed 12 Aug | Wed 12 Aug | 0 | ✅ done |
 |  | `A-033` | Permission model + @PreAuthorize | 1.5 | `A-032` `B-001` | Thu 13 Aug | Thu 13 Aug | 0 | ✅ done |
 | 🔴 | `A-034` | ScopeResolver producing a JPA Specification per role | 2 | `A-033` | Thu 13 Aug | Thu 13 Aug | 0 | ✅ done |
-|  | `A-035` | Out-of-scope IDs return 404, not 403, on /tickets/{id} and every… | 0.5 | `A-034` | Thu 13 Aug | Thu 13 Aug | 5 | ✅ done |
-| 🔴 | `A-036` | Permission test matrix | 2 | `A-035` | Thu 13 Aug | Thu 13 Aug | 6 | ✅ done |
+|  | `A-035` | Out-of-scope IDs return 404, not 403, on /tickets/{id} and every… | 0.5 | `A-034` | Thu 13 Aug | Thu 13 Aug | 4 | ✅ done |
+| 🔴 | `A-036` | Permission test matrix | 2 | `A-035` | Thu 13 Aug | Thu 13 Aug | 5 | ✅ done |
 |  | `A-037` | ArchUnit rules | 1 | `A-034` ᶦ | Thu 13 Aug | Thu 13 Aug | 21 | ✅ done |
 |  | `A-040` | Append-only services for the three protected tables | 1.5 | `A-010` `A-013` | Fri 14 Aug | Fri 14 Aug | 0 | ✅ done |
 |  | `A-041` | Canonical JSON serialiser — fixed key order, fixed timestamp format | 1.5 | `A-040` | Fri 14 Aug | Fri 14 Aug | 0 | ✅ done |
@@ -274,7 +274,7 @@ gantt
 |  | `A-071` | Audit Log Viewer | 1.5 | `A-034` ᶦ | Tue 18 Aug | Tue 18 Aug | 18 | ✅ done |
 |  | `A-072` | Global search + ticket-ID deep link | 1.5 | `A-009` `C-005` ᶦ | Wed 19 Aug | Wed 19 Aug | 17 | ✅ done |
 |  | `A-073` | Performance | 2 | `A-053` `B-007` ᶦ | Tue 08 Sep | Wed 09 Sep | 0 | ▫️ to do |
-|  | `A-074` | Security | 2 | `A-036` ᶦ | Thu 20 Aug | Thu 20 Aug | 2 | ✅ done |
+|  | `A-074` | Security | 2 | `A-036` ᶦ | Thu 20 Aug | Thu 20 Aug | 1 | ✅ done |
 |  | `A-075` | Go-live runbook, deployment, TLS, secrets in vault | 2 | `A-073` `A-074` ᶦ | Thu 10 Sep | Fri 11 Sep | 0 | ▫️ to do |
 |  | `A-076` | Login throttle — the half A-021 deferred | 1 | — | Wed 12 Aug | Wed 12 Aug | 22 | ✅ done |
 |  | `A-077` | Project dashboard | 2 | — | Fri 21 Aug | Fri 21 Aug | 15 | ✅ done |
@@ -290,21 +290,21 @@ gantt
 | 🔴 | `A-110` | modules JWT claim | 2 | `A-109` ᶦ | Fri 04 Sep | Fri 04 Sep | 0 | ✅ done |
 | 🔴 | `A-111` | ModuleGuard | 2 | `A-110` ᶦ | Fri 04 Sep | Fri 04 Sep | 0 | ✅ done |
 | 🔴 | `A-112` | OnboardingScopeResolver and ScopedJourneys | 3 | `A-111` ᶦ | Fri 04 Sep | Fri 04 Sep | 0 | ✅ done |
-|  | `A-113` | PAN encryption and the reveal audit | 3 | `A-101` ᶦ | Sat 12 Sep | Tue 15 Sep | 0 | 🟡 50% |
-|  | `A-114` | Permission-matrix entries | 2 | `A-112` ᶦ | Tue 15 Sep | Thu 17 Sep | 0 | ▫️ to do |
-|  | `A-115` | ArchUnit: the two modules stay separable | 2 | `A-106` ᶦ | Thu 17 Sep | Sat 19 Sep | 0 | ▫️ to do |
-|  | `A-116` | Module launcher and switcher | 2 | `A-110` ᶦ | Sat 19 Sep | Wed 23 Sep | 0 | ▫️ to do |
-|  | `A-117` | OB-08 | 2 | `A-116` ᶦ | Wed 23 Sep | Fri 25 Sep | 0 | ▫️ to do |
+|  | `A-113` | PAN encryption and the reveal audit | 3 | `A-101` ᶦ | Sat 12 Sep | Sat 12 Sep | 0 | 🔵 in review |
+|  | `A-114` | Permission-matrix entries | 2 | `A-112` ᶦ | Sat 12 Sep | Wed 16 Sep | 0 | ▫️ to do |
+|  | `A-115` | ArchUnit: the two modules stay separable | 2 | `A-106` ᶦ | Wed 16 Sep | Fri 18 Sep | 0 | ▫️ to do |
+|  | `A-116` | Module launcher and switcher | 2 | `A-110` ᶦ | Fri 18 Sep | Tue 22 Sep | 0 | ▫️ to do |
+|  | `A-117` | OB-08 | 2 | `A-116` ᶦ | Tue 22 Sep | Thu 24 Sep | 0 | ▫️ to do |
 | 🔴 | `A-118` | OpenAPI contract for the whole module | 3 | — | Sat 05 Sep | Sat 05 Sep | 36 | ✅ done |
 | 🔴 | `A-119` | Wire-conformance ratchet for onboarding DTOs | 2 | `A-118` ᶦ | Sat 05 Sep | Sat 05 Sep | 37 | ✅ done |
-|  | `A-120` | Public sign-off surface | 3 | `A-107` ᶦ | Fri 25 Sep | Wed 30 Sep | 0 | ▫️ to do |
-|  | `A-121` | OTP issue and verify | 2 | `A-120` ᶦ | Wed 30 Sep | Fri 02 Oct | 0 | ▫️ to do |
-|  | `A-122` | Permission-matrix completeness | 2 | `A-114` ᶦ | Fri 02 Oct | Tue 06 Oct | 0 | ▫️ to do |
+|  | `A-120` | Public sign-off surface | 3 | `A-107` ᶦ | Thu 24 Sep | Tue 29 Sep | 0 | ▫️ to do |
+|  | `A-121` | OTP issue and verify | 2 | `A-120` ᶦ | Tue 29 Sep | Thu 01 Oct | 0 | ▫️ to do |
+|  | `A-122` | Permission-matrix completeness | 2 | `A-114` ᶦ | Thu 01 Oct | Sat 03 Oct | 0 | ▫️ to do |
 |  | `A-123` | Mutation tests on the append-only pair | 2 | `A-106` ᶦ | Thu 03 Sep | Thu 03 Sep | 39 | ✅ done |
-|  | `A-124` | ob_products master | 1 | `A-101` ᶦ | Tue 06 Oct | Wed 07 Oct | 0 | ▫️ to do |
-|  | `A-125` | client_accounts + CLIENT principal — identity-layer table | 3 | `A-110` ᶦ | Wed 07 Oct | Sat 10 Oct | 0 | ▫️ to do |
-|  | `A-126` | Portal route trees + ClientScopeResolver | 3 | `A-125` ᶦ | Sat 10 Oct | Thu 15 Oct | 0 | ▫️ to do |
-|  | `A-127` | is_client_visible activation | 2 | `A-126` ᶦ | Thu 15 Oct | Sat 17 Oct | 4 | ▫️ to do |
+|  | `A-124` | ob_products master | 1 | `A-101` ᶦ | Sat 03 Oct | Tue 06 Oct | 0 | ▫️ to do |
+|  | `A-125` | client_accounts + CLIENT principal — identity-layer table | 3 | `A-110` ᶦ | Tue 06 Oct | Fri 09 Oct | 0 | ▫️ to do |
+|  | `A-126` | Portal route trees + ClientScopeResolver | 3 | `A-125` ᶦ | Fri 09 Oct | Wed 14 Oct | 0 | ▫️ to do |
+|  | `A-127` | is_client_visible activation | 2 | `A-126` ᶦ | Wed 14 Oct | Fri 16 Oct | 5 | ▫️ to do |
 |  | `A-128` | Service dependency & escalation schema | 1 | `A-103` ᶦ | Thu 03 Sep | Thu 03 Sep | 5 | ✅ done |
 
 </details>
@@ -317,7 +317,7 @@ gantt
 |  | `B-001` | Seed: 6 roles + the full permission matrix from blueprint §2 | 1 | `A-003` | Thu 06 Aug | Thu 06 Aug | 0 | ✅ done |
 |  | `B-002` | Seed: 11 task types | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 23 | ✅ done |
 |  | `B-003` | Seed: statuses | 1 | `A-007` | Fri 07 Aug | Fri 07 Aug | 4 | ✅ done |
-|  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 8 | ✅ done |
+|  | `B-004` | Seed: 3 workflow templates with their stages — Standard Dev Flow | 1 | `A-005` | Fri 07 Aug | Fri 07 Aug | 7 | ✅ done |
 |  | `B-005` | JPA entities + repositories for the full model, built on A's schema | 3 | `A-006` `A-007` | Sat 08 Aug | Sat 08 Aug | 0 | ✅ done |
 |  | `B-006` | MapStruct base configuration | 0.5 | `B-005` ᶦ | Sat 08 Aug | Mon 10 Aug | 0 | ✅ done |
 | 🔴 | `B-007` | Ticket fixture corpus | 2 | `B-004` `B-005` | Mon 10 Aug | Mon 10 Aug | 0 | ✅ done |
@@ -370,17 +370,17 @@ gantt
 |  | `B-067` | Masters index — the sidebar's Masters entry lands on a placeholder | 1 | — | Sat 22 Aug | Sat 22 Aug | 14 | ✅ done |
 |  | `B-068` | Org settings screen — decided the API is enough | 1 | — | Sat 22 Aug | Sat 22 Aug | 14 | ✅ done |
 |  | `B-101` | Fixture corpus | 2 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 39 | ✅ done |
-| 🔴 | `B-102` | Client CRUD and the duplicate guard | 3 | `A-112` `A-113` ᶦ | Sat 19 Sep | Thu 24 Sep | 0 | ▫️ to do |
-|  | `B-103` | SPOC contacts — multiple per client, one primary | 1 | `B-102` ᶦ | Thu 24 Sep | Fri 25 Sep | 0 | ▫️ to do |
-|  | `B-104` | Applications purchased — with license start and end dates | 1 | `B-102` ᶦ | Fri 25 Sep | Sat 26 Sep | 0 | ▫️ to do |
-|  | `B-106` | Requirements | 1 | `B-102` ᶦ | Sat 26 Sep | Tue 29 Sep | 0 | ▫️ to do |
-|  | `B-107` | Client attachments — the existing upload pipeline, unchanged | 1 | `B-102` ᶦ | Tue 29 Sep | Wed 30 Sep | 0 | ▫️ to do |
-|  | `B-108` | OB-03 — client list — filter by status, RAG, owner and sales person | 2 | `B-102` ᶦ | Wed 30 Sep | Fri 02 Oct | 0 | ▫️ to do |
-|  | `B-109` | OB-04 — new client wizard — four steps, multi-product selection | 3 | `B-103` `B-104` `B-106` `B-107` ᶦ | Fri 02 Oct | Wed 07 Oct | 0 | ▫️ to do |
+| 🔴 | `B-102` | Client CRUD and the duplicate guard | 3 | `A-112` `A-113` ᶦ | Thu 17 Sep | Tue 22 Sep | 0 | ▫️ to do |
+|  | `B-103` | SPOC contacts — multiple per client, one primary | 1 | `B-102` ᶦ | Tue 22 Sep | Wed 23 Sep | 0 | ▫️ to do |
+|  | `B-104` | Applications purchased — with license start and end dates | 1 | `B-102` ᶦ | Wed 23 Sep | Thu 24 Sep | 0 | ▫️ to do |
+|  | `B-106` | Requirements | 1 | `B-102` ᶦ | Thu 24 Sep | Fri 25 Sep | 0 | ▫️ to do |
+|  | `B-107` | Client attachments — the existing upload pipeline, unchanged | 1 | `B-102` ᶦ | Fri 25 Sep | Sat 26 Sep | 0 | ▫️ to do |
+|  | `B-108` | OB-03 — client list — filter by status, RAG, owner and sales person | 2 | `B-102` ᶦ | Sat 26 Sep | Wed 30 Sep | 0 | ▫️ to do |
+|  | `B-109` | OB-04 — new client wizard — four steps, multi-product selection | 3 | `B-103` `B-104` `B-106` `B-107` ᶦ | Wed 30 Sep | Sat 03 Oct | 0 | ▫️ to do |
 | 🔴 | `B-110` | Outbox dispatcher with retry | 2 | `A-107` ᶦ | Fri 04 Sep | Fri 04 Sep | 34 | ✅ done |
 |  | `B-111` | Email templates through the existing mail engine — no new transport | 1 | `B-110` ᶦ | Fri 04 Sep | Fri 04 Sep | 38 | ✅ done |
 |  | `B-112` | OB-13 | 2 | `B-110` ᶦ | Fri 04 Sep | Fri 04 Sep | 37 | ✅ done |
-|  | `B-113` | OB-11 and OB-12 | 2 | `C-115` ᶦ | Thu 17 Sep | Sat 19 Sep | 0 | ▫️ to do |
+|  | `B-113` | OB-11 and OB-12 | 2 | `C-115` ᶦ | Sat 03 Oct | Wed 07 Oct | 0 | ▫️ to do |
 |  | `B-114` | Daily digest to managers | 1 | `B-112` ᶦ | Sat 05 Sep | Sat 05 Sep | 37 | ✅ done |
 |  | `B-115` | OB-09 | 2 | `A-121` ᶦ | Wed 07 Oct | Fri 09 Oct | 0 | ▫️ to do |
 |  | `B-116` | Acceptance PDF | 2 | `B-115` ᶦ | Sat 10 Oct | Wed 14 Oct | 0 | ▫️ to do |
