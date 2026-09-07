@@ -313,7 +313,25 @@ class ObWireConformanceTest {
 
     private static Object value(Class<?> type, Type generic, int depth) {
         if (depth > 4) {
-            return null;
+            // B-102 · a primitive component cannot take null, and the failure
+            // it produces names nothing useful: newInstance throws an NPE from
+            // sun.invoke.util.ValueConversions, so the message points at a JDK
+            // conversion class rather than at the record that ran out of depth.
+            //
+            // The guard's job is to stop recursing, not to make a sample
+            // impossible to construct — and the two are not the same once a
+            // matched schema nests five records deep. The first one that does
+            // is ObClientDetailResponse -> ObClientDetail -> journeys[] ->
+            // ObJourneyStrip -> steps[] -> ObStepDot, every level of which the
+            // contract declares, so the shape is right and the guard was
+            // simply never asked this question before.
+            //
+            // Zero is the honest "stopped here" value: it constructs, it
+            // serialises, and both assertions above only ask whether a field is
+            // present and whether an object arrived as a scalar — neither reads
+            // the value. Raising the depth limit would move this failure rather
+            // than fix it, since a self-referential record still reaches the cut.
+            return zeroIfPrimitive(type);
         }
         if (type == long.class || type == Long.class) return 1L;
         if (type == int.class || type == Integer.class) return 1;
@@ -334,6 +352,28 @@ class ObWireConformanceTest {
         }
         if (type.isRecord()) return sample(type, depth + 1);
         return null;
+    }
+
+    /**
+     * B-102 · the depth guard's return value, for a component that cannot hold
+     * null.
+     *
+     * <p>Null for every reference type, exactly as before. Only primitives
+     * change, and only past the cut-off — a fully sampled record still gets the
+     * distinctive {@code 1}/{@code 1L}/{@code false} values above, so nothing
+     * about what this test actually asserts moves.
+     */
+    private static Object zeroIfPrimitive(Class<?> type) {
+        if (!type.isPrimitive()) return null;
+        if (type == long.class) return 0L;
+        if (type == int.class) return 0;
+        if (type == short.class) return (short) 0;
+        if (type == byte.class) return (byte) 0;
+        if (type == char.class) return (char) 0;
+        if (type == boolean.class) return Boolean.FALSE;
+        if (type == float.class) return 0.0f;
+        if (type == double.class) return 0.0d;
+        throw new IllegalStateException("unhandled primitive " + type);
     }
 
     private static Class<?> elementType(Type generic) {

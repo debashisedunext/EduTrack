@@ -334,11 +334,11 @@ class ObClientReadRepository {
      * are excluded — an archived journey is a template version that was
      * replaced, and showing it beside its replacement would double every strip.
      */
-    List<JourneyRow> journeysOf(long clientId) {
+    List<JourneyStripRow> journeysOf(long clientId) {
         return jdbc.sql("""
                 SELECT j.id                 AS id,
                        j.gate_status        AS gateStatus,
-                       j.held_by_journey_id AS blockedByJourneyId,
+                       j.held_by_journey_id AS heldByJourneyId,
                        p.id                 AS productId,
                        p.code               AS productCode,
                        p.name               AS productName,
@@ -449,7 +449,7 @@ class ObClientReadRepository {
                           LocalDate licenseEnd, long productId, String productCode, String productName) {
     }
 
-    record JourneyRow(long id, String gateStatus, Long blockedByJourneyId, long productId,
+    record JourneyStripRow(long id, String gateStatus, Long heldByJourneyId, long productId,
                       String productCode, String productName, int stepCount, int stepsSettled,
                       int totalTatDays, String rag) {
     }
@@ -500,8 +500,8 @@ class ObClientReadRepository {
             localDate(rs, "licenseStart"), localDate(rs, "licenseEnd"),
             rs.getLong("productId"), rs.getString("productCode"), rs.getString("productName"));
 
-    private static final RowMapper<JourneyRow> JOURNEY_MAPPER = (rs, n) -> new JourneyRow(
-            rs.getLong("id"), rs.getString("gateStatus"), nullableLong(rs, "blockedByJourneyId"),
+    private static final RowMapper<JourneyStripRow> JOURNEY_MAPPER = (rs, n) -> new JourneyStripRow(
+            rs.getLong("id"), rs.getString("gateStatus"), nullableLong(rs, "heldByJourneyId"),
             rs.getLong("productId"), rs.getString("productCode"), rs.getString("productName"),
             rs.getInt("stepCount"), rs.getInt("stepsSettled"), rs.getInt("totalTatDays"),
             rs.getString("rag"));

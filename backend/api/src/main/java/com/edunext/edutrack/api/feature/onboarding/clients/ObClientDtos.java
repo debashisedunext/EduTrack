@@ -66,7 +66,7 @@ final class ObClientDtos {
      * unbuilt feature. Null renders as an em dash.
      */
     record ObJourneyStrip(long id, ObProductRef product, String gateStatus, String rag,
-                          int percentComplete, Long blockedByJourneyId,
+                          int percentComplete, Long heldByJourneyId,
                           Integer totalTatDays, Double utilizedHours, List<ObStepDot> steps) {
     }
 

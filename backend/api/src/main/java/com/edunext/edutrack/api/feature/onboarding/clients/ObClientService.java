@@ -143,7 +143,7 @@ class ObClientService {
      * seven round trips to render a page that is, in the end, one screen.
      */
     private List<ObClientDtos.ObJourneyStrip> journeys(long clientId) {
-        List<ObClientReadRepository.JourneyRow> journeyRows = reads.journeysOf(clientId);
+        List<ObClientReadRepository.JourneyStripRow> journeyRows = reads.journeysOf(clientId);
         if (journeyRows.isEmpty()) {
             return List.of();
         }
@@ -156,7 +156,7 @@ class ObClientService {
         }
 
         List<ObClientDtos.ObJourneyStrip> strips = new ArrayList<>(journeyRows.size());
-        for (ObClientReadRepository.JourneyRow journey : journeyRows) {
+        for (ObClientReadRepository.JourneyStripRow journey : journeyRows) {
             strips.add(new ObClientDtos.ObJourneyStrip(
                     journey.id(),
                     new ObClientDtos.ObProductRef(journey.productId(), journey.productCode(),
@@ -164,7 +164,7 @@ class ObClientService {
                     journey.gateStatus(),
                     journey.rag(),
                     percentComplete(journey.stepsSettled(), journey.stepCount()),
-                    journey.blockedByJourneyId(),
+                    journey.heldByJourneyId(),
                     journey.totalTatDays(),
                     // C-120's roll-up over ob_step_clock_events. Null rather
                     // than 0.0 — see ObJourneyStrip's own note.
