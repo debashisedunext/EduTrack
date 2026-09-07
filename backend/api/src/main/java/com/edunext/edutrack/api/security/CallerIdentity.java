@@ -206,6 +206,20 @@ public record CallerIdentity(long userId, String roleCode, List<Long> projectIds
     }
 
     private static Optional<CallerIdentity> fromToken(Jwt jwt) {
+        // A-125 · a portal token is not a staff identity, and the refusal is
+        // here rather than in a guard because this is the one place a staff
+        // identity is built from a token. A guard can be forgotten on a route;
+        // this cannot.
+        //
+        // The danger it closes is not a client reaching a staff route — the
+        // route trees are separate and A-126 guards them. It is subtler: `sub`
+        // on a portal token is a client_accounts id, and that sequence overlaps
+        // users.id. Were one to become a CallerIdentity, `assigned_to = me`
+        // would compare a client's account id against staff ids and return
+        // whatever staff member happens to share the number.
+        if (PrincipalType.of(jwt.getClaimAsString(PrincipalType.CLAIM)) == PrincipalType.CLIENT) {
+            return Optional.empty();
+        }
         Long userId = asId(jwt.getSubject());
         String role = normalisedRole(jwt.getClaimAsString(ROLE_CLAIM));
         if (userId == null || role == null) {
