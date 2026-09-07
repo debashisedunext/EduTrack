@@ -389,9 +389,25 @@ describe('A-118 · the OB-02 board and OB-10 hub', () => {
   it('lists unbuilt reports with a reason rather than hiding them', async () => {
     const { data } = await get('/onboarding/reports');
     expect(data.data.reports).toHaveLength(12);
+    // B-122 · six, not five. A-118 wrote five — the OB4b group PHASE-2-BUILD-PLAN
+    // §3 #8 holds — before the build order settled `prereq-aging`, which reads
+    // `ob_client_prereq_tasks` and cannot run until B-124/B-125 create it. The
+    // real server declares it unavailable, so a mock claiming otherwise would
+    // have the frontend exercising a state no deployment can produce.
     const held = data.data.reports.filter((r: { available: boolean }) => !r.available);
-    expect(held).toHaveLength(5);
+    expect(held).toHaveLength(6);
     expect(held.every((r: { unavailableReason: string }) => r.unavailableReason?.length > 0)).toBe(true);
+  });
+
+  // B-122 · the two unbuilt groups are waiting on different things, and the
+  // cards say which. "Held pending the reports decision" on a report whose
+  // tables do not exist sends somebody to ask a question nobody can answer.
+  it('says a report waiting on tables is not waiting on the OB4b decision', async () => {
+    const { data } = await get('/onboarding/reports');
+    const prereqAging = data.data.reports.find((r: { key: string }) => r.key === 'prereq-aging');
+    expect(prereqAging.available).toBe(false);
+    expect(prereqAging.unavailableReason).toContain('B-124');
+    expect(prereqAging.unavailableReason).not.toContain('OB4b');
   });
 
   it('404s a report that is declared but not built', async () => {

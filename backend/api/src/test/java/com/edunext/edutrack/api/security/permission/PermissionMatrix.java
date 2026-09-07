@@ -2089,7 +2089,38 @@ final class PermissionMatrix {
             // still A-111's, unwired, exactly as above.
             everyRole("GET", "/api/v1/onboarding/notifications"),
             everyRole("PATCH", "/api/v1/onboarding/notifications/{notificationId}/read"),
-            everyRole("PATCH", "/api/v1/onboarding/notifications/read-all"));
+            everyRole("PATCH", "/api/v1/onboarding/notifications/read-all"),
+
+            // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
+            //
+            // Every role, and for the reason the routes above are: which
+            // onboarding roles may read a report is an *onboarding* role
+            // question, and this file cannot express one. It lives in the
+            // moduleRoles claim, which JwtAuthoritiesConverter does not turn
+            // into a Spring authority, so none of the six ticketing-role
+            // fixtures below carries any onboarding standing at all.
+            //
+            // What a reachable route yields is the interesting half. Both are
+            // scoped by ObReportScope, which resolves anything that is not one
+            // of plan section 3's five module roles to a deny-all SQL
+            // predicate. So a platform role with no onboarding grant reaches
+            // the catalogue and gets twelve cards with a scopeNote saying they
+            // hold no onboarding role, and reaches a runner and gets zero rows
+            // with an appliedScope of "nothing". Neither is a 403, so
+            // "everyRole" is right either way — and the fixtures reaching it
+            // are what prove the reports never hand an unscoped row to a
+            // caller with no standing, which ObReportsIT asserts against real
+            // MySQL for all five roles plus the two deny cases.
+            //
+            // The catalogue is deliberately NOT narrowed by role. A report's
+            // rows are scoped and its existence is not: hiding cards per role
+            // would make the hub a second, undocumented copy of this file.
+            //
+            // The module gate that would make a caller with no ONBOARDING
+            // entitlement a 404 before any of this is A-111's, still unwired,
+            // exactly as above.
+            everyRole("GET", "/api/v1/onboarding/reports"),
+            everyRole("GET", "/api/v1/onboarding/reports/{reportKey}"));
 
     /**
      * One route and what each role may do with it.
