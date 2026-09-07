@@ -155,6 +155,26 @@ api/feature/onboarding/dashboard/       @Ayushedunext
 api/feature/onboarding/reports/                 @Ayushedunext
 /frontend/src/features/onboarding/reports/      @Ayushedunext
 
+# B-102's onboarding client master — the OB1 block's own package, and the one
+# the plan's ownership map (PHASE-2-BUILD-PLAN.md §210) names first. Same two
+# patterns and the same sub-directory reasoning as every rule above; the
+# frontend half is empty until B-108 and B-109 build OB-03 and OB-04, which is
+# the "empty rule costs nothing" case B-110 argued for worker/onboarding/stats/.
+#
+# NOT `api/feature/onboarding/clients` without the slash: that would also match
+# a file called `clients` and, more to the point, the parent
+# `api/feature/onboarding/` stays unclaimed on purpose — C-102's journey
+# designer and C-104's step lifecycle live under it.
+api/feature/onboarding/clients/                 @Ayushedunext
+/frontend/src/features/onboarding/clients/      @Ayushedunext
+# B-102 moved ObStepRag up from api/feature/onboarding/reports/ into the parent
+# package, so OB-03's client list and OB-10's report rows share one RAG formula
+# instead of keeping two. The parent directory is deliberately unclaimed — see
+# the note just above — so the two files are named individually, the way
+# B-111's mail layout is named rather than its directory. Both were checked
+# against `git ls-files`.
+api/feature/onboarding/ObStepRag.java           @Ayushedunext
+
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
 #
