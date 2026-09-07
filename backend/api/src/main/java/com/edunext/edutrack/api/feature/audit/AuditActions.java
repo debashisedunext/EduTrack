@@ -80,6 +80,18 @@ final class AuditActions {
     static final String LOGOUT = "LOGOUT";
 
     /**
+     * A-113 · somebody read a client's PAN in the clear.
+     *
+     * <p>Written by name because a reveal is a <b>read</b>, and
+     * {@link #actionFor} only derives terms for mutating methods — so nothing
+     * in {@link AuditInterceptor} will ever produce this row. Blueprint §11
+     * requires it, and PHASE-2-BUILD-PLAN finding 10 is why there is a discrete
+     * event to attach it to at all: unmasking automatically by role, as the
+     * prototype did, leaves the audit rule with nothing to log.
+     */
+    static final String PAN_REVEALED = "PAN_REVEALED";
+
+    /**
      * A request reached a handler and was refused by {@code @PreAuthorize}.
      *
      * <p>Recorded on reads as well as writes, and the only failure recorded at

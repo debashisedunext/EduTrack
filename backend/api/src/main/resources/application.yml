@@ -258,6 +258,28 @@ edutrack:
       # every enrolled user's second factor.
       encryption-key: ${TOTP_ENCRYPTION_KEY:local-dev-only-totp-encryption-key-change-me-in-every-other-environment}
 
+  onboarding:
+    pan:
+      # A-113 · PAN is identity, not a financial field (Onboarding plan §1.1),
+      # and §11 requires it encrypted, masked to the last four, and every
+      # unmasked read audited.
+      #
+      # TWO KEYS, AND THEY ARE NOT INTERCHANGEABLE. The migration note on
+      # ob_clients states the rule: the AES key may rotate freely, re-encrypting
+      # rows as it goes, but the HMAC key cannot be rotated without invalidating
+      # every stored blind index at once — and with it the duplicate-client
+      # guard, which would then stop firing without anything looking wrong.
+      # Generate them separately:  openssl rand -base64 32
+      #
+      # PanConfig REFUSES TO START outside `local` while either is still the
+      # committed default, for TotpConfig's reason and a worse case: a PAN is
+      # statutory identity for a real company, and ob_clients holds one each.
+      #
+      # Both are read through PanKeySource, so A-075's vault replaces one bean
+      # and no stored byte moves.
+      encryption-key: ${PAN_ENCRYPTION_KEY:bG9jYWwtZGV2LW9ubHktcGFuLWFlcy1rZXktMzJieXQ=}
+      blind-index-key: ${PAN_BLIND_INDEX_KEY:bG9jYWwtZGV2LW9ubHktcGFuLWhtYWMta2V5LTMyYnk=}
+
   storage:
     endpoint: ${S3_ENDPOINT:http://localhost:9000}
     bucket: ${S3_BUCKET:edutrack}
