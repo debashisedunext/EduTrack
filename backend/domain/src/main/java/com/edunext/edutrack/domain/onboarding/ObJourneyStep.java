@@ -111,6 +111,18 @@ public class ObJourneyStep {
     @Column(name = "due_at")
     private Instant dueAt;
 
+    /**
+     * C-113 · when the TAT scanner flagged {@link #dueAt} as passed.
+     * {@code null} = not yet flagged, whatever {@link #dueAt} says — a step
+     * still {@code PENDING} or {@code WAITING_ON_CLIENT} has a dead or
+     * frozen clock and is never a candidate (see {@code ObTatRepository}).
+     * A plain fact, not a colour: {@code null → timestamp} once, guarded by
+     * the same column in its own {@code WHERE}, on {@code tickets.escalate}'s
+     * precedent — see the migration header.
+     */
+    @Column(name = "tat_breached_at")
+    private Instant tatBreachedAt;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
@@ -269,6 +281,14 @@ public class ObJourneyStep {
 
     public void setDueAt(Instant dueAt) {
         this.dueAt = dueAt;
+    }
+
+    public Instant getTatBreachedAt() {
+        return tatBreachedAt;
+    }
+
+    public void setTatBreachedAt(Instant tatBreachedAt) {
+        this.tatBreachedAt = tatBreachedAt;
     }
 
     public Instant getCreatedAt() {

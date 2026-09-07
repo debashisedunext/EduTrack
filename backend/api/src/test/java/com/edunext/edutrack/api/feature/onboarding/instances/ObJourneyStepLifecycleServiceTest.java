@@ -1,6 +1,9 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.journal.ObStepJournal;
+import com.edunext.edutrack.domain.masters.WorkingCalendar;
+import com.edunext.edutrack.domain.masters.WorkingCalendarRepository;
+import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
 import com.edunext.edutrack.domain.onboarding.ObGateStatus;
@@ -18,12 +21,24 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepositor
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepClockAttribution;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEvent;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEventRepository;
+import com.edunext.edutrack.domain.onboarding.ObStepClockEventType;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
 import com.edunext.edutrack.domain.onboarding.ObStepHistoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +47,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -63,10 +82,14 @@ class ObJourneyStepLifecycleServiceTest {
     private final ObSignoffRepository signoffs = mock(ObSignoffRepository.class);
     private final ObStepHistoryRepository stepHistory = mock(ObStepHistoryRepository.class);
     private final ObStepJournal stepJournal = new ObStepJournal(journeys, stepHistory);
+    private final WorkingHoursService workingHours = mock(WorkingHoursService.class);
+    private final WorkingCalendarRepository workingCalendars = mock(WorkingCalendarRepository.class);
+    private final ObStepClockEventRepository clockEvents = mock(ObStepClockEventRepository.class);
+    private final ObStepClockRecorder clockRecorder = mock(ObStepClockRecorder.class);
 
     private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
             journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs,
-            stepJournal);
+            stepJournal, workingHours, workingCalendars, clockEvents, clockRecorder);
 
     @BeforeEach
     void wireFakes() {
@@ -94,6 +117,35 @@ class ObJourneyStepLifecycleServiceTest {
             historyRows.add(row);
             return row;
         });
+
+        // C-105 · a plain 9-to-6 UTC calendar, Sat/Sun off — a 9-hour working
+        // day, so tatDays=2 (pendingStep's default) is an 18-hour budget.
+        // addWorkingHours/workingHoursBetween are stubbed as raw-duration
+        // arithmetic rather than the real weekend-skipping walk: that walk is
+        // WorkingHoursServiceTest's own coverage, and re-deriving it here
+        // would test the fake, not this service's wiring into it.
+        WorkingCalendar calendar = new WorkingCalendar();
+        calendar.setTimezone("UTC");
+        calendar.setWorkDayStart(LocalTime.of(9, 0));
+        calendar.setWorkDayEnd(LocalTime.of(18, 0));
+        calendar.setWeeklyOff(EnumSet.of(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY));
+        when(workingCalendars.getCalendar()).thenReturn(calendar);
+        when(workingHours.addWorkingHours(any(), any())).thenAnswer(inv -> {
+            Instant start = inv.getArgument(0);
+            BigDecimal hours = inv.getArgument(1);
+            return start.plusSeconds(hours.multiply(BigDecimal.valueOf(3600)).longValue());
+        });
+        when(workingHours.workingHoursBetween(any(), any())).thenAnswer(inv -> {
+            Instant from = inv.getArgument(0);
+            Instant to = inv.getArgument(1);
+            if (!from.isBefore(to)) {
+                return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            }
+            return BigDecimal.valueOf(Duration.between(from, to).toSeconds())
+                    .divide(BigDecimal.valueOf(3600), 2, RoundingMode.HALF_UP);
+        });
+        when(clockEvents.findFirstByStepIdAndEventTypeOrderByOccurredAtDescIdDesc(anyLong(), any()))
+                .thenReturn(Optional.empty());
 
         ObJourney journey = new ObJourney();
         journey.setId(JOURNEY);
@@ -411,6 +463,39 @@ class ObJourneyStepLifecycleServiceTest {
                 .isInstanceOf(InvalidStepTransitionException.class);
     }
 
+    /** C-105 · the pause is a row, not just a status flip. */
+    @Test
+    void waitOnClientRecordsAPausedClockEventAttributedToTheClient() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        service.waitOnClient(STEP, OWNER);
+
+        ArgumentCaptor<ObStepClockEvent> captor = ArgumentCaptor.forClass(ObStepClockEvent.class);
+        verify(clockRecorder).record(captor.capture());
+        ObStepClockEvent event = captor.getValue();
+        assertThat(event.getStepId()).isEqualTo(STEP);
+        assertThat(event.getJourneyId()).isEqualTo(JOURNEY);
+        assertThat(event.getEventType()).isEqualTo(ObStepClockEventType.PAUSED);
+        assertThat(event.getPauseReason()).isEqualTo("WAITING_ON_CLIENT");
+        assertThat(event.getAttributedTo()).isEqualTo(ObStepClockAttribution.CLIENT);
+        assertThat(event.getActorId()).isEqualTo(OWNER);
+        assertThat(event.getOccurredAt()).isNotNull();
+    }
+
+    // ── start · due_at (C-105) ───────────────────────────────────────────
+
+    /**
+     * {@code pendingStep()}'s {@code tatDays=2} against the 9-hour test
+     * calendar is an 18-hour budget; the stubbed {@code addWorkingHours}
+     * adds it as a raw duration onto whatever {@code startedAt} came out.
+     */
+    @Test
+    void startComputesDueAtFromTheWorkingCalendarTatBudget() {
+        ObJourneyStep started = service.start(STEP, OWNER);
+
+        assertThat(started.getDueAt()).isEqualTo(started.getStartedAt().plusSeconds(18 * 3600L));
+    }
+
     // ── resume ────────────────────────────────────────────────────────────
 
     @Test
@@ -427,9 +512,24 @@ class ObJourneyStepLifecycleServiceTest {
         assertThat(resumed.getBlockedNote()).isNull();
     }
 
+    /** A resume from BLOCKED never paused the clock, so it writes no event. */
+    @Test
+    void resumeFromBlockedRecordsNoClockEvent() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.BLOCKED);
+        step.setBlockedReasonCode("client-unresponsive");
+
+        service.resume(STEP, OWNER);
+
+        verify(clockRecorder, never()).record(any());
+    }
+
     @Test
     void resumeMovesAWaitingOnClientStepBackToInProgress() {
-        stepRows.get(STEP).setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        step.setDueAt(Instant.parse("2026-10-01T00:00:00Z"));
+        stubLastPause(Instant.parse("2026-09-28T00:00:00Z"));
 
         ObJourneyStep resumed = service.resume(STEP, OWNER);
 
@@ -441,12 +541,88 @@ class ObJourneyStepLifecycleServiceTest {
         ObJourneyStep step = stepRows.get(STEP);
         step.setStatus(ObJourneyStepStatus.BLOCKED);
         step.setBlockedReasonCode("client-unresponsive");
-        java.time.Instant dueAt = java.time.Instant.parse("2026-10-01T00:00:00Z");
+        Instant dueAt = Instant.parse("2026-10-01T00:00:00Z");
         step.setDueAt(dueAt);
 
         ObJourneyStep resumed = service.resume(STEP, OWNER);
 
         assertThat(resumed.getDueAt()).isEqualTo(dueAt);
+    }
+
+    /**
+     * C-105 · the working hours still owed as of the pause — computed
+     * between the last {@code PAUSED} row's {@code occurredAt} and the old
+     * {@code due_at} — are what {@code addWorkingHours} is asked to place
+     * from {@code resumedAt}. The stubbed calendar has no weekends inside
+     * this narrow window, so the raw-duration and working-hours figures
+     * agree: 3 days = 72 hours owed.
+     */
+    @Test
+    void resumeFromWaitingOnClientRecomputesDueAtFromHoursOwedAtThePause() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        Instant oldDueAt = Instant.parse("2026-09-30T00:00:00Z");
+        step.setDueAt(oldDueAt);
+        Instant pausedAt = Instant.parse("2026-09-27T00:00:00Z");
+        stubLastPause(pausedAt);
+
+        service.resume(STEP, OWNER);
+
+        ArgumentCaptor<BigDecimal> hoursCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        ArgumentCaptor<Instant> fromCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(workingHours).addWorkingHours(any(), hoursCaptor.capture());
+        verify(workingHours).workingHoursBetween(fromCaptor.capture(), eq(oldDueAt));
+        assertThat(fromCaptor.getValue()).isEqualTo(pausedAt);
+        assertThat(hoursCaptor.getValue()).isEqualByComparingTo("72.00");
+    }
+
+    /** A step already breached when it paused owes nothing and resumes exactly at resumedAt. */
+    @Test
+    void resumeFromWaitingOnClientOwesZeroHoursWhenAlreadyBreachedAtThePause() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        Instant oldDueAt = Instant.parse("2026-09-20T00:00:00Z");
+        step.setDueAt(oldDueAt);
+        // Paused after its own due date — already breached.
+        stubLastPause(Instant.parse("2026-09-25T00:00:00Z"));
+
+        ObJourneyStep resumed = service.resume(STEP, OWNER);
+
+        ArgumentCaptor<BigDecimal> hoursCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        ArgumentCaptor<Instant> resumedAtCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(workingHours).addWorkingHours(resumedAtCaptor.capture(), hoursCaptor.capture());
+        assertThat(hoursCaptor.getValue()).isEqualByComparingTo("0.00");
+        assertThat(resumed.getDueAt()).isEqualTo(resumedAtCaptor.getValue());
+    }
+
+    /** C-105 · the resume is a row too, attributed back to internal — the wait is over. */
+    @Test
+    void resumeFromWaitingOnClientRecordsAResumedClockEvent() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        step.setDueAt(Instant.parse("2026-10-01T00:00:00Z"));
+        stubLastPause(Instant.parse("2026-09-28T00:00:00Z"));
+
+        service.resume(STEP, OWNER);
+
+        ArgumentCaptor<ObStepClockEvent> captor = ArgumentCaptor.forClass(ObStepClockEvent.class);
+        verify(clockRecorder).record(captor.capture());
+        ObStepClockEvent event = captor.getValue();
+        assertThat(event.getStepId()).isEqualTo(STEP);
+        assertThat(event.getJourneyId()).isEqualTo(JOURNEY);
+        assertThat(event.getEventType()).isEqualTo(ObStepClockEventType.RESUMED);
+        assertThat(event.getPauseReason()).isNull();
+        assertThat(event.getActorId()).isEqualTo(OWNER);
+    }
+
+    @Test
+    void resumeFromWaitingOnClientWithNoPausedEventOnRecordFailsLoudly() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        stepRows.get(STEP).setDueAt(Instant.parse("2026-10-01T00:00:00Z"));
+        // No stubLastPause(...) — the default wireFakes() stub returns empty.
+
+        assertThatThrownBy(() -> service.resume(STEP, OWNER))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -462,6 +638,19 @@ class ObJourneyStepLifecycleServiceTest {
 
         assertThatThrownBy(() -> service.resume(STEP, STRANGER))
                 .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    /** Stubs the most recent {@code PAUSED} row {@code resume} needs, at the given instant. */
+    private void stubLastPause(Instant occurredAt) {
+        ObStepClockEvent paused = new ObStepClockEvent();
+        paused.setStepId(STEP);
+        paused.setJourneyId(JOURNEY);
+        paused.setEventType(ObStepClockEventType.PAUSED);
+        paused.setPauseReason("WAITING_ON_CLIENT");
+        paused.setAttributedTo(ObStepClockAttribution.CLIENT);
+        paused.setOccurredAt(occurredAt);
+        when(clockEvents.findFirstByStepIdAndEventTypeOrderByOccurredAtDescIdDesc(STEP, ObStepClockEventType.PAUSED))
+                .thenReturn(Optional.of(paused));
     }
 
     // ── skip (C-107) ─────────────────────────────────────────────────────

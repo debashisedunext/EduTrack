@@ -1,0 +1,41 @@
+-- =====================================================================
+-- C-113 · Client Onboarding — the TAT scanner's own flag
+--
+-- Table: ob_journey_steps (adds tat_breached_at)
+--
+-- Source: docs/Onboarding-Module-Plan.md §5.11 ("the scanner"), §9's risk
+--         table item 3 ("Amber before Red"); docs/streams/STREAM-C-TICKETS.md
+--         C-113
+--
+-- WHO IS WAITING: C-114 (RAG computation) reads this column as one input;
+-- C-115 (the escalation matrix) is the next writer of ob_escalations off
+-- the same breach this column flags. Touches Stream C's own table only —
+-- ob_journey_steps is not one of CLAUDE.md's named append-only tables — so
+-- flagged for visibility rather than for Stream A sign-off.
+--
+-- ONE FLAG, NOT A COLOUR. C-114's own task is "RAG computation — Green to
+-- Amber at a configured threshold to Red on breach"; naming a column here
+-- `rag_status` or similar would be doing half of that task under a
+-- different name, and the other half (the Amber threshold) needs the
+-- TAT-consumed percentage C-120 has not built yet. What C-113 can say
+-- honestly today is a plain fact: has this step's due date been flagged as
+-- passed, and when. Nothing about colour.
+--
+-- NULLABLE, DATETIME(6), SAME IDIOM AS started_at/finished_at ALREADY ON
+-- THIS ROW. ob_journey_steps is a plain mutable table (A-104) — not one of
+-- the append-only pair A-106 built — so a flip here is a column UPDATE
+-- guarded by `tat_breached_at IS NULL`, on `tickets.escalate`'s own
+-- precedent (D-020), not a side "claims" table: `stage_sla_alerts` exists
+-- only because `ticket_stage_transitions` is append-only and this table is
+-- not.
+-- =====================================================================
+
+ALTER TABLE ob_journey_steps
+  ADD COLUMN tat_breached_at DATETIME(6) NULL AFTER due_at;
+
+-- No new index. `ix_ob_journey_steps_due (status, due_at)` — A-104's own
+-- comment already calls it "the scanner's sweep: open steps with a due
+-- date, oldest first" — is exactly what C-113's candidate query needs; a
+-- second index keyed on the new column would only earn its keep once
+-- breached steps vastly outnumbered open ones, which is not this table's
+-- shape.
