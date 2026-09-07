@@ -30,8 +30,11 @@ increasingly awkward compromise for both sides:
 
 - **Different state sets.** Tickets have six (`COMPLETED/CURRENT/PENDING/
   REWORKED/SKIPPED/BLOCKED`, hash-chained history behind every one).
-  Onboarding steps have five (`PENDING/CURRENT/DONE/WAITING/BLOCKED`) plus a
-  breach *overlay* that is a fact about a TAT percentage, not a state.
+  Onboarding steps have six (`PENDING/CURRENT/DONE/WAITING/BLOCKED/SKIPPED`)
+  plus a breach *overlay* that is a fact about health, not a state.
+  (`SKIPPED` was added by C-110 — see `clientDetail/README.md`. This line
+  originally said five, describing the Storybook fixtures rather than
+  `ObJourneyStepStatus`, which has carried `SKIPPED` since C-107.)
 - **Different time model.** A ticket segment's duration is wall-clock minutes
   measured server-side; a journey step's is a working-day **TAT budget** with
   a running percent-consumed bar, and DONE steps carry SD/FD dates with an
@@ -77,12 +80,15 @@ CLAUDE.md's accessibility line and the design decision log's own
 ## What this task is not
 
 - **The step panel** (§9 OB-05's expanded step detail below the ribbon,
-  actions, task-list gate) — C-110's.
+  actions, task-list gate) — C-110's for the read-only half; the actions and
+  the task-list gate are C-111's (OB-06).
 - **The prerequisites accordion above the ribbon, and the journey accordion
   strip around it** — also C-110's; this task is the ribbon alone.
-- **A real data source.** `JourneyStep` is local and unwired — no endpoint
-  exists yet (A-101 is still blocked behind A-103/A-104/A-105). Storybook
-  fixtures are the only thing feeding it until then.
+- ~~**A real data source.**~~ **Superseded.** This said `JourneyStep` was
+  unwired with no endpoint behind it. A-101 landed and C-110 wired it:
+  `clientDetail/ribbonSteps.ts` feeds this ribbon from
+  `GET /onboarding/journeys/{journeyId}`. `types.ts` stayed local anyway, for
+  a different reason it now states in its own header.
 - **Collapsed grouping.** See `JourneyRibbonStrip`'s own docstring — the
   seeded default template is 8 steps and nothing in the module plan asks for
   one; adding it ahead of a template that needs it would be scope this task

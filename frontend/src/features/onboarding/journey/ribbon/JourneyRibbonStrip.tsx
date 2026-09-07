@@ -31,6 +31,10 @@ import { useRovingFocus } from './rovingFocus'
  * position with it, so this only re-centres when the journey's current step
  * genuinely changes, never on a focus move.
  *
+ * It moves the strip's own `scrollLeft` and nothing else. C-110 mounts this
+ * inside an accordion that must never scroll the page (plan §9, OB-05), and
+ * `scrollIntoView` would have scrolled every ancestor including the document.
+ *
  * ## What this task is not
  *
  * No collapsed-grouping pass (`components/ribbon/collapsedGroup.ts`'s
@@ -60,12 +64,28 @@ export function JourneyRibbonStrip({
 
   React.useEffect(() => {
     if (!currentId) return
-    const node = scrollRef.current?.querySelector<HTMLElement>('[data-journey-current="true"]')
-    node?.scrollIntoView?.({
-      inline: 'center',
-      block: 'nearest',
-      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-    })
+    const container = scrollRef.current
+    const node = container?.querySelector<HTMLElement>('[data-journey-current="true"]')
+    if (!container || !node) return
+
+    // Horizontal only, and deliberately not `scrollIntoView`.
+    //
+    // C-110 mounts this strip inside an accordion whose own rule (plan §9,
+    // OB-05) is that expanding one or selecting a step **never scrolls the
+    // page**. `scrollIntoView` walks every scrollable ancestor, the document
+    // included, so on the expand that mounts this it would drag the page to
+    // the ribbon — defeating the anchoring C-110 does one effect earlier, and
+    // for a reason no reader could connect to the accordion they clicked.
+    //
+    // Setting `scrollLeft` on the strip's own container cannot move anything
+    // but the strip, which is all "auto-centred" ever meant here.
+    const target = node.offsetLeft - (container.clientWidth - node.offsetWidth) / 2
+    const left = Math.max(0, Math.min(target, container.scrollWidth - container.clientWidth))
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ left, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    } else {
+      container.scrollLeft = left
+    }
     // Only the current step's own identity — see the docstring above for why
     // the roving tab stop must not be an input here too.
   }, [currentId])
