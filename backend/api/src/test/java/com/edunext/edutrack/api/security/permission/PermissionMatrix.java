@@ -750,6 +750,10 @@ final class PermissionMatrix {
     private static final String SKIP_JOURNEY_STEP = """
             {"reason":"Matrix fixture — client does not need this service"}""";
 
+    /** C-115 · {@code resolveObEscalation}'s mandatory {@code note} — an allowed role is entitled to reach the service, not this fixture. */
+    private static final String RESOLVE_ESCALATION = """
+            {"note":"Matrix fixture — resolved"}""";
+
     /**
      * One row per routed handler.
      *
@@ -2065,6 +2069,22 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/notifications"),
             everyRole("PATCH", "/api/v1/onboarding/notifications/{notificationId}/read"),
             everyRole("PATCH", "/api/v1/onboarding/notifications/read-all"),
+
+            // ── C-115 · the internal escalation ladder ─────────────────────────
+            //
+            // isAuthenticated() only, the same interim state every /onboarding/**
+            // controller in this file declares — ModuleAccessGuard is written but
+            // not yet wired into SecurityConfig. A-112 row-scope is enforced
+            // inside ObEscalationService/ObEscalationScope rather than here: a
+            // caller with no ONBOARDING standing gets an empty list on the GET
+            // (ObEscalationScope.deniesEverything's own fast path, the
+            // notification centre's identical reasoning two blocks up) and 404
+            // on acknowledge/resolve (EscalationNotFoundException — an
+            // out-of-scope or nonexistent id answer the same way, on
+            // ObModuleGated's "indistinguishable from not found" rule).
+            everyRole("GET", "/api/v1/onboarding/escalations"),
+            everyRole("POST", "/api/v1/onboarding/escalations/{escalationId}/acknowledge"),
+            everyRole("POST", "/api/v1/onboarding/escalations/{escalationId}/resolve", RESOLVE_ESCALATION),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //
