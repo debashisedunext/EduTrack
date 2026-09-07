@@ -61,5 +61,9 @@
     "status": "done",
     "pct": 100,
     "reason": "Shivendra, commit d1f78b95 in PR #220 merged 2026-08-19 — V20260819_0443__client_daily_stats.sql, worker/stats/{DailyStatsRepository.refreshClientStats,StatsRefreshWorker}, the client-volume branch in WidgetService/WidgetRepository, and features/dashboard/charts/ClientVolumeBar with its tests; DashboardWidgetIT carries 11 references and the generated client already declares the key. The commit subject does say 'A-059', but the branch was called feat/platform/client-volume-widget, so the merge subject that reached develop's first-parent history carried no task ID and the refresh could not attribute it — the same failure as A-030 and A-010. Backlog line 371 has been checked off since the day it merged."
+  },
+  "A-125": {
+    "status": "done",
+    "reason": "Merged to develop in PR #387 (commit c05a11a8). Git cannot attribute it: the only mention is the merge subject 'feat/platform/a-125-client-accounts', and the tracker's [A-D]-\\d{3} pattern is case-sensitive, so lowercase 'a-125' matches nothing. Same failure as A-010/A-013. Verified done: security/PrincipalType + feature/portal/{ClientPrincipal,ClientAccountRow,ClientAccountRepository,PortalUsernames} on develop, backend CI green."
   }
 }

@@ -23,7 +23,8 @@ a local stack.
 | `explain.sql` | The index review, as a re-runnable script. 17 labelled `EXPLAIN ANALYZE` plans. |
 | `k6/dashboard.js` | Dashboard load test — the blocking call plus the ten-widget fan-out. |
 | `k6/tickets-list.js` | Ticket-list load test — first page, filtered, deep keyset page, drill-down. |
-| `run.sh` | Runs either k6 script via the `grafana/k6` Docker image. |
+| `first-paint.js` | **The browser half of first paint** — real Chromium, FCP/LCP on `/dashboard`. |
+| `run.sh` | Runs any of the three via the `grafana/k6` Docker images. |
 
 ## Running it
 
@@ -47,7 +48,17 @@ docker exec -i edutrack-mysql mysql -uroot -prootpw edutrack < tools/perf/explai
 
 # the load tests (API must be up on 8080 under local,dev-noauth)
 tools/perf/run.sh both
+
+# the browser half of first paint. NEEDS THE PRODUCTION BUNDLE, not the Vite
+# dev server: an unminified dev build measures a bundle nobody is served.
+#   cd frontend && npm run build
+#   cp -r frontend/dist/* backend/api/target/classes/static/
+# then, with the API up:
+tools/perf/run.sh first-paint
 ```
+
+`first-paint` pulls `grafana/k6:master-with-browser` the first time — the base
+image carries no Chromium. Only that target pays for it.
 
 ## The summary-table trap
 
@@ -359,6 +370,110 @@ with a 40 KB payload per page.
 
 ---
 
+# First paint — the browser half
+
+Run with `tools/perf/run.sh first-paint`. Ten navigations to `/dashboard` per
+run, one at a time, real Chromium, against the 50,000-ticket corpus with the
+summary tables rebuilt. FCP and LCP are read from the page's own Paint Timing
+and `largest-contentful-paint` entries.
+
+## The result
+
+| | Before | After |
+|---|---|---|
+| FCP p95, five runs | 1.03 s · 883 ms · 1.29 s · 1.00 s · 1.07 s | **440 · 440 · 488 · 580 · 524 ms** |
+| Runs inside the 1000 ms budget | 1 of 5 | **5 of 5** |
+| FCP average | 854 ms | **394–459 ms** |
+| Initial script transfer | 2,122,669 B | **1,020,429 B** |
+| Script execute | 225–285 ms | **91 ms** |
+
+The first measurement failed: **four of five runs over**, median between 790 ms
+and 920 ms, the budget spent almost entirely with nothing left for hardware
+slower than a developer laptop on loopback. The fix below is in the same change,
+and the after-numbers come from the same harness on the same machine.
+
+The run-to-run spread is the same phenomenon the dashboard section already
+records for the server half (719 ms / 1.45 s / 885 ms on three consecutive
+runs), and it has the same cause: one host running MySQL, Redis, MinIO, the API
+and Chromium at once. **Report the spread, not the best run.**
+
+## Where the time went
+
+Averages across five runs each side. The document was never the problem, and
+the diagnosis is the two script rows.
+
+| | Before | After |
+|---|---|---|
+| Document | ~24 ms | ~24 ms |
+| DOM interactive | ~66 ms | ~60 ms |
+| Script transfer | **2,122,669 B** | **1,020,429 B** |
+| Script execute | 225–285 ms | **91 ms** |
+| **FCP** | **790–920 ms** | **394–459 ms** |
+
+Script transfer was byte-identical on every run before the change and is again
+after it, which is what identifies it as a fixed cost of the bundle rather than
+anything about the request.
+
+## The finding, and the fix: one chunk held the whole product
+
+`vite build` emits a single `index-*.js` of **2,122 kB raw / 548 kB gzipped**,
+and warns about it on every build. The cause is in `frontend/src/App.tsx`:
+**51 routes across 12 feature areas, every one a static import, zero
+`React.lazy`.** Somebody opening the dashboard downloads, parses and executes
+the workflow designer, the Excel import wizard, the chat panel and every master
+screen before their first frame.
+
+That is the browser half's budget, and no server-side change reaches it.
+
+**The fix is route-level code splitting**, and it is in this change:
+44 of the 46 screens became `lazy()` imports behind per-route Suspense
+boundaries. The initial chunk halved and FCP came in at roughly 2.3× faster.
+
+Three decisions inside it are worth knowing, because each had a plausible
+other side:
+
+**The dashboard and login stay eager.** The obvious version lazy-loads all 46.
+It also puts a round trip in front of *the very route this task is measuring* —
+and login is the entry point for everyone not signed in. The 44 that are
+deferred are the ones a given visit will probably never open: the workflow
+designer, the Excel import wizard, every master screen. Eager-load what the
+visitor is about to see; defer the rest.
+
+**The Suspense boundaries are per route, not one around `<Routes>`.** One
+boundary at the top is less code and would have made this metric lie: FCP would
+then be the *fallback* painting in 200 ms while the user waits exactly as long
+as before — the budget met in the letter and broken in the intent. Boundaries
+sit inside `AppShell`'s outlet instead, so `AppShell` stays a static import and
+first paint is the real chrome: sidebar, top bar, project switcher.
+
+**No stream's own directory is touched.** Only `App.tsx` changes — the screens
+themselves are untouched, and so are their tests.
+
+## LCP is equal to FCP here, and that is real rather than a bug
+
+Every run reports identical FCP and LCP. The largest contentful element at that
+moment *is* the app shell: the dashboard's widgets have not drawn, because their
+data has not arrived. LCP would separate from FCP once the fan-out lands, which
+is what `k6/dashboard.js` already asserts on. **So LCP carries no information
+here that FCP does not**, and its 4000 ms threshold is a smoke alarm rather than
+a budget.
+
+## A note on how this file's own threshold was got wrong first
+
+The first version asserted on k6's built-in `browser_web_vital_fcp`. It reported
+`p(95)=0s` and **the threshold passed** — k6 collects vitals asynchronously and
+the iteration closed the page before they flushed, so a green run had measured
+nothing at all. Same shape as A-068's first-time-right showing 100% from a
+counter nothing incremented, and A-057's SLA gauge before it.
+
+Two changes came out of it, and both are why the numbers above can be trusted:
+the metrics are read from the page rather than taken from k6, where an absent
+value is `null` instead of `0`; and the `checks` threshold is part of the
+assertion rather than decoration, because a metric with no samples satisfies a
+percentile threshold trivially. A run is only meaningful if both are green.
+
+---
+
 # Known limitations of this harness
 
 Written down rather than discovered later.
@@ -370,10 +485,11 @@ restart the API with different properties. Unrestricted is the right default
 because it is the *pessimistic* scope: nothing narrows anything, so every query
 does the most work it can.
 
-**First paint is measured in two halves.** k6 measures the server; the browser
-half — bundle, parse, render — is not covered here. The 1.5 s budget is split
-~1000 ms browser / ~500 ms API, and **that split is a decision, not a
-measurement**. The API half is what `k6/dashboard.js` asserts.
+**First paint is measured in two halves**, and both halves are now measured —
+the server by `k6/dashboard.js`, the browser by `first-paint.js`. The 1.5 s
+budget is split ~1000 ms browser / ~500 ms API, and **that split is still a
+decision, not a measurement**; what has changed is that neither side of it is
+unobserved any more. See "First paint — the browser half" above.
 
 **The corpus has three projects.** A real org has more, and one project holding
 1% of tickets is a scope shape this corpus cannot produce. It is the case where
