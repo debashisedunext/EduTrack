@@ -132,6 +132,17 @@ resources/templates/mail/onboarding.html  @Ayushedunext
 # case, and it stays with the catch-all until whoever builds the shell claims it.
 /frontend/src/features/onboarding/notifications/  @Ayushedunext
 
+# B-122's OB-10 reports hub, on the same two patterns and for the same reason
+# the rule above is on a sub-directory rather than on the onboarding parent.
+# Named on the day the package is created rather than when B-123's export
+# redaction lands inside it — B-110's argument for listing worker/onboarding/
+# stats/ before B-120 existed: an empty rule costs nothing and a missing one is
+# only noticed by whoever reviews the wrong person's pull request. Both
+# patterns were checked against `git ls-files`, since a rule that matches
+# nothing looks exactly like one that works.
+api/feature/onboarding/reports/                 @Ayushedunext
+/frontend/src/features/onboarding/reports/      @Ayushedunext
+
 # ---- Cross-cutting: the three append-only tables and the immutability core
 # always need Stream A's eyes, whoever is touching them.
 #
