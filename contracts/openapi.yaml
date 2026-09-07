@@ -8004,6 +8004,18 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403':
+          description: |
+            An OB Viewer or Step Owner on a client they can read. **B-102 raised
+            this as a gap and B-103 closes it**, being the next task to open this
+            file: the rule above names three writers and the operation declared
+            no status for breaking it, so a Viewer — whom A-112's scope *does*
+            let read this client on OB-05 — would have been denied with a `404`
+            for a row they are looking at. Exactly the `ROWLESS_403` argument
+            `skipObJourneyStep` already records.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
@@ -8014,6 +8026,172 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+
+  # ── B-103 · the SPOC panel on OB-05 ────────────────────────────────────────
+  # `createObClient` writes the first contacts and then has no way to manage
+  # them; `updateObClient` says so — "`contacts` and `applications` … are their
+  # own operations because each has a side effect a field update cannot carry".
+  # These are those operations for contacts. The side effect is the primary
+  # slot: promoting one SPOC demotes another, and the demotion has to happen in
+  # the same transaction or the client briefly has two people receiving its
+  # sign-off requests, or none.
+  #
+  # EVERY ONE ANSWERS THE WHOLE CLIENT DOCUMENT, not the contact it wrote.
+  # `getObClient`'s ETag covers the document contacts are part of, so any write
+  # here invalidates it; handing back the fresh document and its new tag is what
+  # stops the next Save on the Client info card being a 412 the user cannot
+  # explain. `updateClientContact` one module over could not do this — its
+  # contacts hang off a list with no tag of its own — and its description
+  # records the re-read it costs the S-33 form instead.
+
+  /onboarding/clients/{obClientId}/contacts:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    post:
+      tags: [onboarding]
+      operationId: addObClientContact
+      summary: Add a SPOC (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        B-103 · OB-05's SPOC panel, adding.
+
+        **`whatsappOptIn: true` requires `whatsappOptInSource`.** That pairing is
+        the whole reason this capture is built in a phase that sends no WhatsApp
+        at all (PHASE-2-BUILD-PLAN.md §6.1): consent is the one item in the
+        deferral that cannot be reconstructed later, and a `true` with no basis
+        recorded is a SPOC who has to be re-approached before a single message
+        can go out. Both the flag and its basis are also written to
+        `ob_contact_consent_events`, which is insert-only, so a later withdrawal
+        does not erase the evidence that consent stood when it stood.
+
+        **`isPrimary: true` promotes and demotes the incumbent** in the same
+        transaction — the way to replace a SPOC who has left without the client
+        ever having none.
+
+        **A duplicate email under the same client is refused** (`409`,
+        case-insensitively, agreeing with `utf8mb4_0900_ai_ci` and with
+        `uq_ob_client_contacts_email`). The same address under a *different*
+        client stays allowed: one consultant can be the SPOC at two.
+
+        Writes are OB Admin, Onboarding Manager, or Sales for a client they
+        created — `updateObClient`'s rule, on the same record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObContactUpsertRequest' }
+      responses:
+        '201':
+          description: |
+            Added. The body is the whole client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /onboarding/clients/{obClientId}/contacts/{contactId}:
+    parameters:
+      - { $ref: '#/components/parameters/ObClientId' }
+      - { $ref: '#/components/parameters/ObContactId' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObClientContact
+      summary: Edit a SPOC (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        B-103 · OB-05's SPOC panel, editing — and the operation that promotes,
+        demotes, deactivates and reactivates, because each of those is a field
+        on this row rather than a verb of its own.
+
+        **The `If-Match` comes from `getObClient`.** Unlike the ticketing
+        contact patch, which had to be exempted because its list carried no tag,
+        the SPOC list is *inside* a tagged document. A stale editor is refused
+        rather than allowed to overwrite a promotion somebody else made while
+        the panel was open.
+
+        **The body is the whole representation, not a sparse patch** — an absent
+        field is a cleared one. `ContactWriteRequest`'s call, one module over.
+
+        **Consent is only restamped when it changes.** Sending
+        `whatsappOptIn: true` again with the same source on an unrelated edit
+        leaves the original date standing; a new consent event is written when
+        the flag flips or the basis differs. Otherwise correcting a phone number
+        would silently re-date the consent to today, which is the same evidence
+        problem as not recording it.
+
+        **Demoting the only primary is refused** with `409`
+        `ob-contact-primary-required`, and so is deactivating them. This is
+        where the module deliberately parts company with `updateClientContact`,
+        which allows a client to have no primary because B-028's gate catches it
+        at ticket creation. Onboarding has no such gate: the kickoff mail, the
+        one-time portal password and every sign-off request address the primary
+        SPOC, and with none they are addressed to nobody and nothing reports it.
+        Promote the replacement first — one request, no window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObContactUpsertRequest' }
+      responses:
+        '200':
+          description: Saved. The whole client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [onboarding]
+      operationId: removeObClientContact
+      summary: Remove a SPOC (OB-05)
+      description: |
+        B-103 · **deactivates; it does not delete.**
+
+        A contact is what `ob_signoff_requests.sent_to_contact_id` points at and
+        what a client escalation is raised by. A real `DELETE` either fails as a
+        constraint violation naming a MySQL index or — "fixed" with a cascade —
+        destroys the record of who signed off on a live client's go-live. The
+        row stays, `isActive` goes false, and it is still in `getObClient` so the
+        panel can show it as removed and bring it back.
+
+        It would also take the consent record with it, which
+        `ob_contact_consent_events` exists to keep.
+
+        **Removing an already-removed contact is `200`, not `404`.** It is a
+        setter, and the second half of a double-click must not be an error about
+        something that did happen — B-014's `UNCHANGED` argument. A contact id
+        belonging to a *different* client is `404`.
+
+        **Removing the only primary is refused**, `409`
+        `ob-contact-primary-required` — see `updateObClientContact` for why
+        onboarding differs from the ticketing master here.
+
+        No `If-Match`: `DELETE` is a setter with one destination, so there is no
+        lost update for a tag to prevent — the concurrent caller wanted the state
+        the winner produced. The response still carries the client's new `ETag`,
+        because everything else on OB-05 is editing against the old one.
+      responses:
+        '200':
+          description: |
+            Removed, or already removed — the second is not an error. The whole
+            client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   # ── A-118 · journey instances and the step panel ───────────────────────────
   # The template side (OB-07) is above; this is what a template becomes once a
@@ -10895,6 +11073,16 @@ components:
         masters are disjoint tables and the ids do not correspond; a client
         present in both is joined at the identity layer by an explicit audited
         link, never by a shared key.
+    ObContactId:
+      name: contactId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        B-103 · an `ob_client_contacts` id, **not** a ticketing `ContactId`.
+        Nested under the client on purpose: a contact belonging to a *different*
+        `ob_clients` row is `404`, not `403` — the id is a row this caller has
+        no business knowing exists under that client.
     ObJourneyId:
       name: journeyId
       in: path
@@ -16882,7 +17070,7 @@ components:
 
     ObContact:
       type: object
-      required: [id, name, email, isPrimary]
+      required: [id, name, email, isPrimary, isActive]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string, maxLength: 160 }
@@ -16895,6 +17083,25 @@ components:
             Consent, held per contact rather than per client. WhatsApp
             notification templates need prior opt-in, and a client's SPOCs do
             not all give it.
+        whatsappOptInAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            B-103 · when the consent above was recorded. Null whenever
+            `whatsappOptIn` is false — the two move together, and a withdrawal
+            clears this rather than leaving a stamp beside a `false`. The
+            history of both is in `ob_contact_consent_events`.
+        whatsappOptInSource:
+          oneOf:
+            - { $ref: '#/components/schemas/ObConsentSource' }
+            - { type: 'null' }
+          description: |
+            B-103 · **how** the client gave it, never which screen recorded it.
+            Null whenever `whatsappOptIn` is false.
+
+            `UNRECORDED` appears only on rows written before consent capture
+            existed and cannot be sent by any caller. It is the honest answer
+            for a SPOC who has to be re-approached before a message can go out.
         isPrimary:
           type: boolean
           description: |
@@ -16902,7 +17109,37 @@ components:
             the one-time portal password, and every sign-off request — so a
             client with none is a client nothing can be sent to, and
             `createObClient` requires one.
+
+            **False while the contact is inactive**, whatever the stored flag
+            says: `ob_client_contacts.is_primary_key` — the generated column the
+            unique index is on — is 1 only while a contact is *also* active, so
+            deactivating a primary releases the slot. Reading the enforced fact
+            rather than a second one that could drift from it.
+        isActive:
+          type: boolean
+          description: |
+            B-103 · false for a contact who has left. `removeObClientContact`
+            deactivates and never deletes, so OB-05's SPOC panel can still show
+            them, still show what they signed off, and reactivate one who comes
+            back.
       description: '`ob_client_contacts` — the SPOCs.'
+    ObConsentSource:
+      type: string
+      enum: [VERBAL, EMAIL, WRITTEN, CONTRACT, CLIENT_PORTAL, UNRECORDED]
+      description: |
+        B-103 · the basis on which a SPOC gave messaging consent.
+
+        A closed vocabulary rather than free text, because this is the field a
+        challenged consent is defended with and "yes I think they said ok" is
+        not a defence. It describes **how the client gave consent**, not which
+        form was open when a colleague typed it in — a source naming the screen
+        would read the same on every staff-entered row and carry no information.
+        Who recorded it and when are separate columns.
+
+        `UNRECORDED` is **write-refused on every operation**. It exists for the
+        rows that predate this capture, whose basis genuinely is not known, and
+        it stays visible so those SPOCs get re-approached instead of being
+        quietly assumed to have consented.
     ObContactWriteRequest:
       type: object
       required: [name, email, isPrimary]
@@ -16912,7 +17149,63 @@ components:
         email: { type: string, format: email }
         phone: { type: [string, 'null'], maxLength: 32 }
         whatsappOptIn: { type: boolean, default: false }
+        whatsappOptInSource:
+          oneOf:
+            - { $ref: '#/components/schemas/ObConsentSource' }
+            - { type: 'null' }
+          description: |
+            B-103 · **required when `whatsappOptIn` is true**, and rejected with
+            `400` when it is false. Consent without a recorded basis is the one
+            thing that cannot be repaired later, so the wizard asks at the point
+            the box is ticked rather than leaving a column to be backfilled by
+            somebody who was not in the conversation.
+
+            `UNRECORDED` is refused here.
         isPrimary: { type: boolean }
+      description: |
+        The wizard's contact rows. `addObClientContact` takes
+        `ObContactUpsertRequest` instead — same fields plus `isActive`, which a
+        create has no use for.
+    ObContactUpsertRequest:
+      type: object
+      required: [name, email, isPrimary]
+      properties:
+        name: { type: string, maxLength: 160 }
+        designation: { type: [string, 'null'], maxLength: 120 }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'], maxLength: 32 }
+        whatsappOptIn: { type: boolean, default: false }
+        whatsappOptInSource:
+          oneOf:
+            - { $ref: '#/components/schemas/ObConsentSource' }
+            - { type: 'null' }
+          description: |
+            Required when `whatsappOptIn` is true, refused when it is false, and
+            `UNRECORDED` is never accepted. As `ObContactWriteRequest`.
+
+            **Re-sending the same `true` does not restamp the consent.** An
+            unrelated edit — a corrected phone number — must not move the date
+            the consent is dated from, so a new event is written only when the
+            flag or the basis actually changes.
+        isPrimary:
+          type: boolean
+          description: |
+            `true` promotes, demoting the current primary in the same
+            transaction. `false` on the client's **only** primary is refused
+            with `409 ob-contact-primary-required` — promote the replacement
+            first, which is one request and leaves no window in which the client
+            has nobody.
+        isActive:
+          type: boolean
+          default: true
+          description: |
+            `false` deactivates, exactly as `removeObClientContact` does;
+            `true` brings a departed contact back. Absent means unchanged on a
+            `PATCH` and active on a `POST`.
+      description: |
+        B-103 · the whole representation, not a sparse patch — the SPOC row
+        editor sends every field on every save, so an absent one is a cleared
+        one. `ContactWriteRequest`'s call one module over, for the same reason.
     ObApplication:
       type: object
       required: [id, product]
@@ -17071,9 +17364,21 @@ components:
                 which writes an audit row per call, and that operation lands
                 with A-113. Until then this is masked for everyone, which is
                 the safe direction to be wrong in.
+            statusReason:
+              type: [string, 'null']
+              description: |
+                Why the client was put `ON_HOLD` or `DROPPED`.
+                `updateObClientRequest` has always taken it and there was
+                nowhere to read it back — **B-102 raised the gap and B-103
+                closes it**, an added optional field, which CONVENTIONS.md §1
+                says is not breaking.
             contacts:
               type: array
               items: { $ref: '#/components/schemas/ObContact' }
+              description: |
+                Active and inactive both, primary first. OB-05 administers this
+                list, and a panel that could not see a departed SPOC could not
+                reactivate one — nor explain whose name is on a past sign-off.
             applications:
               type: array
               items: { $ref: '#/components/schemas/ObApplication' }

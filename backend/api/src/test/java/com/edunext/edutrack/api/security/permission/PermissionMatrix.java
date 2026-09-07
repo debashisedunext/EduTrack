@@ -802,6 +802,20 @@ final class PermissionMatrix {
             {"name":"Matrix Fixture Client"}""";
 
     /**
+     * B-103 · {@code ObContactUpsertRequest} — {@code name}, {@code email} and
+     * {@code isPrimary} are the required three, so this is the smallest body
+     * that clears Bean Validation and lets the guard be what answers.
+     *
+     * <p>{@code whatsappOptIn} is left off deliberately. Sending it as
+     * {@code true} would need a {@code whatsappOptInSource} beside it, and a
+     * fixture that carried a consent basis would be this file asserting
+     * something about consent — which is {@code ObContactServiceTest}'s and
+     * {@code ObContactsIT}'s subject, not authorisation's.
+     */
+    private static final String UPSERT_OB_CONTACT = """
+            {"name":"Matrix Fixture SPOC","email":"matrix.spoc@example.com","isPrimary":false}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -2196,6 +2210,21 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/clients/{obClientId}"),
             everyRole("POST", "/api/v1/onboarding/clients", CREATE_OB_CLIENT),
             everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}", UPDATE_OB_CLIENT),
+
+            // ── B-103 · OB-05's SPOC panel ────────────────────────────────────
+            //
+            // Every role, and for the block above's reason unchanged: who may
+            // manage a client's SPOCs is an *onboarding* role question, and none
+            // of the six ticketing-role fixtures here carries onboarding
+            // standing at all. What each of them gets is 404 — the scoped client
+            // read runs before anything else in ObContactService, and finds
+            // nothing. The 403 these three routes can also give
+            // (ObClientReadOnlyException) needs a real OB Viewer or Step Owner,
+            // which is ObContactsIT's case; the 409s need a real client.
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/contacts", UPSERT_OB_CONTACT),
+            everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
+                    UPSERT_OB_CONTACT),
+            everyRole("DELETE", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}"),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //

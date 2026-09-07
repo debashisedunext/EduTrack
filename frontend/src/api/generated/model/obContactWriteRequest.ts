@@ -48,7 +48,14 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObContactWriteRequestDesignation } from './obContactWriteRequestDesignation';
 import type { ObContactWriteRequestPhone } from './obContactWriteRequestPhone';
+import type { ObContactWriteRequestWhatsappOptInSource } from './obContactWriteRequestWhatsappOptInSource';
 
+/**
+ * The wizard's contact rows. `addObClientContact` takes
+`ObContactUpsertRequest` instead — same fields plus `isActive`, which a
+create has no use for.
+
+ */
 export interface ObContactWriteRequest {
   /** @maxLength 160 */
   name: string;
@@ -58,5 +65,14 @@ export interface ObContactWriteRequest {
   /** @maxLength 32 */
   phone?: ObContactWriteRequestPhone;
   whatsappOptIn?: boolean;
+  /** B-103 · **required when `whatsappOptIn` is true**, and rejected with
+`400` when it is false. Consent without a recorded basis is the one
+thing that cannot be repaired later, so the wizard asks at the point
+the box is ticked rather than leaving a column to be backfilled by
+somebody who was not in the conversation.
+
+`UNRECORDED` is refused here.
+ */
+  whatsappOptInSource?: ObContactWriteRequestWhatsappOptInSource;
   isPrimary: boolean;
 }

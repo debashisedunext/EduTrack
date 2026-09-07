@@ -1,8 +1,12 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -56,21 +60,73 @@ class ObClientChildWriteRepository {
      * checked that exactly one carries it, and
      * {@code uq_ob_client_contacts_primary} refuses a second regardless — the
      * check is the good error message, the index is what is true under a race.
+     *
+     * <p><b>B-103 · the consent stamp is written here, not left for the SPOC
+     * panel to fill in later.</b> A contact boarded through the wizard with the
+     * box ticked and no basis recorded is precisely the row that has to be
+     * re-approached before a message can go out, and OB-04 is where the
+     * conversation that produced the consent actually happened —
+     * {@code ObClientWriteService} refuses the create rather than storing a
+     * bare {@code true}. Every one of them also opens the consent journal with
+     * its first event, so a consent given at boarding and withdrawn later is
+     * still provable to have stood in between.
+     *
+     * @param callerId the boarder, recorded as who attested each consent
+     * @param at       one instant for the whole create, so every contact of one
+     *                 client carries the same consent timestamp — they were
+     *                 given in one conversation and a per-row {@code NOW()}
+     *                 would suggest otherwise
      */
-    void insertContacts(long clientId, List<ObClientDtos.ObContactWriteRequest> contacts) {
+    void insertContacts(long clientId, List<ObClientDtos.ObContactWriteRequest> contacts,
+                        Long callerId, Instant at) {
         for (ObClientDtos.ObContactWriteRequest contact : contacts) {
+            boolean optedIn = contact.optedIn();
+            String source = optedIn
+                    ? ObConsentSource.parse(contact.whatsappOptInSource())
+                            .orElseThrow(() -> new IllegalStateException(
+                                    "consent source passed validation and did not parse: "
+                                            + contact.whatsappOptInSource()))
+                            .name()
+                    : null;
+
+            KeyHolder keys = new GeneratedKeyHolder();
             jdbc.sql("""
                     INSERT INTO ob_client_contacts
-                        (ob_client_id, name, designation, email, phone, whatsapp_opt_in, is_primary)
-                    VALUES (:clientId, :name, :designation, :email, :phone, :optIn, :primary)
+                        (ob_client_id, name, designation, email, phone,
+                         whatsapp_opt_in, whatsapp_opt_in_at, whatsapp_opt_in_source,
+                         whatsapp_opt_in_by, is_primary)
+                    VALUES (:clientId, :name, :designation, :email, :phone,
+                            :optIn, :optInAt, :optInSource, :optInBy, :primary)
                     """)
                     .param("clientId", clientId)
                     .param("name", contact.name().trim())
                     .param("designation", trimmedOrNull(contact.designation()))
                     .param("email", contact.email().trim())
                     .param("phone", trimmedOrNull(contact.phone()))
-                    .param("optIn", contact.optedIn())
+                    .param("optIn", optedIn)
+                    .param("optInAt", optedIn ? Timestamp.from(at) : null)
+                    .param("optInSource", source)
+                    .param("optInBy", optedIn ? callerId : null)
                     .param("primary", contact.primary())
+                    .update(keys);
+
+            if (!optedIn) {
+                continue;
+            }
+            Number contactId = keys.getKey();
+            if (contactId == null) {
+                throw new IllegalStateException(
+                        "ob_client_contacts insert returned no generated key for client " + clientId);
+            }
+            jdbc.sql("""
+                    INSERT INTO ob_contact_consent_events
+                        (ob_client_contact_id, channel, opted_in, source, recorded_by, recorded_at)
+                    VALUES (:contactId, 'WHATSAPP', 1, :source, :recordedBy, :recordedAt)
+                    """)
+                    .param("contactId", contactId.longValue())
+                    .param("source", source)
+                    .param("recordedBy", callerId)
+                    .param("recordedAt", Timestamp.from(at))
                     .update();
         }
     }

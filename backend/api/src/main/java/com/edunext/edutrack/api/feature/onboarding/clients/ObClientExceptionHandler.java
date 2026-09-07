@@ -11,8 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * B-102 · RFC 9457 problem documents for {@link ObClientController}
- * ({@code CONVENTIONS.md} §3).
+ * B-102 · RFC 9457 problem documents for {@link ObClientController}, and since
+ * B-103 for {@link ObContactController} too ({@code CONVENTIONS.md} §3).
  *
  * <p>Scoped by {@code assignableTypes}, on the precedent every handler in this
  * repository follows: a repository-wide {@code @RestControllerAdvice} is shared
@@ -22,7 +22,7 @@ import java.util.Map;
  * §3 is explicit that clients branch on {@code type} and never on prose, so
  * these three strings are the API and the sentences beside them are not.
  */
-@RestControllerAdvice(assignableTypes = ObClientController.class)
+@RestControllerAdvice(assignableTypes = {ObClientController.class, ObContactController.class})
 class ObClientExceptionHandler {
 
     private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
@@ -34,6 +34,10 @@ class ObClientExceptionHandler {
     private static final URI LIVE_NOT_EARNED = URI.create("https://edutrack/errors/ob-client-live-not-earned");
     private static final URI PORTAL_LOGIN_UNAVAILABLE =
             URI.create("https://edutrack/errors/ob-client-portal-login-unavailable");
+    private static final URI CONTACT_EMAIL_DUPLICATE =
+            URI.create("https://edutrack/errors/ob-contact-email-duplicate");
+    private static final URI CONTACT_PRIMARY_REQUIRED =
+            URI.create("https://edutrack/errors/ob-contact-primary-required");
 
     /** 404 — no such client, or one out of the caller's A-112 scope. Indistinguishable, by design. */
     @ExceptionHandler(ObClientNotFoundException.class)
@@ -165,6 +169,59 @@ class ObClientExceptionHandler {
         problem.setProperty("forceable", false);
         problem.setProperty("errors",
                 Map.of("createPortalLogin", new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * 404 — no such SPOC under this client, or one belonging to somebody
+     * else's. Indistinguishable, by design.
+     */
+    @ExceptionHandler(ObContactNotFoundException.class)
+    ResponseEntity<ProblemDetail> handleContactNotFound(ObContactNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Not found");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    /**
+     * 409 {@code ob-contact-email-duplicate} — final.
+     *
+     * <p>{@code errors} is keyed on {@code email} so the SPOC row editor lands
+     * the message on the field that caused it, which is also how the panel knows
+     * which of its rows to reopen.
+     */
+    @ExceptionHandler(DuplicateContactEmailException.class)
+    ResponseEntity<ProblemDetail> handleDuplicateEmail(DuplicateContactEmailException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(CONTACT_EMAIL_DUPLICATE);
+        problem.setTitle("That email is already a contact on this client");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("forceable", false);
+        problem.setProperty("errors", Map.of("email", new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * 409 {@code ob-contact-primary-required} — the client would be left with no
+     * primary SPOC.
+     *
+     * <p>{@code forceable: false} carried explicitly, on
+     * {@code handleDuplicatePan}'s reasoning: the SPOC panel can show this 409
+     * and a duplicate-email 409, and neither is overridable, but the wizard one
+     * screen away shows a 409 that <em>is</em>. A client left to infer which is
+     * which from the {@code type} will eventually offer "do it anyway" beside
+     * one that cannot be.
+     */
+    @ExceptionHandler(LastPrimaryContactException.class)
+    ResponseEntity<ProblemDetail> handleLastPrimary(LastPrimaryContactException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(CONTACT_PRIMARY_REQUIRED);
+        problem.setTitle("A client needs one primary SPOC");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("forceable", false);
+        problem.setProperty("errors", Map.of("isPrimary", new String[]{e.getMessage()}));
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
