@@ -377,39 +377,44 @@ run, one at a time, real Chromium, against the 50,000-ticket corpus with the
 summary tables rebuilt. FCP and LCP are read from the page's own Paint Timing
 and `largest-contentful-paint` entries.
 
-## The result: the browser budget is not being met
+## The result
 
-| Run | FCP p95 | Verdict |
+| | Before | After |
 |---|---|---|
-| 1 | 1.03 s | ✗ |
-| 2 | 883 ms | ✓ |
-| 3 | 1.29 s | ✗ |
-| 4 | 1.00 s | ✗ |
-| 5 | 1.07 s | ✗ |
+| FCP p95, five runs | 1.03 s · 883 ms · 1.29 s · 1.00 s · 1.07 s | **440 · 440 · 488 · 580 · 524 ms** |
+| Runs inside the 1000 ms budget | 1 of 5 | **5 of 5** |
+| FCP average | 854 ms | **394–459 ms** |
+| Initial script transfer | 2,122,669 B | **1,020,429 B** |
+| Script execute | 225–285 ms | **91 ms** |
 
-**Four of five runs exceed the 1000 ms this half was given.** Median FCP sits
-between 790 ms and 920 ms across runs, so this is not one bad sample — the
-budget is being spent almost entirely, with nothing left for slower hardware
-than a developer laptop on loopback.
+The first measurement failed: **four of five runs over**, median between 790 ms
+and 920 ms, the budget spent almost entirely with nothing left for hardware
+slower than a developer laptop on loopback. The fix below is in the same change,
+and the after-numbers come from the same harness on the same machine.
 
 The run-to-run spread is the same phenomenon the dashboard section already
 records for the server half (719 ms / 1.45 s / 885 ms on three consecutive
 runs), and it has the same cause: one host running MySQL, Redis, MinIO, the API
 and Chromium at once. **Report the spread, not the best run.**
 
-## Where the time goes
+## Where the time went
 
-Averages across the five runs:
+Averages across five runs each side. The document was never the problem, and
+the diagnosis is the two script rows.
 
-| | Time | Note |
+| | Before | After |
 |---|---|---|
-| Document | ~24 ms | The 1.5 kB `index.html`. Not the problem. |
-| DOM interactive | ~66 ms | |
-| Script transfer | **2,122,669 bytes** | Identical every run — one chunk |
-| Script execute | 225–285 ms | |
-| **FCP** | **790–920 ms** | |
+| Document | ~24 ms | ~24 ms |
+| DOM interactive | ~66 ms | ~60 ms |
+| Script transfer | **2,122,669 B** | **1,020,429 B** |
+| Script execute | 225–285 ms | **91 ms** |
+| **FCP** | **790–920 ms** | **394–459 ms** |
 
-## The finding: one chunk holds the whole product
+Script transfer was byte-identical on every run before the change and is again
+after it, which is what identifies it as a fixed cost of the bundle rather than
+anything about the request.
+
+## The finding, and the fix: one chunk held the whole product
 
 `vite build` emits a single `index-*.js` of **2,122 kB raw / 548 kB gzipped**,
 and warns about it on every build. The cause is in `frontend/src/App.tsx`:
@@ -420,13 +425,29 @@ screen before their first frame.
 
 That is the browser half's budget, and no server-side change reaches it.
 
-**The fix is route-level code splitting, and it is deliberately not in this
-change.** `App.tsx` routes belong to all four streams — 17 masters (B), 7
-tickets (C), 9 auth/dashboard/reports (A), chat (D) — so converting them needs
-those owners' sign-off, Suspense boundaries, and a test pass per stream. It is
-its own task, not a rider on the measurement that found it. What is here is the
-instrument and the number, so that the change can be measured rather than
-asserted.
+**The fix is route-level code splitting**, and it is in this change:
+44 of the 46 screens became `lazy()` imports behind per-route Suspense
+boundaries. The initial chunk halved and FCP came in at roughly 2.3× faster.
+
+Three decisions inside it are worth knowing, because each had a plausible
+other side:
+
+**The dashboard and login stay eager.** The obvious version lazy-loads all 46.
+It also puts a round trip in front of *the very route this task is measuring* —
+and login is the entry point for everyone not signed in. The 44 that are
+deferred are the ones a given visit will probably never open: the workflow
+designer, the Excel import wizard, every master screen. Eager-load what the
+visitor is about to see; defer the rest.
+
+**The Suspense boundaries are per route, not one around `<Routes>`.** One
+boundary at the top is less code and would have made this metric lie: FCP would
+then be the *fallback* painting in 200 ms while the user waits exactly as long
+as before — the budget met in the letter and broken in the intent. Boundaries
+sit inside `AppShell`'s outlet instead, so `AppShell` stays a static import and
+first paint is the real chrome: sidebar, top bar, project switcher.
+
+**No stream's own directory is touched.** Only `App.tsx` changes — the screens
+themselves are untouched, and so are their tests.
 
 ## LCP is equal to FCP here, and that is real rather than a bug
 

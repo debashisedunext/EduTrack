@@ -1,59 +1,182 @@
+import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
-import { ChatPage } from './features/chat/ChatPage'
+import { DashboardPage } from './features/dashboard/DashboardPage'
+import { LoginPage } from './features/auth/LoginPage'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
-import { CreateTicketPage } from './features/tickets/create/CreateTicketPage'
-import { TicketDetailPage } from './features/tickets/detail/TicketDetailPage'
 import {
   CLIENT_ROUTE,
   PROJECT_ROUTE,
   RESOURCE_ROUTE,
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
-import { TicketListPage } from './features/tickets/list/TicketListPage'
-import { BulkReassignWizardPage } from './features/tickets/reassign/BulkReassignWizardPage'
-import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
-import { StageQueuePage } from './features/tickets/stage-queue/StageQueuePage'
-import { DashboardPage } from './features/dashboard/DashboardPage'
-import { ClientListPage } from './features/clients/ClientListPage'
-import { ClientFormPage } from './features/clients/ClientFormPage'
-import { ClientProfilePage } from './features/clients/ClientProfilePage'
-import { ClientImportPage } from './features/imports/ClientImportPage'
-import { ResourceImportPage } from './features/imports/ResourceImportPage'
-import { MastersIndexPage } from './features/masters/MastersIndexPage'
-import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
-import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
-import { ProjectListPage } from './features/masters/projects/ProjectListPage'
-import { ProjectSettingsPage } from './features/masters/projects/ProjectSettingsPage'
-import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
-import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
-import { NotificationTemplateListPage } from './features/masters/notificationTemplates/NotificationTemplateListPage'
-import { TimesheetPage } from './features/masters/timesheet/TimesheetPage'
-import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
-import { ResourceListPage } from './features/masters/resources/ResourceListPage'
-import { RoleListPage } from './features/masters/roles/RoleListPage'
-import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
-import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
-import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
-import { ObNotificationCentrePage } from './features/onboarding/notifications/ObNotificationCentrePage'
-import { ObReportsHubPage } from './features/onboarding/reports/ObReportsHubPage'
-import { ObReportViewerPage } from './features/onboarding/reports/ObReportViewerPage'
-import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
-import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
-import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
-import { ChangePasswordPage } from './features/auth/ChangePasswordPage'
-import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
-import { LoginPage } from './features/auth/LoginPage'
 import { RequireAuth } from './features/auth/RequireAuth'
-import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
-import { AuditLogPage } from './features/audit/AuditLogPage'
-import { ProjectDashboardPage } from './features/projects/ProjectDashboardPage'
-import { ProjectIndexPage } from './features/projects/ProjectIndexPage'
-import { ReportsHubPage } from './features/reports/ReportsHubPage'
-import { ReportViewerPage } from './features/reports/ReportViewerPage'
-import { ScheduledReportsPage } from './features/reports/ScheduledReportsPage'
-import { ResourceProfilePage } from './features/resources/ResourceProfilePage'
-import { SettingsPage } from './features/settings/SettingsPage'
+
+const AuditLogPage = lazy(() =>
+  import('./features/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })),
+)
+const BulkReassignWizardPage = lazy(() =>
+  import('./features/tickets/reassign/BulkReassignWizardPage').then((m) => ({ default: m.BulkReassignWizardPage })),
+)
+const ChangePasswordPage = lazy(() =>
+  import('./features/auth/ChangePasswordPage').then((m) => ({ default: m.ChangePasswordPage })),
+)
+const ChatPage = lazy(() =>
+  import('./features/chat/ChatPage').then((m) => ({ default: m.ChatPage })),
+)
+const ClientFormPage = lazy(() =>
+  import('./features/clients/ClientFormPage').then((m) => ({ default: m.ClientFormPage })),
+)
+const ClientImportPage = lazy(() =>
+  import('./features/imports/ClientImportPage').then((m) => ({ default: m.ClientImportPage })),
+)
+const ClientListPage = lazy(() =>
+  import('./features/clients/ClientListPage').then((m) => ({ default: m.ClientListPage })),
+)
+const ClientProfilePage = lazy(() =>
+  import('./features/clients/ClientProfilePage').then((m) => ({ default: m.ClientProfilePage })),
+)
+const CreateTicketPage = lazy(() =>
+  import('./features/tickets/create/CreateTicketPage').then((m) => ({ default: m.CreateTicketPage })),
+)
+const ForgotPasswordPage = lazy(() =>
+  import('./features/auth/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
+)
+const JourneyTemplateDesignerPage = lazy(() =>
+  import('./features/onboarding/journeys/JourneyTemplateDesignerPage').then((m) => ({ default: m.JourneyTemplateDesignerPage })),
+)
+const MastersIndexPage = lazy(() =>
+  import('./features/masters/MastersIndexPage').then((m) => ({ default: m.MastersIndexPage })),
+)
+const MyTasksPage = lazy(() =>
+  import('./features/tickets/my-tasks/MyTasksPage').then((m) => ({ default: m.MyTasksPage })),
+)
+const NotificationTemplateListPage = lazy(() =>
+  import('./features/masters/notificationTemplates/NotificationTemplateListPage').then((m) => ({ default: m.NotificationTemplateListPage })),
+)
+const ObNotificationCentrePage = lazy(() =>
+  import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
+)
+const ObReportViewerPage = lazy(() =>
+  import('./features/onboarding/reports/ObReportViewerPage').then((m) => ({ default: m.ObReportViewerPage })),
+)
+const ObReportsHubPage = lazy(() =>
+  import('./features/onboarding/reports/ObReportsHubPage').then((m) => ({ default: m.ObReportsHubPage })),
+)
+const PriorityListPage = lazy(() =>
+  import('./features/masters/priorities/PriorityListPage').then((m) => ({ default: m.PriorityListPage })),
+)
+const ProjectDashboardPage = lazy(() =>
+  import('./features/projects/ProjectDashboardPage').then((m) => ({ default: m.ProjectDashboardPage })),
+)
+const ProjectFormPage = lazy(() =>
+  import('./features/masters/projects/ProjectFormPage').then((m) => ({ default: m.ProjectFormPage })),
+)
+const ProjectIndexPage = lazy(() =>
+  import('./features/projects/ProjectIndexPage').then((m) => ({ default: m.ProjectIndexPage })),
+)
+const ProjectListPage = lazy(() =>
+  import('./features/masters/projects/ProjectListPage').then((m) => ({ default: m.ProjectListPage })),
+)
+const ProjectSettingsPage = lazy(() =>
+  import('./features/masters/projects/ProjectSettingsPage').then((m) => ({ default: m.ProjectSettingsPage })),
+)
+const ProjectTeamPage = lazy(() =>
+  import('./features/masters/projects/ProjectTeamPage').then((m) => ({ default: m.ProjectTeamPage })),
+)
+const ReportViewerPage = lazy(() =>
+  import('./features/reports/ReportViewerPage').then((m) => ({ default: m.ReportViewerPage })),
+)
+const ReportsHubPage = lazy(() =>
+  import('./features/reports/ReportsHubPage').then((m) => ({ default: m.ReportsHubPage })),
+)
+const ResetPasswordPage = lazy(() =>
+  import('./features/auth/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })),
+)
+const ResourceFormPage = lazy(() =>
+  import('./features/masters/resources/ResourceFormPage').then((m) => ({ default: m.ResourceFormPage })),
+)
+const ResourceImportPage = lazy(() =>
+  import('./features/imports/ResourceImportPage').then((m) => ({ default: m.ResourceImportPage })),
+)
+const ResourceListPage = lazy(() =>
+  import('./features/masters/resources/ResourceListPage').then((m) => ({ default: m.ResourceListPage })),
+)
+const ResourceProfilePage = lazy(() =>
+  import('./features/resources/ResourceProfilePage').then((m) => ({ default: m.ResourceProfilePage })),
+)
+const RoleListPage = lazy(() =>
+  import('./features/masters/roles/RoleListPage').then((m) => ({ default: m.RoleListPage })),
+)
+const RolePermissionsPage = lazy(() =>
+  import('./features/masters/roles/RolePermissionsPage').then((m) => ({ default: m.RolePermissionsPage })),
+)
+const ScheduledReportsPage = lazy(() =>
+  import('./features/reports/ScheduledReportsPage').then((m) => ({ default: m.ScheduledReportsPage })),
+)
+const SettingsPage = lazy(() =>
+  import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+)
+const SlaMatrixPage = lazy(() =>
+  import('./features/masters/projects/SlaMatrixPage').then((m) => ({ default: m.SlaMatrixPage })),
+)
+const StageQueuePage = lazy(() =>
+  import('./features/tickets/stage-queue/StageQueuePage').then((m) => ({ default: m.StageQueuePage })),
+)
+const StatusMasterPage = lazy(() =>
+  import('./features/masters/statuses/StatusMasterPage').then((m) => ({ default: m.StatusMasterPage })),
+)
+const TaskTypeListPage = lazy(() =>
+  import('./features/masters/taskTypes/TaskTypeListPage').then((m) => ({ default: m.TaskTypeListPage })),
+)
+const TicketDetailPage = lazy(() =>
+  import('./features/tickets/detail/TicketDetailPage').then((m) => ({ default: m.TicketDetailPage })),
+)
+const TicketListPage = lazy(() =>
+  import('./features/tickets/list/TicketListPage').then((m) => ({ default: m.TicketListPage })),
+)
+const TimesheetPage = lazy(() =>
+  import('./features/masters/timesheet/TimesheetPage').then((m) => ({ default: m.TimesheetPage })),
+)
+const WorkflowDesignerPage = lazy(() =>
+  import('./features/masters/designer/WorkflowDesignerPage').then((m) => ({ default: m.WorkflowDesignerPage })),
+)
+const WorkingCalendarPage = lazy(() =>
+  import('./features/masters/calendar/WorkingCalendarPage').then((m) => ({ default: m.WorkingCalendarPage })),
+)
+
+/**
+ * A-073 · every screen is loaded on demand, and the shell is not.
+ *
+ * `vite build` used to emit one 2,122 kB chunk because all 46 screens were
+ * static imports here — so opening the dashboard downloaded, parsed and
+ * executed the workflow designer, the Excel import wizard, the chat panel
+ * and every master screen before the first frame. tools/perf/README.md
+ * carries the measurement that found it.
+ *
+ * WHY THE SUSPENSE BOUNDARY IS PER ROUTE AND NOT AROUND <Routes>
+ *
+ * One boundary at the top would be less code and would have made the metric
+ * lie. First contentful paint would then be the *fallback* — a spinner
+ * painting in 200 ms while the user waits exactly as long as before, and a
+ * budget met in the letter and broken in the intent.
+ *
+ * Boundaries sit inside AppShell's outlet instead, so `AppShell` stays a
+ * static import and the first paint is the real chrome: sidebar, top bar,
+ * project switcher. The page area is the only part that waits, which is
+ * also the honest thing to show, because it is the only part not yet known.
+ */
+function RouteFallback() {
+  return (
+    <div className="p-8" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading screen</span>
+    </div>
+  )
+}
+
+function withSuspense(node: ReactNode) {
+  return <Suspense fallback={<RouteFallback />}>{node}</Suspense>
+}
 
 export default function App() {
   return (
@@ -66,8 +189,8 @@ export default function App() {
           which mean anything to someone who is not signed in.
         */}
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/forgot-password" element={withSuspense(<ForgotPasswordPage />)} />
+        <Route path="/reset-password" element={withSuspense(<ResetPasswordPage />)} />
 
         <Route element={<RequireAuth />}>
           {/*
@@ -75,23 +198,23 @@ export default function App() {
             other route until the password is changed, so a sidebar full of links
             that all redirect back here would be a menu of dead ends.
           */}
-          <Route path="/change-password" element={<ChangePasswordPage />} />
+          <Route path="/change-password" element={withSuspense(<ChangePasswordPage />)} />
 
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/my-tasks" element={<MyTasksPage />} />
+            <Route path="/my-tasks" element={withSuspense(<MyTasksPage />)} />
             {/*
               C-062 · S-31, the QA and Deployment landing page. `LandingRoutes`
               on the server has mapped those two roles here since A-018 and
               carried a note that the route did not exist yet; this is the day
               that note describes, and nothing changes on the server side.
             */}
-            <Route path="/stages/queue" element={<StageQueuePage />} />
-            <Route path="/tickets" element={<TicketListPage />} />
+            <Route path="/stages/queue" element={withSuspense(<StageQueuePage />)} />
+            <Route path="/tickets" element={withSuspense(<TicketListPage />)} />
             {/* Ahead of `/tickets/:ticketId` for readability; React Router ranks
                 the static segment higher regardless of order. */}
-            <Route path="/tickets/new" element={<CreateTicketPage />} />
+            <Route path="/tickets/new" element={withSuspense(<CreateTicketPage />)} />
             {/*
               S-24, the bulk reassignment wizard — C-063. B-014 declared this
               route as a placeholder because the Resource Master links into it —
@@ -100,12 +223,12 @@ export default function App() {
               `features/masters/resources/reassignHandoff.ts` — and C-063 is
               what replaces the placeholder with the real screen.
             */}
-            <Route path="/tickets/bulk-reassign" element={<BulkReassignWizardPage />} />
-            <Route path={TICKET_ROUTE} element={<TicketDetailPage />} />
+            <Route path="/tickets/bulk-reassign" element={withSuspense(<BulkReassignWizardPage />)} />
+            <Route path={TICKET_ROUTE} element={withSuspense(<TicketDetailPage />)} />
             {/* A-077 · the index the sidebar leads to. Not Stream B's project
                 master, which stays at /masters/projects and owns every write —
                 this lists projects and opens their dashboards, nothing else. */}
-            <Route path="/projects" element={<ProjectIndexPage />} />
+            <Route path="/projects" element={withSuspense(<ProjectIndexPage />)} />
             {/*
               S-20's traceability rule is that every entity in the summary panel
               is a link, and three of those destinations belong to other streams:
@@ -119,27 +242,27 @@ export default function App() {
             {/* A-077 · the second of the three placeholders replaced. C-019
                 registered this pattern the same way it registered the resource
                 one, so every project name on every ticket already linked here. */}
-            <Route path={PROJECT_ROUTE} element={<ProjectDashboardPage />} />
+            <Route path={PROJECT_ROUTE} element={withSuspense(<ProjectDashboardPage />)} />
             {/* B-066 · the third and last of the three placeholders replaced.
                 Every client name on every ticket already linked here. */}
-            <Route path={CLIENT_ROUTE} element={<ClientProfilePage />} />
+            <Route path={CLIENT_ROUTE} element={withSuspense(<ClientProfilePage />)} />
             {/* A-069 · S-28. C-019 registered this pattern against a placeholder
                 so every assignee name in the product already linked here. */}
-            <Route path={RESOURCE_ROUTE} element={<ResourceProfilePage />} />
+            <Route path={RESOURCE_ROUTE} element={withSuspense(<ResourceProfilePage />)} />
             {/* D-065 · S-25. The placeholder this replaces was the last thing
                 standing between a finished chat engine and anybody being able
                 to use it — D-050 through D-057 have all been merged for days. */}
-            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat" element={withSuspense(<ChatPage />)} />
             {/*
               A-063 · the hub and its viewer. The viewer is a nested path rather
               than a modal because a filtered report is a URL people send to
               each other and bookmark — which is also why its filters live in
               the query string.
             */}
-            <Route path="/reports" element={<ReportsHubPage />} />
+            <Route path="/reports" element={withSuspense(<ReportsHubPage />)} />
             {/* A-065 · before the :reportKey route, or "schedules" is read as a report key. */}
-            <Route path="/reports/schedules" element={<ScheduledReportsPage />} />
-            <Route path="/reports/:reportKey" element={<ReportViewerPage />} />
+            <Route path="/reports/schedules" element={withSuspense(<ScheduledReportsPage />)} />
+            <Route path="/reports/:reportKey" element={withSuspense(<ReportViewerPage />)} />
             {/*
               A-071 · S-16. A top-level path rather than `/masters/audit-logs`:
               this is not a master anybody edits, and `audit.view` is a
@@ -149,7 +272,7 @@ export default function App() {
               which answers 403, and the page says so rather than pretending the
               screen does not exist.
             */}
-            <Route path="/audit-logs" element={<AuditLogPage />} />
+            <Route path="/audit-logs" element={withSuspense(<AuditLogPage />)} />
             {/*
               B-063 · §21's timesheet. A top-level path for the audit log's
               reason one route up: it is not a master anybody edits, and the
@@ -163,46 +286,46 @@ export default function App() {
               see it and answers 404 if not, so the route is deliberately not
               role-gated here.
             */}
-            <Route path="/timesheet" element={<TimesheetPage />} />
-            <Route path="/timesheet/:userId" element={<TimesheetPage />} />
+            <Route path="/timesheet" element={withSuspense(<TimesheetPage />)} />
+            <Route path="/timesheet/:userId" element={withSuspense(<TimesheetPage />)} />
             {/* B-067 · the index the sidebar's Masters entry has led to since
                 A-030 and never actually reached until now. Permission-filtered
                 per-card rather than gated as a whole page — `MastersIndexPage`'s
                 own note has the per-master @PreAuthorize audit that decided
                 which one (notification templates) needed it. */}
-            <Route path="/masters" element={<MastersIndexPage />} />
-            <Route path="/masters/resources" element={<ResourceListPage />} />
+            <Route path="/masters" element={withSuspense(<MastersIndexPage />)} />
+            <Route path="/masters/resources" element={withSuspense(<ResourceListPage />)} />
             {/* `/new` before `/:userId/edit` so the literal wins — otherwise
                 "new" is matched as a userId and the form loads resource NaN.
                 Inside `RequireAuth` and inside the shell, like every other
                 master screen: the S-08 form is an Admin screen, not one of
                 A-030's four shell-less auth routes. */}
-            <Route path="/masters/resources/new" element={<ResourceFormPage />} />
+            <Route path="/masters/resources/new" element={withSuspense(<ResourceFormPage />)} />
             {/* B-038 · S-07's "bulk import via CSV", on §4B.3's wizard. Literal
                 before `/:userId/edit` for the reason above, and deliberately the
                 same shape of path as `/masters/clients/import`: it is the same
                 screen, registered twice, and two differently-shaped URLs would be
                 the first place that stopped being obvious. */}
-            <Route path="/masters/resources/import" element={<ResourceImportPage />} />
-            <Route path="/masters/resources/:userId/edit" element={<ResourceFormPage />} />
+            <Route path="/masters/resources/import" element={withSuspense(<ResourceImportPage />)} />
+            <Route path="/masters/resources/:userId/edit" element={withSuspense(<ResourceFormPage />)} />
             {/* B-016 · S-10. `/new` before `/:projectId/edit` for the same
                 reason the resource routes give — otherwise "new" matches as a
                 projectId and the form loads project NaN. `/projects/:id` (the
                 project *dashboard*, Stream A's A-069) is a different screen at
                 a different path and is untouched. */}
-            <Route path="/masters/projects" element={<ProjectListPage />} />
-            <Route path="/masters/projects/new" element={<ProjectFormPage />} />
-            <Route path="/masters/projects/:projectId/edit" element={<ProjectFormPage />} />
+            <Route path="/masters/projects" element={withSuspense(<ProjectListPage />)} />
+            <Route path="/masters/projects/new" element={withSuspense(<ProjectFormPage />)} />
+            <Route path="/masters/projects/:projectId/edit" element={withSuspense(<ProjectFormPage />)} />
             {/* B-017 · S-10's Team tab. A sibling route rather than a nested
                 one: the two tabs own their own data, and a layout route would
                 make Team inherit General's read — which fetches the `ETag` its
                 `PATCH` needs and this screen never sends. */}
-            <Route path="/masters/projects/:projectId/team" element={<ProjectTeamPage />} />
+            <Route path="/masters/projects/:projectId/team" element={withSuspense(<ProjectTeamPage />)} />
             {/* B-018 · S-10's SLA tab, a sibling for the same reason — and a
                 sharper one: it needs its own `ETag`, over the matrix rather
                 than over the project, so no shared parent read could serve
                 both tabs anyway. */}
-            <Route path="/masters/projects/:projectId/sla" element={<SlaMatrixPage />} />
+            <Route path="/masters/projects/:projectId/sla" element={withSuspense(<SlaMatrixPage />)} />
             {/* B-019 · S-10's Settings tab, and the fourth sibling. Same
                 reasoning again, and it has its own `ETag` too — over a document
                 spanning `projects` and `project_task_types`, which no read of
@@ -210,18 +333,18 @@ export default function App() {
                 and not the app-wide `/settings` two lines below; they are
                 different screens and the path prefix is what keeps them
                 apart. */}
-            <Route path="/masters/projects/:projectId/settings" element={<ProjectSettingsPage />} />
-            <Route path="/masters/roles" element={<RoleListPage />} />
-            <Route path="/masters/roles/:roleId" element={<RolePermissionsPage />} />
+            <Route path="/masters/projects/:projectId/settings" element={withSuspense(<ProjectSettingsPage />)} />
+            <Route path="/masters/roles" element={withSuspense(<RoleListPage />)} />
+            <Route path="/masters/roles/:roleId" element={withSuspense(<RolePermissionsPage />)} />
             {/* B-021 · S-12. One route, not two: a level is six fields, so the
                 create and edit forms are dialogs on the grid rather than a page
                 each — the shape B-020 gave S-11. There is no `/:id` route to
                 collide with. */}
-            <Route path="/masters/priorities" element={<PriorityListPage />} />
+            <Route path="/masters/priorities" element={withSuspense(<PriorityListPage />)} />
             {/* B-020 · S-11. One route, not two: a task type is eight fields,
                 so the create and edit forms are dialogs on the grid rather
                 than a page each. There is no `/:id` route to collide with. */}
-            <Route path="/masters/task-types" element={<TaskTypeListPage />} />
+            <Route path="/masters/task-types" element={withSuspense(<TaskTypeListPage />)} />
             {/*
               S-13, B-039 builds tab 1. `/masters/statuses` rather than
               `/masters/workflow`, because the tab an Admin lands on is the status
@@ -229,7 +352,7 @@ export default function App() {
               it — and the template designer got its own route (S-30), below, which
               is what that arrangement was leaving room for.
             */}
-            <Route path="/masters/statuses" element={<StatusMasterPage />} />
+            <Route path="/masters/statuses" element={withSuspense(<StatusMasterPage />)} />
             {/*
               B-043 · S-30, the workflow template designer — the route the note
               above reserved. `/masters/workflow/...` rather than a fourth tab on
@@ -242,7 +365,7 @@ export default function App() {
             */}
             <Route
               path="/masters/workflow/designer/:templateId"
-              element={<WorkflowDesignerPage />}
+              element={withSuspense(<WorkflowDesignerPage />)}
             />
             {/*
               C-102 · OB-07's journey template designer. Its own route rather
@@ -257,7 +380,7 @@ export default function App() {
             */}
             <Route
               path="/onboarding/journey-templates/:templateId"
-              element={<JourneyTemplateDesignerPage />}
+              element={withSuspense(<JourneyTemplateDesignerPage />)}
             />
             {/*
               B-112 · OB-13's full page. Beside the designer route above and for
@@ -275,7 +398,7 @@ export default function App() {
               so this is reached by link until B-108/B-109 build one; the bell
               popover mounts on that shell when it lands.
             */}
-            <Route path="/onboarding/notifications" element={<ObNotificationCentrePage />} />
+            <Route path="/onboarding/notifications" element={withSuspense(<ObNotificationCentrePage />)} />
             {/*
               B-122 · OB-10's two routes, beside the notification centre and for
               the same reason the designer and that page are not under
@@ -292,36 +415,36 @@ export default function App() {
               can paste. There is still no onboarding nav section, so both are
               reached by link until B-108/B-109 build one.
             */}
-            <Route path="/onboarding/reports" element={<ObReportsHubPage />} />
-            <Route path="/onboarding/reports/:reportKey" element={<ObReportViewerPage />} />
-            <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
+            <Route path="/onboarding/reports" element={withSuspense(<ObReportsHubPage />)} />
+            <Route path="/onboarding/reports/:reportKey" element={withSuspense(<ObReportViewerPage />)} />
+            <Route path="/masters/calendar" element={withSuspense(<WorkingCalendarPage />)} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a
                 page each. There is no `/:id` route to collide with. */}
             <Route
               path="/masters/notification-templates"
-              element={<NotificationTemplateListPage />}
+              element={withSuspense(<NotificationTemplateListPage />)}
             />
             {/* B-025 · S-32. Under `/masters` because it is a master screen,
                 while `/clients/:clientId` two routes up is the client 360 — a
                 different screen at a different path, kept apart by the prefix
                 the way `/masters/projects` and `/projects/:id` already are.
                 The create/edit form is B-026's, on the two routes below. */}
-            <Route path="/masters/clients" element={<ClientListPage />} />
+            <Route path="/masters/clients" element={withSuspense(<ClientListPage />)} />
             {/* B-026 · S-33. `/new` before `/:clientId/edit` for readability
                 only — React Router ranks the literal segment above the variable
                 regardless of order, the same ranking `/tickets/new` and
                 `/masters/resources/new` already depend on. One component serves
                 both: they are one form, and two would be the same file twice
                 with one copy always slightly behind. */}
-            <Route path="/masters/clients/new" element={<ClientFormPage />} />
+            <Route path="/masters/clients/new" element={withSuspense(<ClientFormPage />)} />
             {/* B-031 · S-34, the Excel import wizard. A literal segment beside
                 `/new`, and the same ranking applies: `:clientId` never swallows
                 it. B-038 moved the component out of `features/clients/` and made
                 it configurable; this route is one of its two registrations and
                 the path is unchanged. */}
-            <Route path="/masters/clients/import" element={<ClientImportPage />} />
-            <Route path="/masters/clients/:clientId/edit" element={<ClientFormPage />} />
+            <Route path="/masters/clients/import" element={withSuspense(<ClientImportPage />)} />
+            <Route path="/masters/clients/:clientId/edit" element={withSuspense(<ClientFormPage />)} />
             {/* The personal half of Settings — profile, password, 2FA, theme
                 and the browser-push switch.
 
@@ -337,7 +460,7 @@ export default function App() {
                 that are missing — S-26's notification matrix and, if it is ever
                 revisited, Organisation — are named in `SettingsPage`'s comment
                 with whose they are. */}
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings" element={withSuspense(<SettingsPage />)} />
             <Route path="*" element={<ScreenPlaceholder title="Not found" />} />
           </Route>
         </Route>
