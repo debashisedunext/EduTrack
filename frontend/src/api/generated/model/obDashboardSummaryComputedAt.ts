@@ -46,22 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObDashboardCard } from './obDashboardCard';
-import type { ObDashboardSummaryComputedAt } from './obDashboardSummaryComputedAt';
 
 /**
- * The OB-02 card board. Read from `ob_dashboard_summary`, never counted
-live — CLAUDE.md.
-
- */
-export interface ObDashboardSummary {
-  /** All seven, always, in `ObDashboardCardKey` order — a card whose
-count is zero is drawn as zero rather than omitted. An absent card
-and a card reading nought are different claims, and only one of
-them is true when nothing is overdue.
- */
-  cards: ObDashboardCard[];
-  /** When `ob_dashboard_summary` was last refreshed. On the response
+ * When `ob_dashboard_summary` was last refreshed. On the response
 because these numbers are pre-aggregated and a board that cannot
 say how stale it is invites a bug report about the difference
 between it and a list.
@@ -73,13 +60,6 @@ first days is correct rather than broken. Required and nullable
 rather than optional, because the distinction that matters is
 *computed and empty* against *never computed* — and a field a
 client may not find at all is one it will render as neither.
+
  */
-  computedAt: ObDashboardSummaryComputedAt;
-  /** What A-112 narrowed the counts to, in a sentence — "journeys
-containing your services", "clients you created", "all clients".
-The same honesty `runReport.meta.appliedScope` provides: a Step
-Owner comparing their board against a colleague's should be able
-to see why the numbers differ without asking.
- */
-  appliedScope?: string;
-}
+export type ObDashboardSummaryComputedAt = string | null;

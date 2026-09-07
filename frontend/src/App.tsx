@@ -35,6 +35,7 @@ import { RoleListPage } from './features/masters/roles/RoleListPage'
 import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
 import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
 import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
+import { ObDashboardPage } from './features/onboarding/dashboard/ObDashboardPage'
 import { ObNotificationCentrePage } from './features/onboarding/notifications/ObNotificationCentrePage'
 import { ObReportsHubPage } from './features/onboarding/reports/ObReportsHubPage'
 import { ObReportViewerPage } from './features/onboarding/reports/ObReportViewerPage'
@@ -294,6 +295,21 @@ export default function App() {
             */}
             <Route path="/onboarding/reports" element={<ObReportsHubPage />} />
             <Route path="/onboarding/reports/:reportKey" element={<ObReportViewerPage />} />
+            {/*
+              B-121 · OB-02, the onboarding dashboard. Beside the four routes
+              above and outside `/masters/**` for the same reason — the
+              Onboarding module's screens are disjoint from the ticketing
+              masters (plan §1.2), and this board is emphatically not S-05's:
+              its own summary tables, its own vocabulary, and A-115's ArchUnit
+              rule refusing the import between them.
+
+              Still no onboarding nav section, so this is reached by direct link
+              until B-108/B-109 build the shell. It is registered now anyway,
+              because it is the destination B-127's slide-over and B-128's grids
+              are added *to* — and a board that arrives after the things that
+              hang off it is a board nobody can review.
+            */}
+            <Route path="/onboarding/dashboard" element={<ObDashboardPage />} />
             <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a
