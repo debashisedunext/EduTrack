@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -107,7 +106,15 @@ class ObReportService {
         }
 
         Instant now = clock.instant();
-        LocalDate end = to != null ? to : LocalDate.now(ZoneOffset.UTC);
+        // `clock`, not ZoneOffset.UTC. The seam two constructors up exists for
+        // exactly this line — its own note says a default window cannot be
+        // asserted against a clock that only moves forwards — and reading the
+        // system clock here walked straight past it. The line above already
+        // does the right thing, which is what made the mismatch invisible:
+        // `now` was fixed under test and `end` was not, so the test passed on
+        // the day it was written and failed on the next one, against an
+        // assertion that had been correct all along.
+        LocalDate end = to != null ? to : LocalDate.now(clock);
         LocalDate start = from != null ? from : end.minusDays(DEFAULT_WINDOW_DAYS);
 
         ObReportScope scope = ObReportScope.of(caller);
