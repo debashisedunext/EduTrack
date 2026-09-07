@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.reports;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonValue;
 
@@ -135,10 +136,59 @@ final class ObReportDtos {
     }
 
     /**
-     * @param type how the client formats and aligns the cell, and how the
-     *             export engine writes it.
+     * @param type        how the client formats and aligns the cell, and how the
+     *                    export engine writes it.
+     * @param sensitivity B-123 · whether the value may be disclosed as it
+     *                    stands. Server-side only — see the constructor below
+     *                    and {@link ObReportSensitivity}, which explains why
+     *                    this is not a second {@link ColumnType}.
      */
-    record Column(String key, String label, ColumnType type) {
+    record Column(String key, String label, ColumnType type,
+                  @JsonIgnore ObReportSensitivity sensitivity) {
+
+        /**
+         * B-123 · a column that reads as a PAN or an amount cannot be declared
+         * {@link ObReportSensitivity#ORDINARY}.
+         *
+         * <p>Throwing from a DTO constructor is unusual and is the point. The
+         * alternative is a test that walks the catalogue, and it cannot be
+         * written honestly: a runner's columns are built inside {@code run()}
+         * behind a repository, so a unit test cannot reach them and an IT
+         * proves it only for the reports that happen to be in its fixture. The
+         * guard instead runs at every construction site there will ever be,
+         * and every runner in this package builds its list under
+         * {@code ObReportRunnersTest} — so a seventh report adding
+         * {@code pan} without classifying it is red in CI, not a column in
+         * somebody's download.
+         *
+         * <p>{@code IllegalArgumentException} rather than a checked type or a
+         * returned error: this is a programming mistake with one fix, in the
+         * same family as {@code ObReportCatalogueTest} refusing a descriptor
+         * marked available with no runner. Neither is reachable by a caller and
+         * neither should be recoverable.
+         */
+        Column {
+            if (sensitivity == ObReportSensitivity.ORDINARY
+                    && ObReportSensitivity.looksSensitive(key, label)) {
+                throw new IllegalArgumentException(
+                        "Column '" + key + "' (" + label + ") reads as sensitive but is declared "
+                                + "ORDINARY. Classify it PAN or MONEY, or rename it — B-123. "
+                                + "An export that ignores the masking rule is the masking rule "
+                                + "not existing.");
+            }
+        }
+
+        /**
+         * The ordinary case, which is nearly every column.
+         *
+         * <p>Here so that six runners and their tests did not all have to name
+         * a classification they do not have — and so that the diff that
+         * introduced this was the guard rather than forty edited lines, in
+         * which a wrong classification would have been invisible.
+         */
+        Column(String key, String label, ColumnType type) {
+            this(key, label, type, ObReportSensitivity.ORDINARY);
+        }
     }
 
     /**

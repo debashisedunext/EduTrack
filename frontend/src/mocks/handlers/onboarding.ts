@@ -42,14 +42,39 @@ const productRef = (id: number, db: Db) => {
 };
 
 /**
- * `ABCDE1234F` → `ABCDE****F`.
+ * `ABCDE1234F` â `••••••234F` — the last four and nothing else.
  *
  * The masking rule lives here and not in a component: a field the server masks
  * is a field the client never receives unmasked, and a mock that sent the real
  * value would let a screen "work" by unmasking something the API will not send.
+ *
+ * **B-123 · this was `slice(0, 5) + '****' + slice(-1)` until A-113 landed,
+ * and that is the exact mask PHASE-2-BUILD-PLAN finding 10 rejected** — six of
+ * ten characters, including the whole five-character prefix (series, holder
+ * type, surname initial) and the checksum. `PanFormat.mask` is now the server's
+ * one definition and it keeps the last four only. A mock that masks more
+ * loosely than the server is the more dangerous direction of the two: every
+ * screen is developed against a payload more revealing than production will
+ * ever send, so a layout that leans on the visible prefix looks right here and
+ * breaks there.
+ *
+ * Kept character-for-character in step with `PanFormat` — normalise first
+ * (the server hashes and masks the trimmed upper-case form), bullets rather
+ * than asterisks, and length preserved so the field still reads as PAN-shaped.
  */
-const maskPan = (pan: string | null): string | null =>
-  pan && pan.length >= 6 ? `${pan.slice(0, 5)}****${pan.slice(-1)}` : pan;
+const PAN_VISIBLE_SUFFIX = 4;
+
+const maskPan = (pan: string | null): string | null => {
+  if (!pan) return pan;
+  const normalised = pan.trim().toUpperCase();
+  if (normalised.length <= PAN_VISIBLE_SUFFIX) {
+    // Nothing to hide behind: a value too short to be a PAN cannot be
+    // partially disclosed, so it is wholly withheld. `PanFormat` agrees.
+    return '•'.repeat(normalised.length);
+  }
+  const hidden = normalised.length - PAN_VISIBLE_SUFFIX;
+  return '•'.repeat(hidden) + normalised.slice(hidden);
+};
 
 /**
  * A step's own colour: RED once its TAT is spent, AMBER from 75%, else GREEN.

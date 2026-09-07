@@ -121,7 +121,13 @@ class ObReportService {
         ObReportFilters filters = new ObReportFilters(productId, obClientId, rag);
         Long ownerSubject = scope.ownerSubject(ownerUserId);
 
-        ObReportRunner.Result result = runner.run(scope, start, end, now, ownerSubject, filters);
+        // B-123 · redact here, not in the exporter. This is the only call that
+        // produces rows, so it is the only place a sensitive value can be
+        // caught once for the file, the JSON and the ETag alike — the same
+        // argument ObReportExportService makes for scope. Everything below this
+        // line sees masked values and nothing below it can opt out.
+        ObReportRunner.Result result = ObExportRedaction.apply(
+                runner.run(scope, start, end, now, ownerSubject, filters));
 
         ObReportDtos.Report report =
                 new ObReportDtos.Report(reportKey, result.columns(), result.rows());
