@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -58,9 +59,11 @@ import org.springframework.web.server.ResponseStatusException;
 class ObJourneyStepLifecycleController {
 
     private final ObJourneyStepLifecycleService service;
+    private final ObJourneyStepRagService rag;
 
-    ObJourneyStepLifecycleController(ObJourneyStepLifecycleService service) {
+    ObJourneyStepLifecycleController(ObJourneyStepLifecycleService service, ObJourneyStepRagService rag) {
         this.service = service;
+        this.rag = rag;
     }
 
     @PostMapping(value = "/{stepId}/start", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -160,7 +163,12 @@ class ObJourneyStepLifecycleController {
         requirePreconditionIfPresent(stepId, ifMatch);
         ObJourneyStep step = service.skip(stepId, CallerIdentityAccess.requireUserId(caller),
                 CallerIdentityAccess.onboardingModuleRole(caller), request.reason());
-        return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step);
+        // Always null in practice: skip's own postcondition is SKIPPED, and
+        // ObRagCalculator returns null for it. Computed anyway rather than
+        // hardcoded, so this response stays correct if skip's own rules
+        // ever change, and so it exercises the same path getStep's ETag
+        // read below does.
+        return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step, rag.ragFor(step));
     }
 
     // ------------------------------------------------------------------
@@ -172,12 +180,24 @@ class ObJourneyStepLifecycleController {
      * If-Match} is optional on this route — the contract lists no `428`
      * response here, only `412`. Absent, the write proceeds unguarded; present,
      * it must match.
+     *
+     * <p><b>C-114 · {@code rag} now enters this hash, and it can change with
+     * nothing but elapsed time</b> — the one field on this DTO that could,
+     * where every other one only moves on a write. In the narrow window
+     * where a step crosses a RAG threshold between the client's read and
+     * this precondition check, a {@code skip} racing that exact moment sees
+     * a stale {@code If-Match} and gets {@code 412} for a reason that is
+     * not a concurrent edit. Left as-is rather than excluding {@code rag}
+     * from the hash: the failure mode is "reload and reapply", and a reload
+     * shows the same freshly-crossed threshold, so the retry succeeds on
+     * the first attempt — self-healing, not a stuck precondition.
      */
     private void requirePreconditionIfPresent(long stepId, String ifMatch) {
         if (ifMatch == null || ifMatch.isBlank()) {
             return;
         }
-        String current = etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(service.getStep(stepId)));
+        ObJourneyStep step = service.getStep(stepId);
+        String current = etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(step, rag.ragFor(step)));
         if (!matches(ifMatch, current)) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
                     "This service changed since you read it. Reload and reapply.");

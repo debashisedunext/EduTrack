@@ -1,7 +1,9 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
+import com.edunext.edutrack.domain.onboarding.ObRag;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -83,11 +85,6 @@ final class ObJourneyStepLifecycleDtos {
         }
     }
 
-    /** C-107 · the health colour, per {@code ObRag}. Never computed here — see {@link ObJourneyStepDetail}'s own javadoc. */
-    enum ObRag {
-        GREEN, AMBER, RED
-    }
-
     /** C-107 · local, on this file's own {@code UserRef} convention — see {@link ObJourneyStepDetail}'s own javadoc. */
     record UserRef(long id, String displayName) {
     }
@@ -119,23 +116,26 @@ final class ObJourneyStepLifecycleDtos {
      * so one record renders it exactly rather than nesting a base and an
      * extension the wire never separates.
      *
-     * <p><b>{@code items} and {@code docs} are always empty here, and {@code
-     * rag} is always {@code null}.</b> Named rather than silently wrong:
-     * populating a checklist's real {@code isMandatory} needs the
-     * template-item join C-106's completion gate owns, and {@code
-     * ob_journey_step_docs} — the instance-level required-document table —
-     * does not exist in any migration yet. {@code rag} needs the
-     * working-calendar TAT-consumed percentage C-105/C-120 compute; "null
-     * where there is nothing to colour" is the schema's own allowance and is
-     * accurate for a route that cannot compute it, not a guess standing in
-     * for one. {@code elapsedHours} is omitted for the identical reason —
-     * optional in the schema, and there is nothing honest to put there before
-     * C-105's clock events exist.
+     * <p><b>{@code items} and {@code docs} are always empty here.</b> Named
+     * rather than silently wrong: populating a checklist's real {@code
+     * isMandatory} needs the template-item join C-106's completion gate
+     * owns, and {@code ob_journey_step_docs} — the instance-level
+     * required-document table — does not exist in any migration yet.
      *
-     * <p>{@link #clockState}, by contrast, <em>is</em> real: it is a pure
-     * function of {@code status} (see {@link ObStepClockState#of}), so it
-     * costs nothing to get right now and there is no reason to leave it a
-     * placeholder.
+     * <p><b>{@code rag}, by contrast, is real as of C-114.</b> {@link
+     * #of(ObJourneyStep, ObRag)} takes it as a parameter rather than
+     * computing it inline, on this record's own convention: it stays a
+     * plain data holder, and {@link ObJourneyStepRagService} (which needs
+     * {@code WorkingHoursService}/{@code WorkingCalendarRepository}/{@code
+     * ObStepClockEventRepository} — three collaborators this file has never
+     * carried) does the work, one level up in the controller. {@code
+     * elapsedHours} stays omitted — optional in the schema, and nothing
+     * here currently needs the raw hours a client could derive from {@code
+     * dueAt} and {@code tatDays} itself.
+     *
+     * <p>{@link #clockState}, similarly, is a pure function of {@code
+     * status} (see {@link ObStepClockState#of}) computed inline, since it
+     * needs no collaborator at all.
      */
     record ObJourneyStepDetail(
             Long id, Long journeyId, int sequence, String name, ObJourneyStepStatus status,
@@ -147,13 +147,13 @@ final class ObJourneyStepLifecycleDtos {
             String skipReason, Long skippedByUserId,
             List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
 
-        static ObJourneyStepDetail of(ObJourneyStep s) {
+        static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag) {
             return new ObJourneyStepDetail(
                     s.getId(), s.getJourneyId(), s.getSequence(), s.getName(), s.getStatus(),
                     s.getOwnerUserId(), s.getBackupOwnerUserId(),
                     s.getBlockedReasonCode(), s.getBlockedNote(),
                     s.getStartedAt(), s.getFinishedAt(), s.getDueAt(),
-                    s.getDescription(), ObStepClockState.of(s.getStatus()), null,
+                    s.getDescription(), ObStepClockState.of(s.getStatus()), rag,
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
                     List.of(), List.of());
@@ -161,8 +161,8 @@ final class ObJourneyStepLifecycleDtos {
     }
 
     record ObJourneyStepDetailResponse(ObJourneyStepDetail data) {
-        static ObJourneyStepDetailResponse of(ObJourneyStep s) {
-            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s));
+        static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag) {
+            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag));
         }
     }
 }
