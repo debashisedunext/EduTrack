@@ -82,8 +82,14 @@ class ObReportServiceTest {
     void theDefaultWindowIsNinetyDaysBackFromToday() {
         run(JourneyFunnelRunner.KEY);
 
-        assertThat(runner.to).isEqualTo(LocalDate.of(2026, 9, 6));
-        assertThat(runner.from).isEqualTo(LocalDate.of(2026, 9, 6).minusDays(90));
+        // Derived from NOW rather than restating its date. The two literals
+        // that stood here said the same thing as the fixed clock only for as
+        // long as somebody kept them in step by hand, and the assertion was
+        // never the thing that was wrong — the service was reading the system
+        // clock instead of this one, so the day moved and the test did not.
+        LocalDate today = LocalDate.ofInstant(NOW, ZoneOffset.UTC);
+        assertThat(runner.to).isEqualTo(today);
+        assertThat(runner.from).isEqualTo(today.minusDays(90));
     }
 
     @Test
