@@ -8,6 +8,8 @@ import com.edunext.edutrack.api.security.module.ModuleAccessFilter;
 import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
 import com.edunext.edutrack.api.security.module.ObModuleRoleFilter;
 import com.edunext.edutrack.api.security.module.ObModuleRoleRules;
+import com.edunext.edutrack.api.security.portal.PortalRouteFilter;
+import com.edunext.edutrack.api.security.portal.PortalRouteGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -219,6 +221,7 @@ public class SecurityConfig {
                                          RequestMatcher cookieAuthenticatedRoutes,
                                          ModuleAccessGuard moduleGuard,
                                          ObModuleRoleRules moduleRoleRules,
+                                         PortalRouteGuard portalGuard,
                                          ObjectMapper objectMapper) throws Exception {
         return http
                 // A-074. Enabled for the two cookie-authenticated routes and no
@@ -318,7 +321,16 @@ public class SecurityConfig {
                 // 401. Authorization refuses the unauthenticated; this refuses
                 // the unentitled. Method security still runs later, so this is
                 // before RolesGuard in the sense the guard's javadoc means.
-                .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper), AuthorizationFilter.class)
+                // A-126 · before the module gate, and the ordering is the whole
+                // interaction. ModuleAccessGuard treats an absent CallerIdentity
+                // as blocked, and a client token produces none by A-125's
+                // construction — so left alone the module gate 404s every client
+                // off their own portal, which it guards deliberately to keep
+                // unentitled staff out. This decides the portal tree first;
+                // ModuleAccessFilter then defers on any request carrying a
+                // client principal.
+                .addFilterAfter(new PortalRouteFilter(portalGuard, objectMapper), AuthorizationFilter.class)
+                .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper), PortalRouteFilter.class)
 
                 // A-122 · after the module gate, never before. That gate answers
                 // 404 to a caller with no ONBOARDING grant; running the role

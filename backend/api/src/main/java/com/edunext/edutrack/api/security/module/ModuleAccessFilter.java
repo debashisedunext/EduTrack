@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.security.module;
 
+import com.edunext.edutrack.api.feature.portal.ClientPrincipal;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -117,6 +118,16 @@ public class ModuleAccessFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        // A-126 · a client principal is not a candidate for a module grant, and
+        // this guard treats an absent CallerIdentity as blocked — so left to
+        // itself it 404s every client off their own portal, which it guards on
+        // purpose to keep unentitled staff out. PortalRouteFilter has already
+        // decided that request; deferring here keeps one question with one gate
+        // rather than two answering it in different vocabularies.
+        if (ClientPrincipal.of(SecurityContextHolder.getContext().getAuthentication()).isPresent()) {
+            chain.doFilter(request, response);
+            return;
+        }
         if (!guard.blocks(caller(), request.getRequestURI())) {
             chain.doFilter(request, response);
             return;
