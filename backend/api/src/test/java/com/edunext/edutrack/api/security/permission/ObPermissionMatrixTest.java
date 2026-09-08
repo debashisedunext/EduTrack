@@ -119,7 +119,7 @@ class ObPermissionMatrixTest {
     }
 
     @Test
-    @DisplayName("eight routes enforce their rule today, and the gap is 32")
+    @DisplayName("eleven routes enforce their rule today, and the gap is still 32")
     void theEnforcementGapIsExact() {
         // THE RATCHET, and the reason this file is not just a coverage check.
         //
@@ -132,7 +132,7 @@ class ObPermissionMatrixTest {
         //
         // WHEN THIS FAILS BECAUSE THE NUMBER WENT DOWN, that is A-122 working.
         // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(40);
+        assertThat(ObPermissionMatrix.ENTRIES).hasSize(43);
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
                 .hasSize(32);
@@ -143,6 +143,13 @@ class ObPermissionMatrixTest {
         // the declared set grew by eleven and the gap by four. The ratio moved
         // the right way: seven of the eleven enforce their rule on arrival.
         //
+        // B-106 · THE DECLARED SET GREW BY THREE AND THE GAP DID NOT MOVE,
+        // which is the ratio this ratchet exists to watch. The requirements
+        // list's POST, PATCH and DELETE all run ObClientScope.mayWrite through
+        // ObRequirementService.requireWritableClient before they touch a row —
+        // the same second enforcement point the SPOC and purchases panels use —
+        // so all three arrive enforced and none of them joins NOT_YET_ENFORCED.
+        //
         // A-122's job is unchanged and is still measured here: 32 is what it
         // has to drive to zero.
         Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
@@ -150,16 +157,19 @@ class ObPermissionMatrixTest {
         assertThat(enforced)
                 .as("ObClientScope.mayWrite is the second enforcement point in the module — "
                         + "it refuses OB_VIEWER and OB_STEP_OWNER on every write to a client "
-                        + "record or to one of its child rows, and ObClientsIT, ObContactsIT "
-                        + "and ObApplicationsIT each prove it against real MySQL")
+                        + "record or to one of its child rows, and ObClientsIT, ObContactsIT, "
+                        + "ObApplicationsIT and ObRequirementsIT each prove it against real MySQL")
                 .containsExactly(
                         "DELETE /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
+                        "DELETE /api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
                         "PATCH /api/v1/onboarding/clients/{obClientId}",
                         "PATCH /api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
                         "PATCH /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
+                        "PATCH /api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
                         "POST /api/v1/onboarding/clients",
                         "POST /api/v1/onboarding/clients/{obClientId}/applications",
                         "POST /api/v1/onboarding/clients/{obClientId}/contacts",
+                        "POST /api/v1/onboarding/clients/{obClientId}/requirements",
                         "POST /api/v1/onboarding/journey-steps/{stepId}/skip");
     }
 }

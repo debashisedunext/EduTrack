@@ -184,6 +184,23 @@ final class ObPermissionMatrix {
         m.put("PATCH /api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
                 CLIENT_WRITERS);
 
+        // B-106's requirements list, on the same rule and for the same reason:
+        // ObRequirementService.requireWritableClient runs ObClientScope.mayWrite
+        // against the parent client before it touches a requirement, so a role
+        // that may not edit the client may not raise, reword or tick off its
+        // requirements either. A Step Owner reads them as part of the client
+        // they are working against and holds no verb over them.
+        //
+        // Three rows where the purchases panel has two. There is a DELETE here
+        // because nothing references ob_client_requirements, where every
+        // purchase carries a journey behind a RESTRICT key — ObRequirementService
+        // .delete has the argument.
+        m.put("POST /api/v1/onboarding/clients/{obClientId}/requirements", CLIENT_WRITERS);
+        m.put("PATCH /api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
+                CLIENT_WRITERS);
+        m.put("DELETE /api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
+                CLIENT_WRITERS);
+
         // --- C-112/C-116's communications timeline ---------------------------
         //
         // ALSO NOT THIS BRANCH'S ROUTES. They are already on develop (PR #409)

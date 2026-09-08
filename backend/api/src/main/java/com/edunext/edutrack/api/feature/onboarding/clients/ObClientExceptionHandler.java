@@ -12,7 +12,9 @@ import java.util.Map;
 
 /**
  * B-102 · RFC 9457 problem documents for {@link ObClientController}, and since
- * B-103 for {@link ObContactController} too ({@code CONVENTIONS.md} §3).
+ * B-103, B-104 and B-106 for {@link ObContactController},
+ * {@link ObApplicationController} and {@link ObRequirementController} too
+ * ({@code CONVENTIONS.md} §3).
  *
  * <p>Scoped by {@code assignableTypes}, on the precedent every handler in this
  * repository follows: a repository-wide {@code @RestControllerAdvice} is shared
@@ -23,7 +25,7 @@ import java.util.Map;
  * these three strings are the API and the sentences beside them are not.
  */
 @RestControllerAdvice(assignableTypes = {ObClientController.class, ObContactController.class,
-        ObApplicationController.class})
+        ObApplicationController.class, ObRequirementController.class})
 class ObClientExceptionHandler {
 
     private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
@@ -286,6 +288,19 @@ class ObClientExceptionHandler {
         problem.setProperty("forceable", false);
         problem.setProperty("errors", Map.of("productId", new String[]{e.getMessage()}));
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * 404 — no such requirement under this client, or one belonging to somebody
+     * else's. Indistinguishable, by design.
+     */
+    @ExceptionHandler(ObRequirementNotFoundException.class)
+    ResponseEntity<ProblemDetail> handleRequirementNotFound(ObRequirementNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Not found");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
     }
 
     /** 422 {@code ob-client-live-not-earned} — LIVE is derived from the journeys, never set. */

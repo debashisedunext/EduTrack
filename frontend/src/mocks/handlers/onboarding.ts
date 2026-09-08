@@ -1,6 +1,7 @@
 import { http } from 'msw';
 import type {
-  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct, ObStep,
+  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct,
+  ObRequirement, ObStep,
 } from '../db';
 import { getDb, nextId } from '../db';
 import { notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
@@ -208,11 +209,77 @@ function obClientDetailDto(c: ObClient, db: Db) {
     pan: maskPan(c.pan),
     contacts: c.contacts.map(contactDto),
     applications: c.applications.map((a) => applicationDto(a, db)),
-    requirements: c.requirements,
+    requirements: c.requirements.map((r) => requirementDto(r, db)),
     journeys: c.journeys.map((j) => journeyDto(j, db)),
     createdBy: userRef(c.createdById, db),
     createdAt: c.createdAt,
   };
+}
+
+/**
+ * B-106 · one requirement, wire-shaped.
+ *
+ * `metBy` and `createdBy` are `UserRef | null` — an unmet requirement has no
+ * one who met it, and both of the server's joins are `LEFT` for the same
+ * reason.
+ */
+function requirementDto(r: ObRequirement, db: Db) {
+  return {
+    id: r.id,
+    sequence: r.sequence,
+    title: r.title,
+    bodyHtml: r.bodyHtml,
+    bodyText: r.bodyText,
+    isMet: r.isMet,
+    metAt: r.metAt,
+    metBy: userRef(r.metById, db),
+    createdBy: userRef(r.createdById, db),
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+interface RequirementWrite {
+  title?: string | null;
+  bodyHtml?: string;
+  isMet?: boolean | null;
+}
+
+/**
+ * The plain-text projection, block-aware.
+ *
+ * Deliberately *not* a sanitiser. PLAN.md §3.9 runs on the server and the mock
+ * re-implementing it would be a second allow-list that can drift from the real
+ * one — the exact failure `RichTextSanitizer`'s note describes, where the
+ * weaker copy becomes the vulnerability and nothing fails a build to say so.
+ * What this reproduces is the projection, so a screen bound against the mock
+ * renders the same two fields it will get from the server.
+ */
+function plainText(html: string): string {
+  return html
+    .replace(/<\/(p|li|ul|ol|pre|blockquote|h3|h4)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+/**
+ * The one §3.9 outcome the mock *does* reproduce: a body that means nothing.
+ *
+ * Not by running an allow-list, but by the crude test that catches the case a
+ * form has to handle — markup with no text in it at all. A screen built against
+ * a mock that accepted `<script>alert(1)</script>` would ship with no handling
+ * for the 400 the server answers.
+ */
+function requirementErrors(body: RequirementWrite, field = 'bodyHtml') {
+  if (body.bodyHtml === undefined) return null;
+  if (!body.bodyHtml?.trim() || !plainText(body.bodyHtml).trim()) {
+    return {
+      [field]: ['A requirement needs something to say. Nothing in that body survived the allow-list.'],
+    };
+  }
+  return null;
 }
 
 // ── the similar-name guard ──────────────────────────────────────────────────
@@ -510,7 +577,7 @@ export const onboardingHandlers = [
       contacts?: ContactUpsert[];
       applications?: { productId: number; licenseType?: string | null; units?: number | null;
         licenseStart?: string | null; licenseEnd?: string | null }[];
-      requirements?: string[];
+      requirements?: RequirementWrite[];
       createPortalLogin?: boolean;
       acknowledgeSimilarNames?: boolean;
     };
@@ -559,6 +626,7 @@ export const onboardingHandlers = [
     const clientId = Math.max(0, ...db.obClients.map((c) => c.id)) + 1;
     let contactId = Math.max(0, ...db.obClients.flatMap((c) => c.contacts.map((x) => x.id)));
     let applicationId = Math.max(0, ...db.obClients.flatMap((c) => c.applications.map((x) => x.id)));
+    let requirementId = Math.max(0, ...db.obClients.flatMap((c) => c.requirements.map((r) => r.id)));
     let journeyId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.map((j) => j.id)));
     let stepId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.flatMap((j) => j.steps.map((s) => s.id))));
 
@@ -594,7 +662,24 @@ export const onboardingHandlers = [
         licenseStart: a.licenseStart ?? null,
         licenseEnd: a.licenseEnd ?? null,
       })),
-      requirements: body.requirements ?? [],
+      // B-106 · rows, numbered in the order they were entered. Blank bodies
+      // are dropped rather than refused, exactly as the server does: a wizard
+      // textarea produces them by accident.
+      requirements: (body.requirements ?? [])
+        .filter((r) => r.bodyHtml?.trim())
+        .map((r, index) => ({
+          id: ++requirementId,
+          sequence: index,
+          title: r.title?.trim() || null,
+          bodyHtml: r.bodyHtml!,
+          bodyText: plainText(r.bodyHtml!),
+          isMet: Boolean(r.isMet),
+          metAt: r.isMet ? new Date().toISOString() : null,
+          metById: r.isMet ? 1 : null,
+          createdById: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: null,
+        })),
       // One journey per purchased product, every one LOCKED. Steps are copied
       // from an existing journey for that product, which stands in for the
       // template snapshot the real service takes — the point being that the
@@ -863,6 +948,91 @@ export const onboardingHandlers = [
       application.units = body.units ?? null;
       application.licenseStart = body.licenseStart ?? null;
       application.licenseEnd = body.licenseEnd ?? null;
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
+
+  // ── B-106 · OB-05's requirements list ────────────────────────────────────
+
+  http.post(url('/onboarding/clients/:obClientId/requirements'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const body = (await request.json()) as RequirementWrite;
+    if (!body.bodyHtml?.trim()) return validationFailed({ bodyHtml: ['A body is required'] });
+    const invalid = requirementErrors(body);
+    if (invalid) return validationFailed(invalid);
+
+    // MAX(sequence) + 1, not a count: a delete leaves gaps on purpose, and a
+    // count would collide with a row that is still there.
+    c.requirements.push({
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.requirements.map((r) => r.id))) + 1,
+      sequence: Math.max(-1, ...c.requirements.map((r) => r.sequence)) + 1,
+      title: body.title?.trim() || null,
+      bodyHtml: body.bodyHtml,
+      bodyText: plainText(body.bodyHtml),
+      isMet: Boolean(body.isMet),
+      metAt: body.isMet ? new Date().toISOString() : null,
+      metById: body.isMet ? 1 : null,
+      createdById: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+    });
+
+    return ok(obClientDetailDto(c, db), undefined, { status: 201 });
+  }),
+
+  http.patch(
+    url('/onboarding/clients/:obClientId/requirements/:requirementId'),
+    async ({ params, request }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      // Resolved by BOTH ids, as every nested onboarding route is: a real
+      // requirement under another client is 404, never 403.
+      const requirement = c.requirements.find((r) => r.id === Number(params.requirementId));
+      if (!requirement) return notFound('Requirement');
+
+      const body = (await request.json()) as RequirementWrite;
+      const invalid = requirementErrors(body);
+      if (invalid) return validationFailed(invalid);
+
+      // Partial by field. An omitted key is untouched; an explicit null title
+      // clears the label, which is the one place a null means something here.
+      if ('title' in body) requirement.title = body.title?.trim() || null;
+      if (body.bodyHtml !== undefined && body.bodyHtml !== null) {
+        requirement.bodyHtml = body.bodyHtml;
+        requirement.bodyText = plainText(body.bodyHtml);
+      }
+      // The stamp moves only when the flag moves — correcting the wording in
+      // November must not re-date a requirement met in March.
+      if (body.isMet !== undefined && body.isMet !== null && body.isMet !== requirement.isMet) {
+        requirement.isMet = body.isMet;
+        requirement.metAt = body.isMet ? new Date().toISOString() : null;
+        requirement.metById = body.isMet ? 1 : null;
+      }
+      requirement.updatedAt = new Date().toISOString();
+
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
+
+  http.delete(
+    url('/onboarding/clients/:obClientId/requirements/:requirementId'),
+    ({ params }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      const index = c.requirements.findIndex((r) => r.id === Number(params.requirementId));
+      if (index < 0) return notFound('Requirement');
+
+      // A hard delete, unlike the purchases panel which has no delete at all:
+      // nothing references a requirement, so the row takes nothing with it. The
+      // remaining sequence numbers keep their gaps rather than renumbering.
+      c.requirements.splice(index, 1);
+      // 200 with the document, not 204 — every write in this package answers
+      // with the client so the page never holds a stale ETag.
       return ok(obClientDetailDto(c, db));
     },
   ),
