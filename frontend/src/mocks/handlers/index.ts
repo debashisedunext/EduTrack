@@ -8,6 +8,7 @@ import { obAdminHandlers } from './onboardingAdmin';
 import { obPrereqHandlers } from './onboardingPrereqs';
 import { obJourneyHandlers } from './onboardingSteps';
 import { obNotificationHandlers } from './obNotifications';
+import { portalHandlers } from './portal';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -69,6 +70,12 @@ export const handlers = [
   // `/onboarding/notifications/**`; A-118 above owns the OB-12 templates the
   // centre renders, which is a different resource under a similar name.
   ...obNotificationHandlers,
+
+  // A-127 · CP-06/07, the client portal's ticketing side. `/portal/**` is its
+  // own tree and overlaps no staff route, so position here is presentation
+  // only — which is the whole point of forking at the route tree rather than
+  // with per-endpoint conditionals (plan §2.3).
+  ...portalHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
