@@ -143,7 +143,7 @@ export function JourneyAccordion({ journey, isOpen, onToggle, siblings, users }:
             selectedStepId={activeStepId ?? undefined}
             onSelectStep={(step) => setSelectedStepId(step.id)}
           />
-          {activeStep && <JourneyStepPanel step={activeStep} resolveUser={resolveUser} />}
+          {activeStep && <JourneyStepPanel step={activeStep} resolveUser={resolveUser} hold={hold} />}
         </>
       )}
     </ObAccordion>

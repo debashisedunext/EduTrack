@@ -750,6 +750,15 @@ final class PermissionMatrix {
     private static final String SKIP_JOURNEY_STEP = """
             {"reason":"Matrix fixture — client does not need this service"}""";
 
+    /**
+     * C-111 · {@code updateObJourneyStepItem}'s body. {@code isDone} is
+     * {@code @NotNull} rather than a primitive, so an absent field is a 400
+     * and not a silent {@code false} — which means this route genuinely
+     * cannot be exercised without a fixture.
+     */
+    private static final String ANSWER_JOURNEY_STEP_ITEM = """
+            {"isDone":true}""";
+
     /** C-115 · {@code resolveObEscalation}'s mandatory {@code note} — an allowed role is entitled to reach the service, not this fixture. */
     private static final String RESOLVE_ESCALATION = """
             {"note":"Matrix fixture — resolved"}""";
@@ -2039,6 +2048,13 @@ final class PermissionMatrix {
             // class javadoc. The row-scope rule this task does own (only a step's
             // owner or backup owner may act) is not a §2 platform role and is
             // enforced in the service, not here.
+            // C-111 · OB-06's own read, and the checkbox on it. The read is
+            // everyRole because seeing a step is not acting on one (plan §9:
+            // "read-only for anybody else's step"); the write is everyRole
+            // too because ObStepOwnership decides it per row, not per role —
+            // the same reasoning the five transitions above carry.
+            everyRole("GET", "/api/v1/onboarding/journey-steps/{stepId}"),
+            everyRole("PATCH", "/api/v1/onboarding/journey-step-items/{itemId}", ANSWER_JOURNEY_STEP_ITEM),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/start"),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/complete"),
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/block", BLOCK_JOURNEY_STEP),

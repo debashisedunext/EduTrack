@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -241,12 +242,7 @@ public class ObJourneyStepLifecycleService {
      */
     private void requireCompletionGate(ObJourneyStep step) {
         List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
-        List<Long> templateItemIds = items.stream()
-                .map(ObJourneyStepItem::getTemplateItemId)
-                .filter(Objects::nonNull)
-                .toList();
-        Map<Long, Boolean> mandatoryByTemplateItemId = templateStepItems.findAllById(templateItemIds).stream()
-                .collect(Collectors.toMap(ObJourneyTemplateStepItem::getId, ObJourneyTemplateStepItem::isMandatory));
+        Map<Long, Boolean> mandatoryByTemplateItemId = mandatoryByTemplateItemId(items);
 
         List<String> unanswered = items.stream()
                 .filter(item -> item.getAnswer() == null)
@@ -429,6 +425,176 @@ public class ObJourneyStepLifecycleService {
     /** C-107 · a plain read, for the controller's {@code ETag} precondition check — no transition, no lock. */
     public ObJourneyStep getStep(long stepId) {
         return requireStep(stepId);
+    }
+
+    // ------------------------------------------------------------------
+    // C-111 · the read side, and the one write that feeds it
+    // ------------------------------------------------------------------
+
+    /**
+     * C-111 · one checklist entry as OB-06 needs it — the stored row, plus
+     * the mandatory-ness that lives on the template rather than on it.
+     *
+     * <p>{@code ObJourneyStepItem} carries no {@code mandatory} column by
+     * design (its own javadoc says so); the value is joined back through
+     * {@code templateItemId}, and an ad-hoc item that no template governs
+     * defaults to mandatory. That default is not restated here — it comes
+     * from the same lookup {@link #requireCompletionGate} reads, so the
+     * panel and the gate cannot disagree about which items hold completion.
+     */
+    public record ChecklistItem(ObJourneyStepItem row, boolean mandatory) {
+    }
+
+    /**
+     * C-111 · one required-document entry.
+     *
+     * <p><b>Derived from the template step, because there is no instance
+     * table.</b> {@code ob_journey_step_docs} exists in no migration —
+     * {@code ObJourneyStepLifecycleDtos} already says so — so the checklist
+     * is the template's and {@code satisfied} is <em>counted</em> rather
+     * than matched, exactly as {@link #requireCompletionGate} counts it:
+     * nothing links one attachment to one checklist entry, so the first
+     * <var>n</var> required rows are satisfied by <var>n</var> clean
+     * attachments.
+     *
+     * <p>That is also why no {@code attachmentId} is carried: naming a
+     * specific attachment for a specific entry would invent a link the
+     * schema does not have, and a screen offering to open "the" document
+     * would open an arbitrary one.
+     */
+    public record ChecklistDoc(Long id, String label, boolean required, boolean satisfied) {
+    }
+
+    public record ObStepChecklist(List<ChecklistItem> items, List<ChecklistDoc> docs) {
+    }
+
+    /**
+     * Which of these items are mandatory, joined back through {@code
+     * templateItemId}.
+     *
+     * <p>Extracted from {@link #requireCompletionGate}, which is the only
+     * reason it exists as a method: the panel that <em>shows</em> the gate
+     * and the service that <em>enforces</em> it must read mandatory-ness the
+     * same way, including the "an ad-hoc item defaults to mandatory" arm,
+     * which lives in the caller's {@code getOrDefault(..., true)}. Two
+     * copies of this join would drift, and the drift would show as a screen
+     * saying a step can be completed while the server refuses it.
+     */
+    private Map<Long, Boolean> mandatoryByTemplateItemId(List<ObJourneyStepItem> items) {
+        List<Long> templateItemIds = items.stream()
+                .map(ObJourneyStepItem::getTemplateItemId)
+                .filter(Objects::nonNull)
+                .toList();
+        return templateStepItems.findAllById(templateItemIds).stream()
+                .collect(Collectors.toMap(ObJourneyTemplateStepItem::getId, ObJourneyTemplateStepItem::isMandatory));
+    }
+
+    /**
+     * C-111 · the Task List and required documents behind OB-06's panel.
+     *
+     * <p>Read-only and deliberately not guarded by ownership: <em>seeing</em>
+     * a step is not <em>acting</em> on it. Plan §9's OB-06 row is explicit
+     * that the panel is "read-only for anybody else's step", which is a
+     * statement that everybody may read it. {@link #answerItem} is where
+     * {@link ObStepOwnership} applies.
+     */
+    @Transactional(readOnly = true)
+    public ObStepChecklist checklistFor(long stepId) {
+        ObJourneyStep step = requireStep(stepId);
+
+        List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
+        Map<Long, Boolean> mandatory = mandatoryByTemplateItemId(items);
+        List<ChecklistItem> checklistItems = items.stream()
+                .map(item -> new ChecklistItem(item, mandatory.getOrDefault(item.getTemplateItemId(), true)))
+                .toList();
+
+        return new ObStepChecklist(checklistItems, docsFor(step));
+    }
+
+    /**
+     * The template's required-document checklist, with the count-based
+     * satisfaction {@link #requireCompletionGate} enforces.
+     *
+     * <p>Required entries are marked satisfied first and in sequence. With
+     * no attachment-to-entry link there is no better answer, and a stable
+     * order at least means one entry does not read satisfied on one call
+     * and outstanding on the next.
+     */
+    private List<ChecklistDoc> docsFor(ObJourneyStep step) {
+        if (step.getTemplateStepId() == null) {
+            return List.of();
+        }
+        long remaining = attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(
+                step.getId(), ObAttachmentScanStatus.CLEAN);
+
+        List<ChecklistDoc> docs = new ArrayList<>();
+        for (ObJourneyTemplateStepDoc doc : templateStepDocs.findByStepIdOrderBySequenceAsc(step.getTemplateStepId())) {
+            boolean satisfied = true;
+            if (doc.isRequired()) {
+                satisfied = remaining > 0;
+                if (satisfied) {
+                    remaining--;
+                }
+            }
+            // An optional entry never holds the gate, so it is never
+            // reported outstanding — it has nothing to be outstanding against.
+            docs.add(new ChecklistDoc(doc.getId(), doc.getLabel(), doc.isRequired(), satisfied));
+        }
+        return docs;
+    }
+
+    /**
+     * C-111 · answer one Task List entry — OB-06's checkbox.
+     *
+     * <p><b>{@code isDone} means "answered", and that is the only reading
+     * under which the panel and the completion gate agree.</b> {@link
+     * #requireCompletionGate} filters on {@code getAnswer() == null}: an
+     * item answered <em>False</em> satisfies the gate exactly as one
+     * answered True does, because §5.8's question is whether the owner has
+     * addressed the item, not whether the answer was yes. So {@code
+     * isDone: true} records True, and {@code false} returns it to
+     * unanswered.
+     *
+     * <p>🔴 <b>The consequence is that False-with-remark is unreachable
+     * through this route, and that is a defect in the contract rather than
+     * a choice made here.</b> {@code ObJourneyStepItemUpdateRequest} carries
+     * one boolean; the column it writes is a three-state {@code Boolean}
+     * whose False arm requires a remark ({@code
+     * ck_ob_journey_step_items_remark}). Two states cannot express three.
+     * Recording "no, and here is why" needs a contract change — Stream A's,
+     * since A-118 owns the schema — and until then this writes only the two
+     * states it can name honestly rather than inventing a remark to satisfy
+     * a check constraint.
+     *
+     * @throws JourneyStepItemNotFoundException no such item
+     * @throws NotStepOwnerException            caller is neither owner nor backup owner of its step
+     * @throws StepAlreadyTerminalException     the step is {@code DONE} or {@code SKIPPED}
+     */
+    @Transactional
+    public ObJourneyStepItem answerItem(long itemId, long callerId, boolean isDone) {
+        ObJourneyStepItem item = stepItems.findById(itemId)
+                .orElseThrow(() -> new JourneyStepItemNotFoundException(itemId));
+        ObJourneyStep step = requireStep(item.getStepId());
+        requireOwnership(step, callerId);
+
+        // A closed step's checklist is the record of how it closed. Editing
+        // it afterwards would change what the completion gate was satisfied
+        // by, retroactively — the same reasoning every other transition
+        // applies to a terminal step.
+        if (step.getStatus() == ObJourneyStepStatus.DONE || step.getStatus() == ObJourneyStepStatus.SKIPPED) {
+            throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
+        }
+
+        item.setAnswer(isDone ? Boolean.TRUE : null);
+        item.setAnsweredBy(isDone ? callerId : null);
+        item.setAnsweredAt(isDone ? Instant.now() : null);
+        if (!isDone) {
+            // A remark belongs to the answer it explains. Keeping one after
+            // clearing the other leaves a reason for a decision no longer
+            // recorded.
+            item.setRemark(null);
+        }
+        return item;
     }
 
     /**

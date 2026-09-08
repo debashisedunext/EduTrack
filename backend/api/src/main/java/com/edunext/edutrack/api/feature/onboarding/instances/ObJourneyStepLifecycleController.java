@@ -1,14 +1,18 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepItem;
+import com.edunext.edutrack.domain.onboarding.ObRag;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 /**
  * C-104 · {@code /onboarding/journey-steps} — start, complete,
@@ -169,6 +175,71 @@ class ObJourneyStepLifecycleController {
         // ever change, and so it exercises the same path getStep's ETag
         // read below does.
         return ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(step, rag.ragFor(step));
+    }
+
+    /**
+     * C-111 · OB-06's own read — the step, its Task List and its required
+     * documents.
+     *
+     * <p><b>Not guarded by ownership.</b> Plan §9 says the panel is
+     * "read-only for anybody else's step", which is a statement that
+     * everybody may read one; {@code ObStepOwnership} governs the writes.
+     * The route is nonetheless {@code isAuthenticated()} like every other on
+     * this controller, and out-of-module callers get the same 404 the class
+     * javadoc describes.
+     *
+     * <p><b>The {@code ETag} is minted over the step without its checklist</b>,
+     * which is the same expression {@link #requirePreconditionIfPresent}
+     * verifies against. Hashing the fuller document this route returns would
+     * hand callers a token their own {@code If-Match} is then rejected for —
+     * the contract calls this route "the only source of the ETag", so it has
+     * to mint the one the other routes actually check.
+     *
+     * <p>That the hash ignores items and docs is coherent rather than a
+     * compromise: the routes guarded by {@code If-Match} are the transitions
+     * and the step {@code PATCH}, none of which touch the checklist, and the
+     * item {@code PATCH} is deliberately unguarded — "two people ticking two
+     * different items on the same service is the normal case", per its own
+     * contract note.
+     */
+    @GetMapping(value = "/{stepId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getObJourneyStep",
+            summary = "One service with its Task List and documents (OB-06)",
+            description = """
+                    The step panel's own read. `items` carries each checklist entry with the                     `isMandatory` joined back from its template row, and `isDone` meaning                     **answered** — the completion gate is satisfied by any answer, True or                     False, so a screen reading this as "answered True" would show an item                     outstanding that the server is willing to complete over.
+
+                    `docs` comes from the *template* step: `ob_journey_step_docs` does not                     exist, so `isSatisfied` is counted against the step's clean attachments                     rather than matched entry by entry, and `attachmentId` is always null.""")
+    ResponseEntity<ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse> getStep(@PathVariable long stepId) {
+        ObJourneyStep step = service.getStep(stepId);
+        ObRag stepRag = rag.ragFor(step);
+        ObJourneyStepLifecycleService.ObStepChecklist checklist = service.checklistFor(stepId);
+        return ResponseEntity.ok()
+                .eTag(etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(step, stepRag)))
+                .body(ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(
+                        step, stepRag, items(checklist), docs(checklist)));
+    }
+
+    private static List<ObJourneyStepLifecycleDtos.ObJourneyStepItem> items(
+            ObJourneyStepLifecycleService.ObStepChecklist checklist) {
+        return checklist.items().stream().map(entry -> {
+            ObJourneyStepItem row = entry.row();
+            return new ObJourneyStepLifecycleDtos.ObJourneyStepItem(
+                    row.getId(), row.getStepId(), row.getSequence(), row.getLabel(),
+                    entry.mandatory(), row.getAnswer() != null, row.getAnsweredAt(),
+                    // No display name to resolve without a users read this
+                    // controller has never carried; the id is what the schema
+                    // asks for elsewhere on this route tree too.
+                    row.getAnsweredBy() == null ? null
+                            : new ObJourneyStepLifecycleDtos.UserRef(row.getAnsweredBy(), null));
+        }).toList();
+    }
+
+    private static List<ObJourneyStepLifecycleDtos.ObJourneyStepDoc> docs(
+            ObJourneyStepLifecycleService.ObStepChecklist checklist) {
+        return checklist.docs().stream()
+                .map(doc -> new ObJourneyStepLifecycleDtos.ObJourneyStepDoc(
+                        doc.id(), null, doc.label(), doc.required(), doc.satisfied(), null))
+                .toList();
     }
 
     // ------------------------------------------------------------------
