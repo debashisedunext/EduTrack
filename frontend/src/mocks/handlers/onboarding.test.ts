@@ -336,6 +336,37 @@ describe('A-118 · what one call to createObClient creates', () => {
     expect(asked.data.hasPortalLogin).toBe(true)
   })
 
+  /**
+   * B-109 · the third thing `createObClient` documents itself as creating,
+   * alongside the journeys above — `ObClientPrereqService.instantiate`'s mock
+   * mirror. Read back through the OB-14 fixture's own shape (5 tasks, 3
+   * mandatory) rather than asserted as a bare count, so a handler that
+   * snapshotted the wrong version's tasks would still fail this.
+   */
+  it('snapshots the active prerequisites master onto the new client', async () => {
+    const res = await createClient(validBody({ name: 'Contoso Onboarding' }))
+    const { data } = await json<{ data: ClientDetail }>(res)
+
+    const db = getDb()
+    const header = db.obClientPrereqs.find((h) => h.obClientId === data.id)
+    expect(header).toMatchObject({ templateVersion: 1, status: 'IN_PROGRESS', clearedAt: null })
+
+    const tasks = db.obClientPrereqTasks.filter((t) => t.obClientId === data.id)
+    expect(tasks).toHaveLength(5)
+    expect(tasks.every((t) => t.status === 'PENDING')).toBe(true)
+    expect(tasks.filter((t) => t.isMandatory)).toHaveLength(3)
+  })
+
+  it('boards no client at all when nothing is published on OB-14', async () => {
+    const db = getDb()
+    for (const version of db.obPrereqVersions) version.isActive = false
+
+    const res = await createClient(validBody({ name: 'Should Not Exist Academy' }))
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type).toContain('ob-client-no-prereq-master')
+    expect((await listClients()).some((c) => c.name === 'Should Not Exist Academy')).toBe(false)
+  })
+
   it('requires exactly one primary SPOC', async () => {
     const none = await createClient(validBody({
       contacts: [{ name: 'A', email: 'a@x.example', isPrimary: false }],

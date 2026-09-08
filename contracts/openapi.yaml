@@ -7963,7 +7963,12 @@ paths:
             `ob-client-pan-duplicate` — final. `ob-client-name-similar` —
             forceable with `acknowledgeSimilarNames`. `ob-product-no-template`
             — a purchased product has no active journey template, so there is
-            nothing to instantiate.
+            nothing to instantiate. `ob-client-no-prereq-master` — nothing is
+            published on OB-14 to snapshot a checklist from; the wizard's
+            confirmation step has nothing to name. `ob-client-portal-login-unavailable`
+            — `createPortalLogin: true` arrived ahead of B-126; none of the
+            four things this call creates land, same as every other guard on
+            this list.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

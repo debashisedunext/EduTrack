@@ -90,11 +90,16 @@ const GATE_OPTIONS = [
  * `/onboarding/clients/{id}` is C-110's route and the path every onboarding
  * mail already points at (`ObMailLinks`).
  *
- * ## What is deliberately not here
+ * ## The "New client" button
  *
- * **No create button.** OB-04 is B-109's four-step wizard and does not exist;
- * a "New client" button that 404s is worse than an absent one, and the wizard
- * lands on the route this page will link to.
+ * `/onboarding/clients/new` is B-109's own wizard, landing on the route this
+ * page has said it would link to since B-108. No role check on the button
+ * itself, on `Sidebar.tsx`'s reasoning for the module's own nav entry: this
+ * screen has never gated anything client-side, and `ObModuleRoleRules` refuses
+ * a caller with no standing to board a client the same way it refuses one with
+ * no standing to see this list.
+ *
+ * ## What is deliberately not here
  *
  * **No bulk actions and no row selection.** S-32 has both because activating
  * and deactivating clients in bulk is a real administrative act there. Nothing
@@ -208,6 +213,9 @@ export function ObClientListPage() {
         <div className="ml-auto flex items-center gap-2">
           <Button asChild variant="secondary" size="sm">
             <Link to="/onboarding/dashboard">Dashboard</Link>
+          </Button>
+          <Button asChild size="sm">
+            <Link to="/onboarding/clients/new">New client</Link>
           </Button>
         </div>
       </div>

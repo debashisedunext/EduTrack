@@ -113,11 +113,28 @@ class ObClientsIT {
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_client_contacts WHERE ob_client_id IN "
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
+        // B-109 · a client's prerequisite snapshot is a child of ob_clients
+        // (fk_ob_client_prereq_tasks_client is RESTRICT), so it has to go
+        // before the DELETE below, not after — the same "children first"
+        // rule this whole block is already following.
+        jdbc.update("DELETE FROM ob_client_prereq_tasks WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
+        jdbc.update("DELETE FROM ob_client_prereqs WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_clients WHERE name LIKE 'IT %'");
         jdbc.update("DELETE FROM ob_journey_template_steps WHERE template_id IN "
                 + "(SELECT id FROM ob_journey_templates WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_journey_templates WHERE name LIKE 'IT %'");
         jdbc.update("DELETE FROM ob_products WHERE code LIKE 'IT_%'");
+        // This class owns the org-wide prerequisites master exclusively for
+        // the life of this container, so it is wiped and republished every
+        // test rather than named-and-filtered like the rows above — there is
+        // no owner column to filter it by. Safe now that no client-side row
+        // still references a template task (both deletes above ran first).
+        // Before the `users` delete below: `published_by`/`created_by` on a
+        // version are FKs into it.
+        jdbc.update("DELETE FROM ob_prereq_template_tasks");
+        jdbc.update("DELETE FROM ob_prereq_template_versions");
         jdbc.update("DELETE FROM users WHERE username LIKE 'it_obclient_%'");
 
         ayush = insertUser("it_obclient_ayush");
@@ -127,6 +144,7 @@ class ObClientsIT {
         secondProduct = insertProduct("IT_LMS", "IT LMS");
         insertTemplate(product, "IT ERP Onboarding");
         insertTemplate(secondProduct, "IT LMS Onboarding");
+        insertPrereqMaster();
 
         admin = new ObClientScope(ObClientScope.OB_ADMIN, ayush);
         salesAyush = new ObClientScope(ObClientScope.OB_SALES, ayush);
@@ -188,6 +206,49 @@ class ObClientsIT {
                 .isInstanceOf(ProductWithoutTemplateException.class);
 
         assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name = 'IT Rollback Academy'"))
+                .isZero();
+    }
+
+    // ── B-109 · the prerequisites instance ──────────────────────────────────
+
+    /**
+     * The half of the atomic create that a mock cannot prove: two more tables
+     * ({@code ob_client_prereqs}, {@code ob_client_prereq_tasks}), written by a
+     * service in a different package, inside the one transaction {@code
+     * ObClientWriteServiceTest} cannot open a container for.
+     */
+    @Test
+    @DisplayName("boarding a client snapshots the active master onto the client's own checklist")
+    void createSnapshotsThePrereqMaster() {
+        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
+                request("IT Checklist Academy", null, List.of(product)));
+
+        assertThat(count("SELECT COUNT(*) FROM ob_client_prereqs WHERE ob_client_id = "
+                + created.id())).isEqualTo(1);
+
+        List<Object[]> tasks = jdbc.query(
+                "SELECT title, is_mandatory FROM ob_client_prereq_tasks "
+                        + "WHERE ob_client_id = ? ORDER BY sequence",
+                (rs, rowNum) -> new Object[]{rs.getString("title"), rs.getBoolean("is_mandatory")},
+                created.id());
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0)[0]).isEqualTo("Signed MSA");
+        assertThat(tasks.get(0)[1]).isEqualTo(true);
+        assertThat(tasks.get(1)[0]).isEqualTo("Data export template");
+        assertThat(tasks.get(1)[1]).isEqualTo(false);
+    }
+
+    /** The same rollback argument {@code productWithoutTemplateRollsEverythingBack} makes, one guard later. */
+    @Test
+    @DisplayName("nothing published on OB-14 boards no client at all")
+    void noPrereqMasterRollsEverythingBack() {
+        jdbc.update("UPDATE ob_prereq_template_versions SET is_active = 0");
+
+        assertThatThrownBy(() -> writes.create(admin, ayush,
+                request("IT No Checklist Academy", null, List.of(product))))
+                .isInstanceOf(NoPublishedPrerequisitesException.class);
+
+        assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name = 'IT No Checklist Academy'"))
                 .isZero();
     }
 
@@ -603,6 +664,22 @@ class ObClientsIT {
                 INSERT INTO ob_journey_template_steps (template_id, sequence, name, tat_days)
                 VALUES (?, 1, 'Kickoff', 2), (?, 2, 'Configuration', 3)
                 """, templateId, templateId);
+    }
+
+    /** B-109 · one published, active version, so every {@code writes.create} in this class has a checklist to snapshot. */
+    private long insertPrereqMaster() {
+        jdbc.update("""
+                INSERT INTO ob_prereq_template_versions (version, is_active, published_at, published_by)
+                VALUES (1, 1, NOW(6), ?)
+                """, ayush);
+        long versionId = idOfLastInsert();
+        jdbc.update("""
+                INSERT INTO ob_prereq_template_tasks
+                    (version_id, sequence, title, tat_days, is_mandatory, is_active)
+                VALUES (?, 1, 'Signed MSA', 2, 1, 1),
+                       (?, 2, 'Data export template', 3, 0, 1)
+                """, versionId, versionId);
+        return versionId;
     }
 
     private long idOfLastInsert() {

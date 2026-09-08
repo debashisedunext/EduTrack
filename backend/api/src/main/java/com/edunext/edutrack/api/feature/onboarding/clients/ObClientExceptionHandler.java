@@ -38,6 +38,8 @@ class ObClientExceptionHandler {
     private static final URI PAN_DUPLICATE = URI.create("https://edutrack/errors/ob-client-pan-duplicate");
     private static final URI NAME_SIMILAR = URI.create("https://edutrack/errors/ob-client-name-similar");
     private static final URI NO_TEMPLATE = URI.create("https://edutrack/errors/ob-product-no-template");
+    private static final URI NO_PREREQ_MASTER =
+            URI.create("https://edutrack/errors/ob-client-no-prereq-master");
     private static final URI LIVE_NOT_EARNED = URI.create("https://edutrack/errors/ob-client-live-not-earned");
     private static final URI PORTAL_LOGIN_UNAVAILABLE =
             URI.create("https://edutrack/errors/ob-client-portal-login-unavailable");
@@ -175,6 +177,17 @@ class ObClientExceptionHandler {
         problem.setProperty("forceable", false);
         problem.setProperty("productIds", e.productIds());
         problem.setProperty("errors", Map.of("applications", new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /** 409 {@code ob-client-no-prereq-master} — nothing published on OB-14 to snapshot. */
+    @ExceptionHandler(NoPublishedPrerequisitesException.class)
+    ResponseEntity<ProblemDetail> handleNoPrereqMaster(NoPublishedPrerequisitesException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(NO_PREREQ_MASTER);
+        problem.setTitle("No prerequisites checklist is published yet");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("forceable", false);
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
