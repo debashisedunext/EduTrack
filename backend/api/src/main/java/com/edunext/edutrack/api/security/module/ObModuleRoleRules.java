@@ -127,6 +127,29 @@ public class ObModuleRoleRules {
         put(m, "DELETE", "/api/v1/onboarding/journey-template-step-docs/{docId}", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/journey-template-step-items/{itemId}", ADMIN_ONLY);
 
+        // B-124 · the prerequisites master (OB-14). §3 gives OB Admin
+        // "prerequisites master" on the same line that gives it journey
+        // templates, and gives no other role a verb over it, so every write
+        // here is Admin's alone — the shape the block above already has.
+        //
+        // The read is every role's, and Manager and Step Owner are the reason
+        // to say so rather than derive it. §3 does give them verbs over
+        // prerequisite *instances* — "verify/skip prerequisites", "verify
+        // prerequisite submissions routed to them" — which are B-125's routes,
+        // not these. What a verifier needs from the master is the wording and
+        // the TAT the client was actually asked against; unreadable, the
+        // instance verbs become guesswork. Sales reads it for OB-04, where the
+        // checklist is what a client is being signed up to.
+        put(m, "GET", "/api/v1/onboarding/prereq-template", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/prereq-template/revisions", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/prereq-template/publish", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/prereq-template/tasks", ADMIN_ONLY);
+        put(m, "PUT", "/api/v1/onboarding/prereq-template/tasks/order", ADMIN_ONLY);
+        put(m, "PATCH", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}", ADMIN_ONLY);
+        put(m, "DELETE", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}/docs", ADMIN_ONLY);
+        put(m, "DELETE", "/api/v1/onboarding/prereq-template-task-docs/{docId}", ADMIN_ONLY);
+
         put(m, "GET", "/api/v1/onboarding/journey-steps/{stepId}", EVERY_ROLE);
         put(m, "PATCH", "/api/v1/onboarding/journey-step-items/{itemId}", STEP_ACTORS);
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/start", STEP_ACTORS);
