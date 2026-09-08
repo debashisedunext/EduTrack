@@ -201,7 +201,7 @@ class ObClientsIT {
         // Not 403 and not an empty field — absent, which is what the 404 rule
         // needs the read to produce.
         assertThat(reads.findDetail(salesDivyansh, created.id())).isEmpty();
-        assertThat(reads.list(salesDivyansh, null, null, null, null, null, null, null, 50).data())
+        assertThat(reads.list(salesDivyansh, null, null, null, null, null, null, null, null, 50).data())
                 .noneSatisfy(row -> assertThat(row.name()).isEqualTo("IT Bluebell Schools"));
     }
 
@@ -372,14 +372,148 @@ class ObClientsIT {
                 Instant.now().minus(2, ChronoUnit.HOURS));
 
         List<ObClientDtos.ObClientSummary> red =
-                reads.list(admin, "IT Filtered", null, ObStepRag.RED, null, null, null, null, 50).data();
+                reads.list(admin, "IT Filtered", null, ObStepRag.RED, null, null, null, null, null, 50).data();
         List<ObClientDtos.ObClientSummary> green =
-                reads.list(admin, "IT Filtered", null, ObStepRag.GREEN, null, null, null, null, 50).data();
+                reads.list(admin, "IT Filtered", null, ObStepRag.GREEN, null, null, null, null, null, 50).data();
 
         assertThat(red).extracting(ObClientDtos.ObClientSummary::name)
                 .containsExactly("IT Filtered Academy");
         assertThat(red.getFirst().rag()).isEqualTo(ObStepRag.RED);
         assertThat(green).isEmpty();
+    }
+
+    // ── B-108 · OB-03's filters ─────────────────────────────────────────────
+
+    /**
+     * The filter B-108 adds, and the reason it needed a container.
+     *
+     * <p>It is the only one on this list that is not a column on
+     * {@code ob_clients}: it walks journeys to steps and back, so a mock of the
+     * repository would assert nothing but that a parameter was passed along.
+     * Two clients, one step owned on each side, and the assertion is that the
+     * <b>other</b> client is absent — a filter the SQL quietly ignored would
+     * return both and read as working.
+     */
+    @Test
+    @DisplayName("the owner filter narrows to the clients whose journeys hold that person's steps")
+    void ownerFilterNarrowsToTheirClients() {
+        ObClientDtos.ObClientDetail mine = writes.create(admin, ayush,
+                request("IT Owned Academy", null, List.of(product)));
+        // Named so it shares no stem with the subject: "IT Unowned Academy"
+        // trips the near-duplicate name guard, which is a real refusal rather
+        // than a test-harness quirk — SimilarClientNames is doing its job.
+        writes.create(admin, ayush, request("IT Bystander Academy", null, List.of(product)));
+
+        ownStep(mine.journeys().getFirst().id(), 1, divyansh, null);
+
+        assertThat(reads.list(admin, "IT ", null, null, null, null, null, divyansh, null, 50).data())
+                .extracting(ObClientDtos.ObClientSummary::name)
+                .containsExactly("IT Owned Academy");
+    }
+
+    /**
+     * The half that is easiest to lose, and the one
+     * {@code OnboardingScopeResolver.hasStepOwnedBy} already argues for: the
+     * backup exists to cover the step when the owner cannot, so a list that
+     * hid those clients would hide exactly the ones a stand-in has been asked
+     * to pick up. A predicate reading only {@code owner_user_id} passes every
+     * other assertion in this class.
+     */
+    @Test
+    @DisplayName("a backup owner is an owner for this filter")
+    void backupOwnersMatchToo() {
+        ObClientDtos.ObClientDetail covered = writes.create(admin, ayush,
+                request("IT Covered Academy", null, List.of(product)));
+
+        ownStep(covered.journeys().getFirst().id(), 1, ayush, divyansh);
+
+        assertThat(reads.list(admin, "IT Covered", null, null, null, null, null, divyansh, null, 50).data())
+                .extracting(ObClientDtos.ObClientSummary::name)
+                .containsExactly("IT Covered Academy");
+    }
+
+    /**
+     * Both owner columns are nullable and SQL equality never matches NULL, so
+     * an unowned step attributes its client to nobody. Asserted rather than
+     * assumed because the failure mode is silent and wide: a predicate written
+     * with {@code <=>} or with a coalesce would hand every unassigned client to
+     * whoever the filter names.
+     */
+    @Test
+    @DisplayName("an unowned step gives nobody a claim on the client")
+    void unownedStepsMatchNobody() {
+        writes.create(admin, ayush, request("IT Ownerless Academy", null, List.of(product)));
+
+        assertThat(reads.list(admin, "IT Ownerless", null, null, null, null, null, ayush, null, 50).data())
+                .isEmpty();
+    }
+
+    /**
+     * The archived arm, which the {@code EXISTS} spells out and nothing else
+     * would catch: a journey that was called off is not work anybody is
+     * implementing, and leaving it in would keep a client on an implementor's
+     * list for ever.
+     */
+    @Test
+    @DisplayName("an archived journey does not keep the client on its owner's list")
+    void archivedJourneysDropOutOfTheOwnerFilter() {
+        ObClientDtos.ObClientDetail archived = writes.create(admin, ayush,
+                request("IT Archived Academy", null, List.of(product)));
+        long journeyId = archived.journeys().getFirst().id();
+        ownStep(journeyId, 1, divyansh, null);
+
+        assertThat(reads.list(admin, "IT Archived", null, null, null, null, null, divyansh, null, 50).data())
+                .hasSize(1);
+
+        jdbc.update("UPDATE ob_journeys SET archived_at = NOW(6) WHERE id = ?", journeyId);
+
+        assertThat(reads.list(admin, "IT Archived", null, null, null, null, null, divyansh, null, 50).data())
+                .isEmpty();
+    }
+
+    /**
+     * The sales filter, which the OB-03 screen cannot test against its own mock
+     * corpus — every fixture client there shares one sales person, so the
+     * filter either returns the whole list or none of it and neither outcome
+     * distinguishes a working filter from an ignored one. Here the rows can be
+     * arranged.
+     */
+    @Test
+    @DisplayName("the sales filter narrows to that person's clients and no others")
+    void salesFilterNarrows() {
+        ObClientDtos.ObClientDetail theirs = writes.create(admin, ayush,
+                request("IT Sold Academy", null, List.of(product)));
+        writes.create(admin, ayush, request("IT Bystander Academy", null, List.of(product)));
+        jdbc.update("UPDATE ob_clients SET sales_person_id = ? WHERE id = ?", divyansh, theirs.id());
+
+        assertThat(reads.list(admin, "IT ", null, null, null, null, divyansh, null, null, 50).data())
+                .extracting(ObClientDtos.ObClientSummary::name)
+                .containsExactly("IT Sold Academy");
+    }
+
+    /**
+     * The gate filter is what OB-03 renders as "Prerequisites pending", and it
+     * is the only way to ask for those clients: their {@code rag} is null, so
+     * none of the three colours returns them. Both halves are asserted, because
+     * a filter that returned everything would pass the first on its own.
+     */
+    @Test
+    @DisplayName("the gate filter is the only way to ask for a client with no colour")
+    void gateFilterFindsTheLockedOnes() {
+        ObClientDtos.ObClientDetail locked = writes.create(admin, ayush,
+                request("IT Gated Academy", null, List.of(product)));
+
+        assertThat(reads.list(admin, "IT Gated", null, null, "LOCKED", null, null, null, null, 50).data())
+                .extracting(ObClientDtos.ObClientSummary::name)
+                .containsExactly("IT Gated Academy");
+        assertThat(reads.list(admin, "IT Gated", null, null, "OPEN", null, null, null, null, 50).data())
+                .isEmpty();
+
+        jdbc.update("UPDATE ob_journeys SET gate_status = 'OPEN', gate_opened_at = NOW(6) "
+                + "WHERE ob_client_id = ?", locked.id());
+
+        assertThat(reads.list(admin, "IT Gated", null, null, "OPEN", null, null, null, null, 50).data())
+                .hasSize(1);
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────
@@ -395,6 +529,13 @@ class ObClientsIT {
                 "SELECT " + ObStepRag.colourOfStep("s")
                         + " FROM ob_journey_steps s WHERE s.journey_id = ? AND s.sequence = ?",
                 String.class, journeyId, sequence);
+    }
+
+    /** B-108 · one step's two owner columns, which is all the owner filter reads. */
+    private void ownStep(long journeyId, int sequence, Long owner, Long backup) {
+        jdbc.update("UPDATE ob_journey_steps SET owner_user_id = ?, backup_owner_user_id = ? "
+                        + "WHERE journey_id = ? AND sequence = ?",
+                owner, backup, journeyId, sequence);
     }
 
     private void setStepClock(long journeyId, int sequence, Instant startedAt, Instant dueAt) {

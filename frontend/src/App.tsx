@@ -58,6 +58,9 @@ const NotificationTemplateListPage = lazy(() =>
 const ObClientDetailPage = lazy(() =>
   import('./features/onboarding/journey/clientDetail/ObClientDetailPage').then((m) => ({ default: m.ObClientDetailPage })),
 )
+const ObClientListPage = lazy(() =>
+  import('./features/onboarding/clients/ObClientListPage').then((m) => ({ default: m.ObClientListPage })),
+)
 const ObDashboardPage = lazy(() =>
   import('./features/onboarding/dashboard/ObDashboardPage').then((m) => ({ default: m.ObDashboardPage })),
 )
@@ -472,6 +475,22 @@ export default function App() {
               Still no onboarding nav section, so this is reached from a mail
               link or the OB-03 list (B-108) rather than from the sidebar.
             */}
+            {/*
+              B-108 · OB-03, the onboarding client list. Registered *before*
+              `/onboarding/clients/:obClientId` for readability only — React
+              Router ranks a literal path above one with a variable segment
+              regardless of order, the same ranking `/masters/clients/new`
+              already depends on. A bare `/onboarding/clients` cannot be
+              swallowed by the detail route anyway: `:obClientId` requires a
+              segment to bind.
+
+              This is the screen the four routes above have each said they were
+              waiting for — "reached by direct link until B-108/B-109 build
+              one". It is not yet a nav section: the onboarding shell is
+              B-109's, and the module still has no sidebar entry, so this page
+              links out to the dashboard rather than pretending to be one.
+            */}
+            <Route path="/onboarding/clients" element={withSuspense(<ObClientListPage />)} />
             <Route
               path="/onboarding/clients/:obClientId"
               element={withSuspense(<ObClientDetailPage />)}
