@@ -50,10 +50,22 @@ interface ApplicationRow {
   licenseEnd: string | null
 }
 
+interface RequirementRow {
+  id: number
+  sequence: number
+  title: string | null
+  bodyHtml: string
+  bodyText: string
+  isMet: boolean
+  metAt: string | null
+  metBy: { id: number; displayName: string } | null
+}
+
 interface ClientDetail extends ClientRow {
   pan: string | null
   contacts: ContactRow[]
   applications: ApplicationRow[]
+  requirements: RequirementRow[]
   journeys: { id: number; rag: Rag; gateStatus: string; totalTatDays: number; utilizedHours: number;
     heldByJourneyId: number | null; percentComplete: number
     steps: { id: number; rag: Rag; status: string }[] }[]
@@ -768,6 +780,166 @@ describe('B-104 · the product identifies a purchase and is not a field on it', 
     // else answers exactly as an invented one does — which is what stops it
     // enumerating which organisations bought which products.
     const res = await patchApplication(NORTHWIND, theirs.id, { productId: theirs.productId })
+    expect(res.status).toBe(404)
+  })
+})
+
+
+// ── B-106 · requirements ─────────────────────────────────────────────────────
+
+const addRequirement = (clientId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const patchRequirement = (clientId: number, requirementId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements/${requirementId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const deleteRequirement = (clientId: number, requirementId: number) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements/${requirementId}`, {
+    method: 'DELETE',
+  })
+
+describe('B-106 · requirements are rows, not strings', () => {
+  it('adds at the end of the list and derives the plain-text projection', async () => {
+    const before = await getClient(NORTHWIND)
+
+    const res = await addRequirement(NORTHWIND, {
+      title: 'Branding',
+      bodyHtml: '<p>Logo and <strong>colour palette</strong> in the portal</p>',
+    })
+    expect(res.status).toBe(201)
+
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.requirements).toHaveLength(before.requirements.length + 1)
+
+    const added = after.requirements[after.requirements.length - 1]
+    expect(added.title).toBe('Branding')
+    // Derived, never supplied — the screen reads both fields and a mock that
+    // left bodyText empty would let a list ship that renders blank rows.
+    expect(added.bodyText).toBe('Logo and colour palette in the portal')
+    expect(added.sequence).toBeGreaterThan(before.requirements[before.requirements.length - 1].sequence)
+    expect(added.isMet).toBe(false)
+    expect(added.metAt).toBeNull()
+  })
+
+  it('refuses a body with no text in it', async () => {
+    // The one §3.9 outcome the mock reproduces. A screen built against a mock
+    // that accepted this would ship with no handling for the 400 the server
+    // answers — and the allow-list itself is the server's, deliberately not
+    // reimplemented here.
+    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p><br></p>' })
+
+    expect(res.status).toBe(400)
+    const body = await json<{ errors: Record<string, string[]> }>(res)
+    expect(body.errors).toHaveProperty('bodyHtml')
+  })
+
+  it('answers the whole client document, so the page ETag stays usable', async () => {
+    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p>Handover pack</p>' })
+    const body = await json<{ data: ClientDetail }>(res)
+
+    // Not the requirement — the client, with its contacts and journeys, exactly
+    // as every other write in this package answers.
+    expect(body.data.id).toBe(NORTHWIND)
+    expect(body.data.contacts.length).toBeGreaterThan(0)
+    expect(body.data.journeys.length).toBeGreaterThan(0)
+  })
+})
+
+describe('B-106 · the met flag carries its own evidence', () => {
+  it('stamps who and when on the way in, and clears both on the way out', async () => {
+    const client = await getClient(NORTHWIND)
+    const unmet = client.requirements.find((r) => !r.isMet)!
+
+    const met = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, unmet.id, { isMet: true }),
+    )).data.requirements.find((r) => r.id === unmet.id)!
+
+    expect(met.isMet).toBe(true)
+    expect(met.metAt).not.toBeNull()
+    expect(met.metBy).not.toBeNull()
+
+    const reopened = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, unmet.id, { isMet: false }),
+    )).data.requirements.find((r) => r.id === unmet.id)!
+
+    // Cleared rather than left behind — a stamp beside a false flag is what
+    // ck_ob_client_requirements_met refuses at the column.
+    expect(reopened.isMet).toBe(false)
+    expect(reopened.metAt).toBeNull()
+    expect(reopened.metBy).toBeNull()
+  })
+
+  it('does not re-date a requirement that was already met', async () => {
+    const client = await getClient(NORTHWIND)
+    const already = client.requirements.find((r) => r.isMet)!
+    const stamped = already.metAt
+
+    const after = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, already.id, { bodyHtml: '<p>Reworded in November</p>' }),
+    )).data.requirements.find((r) => r.id === already.id)!
+
+    // The rule the three-column design exists for: correcting the wording in
+    // November must not re-date a requirement met in March.
+    expect(after.bodyText).toBe('Reworded in November')
+    expect(after.isMet).toBe(true)
+    expect(after.metAt).toBe(stamped)
+  })
+
+  it('leaves an omitted field alone and clears an explicit null title', async () => {
+    const client = await getClient(NORTHWIND)
+    const titled = client.requirements.find((r) => r.title !== null)!
+
+    const untouched = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, titled.id, { bodyHtml: '<p>New wording</p>' }),
+    )).data.requirements.find((r) => r.id === titled.id)!
+    expect(untouched.title).toBe(titled.title)
+
+    const cleared = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, titled.id, { title: null }),
+    )).data.requirements.find((r) => r.id === titled.id)!
+    expect(cleared.title).toBeNull()
+    // And the body the previous request set is still there — partial by field.
+    expect(cleared.bodyText).toBe('New wording')
+  })
+})
+
+describe('B-106 · removing a requirement takes nothing with it', () => {
+  it('removes the row, keeps the gap, and answers 200 with the document', async () => {
+    const before = await getClient(NORTHWIND)
+    const target = before.requirements[0]
+    const survivor = before.requirements[1]
+
+    const res = await deleteRequirement(NORTHWIND, target.id)
+    // 200 and not 204: every write here answers with the client so the page
+    // never holds a tag for a client that has just changed.
+    expect(res.status).toBe(200)
+
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.requirements.map((r) => r.id)).not.toContain(target.id)
+    // The surviving row keeps the sequence it had — renumbering would rewrite
+    // every following row to tidy a column nobody reads.
+    expect(after.requirements.find((r) => r.id === survivor.id)!.sequence)
+      .toBe(survivor.sequence)
+    // And nothing else on the client moved.
+    expect(after.journeys).toHaveLength(before.journeys.length)
+    expect(after.contacts).toHaveLength(before.contacts.length)
+  })
+
+  it('404s a requirement id belonging to another client', async () => {
+    const db = getDb()
+    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.requirements.length > 0)!
+
+    // Resolved by BOTH ids, as every nested onboarding route is: a real
+    // requirement under somebody else answers exactly as an invented one does.
+    const res = await deleteRequirement(NORTHWIND, other.requirements[0].id)
     expect(res.status).toBe(404)
   })
 })

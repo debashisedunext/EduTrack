@@ -129,10 +129,29 @@ class ObClientService {
                 row.statusReason(),
                 contacts,
                 applications,
-                reads.requirementsOf(id),
+                reads.requirementsOf(id).stream().map(ObClientService::requirement).toList(),
                 journeys(id),
                 ObClientDtos.UserRef.of(row.createdBy(), row.createdByName()),
                 row.createdAt());
+    }
+
+    /**
+     * B-106 · one requirement row, with both user references assembled.
+     *
+     * <p>{@code UserRef.of} answers null for a null id, which is what makes the
+     * two left joins in {@code REQUIREMENT_COLUMNS} safe to read here without a
+     * branch: an unmet requirement has no {@code metBy} and an imported one has
+     * no {@code createdBy}, and both come back as an absent object rather than
+     * as a {@code UserRef} wrapped around a zero.
+     */
+    private static ObClientDtos.ObRequirement requirement(
+            ObClientReadRepository.RequirementRow row) {
+        return new ObClientDtos.ObRequirement(
+                row.id(), row.sequence(), row.title(), row.bodyHtml(), row.bodyText(),
+                row.isMet(), row.metAt(),
+                ObClientDtos.UserRef.of(row.metBy(), row.metByName()),
+                ObClientDtos.UserRef.of(row.createdBy(), row.createdByName()),
+                row.createdAt(), row.updatedAt());
     }
 
     /**

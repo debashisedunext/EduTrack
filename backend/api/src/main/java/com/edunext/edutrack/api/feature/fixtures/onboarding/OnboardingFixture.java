@@ -410,9 +410,11 @@ public class OnboardingFixture {
      */
     private void createRequirements(ClientSpec spec, long clientId, Map<String, Long> userIds) {
         insert("""
-                INSERT INTO ob_client_requirements (ob_client_id, sequence, body, created_by)
-                     VALUES (?, 1, ?, ?)
-                """, clientId, spec.requirements(), userIds.get(spec.createdByUserKey()));
+                INSERT INTO ob_client_requirements
+                           (ob_client_id, sequence, body_html, body_text, created_by, updated_by)
+                     VALUES (?, 1, ?, ?, ?, ?)
+                """, clientId, paragraph(spec.requirements()), spec.requirements(),
+                userIds.get(spec.createdByUserKey()), userIds.get(spec.createdByUserKey()));
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -860,5 +862,22 @@ public class OnboardingFixture {
             throw new IllegalStateException("no generated key returned for: " + sql);
         }
         return key.longValue();
+    }
+
+    /**
+     * B-106 · the corpus's requirement text as one escaped paragraph.
+     *
+     * <p>{@code body_html} became a rich-text column in V20260908_1210 and the
+     * transcription's requirements are plain sentences. Escaped rather than
+     * wrapped, for the migration's own backfill reason: a {@code <} in a
+     * prototype string is a literal somebody typed, and copying it in as markup
+     * would make the fixture assert a document nobody wrote — and would put a
+     * corpus row through no allow-list, on the one path that writes rows
+     * directly rather than through {@code ObRequirementBody}.
+     */
+    private static String paragraph(String text) {
+        return "<p>" + text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;") + "</p>";
     }
 }

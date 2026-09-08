@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -71,6 +72,8 @@ class ObClientWriteService {
     private final ObClientRepository clients;
     private final ObClientReadRepository reads;
     private final ObClientChildWriteRepository children;
+    private final ObRequirementWriteRepository requirements;
+    private final ObRequirementBody requirementBodies;
     private final ObClientService details;
     private final ObJourneyInstantiationService journeys;
     private final PanService pan;
@@ -87,15 +90,20 @@ class ObClientWriteService {
     ObClientWriteService(ObClientRepository clients,
                          ObClientReadRepository reads,
                          ObClientChildWriteRepository children,
+                         ObRequirementWriteRepository requirements,
+                         ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
                          PanService pan) {
-        this(clients, reads, children, details, journeys, pan, Clock.systemUTC());
+        this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
+                Clock.systemUTC());
     }
 
     ObClientWriteService(ObClientRepository clients,
                          ObClientReadRepository reads,
                          ObClientChildWriteRepository children,
+                         ObRequirementWriteRepository requirements,
+                         ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
                          PanService pan,
@@ -103,6 +111,8 @@ class ObClientWriteService {
         this.clients = clients;
         this.reads = reads;
         this.children = children;
+        this.requirements = requirements;
+        this.requirementBodies = requirementBodies;
         this.details = details;
         this.journeys = journeys;
         this.pan = pan;
@@ -153,9 +163,10 @@ class ObClientWriteService {
         ObClient saved = clients.saveAndFlush(client);
         long clientId = saved.getId();
 
-        children.insertContacts(clientId, request.contacts(), callerId, clock.instant());
+        Instant at = clock.instant();
+        children.insertContacts(clientId, request.contacts(), callerId, at);
         children.insertApplications(clientId, request.applications());
-        children.insertRequirements(clientId, request.requirementsOrEmpty(), callerId);
+        insertRequirements(clientId, request.requirementsOrEmpty(), callerId, at);
 
         // One locked journey per purchased product, from C-103's service. It
         // reads ob_client_applications to check the product was bought, which
@@ -168,6 +179,48 @@ class ObClientWriteService {
                 .orElseThrow(() -> new IllegalStateException(
                         "client " + clientId + " was created and is not readable by its own creator — "
                                 + "the scope rule and the created_by stamp disagree"));
+    }
+
+    /**
+     * B-106 · the wizard's requirements step, written through the same
+     * repository and the same sanitiser OB-05's panel uses.
+     *
+     * <p>Not {@code ObClientChildWriteRepository} any more, and not a private
+     * copy of the statement. A requirement body goes through PLAN.md §3.9's
+     * allow-list before it is stored, and a wizard path that wrote the raw
+     * string while the panel sanitised would be a security boundary with a hole
+     * in the older half of it — the hole that is hardest to notice, because the
+     * screen renders both rows the same way.
+     *
+     * <p><b>Blank entries are dropped rather than refused</b>, which is B-102's
+     * behaviour kept deliberately. A wizard textarea produces them by accident
+     * and an empty requirement is a line on a checklist that says nothing; a
+     * boarder should not have to hunt an invisible row to submit their form. A
+     * body that is <em>not</em> blank and reduces to nothing under the allow-list
+     * is a different matter — that one is a 400, keyed to its own index, because
+     * something was typed and nothing survived, and silently dropping it would
+     * lose a requirement somebody believed they had recorded.
+     *
+     * <p>The index in the key is what lets a four-step wizard reopen the right
+     * row: {@code requirements[2].bodyHtml} on a list of six is a message about
+     * one of them, where {@code requirements} alone is a message about none.
+     */
+    private void insertRequirements(long clientId,
+                                    List<ObClientDtos.ObRequirementWriteRequest> rows,
+                                    Long createdBy, Instant at) {
+        int sequence = 0;
+        for (int index = 0; index < rows.size(); index++) {
+            ObClientDtos.ObRequirementWriteRequest row = rows.get(index);
+            if (row == null || row.bodyHtml() == null || row.bodyHtml().isBlank()) {
+                continue;
+            }
+            ObRequirementBody.Stored body =
+                    requirementBodies.of(row.bodyHtml(), "requirements[" + index + "].bodyHtml");
+            boolean met = row.met();
+            requirements.insert(clientId, sequence++, trimmedOrNull(row.title()),
+                    body.html(), body.text(),
+                    met, met ? at : null, met ? createdBy : null, createdBy);
+        }
     }
 
     // ------------------------------------------------------------------

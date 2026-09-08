@@ -173,6 +173,19 @@ public class ObModuleRoleRules {
         put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
                 ADMIN_AND_SALES);
 
+        // B-106 · the requirements list, on the client's rule for the third
+        // time — ObRequirementService.requireWritableClient runs the same
+        // ObClientScope.mayWrite before it touches a row, so raising, rewording
+        // and ticking off a requirement all belong to whoever may edit the
+        // client. There IS a DELETE here where the purchases have none: nothing
+        // references ob_client_requirements, so removing one destroys no record
+        // of work that was done.
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/requirements", ADMIN_AND_SALES);
+        put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
+                ADMIN_AND_SALES);
+        put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
+                ADMIN_AND_SALES);
+
         // C-112 · the communication log, which landed on develop while this
         // branch was open. Reading one is every role's — Viewer sees
         // everything read-only and Sales "views progress". Recording one is a

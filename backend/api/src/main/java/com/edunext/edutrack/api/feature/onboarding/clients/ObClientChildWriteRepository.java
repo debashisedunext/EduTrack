@@ -12,9 +12,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * B-102 · the three child tables the OB-04 create writes in the same
- * transaction as the client row: {@code ob_client_contacts},
- * {@code ob_client_applications} and {@code ob_client_requirements}.
+ * B-102 · the child tables the OB-04 create writes in the same transaction as
+ * the client row: {@code ob_client_contacts} and
+ * {@code ob_client_applications}. It wrote {@code ob_client_requirements} too
+ * until B-106 — see below for where that went and why.
  *
  * <h2>Plain SQL, and no {@code @Entity} for any of the three</h2>
  *
@@ -32,6 +33,14 @@ import java.util.stream.Collectors;
  * form the migration already defines, and claims nothing about how they are
  * later managed. {@code PurchasedProductAccess} (C-103) made the identical call
  * about the identical table one package over.
+ *
+ * <p><b>B-106 took the requirements insert out of here</b>, which is what that
+ * deferral was for. {@code ObRequirementWriteRepository} owns the statement now
+ * and {@code ObClientWriteService} calls it directly for the wizard's rows. The
+ * reason is not tidiness: a requirement body has to go through §3.9's allow-list
+ * before it is stored, and a wizard path that wrote the raw string while the
+ * OB-05 panel sanitised would be a security boundary with a hole in the older
+ * half of it. One statement, one sanitiser, both paths.
  *
  * <h2>Why the create writes them at all</h2>
  *
@@ -145,32 +154,6 @@ class ObClientChildWriteRepository {
                     .param("units", application.units())
                     .param("start", application.licenseStart())
                     .param("end", application.licenseEnd())
-                    .update();
-        }
-    }
-
-    /**
-     * The requirements, numbered in the order they were entered.
-     *
-     * <p>{@code sequence} is that order and is the order OB-05 shows them in.
-     * Blank entries are dropped rather than stored: a wizard textarea produces
-     * them by accident, and an empty requirement is a row somebody has to work
-     * through that says nothing.
-     */
-    void insertRequirements(long clientId, List<String> requirements, Long createdBy) {
-        int sequence = 0;
-        for (String body : requirements) {
-            if (body == null || body.isBlank()) {
-                continue;
-            }
-            jdbc.sql("""
-                    INSERT INTO ob_client_requirements (ob_client_id, sequence, body, created_by)
-                    VALUES (:clientId, :sequence, :body, :createdBy)
-                    """)
-                    .param("clientId", clientId)
-                    .param("sequence", sequence++)
-                    .param("body", body.trim())
-                    .param("createdBy", createdBy)
                     .update();
         }
     }

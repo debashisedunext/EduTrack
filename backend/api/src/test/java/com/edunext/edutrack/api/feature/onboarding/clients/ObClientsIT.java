@@ -144,7 +144,19 @@ class ObClientsIT {
         assertThat(created.name()).isEqualTo("IT Horizon Academy");
         assertThat(created.contacts()).hasSize(1);
         assertThat(created.applications()).hasSize(2);
-        assertThat(created.requirements()).containsExactly("Single sign-on", "Data migration");
+        // B-106 · rows rather than strings, in the order they were entered,
+        // each one having been through §3.9's allow-list on the way in.
+        assertThat(created.requirements())
+                .extracting(ObClientDtos.ObRequirement::bodyText)
+                .containsExactly("Single sign-on", "Data migration");
+        assertThat(created.requirements())
+                .extracting(ObClientDtos.ObRequirement::sequence)
+                .containsExactly(0, 1);
+        assertThat(created.requirements()).allSatisfy(requirement -> {
+            assertThat(requirement.isMet()).isFalse();
+            assertThat(requirement.metAt()).isNull();
+            assertThat(requirement.createdBy()).isNotNull();
+        });
         assertThat(created.journeys()).hasSize(2);
         assertThat(created.journeys()).allSatisfy(journey ->
                 assertThat(journey.gateStatus()).isEqualTo("LOCKED"));
@@ -409,7 +421,8 @@ class ObClientsIT {
                         .map(id -> new ObClientDtos.ObApplicationWriteRequest(
                                 id, "ANNUAL", 100, BOARDED, BOARDED.plusYears(1)))
                         .toList(),
-                List.of("Single sign-on", "Data migration"),
+                List.of(new ObClientDtos.ObRequirementWriteRequest(null, "Single sign-on", null),
+                        new ObClientDtos.ObRequirementWriteRequest(null, "Data migration", null)),
                 false, false);
     }
 

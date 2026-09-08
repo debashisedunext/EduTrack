@@ -8327,6 +8327,165 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
 
+  /onboarding/clients/{obClientId}/requirements:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    post:
+      tags: [onboarding]
+      operationId: addObClientRequirement
+      summary: Add a requirement (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        B-106 · OB-05's requirements list, adding.
+
+        **Requirements stopped being strings here.** Until B-106 they were an
+        `array<string>` captured once by the wizard and never touchable again —
+        no id, so nothing could be edited, removed, or marked done; no markup, so
+        a requirement with two clauses and a link was one run-on line. Plan §9
+        shows OB-05 rendering them as *a list somebody works through*, and a
+        string has nowhere to record having been worked through.
+
+        **`bodyHtml` goes through PLAN.md §3.9's allow-list on the server, on
+        write, always.** The same sanitiser as the ticket description and the
+        comment body — `api/text/RichTextSanitizer`, one copy, so tightening the
+        list retroactively protects every field it governs. What is stored is the
+        sanitised result, never what was sent, and `bodyText` is derived from it
+        rather than supplied. A body that sanitises to nothing is `400`, not an
+        empty row: `<script>alert(1)</script>` is a 27-character string Bean
+        Validation accepts and that means nothing once §3.9 has run.
+
+        **New requirements land at the end of the list.** `sequence` is the order
+        they were entered and the order OB-05 prints them; a requirement raised in
+        month three belongs after the ones raised at boarding, not interleaved by
+        id.
+
+        Writes are OB Admin, Onboarding Manager, or Sales for a client they
+        created — `updateObClient`'s rule, on the same record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObRequirementWriteRequest' }
+      responses:
+        '201':
+          description: |
+            Added. The body is the whole client document with its new `ETag`, as
+            every write in this package answers — see `addObClientApplication`
+            for why a requirement-shaped response would leave OB-05's other
+            cards holding a tag that is already stale.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/clients/{obClientId}/requirements/{requirementId}:
+    parameters:
+      - { $ref: '#/components/parameters/ObClientId' }
+      - { $ref: '#/components/parameters/ObRequirementId' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObClientRequirement
+      summary: Edit a requirement, or mark it met (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        B-106 · the label, the body, and whether it has been satisfied.
+
+        **Partial by field, unlike the purchases panel.**
+        `ObApplicationWriteRequest` is the whole representation because a purchase
+        is five fields a row editor submits together. This body carries `isMet`,
+        which is not a field of the same kind: a full-representation PATCH would
+        make every wording correction also re-assert the met flag, and
+        re-asserting `true` while somebody else reopened the requirement would
+        close it again without anybody having asked. `updateObClient` refused a
+        full representation for the identical reason about `status`. An omitted
+        field is untouched; an explicit `null` on `title` clears it.
+
+        **`isMet` carries its own evidence.** Setting it `true` stamps `metAt` and
+        `metBy` from the server clock and the caller — neither is accepted from
+        the body. Setting it `false` clears both.
+        `ck_ob_client_requirements_met` says the same thing at the column, so a
+        flag without a stamp is refused by the database and not only here. What
+        this is *not* is a sign-off: journey sign-off is C-112's gate over
+        `ob_signoff_requests`, and a requirements tick is the person doing the
+        work saying they have done it.
+
+        **Re-marking an already-met requirement does not re-stamp it.** Correcting
+        the wording in November must not re-date a requirement met in March —
+        `ObContactService`'s consent rule, applied to the same class of evidence.
+        The stamp moves only when the flag does.
+
+        **`bodyHtml` is re-sanitised on every edit**, never merged with what is
+        stored. A body that sanitises to nothing is `400`; omitting `bodyHtml`
+        leaves the stored markup and its projection alone.
+
+        The `If-Match` comes from `getObClient`, as the SPOC and purchase patches
+        do. Two people editing one requirement is the ordinary case on a list
+        several people work through at once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObRequirementUpdateRequest' }
+      responses:
+        '200':
+          description: Saved. The whole client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [onboarding]
+      operationId: deleteObClientRequirement
+      summary: Remove a requirement (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        B-106 · a requirement entered by mistake, or one the client withdrew.
+
+        **This path has a `DELETE` where the purchases panel deliberately does
+        not**, and the difference is worth stating because the two sit on one
+        screen. A purchase carries a journey from the moment it is made and
+        `fk_ob_journeys_application` is `RESTRICT`, so removing one could only
+        fail or destroy the record of work that was done. Nothing hangs off a
+        requirement: no foreign key points at `ob_client_requirements`, no
+        journey is instantiated from it, and no history references it. A row
+        removed here takes nothing with it.
+
+        **A hard delete rather than a tombstone.** The rows this removes are
+        typos and duplicates from a wizard textarea — `insertRequirements` has
+        dropped blank ones since B-102 for the same reason. A tombstoned typo is
+        a line every future reader of the list has to decide to ignore. A
+        requirement that was genuinely agreed and later dropped is `isMet: false`
+        with the reason in its body, which is a different act and stays visible.
+
+        **Answers `200` with the client document, not `204`.** Every other write
+        in this package returns it with a fresh `ETag`, and a `204` here would
+        leave the caller holding the tag of a client that has just changed —
+        their next save would be a `412` they cannot account for.
+
+        The sequence numbers of the remaining requirements are left as they are.
+        `ix_ob_client_requirements_client` orders by `sequence, id` and gaps do
+        not affect that; renumbering would rewrite every following row to make a
+        column nobody reads look tidy.
+      responses:
+        '200':
+          description: Removed. The whole client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
   # ── A-118 · journey instances and the step panel ───────────────────────────
   # The template side (OB-07) is above; this is what a template becomes once a
   # client buys the product. `ObJourneyStrip` deliberately stops at the
@@ -11229,6 +11388,15 @@ components:
         more here — enumerating this table would enumerate which organisations
         bought which products, a fact about other clients' commercial
         relationships rather than about the caller's own work.
+    ObRequirementId:
+      name: requirementId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        B-106 · an `ob_client_requirements` id. Nested under the client on
+        purpose: a requirement belonging to a *different* `ob_clients` row is
+        `404`, not `403` — `ObContactId`'s reasoning, unchanged.
     ObJourneyId:
       name: journeyId
       in: path
@@ -17415,6 +17583,138 @@ components:
         purchase is the same five fields whether it is made at boarding or six
         months later, and a second schema identical to this one would be a shape
         that can drift from its twin for no benefit.
+    ObRequirement:
+      type: object
+      required: [id, sequence, bodyHtml, bodyText, isMet, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        sequence:
+          type: integer
+          description: |
+            The order it was entered, and the order OB-05 prints it. Not unique
+            and gapped: a delete leaves the numbers of the rows after it alone
+            rather than rewriting every one of them to tidy a column nobody
+            reads.
+        title:
+          type: [string, 'null']
+          maxLength: 200
+          description: |
+            The one-line label OB-05's list shows collapsed. Nullable and
+            staying so — a requirement captured in the OB-04 wizard is a
+            sentence somebody typed into a textarea, and demanding a label at
+            boarding demands it at the moment nobody has one.
+        bodyHtml:
+          type: string
+          description: |
+            Sanitised markup, PLAN.md §3.9's allow-list. **This is the stored
+            value, not the submitted one** — what came in was passed through
+            `api/text/RichTextSanitizer` and what survived is here.
+        bodyText:
+          type: string
+          description: |
+            The plain-text projection of `bodyHtml`, derived on write and never
+            supplied. Same column pair and the same reason as `ticket_comments`:
+            neither a search index nor the text/plain part of a mail should be
+            deriving it at read time, and an index over markup matches `li` and
+            `href` as readily as prose.
+        isMet:
+          type: boolean
+          description: |
+            Whether the requirement has been satisfied. **Not a sign-off** —
+            journey sign-off is C-112's gate over `ob_signoff_requests` and
+            involves the client. This is the person doing the work saying they
+            have done it.
+        metAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Stamped by the server when `isMet` becomes `true`, cleared when it
+            becomes `false`, and **not re-stamped by an unrelated edit** —
+            correcting the wording in November must not re-date a requirement
+            met in March. `ck_ob_client_requirements_met` holds the flag and
+            this stamp together at the column.
+        metBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            The staff user who marked it met. Null-able even when `isMet` is
+            true, and deliberately outside the CHECK that binds the flag to its
+            stamp: after B-126 a client confirms requirements through their own
+            portal login, and attributing that to a staff user would be a false
+            attribution on the one field whose job is attribution.
+            `whatsappOptInBy` makes the identical call one table over.
+        createdBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: [string, 'null'], format: date-time }
+      description: |
+        `ob_client_requirements` — one thing this client needs before or during
+        onboarding.
+
+        **B-106 made these rows rather than strings.** They were an
+        `array<string>` written once by the wizard: no id, so nothing could be
+        edited, removed or ticked off; no markup, so a requirement with two
+        clauses and a link was one run-on line. Plan §9 renders OB-05's
+        requirements as a list somebody works through, and a string has nowhere
+        to record having been worked through.
+    ObRequirementWriteRequest:
+      type: object
+      required: [bodyHtml]
+      properties:
+        title: { type: [string, 'null'], maxLength: 200 }
+        bodyHtml:
+          type: string
+          maxLength: 20000
+          description: |
+            Rich text, sanitised on the server against PLAN.md §3.9's allow-list
+            before anything is stored. The 20 000 is §3.9's bound on what is
+            *submitted*; the sanitised result is checked against it too, because
+            escaping makes strings longer and §3.9's sentence is about what gets
+            stored.
+
+            **A body that sanitises to nothing is `400`, not an empty row.**
+            `<script>alert(1)</script>` is a non-blank 27-character string that
+            passes every length and blank check and means nothing once the
+            allow-list has run.
+        isMet:
+          type: boolean
+          default: false
+          description: |
+            Rarely true on a create — a requirement is normally raised before it
+            is met — but accepted, because a requirement recorded after the fact
+            is an ordinary thing. `metAt` is stamped by the server; there is no
+            field for it here, and one would let a caller backdate the evidence.
+      description: |
+        The body of `addObClientRequirement`, and of each entry in
+        `createObClient`'s `requirements` list.
+
+        **The wizard and the panel share this schema** rather than having an
+        upsert twin, `ObApplicationWriteRequest`'s call: a requirement is the
+        same three fields whether it is raised at boarding or in month three.
+        The `PATCH` does *not* reuse it — see `ObRequirementUpdateRequest` for
+        why partial-by-field is not the same shape as a create.
+    ObRequirementUpdateRequest:
+      type: object
+      properties:
+        title: { type: [string, 'null'], maxLength: 200 }
+        bodyHtml: { type: string, maxLength: 20000 }
+        isMet: { type: boolean }
+      description: |
+        **Partial by field.** Every property is optional: an omitted one is left
+        alone, and an explicit `null` on `title` clears it.
+
+        This is the one place in the onboarding client package where a `PATCH`
+        does not take the whole representation, and the reason is `isMet`.
+        `ObApplicationWriteRequest` can be a full representation because a
+        purchase is five fields a row editor submits together; a full
+        representation here would make every wording correction also re-assert
+        the met flag, so a correction saved while somebody else reopened the
+        requirement would close it again with nobody having asked.
+        `updateObClient` refused a full representation for the identical reason
+        about `status`.
     ObJourneyStrip:
       type: object
       required: [id, product, gateStatus, percentComplete, steps]
@@ -17563,8 +17863,18 @@ components:
               items: { $ref: '#/components/schemas/ObApplication' }
             requirements:
               type: array
-              items: { type: string }
-              description: Free-text capture from the wizard's requirements step.
+              items: { $ref: '#/components/schemas/ObRequirement' }
+              description: |
+                B-106 · in `sequence` order, met and unmet together. **This was
+                an `array<string>` until B-106** — a breaking change made at the
+                only moment it is free, before any screen rendered it: OB-05's
+                requirements card is B-108's and does not exist yet, so the sole
+                consumer of the old shape is the generated client this document
+                produces. Waiting would have meant a `v2` for a field nobody had
+                read.
+
+                Not paginated, for `journeys`' reason: a client's requirements
+                are a handful and the card needs the set to render any of it.
             journeys:
               type: array
               items: { $ref: '#/components/schemas/ObJourneyStrip' }
@@ -17609,7 +17919,17 @@ components:
             would board a client with nothing to onboard them through.
         requirements:
           type: array
-          items: { type: string }
+          items: { $ref: '#/components/schemas/ObRequirementWriteRequest' }
+          description: |
+            B-106 · the wizard's requirements step, now rich text rather than
+            bare strings. Each entry is sanitised against PLAN.md §3.9's
+            allow-list before it is stored, exactly as one added later through
+            `addObClientRequirement` is — one write path and one sanitiser, so a
+            requirement typed at boarding and one typed in month three are the
+            same row.
+
+            Optional and may be empty: a client with nothing recorded yet is
+            ordinary, unlike one with no SPOC or no purchase.
         createPortalLogin:
           type: boolean
           default: false
