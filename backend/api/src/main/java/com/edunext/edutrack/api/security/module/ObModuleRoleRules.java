@@ -159,6 +159,20 @@ public class ObModuleRoleRules {
         put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", ADMIN_AND_SALES);
         put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", ADMIN_AND_SALES);
 
+        // B-104 · the purchases. Same rule as the SPOCs one block up and for
+        // the same reason: ObApplicationService runs ObClientScope.mayWrite
+        // against the parent client before it touches a purchase, so a role
+        // that may not edit the client may not record what it bought either.
+        //
+        // No read route and no DELETE. Purchases arrive inside the client
+        // response like contacts do, and there is no delete because
+        // fk_ob_journeys_application is RESTRICT and every purchase carries a
+        // journey from the moment it is made — ObApplicationService has the
+        // argument in full.
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/applications", ADMIN_AND_SALES);
+        put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
+                ADMIN_AND_SALES);
+
         // C-112 · the communication log, which landed on develop while this
         // branch was open. Reading one is every role's — Viewer sees
         // everything read-only and Sales "views progress". Recording one is a
