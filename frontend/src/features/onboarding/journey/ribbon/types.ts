@@ -1,24 +1,42 @@
 /**
  * C-109 · the onboarding journey ribbon's own wire shape.
  *
- * `frontend/src/api/generated/` has no onboarding models yet — A-101 (the
- * OpenAPI contract, PHASE-2-BUILD-PLAN.md §6.0) is still blocked behind
- * A-103/A-104/A-105, which this task's own dependency graph does not wait on.
- * `HandoffDialog`'s own precedent (`ribbon?: Ribbon`, an optional prop typed
- * against a shape the real service did not fill in yet) is the one this
- * follows: build against a local type now, delete this file and re-point the
- * two imports at the generated model the day the contract lands. Nothing else
- * in this directory changes shape when that happens — `JourneyStep` below is
- * written to already match Onboarding-Module-Plan.md §5/§9 field for field.
+ * **Still local after A-101 landed, and now for a different reason.** C-109
+ * wrote this file because `frontend/src/api/generated/` had no onboarding
+ * models at all; it does now, and `ObJourneyStepView` is the read the ribbon
+ * is fed from. It is not the shape the ribbon draws:
+ *
+ * - `ObJourneyStepView.status` carries `IN_PROGRESS`/`WAITING_ON_CLIENT`,
+ *   which are server words for `CURRENT`/`WAITING` here — the tile's own
+ *   vocabulary, and the one `stepState.ts` keys its treatments on.
+ * - `ownerUserId` is an id. The tile prints a name, which is a second read.
+ * - `tatPercent` is not in that schema at all (`ObJourneyStepDetail`'s
+ *   `elapsedHours` is one step at a time), so the ribbon has to be able to
+ *   draw a breach from `rag` alone.
+ *
+ * So this stays as the ribbon's own vocabulary and C-110's `ribbonSteps.ts`
+ * is the one adapter between the two. One translation in one file beats a
+ * generated model half-translated at every call site.
  */
 
-/** §5.7's five step states. Onboarding has no REWORKED/SKIPPED equivalent —
- * a step is either worked, waiting, blocked, or hasn't started. */
-export type JourneyStepStatus = 'PENDING' | 'CURRENT' | 'DONE' | 'WAITING' | 'BLOCKED'
+/** §5.7's step states. `CURRENT`/`WAITING` are `IN_PROGRESS`/
+ * `WAITING_ON_CLIENT` in `ObJourneyStepStatus` — see the header.
+ *
+ * **`SKIPPED` is C-110's addition, and it is a correction rather than a new
+ * feature.** C-109 wrote "onboarding has no SKIPPED equivalent" against the
+ * five states its Storybook fixtures used; C-107 had already shipped the skip
+ * transition, and `ObJourneyStepStatus` carries `SKIPPED`. Folding it into
+ * `DONE` would have the ribbon tell a reader that a waived service was
+ * delivered — on the screen sign-off is decided from. */
+export type JourneyStepStatus = 'PENDING' | 'CURRENT' | 'DONE' | 'WAITING' | 'BLOCKED' | 'SKIPPED'
 
 /** DONE only. `null`/absent reads as "closed on time" — the prototype's own
  * `stEmoji` treats a missing `closed` the same way. */
 export type JourneyStepClosed = 'early' | 'late' | null
+
+/** §5.9's health colour, as the server computed it (C-114). `null` where
+ * there is nothing running to colour. */
+export type JourneyStepRag = 'GREEN' | 'AMBER' | 'RED' | null
 
 export interface JourneyStepOwner {
   displayName: string
@@ -40,6 +58,15 @@ export interface JourneyStep {
   /** Working hours consumed vs `tatDays`, 0-100+, `null` before the step has started.
    * Server-computed from `ob_step_clock_events` at read time (§5.10) — never derived here. */
   tatPercent: number | null
+  /** The server's own health colour for this step, when the read carries one.
+   *
+   * **Authoritative over `tatPercent` where the two could disagree.** C-114
+   * computes RAG on the working calendar with the org's amber threshold;
+   * anything this file derived from a percentage would be a second opinion
+   * about the same fact. It also lets the journey read — which has `rag` and
+   * no percent — still draw a breach, which is the case OB-05 actually has.
+   */
+  rag?: JourneyStepRag
   /** DONE only — start/finish dates, §9 OB-05's "SD/FD with an on-time / early / delayed marker". */
   startedOn?: string | null
   finishedOn?: string | null
@@ -51,6 +78,7 @@ export interface JourneyStep {
   /** §5.8's task-list gate — sub-categories answered vs total. */
   subTasksAnswered?: number
   subTasksTotal?: number
-  /** Hold reason (BLOCKED) — the hover card's note, §4A.3's precedent for the phase-1 ribbon. */
+  /** Hold reason (BLOCKED), or the waiver reason (SKIPPED) — §4A.3's
+   * precedent for the phase-1 ribbon. */
   note?: string | null
 }
