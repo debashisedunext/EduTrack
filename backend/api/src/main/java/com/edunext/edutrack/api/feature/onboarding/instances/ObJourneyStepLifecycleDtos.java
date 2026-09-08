@@ -5,6 +5,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
 import com.edunext.edutrack.domain.onboarding.ObRag;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -91,8 +92,15 @@ final class ObJourneyStepLifecycleDtos {
 
     /**
      * C-107 · {@code ObJourneyStepItem} — one checklist entry, wire shape.
-     * Never populated by this route today; see {@link ObJourneyStepDetail}'s
-     * own javadoc for why.
+     * Populated as of C-111 by {@code GET /journey-steps/{stepId}}; still
+     * empty on {@code skip}'s response, which needs no checklist.
+     *
+     * <p><b>{@code isDone} means "answered".</b> The column behind it is a
+     * three-state {@code Boolean} and the completion gate is satisfied by
+     * <em>any</em> answer, True or False — see {@code
+     * ObJourneyStepLifecycleService#answerItem}. Mapping this to "answered
+     * True" instead would show an item as outstanding that the server is
+     * perfectly willing to complete over.
      */
     record ObJourneyStepItem(
             Long id, Long stepId, int sequence, String label,
@@ -101,8 +109,13 @@ final class ObJourneyStepLifecycleDtos {
 
     /**
      * C-107 · {@code ObJourneyStepDoc} — one required-document entry, wire
-     * shape. Never populated by this route today; see {@link
-     * ObJourneyStepDetail}'s own javadoc for why.
+     * shape. Populated as of C-111 from the <em>template</em> step's
+     * checklist, because {@code ob_journey_step_docs} still does not exist.
+     *
+     * <p>{@code attachmentId} is therefore always {@code null}: nothing links
+     * one attachment to one checklist entry, so {@code isSatisfied} is
+     * counted rather than matched and no single attachment can honestly be
+     * named as the one that satisfied a given row.
      */
     record ObJourneyStepDoc(
             Long id, Long stepId, String label, boolean isRequired, boolean isSatisfied, Long attachmentId) {
@@ -116,11 +129,15 @@ final class ObJourneyStepLifecycleDtos {
      * so one record renders it exactly rather than nesting a base and an
      * extension the wire never separates.
      *
-     * <p><b>{@code items} and {@code docs} are always empty here.</b> Named
-     * rather than silently wrong: populating a checklist's real {@code
-     * isMandatory} needs the template-item join C-106's completion gate
-     * owns, and {@code ob_journey_step_docs} — the instance-level
-     * required-document table — does not exist in any migration yet.
+     * <p><b>{@code items} and {@code docs} were always empty here until
+     * C-111.</b> They are filled by {@code GET /journey-steps/{stepId}} and
+     * still empty on {@code skip}'s response, which does not need them.
+     * C-107's note that this needed "the template-item join C-106's
+     * completion gate owns" was exactly right, and that is how it was
+     * resolved: {@code ObJourneyStepLifecycleService#mandatoryByTemplateItemId}
+     * is now shared by the gate and the read, so the two cannot drift.
+     * {@code ob_journey_step_docs} still does not exist, so the documents
+     * come from the template step — see {@link ObJourneyStepDoc}.
      *
      * <p><b>{@code rag}, by contrast, is real as of C-114.</b> {@link
      * #of(ObJourneyStep, ObRag)} takes it as a parameter rather than
@@ -148,6 +165,21 @@ final class ObJourneyStepLifecycleDtos {
             List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
 
         static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag) {
+            return of(s, rag, List.of(), List.of());
+        }
+
+        /**
+         * C-111 · the same shape with its checklist filled in — what {@code
+         * GET /onboarding/journey-steps/{stepId}} answers.
+         *
+         * <p>The empty-list overload above is kept rather than replaced:
+         * {@code skip}'s response and the {@code ETag} precondition both use
+         * it, and neither needs a checklist. Making them pay for two extra
+         * queries to send fields the caller is not reading would be a cost
+         * with no reader.
+         */
+        static ObJourneyStepDetail of(ObJourneyStep s, ObRag rag,
+                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
             return new ObJourneyStepDetail(
                     s.getId(), s.getJourneyId(), s.getSequence(), s.getName(), s.getStatus(),
                     s.getOwnerUserId(), s.getBackupOwnerUserId(),
@@ -156,7 +188,7 @@ final class ObJourneyStepLifecycleDtos {
                     s.getDescription(), ObStepClockState.of(s.getStatus()), rag,
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
-                    List.of(), List.of());
+                    items, docs);
         }
     }
 
@@ -164,5 +196,30 @@ final class ObJourneyStepLifecycleDtos {
         static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag) {
             return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag));
         }
+
+        static ObJourneyStepDetailResponse of(ObJourneyStep s, ObRag rag,
+                List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs) {
+            return new ObJourneyStepDetailResponse(ObJourneyStepDetail.of(s, rag, items, docs));
+        }
+    }
+
+    /**
+     * C-111 · {@code PATCH /onboarding/journey-step-items/{itemId}}.
+     *
+     * <p>🔴 <b>One boolean against a three-state column.</b> {@code
+     * ob_journey_step_items.answer} is a nullable {@code Boolean} —
+     * unanswered, True, or False-with-a-mandatory-remark — and this request
+     * can name two of those three. See {@code
+     * ObJourneyStepLifecycleService#answerItem} for what that costs and why
+     * the fix is a contract change rather than a workaround here.
+     *
+     * <p>{@code Boolean} rather than {@code boolean} so a missing field is a
+     * clean {@code 400} from {@code @NotNull} instead of silently defaulting
+     * to {@code false} and un-answering an item the caller never mentioned.
+     */
+    record ObJourneyStepItemUpdateRequest(@NotNull Boolean isDone) {
+    }
+
+    record ObJourneyStepItemResponse(ObJourneyStepItem data) {
     }
 }

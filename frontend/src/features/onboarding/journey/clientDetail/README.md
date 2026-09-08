@@ -1,7 +1,7 @@
 # `features/onboarding/journey/clientDetail/`
 
-C-110 — OB-05, the onboarding client detail page. `Onboarding-Module-Plan.md`
-§9, OB-05 row.
+C-110 — OB-05, the onboarding client detail page — and **C-111 — OB-06**, the
+step update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
 
 | File | What it is |
 |---|---|
@@ -12,7 +12,12 @@ C-110 — OB-05, the onboarding client detail page. `Onboarding-Module-Plan.md`
 | `PrereqReasonDialog.tsx` | The mandatory reason behind a return and a waiver. |
 | `JourneyAccordion.tsx` | One product's strip, and the ribbon + step panel it expands to. |
 | `StepDotStrip.tsx` | The collapsed strip's RAG dots, from `ObStepDot`. |
-| `JourneyStepPanel.tsx` | The selected step, read-only. C-111 adds the actions. |
+| `JourneyStepPanel.tsx` | The selected step — summary, task list, actions (C-110 + C-111). |
+| `StepActionBar.tsx` | OB-06's transitions: start / complete / block / waiting / resume. |
+| `StepTaskList.tsx` | §5.8's Task List and the required documents, with the gate visible. |
+| `BlockStepDialog.tsx` | The mandatory block reason, and the clock warning. |
+| `blockReasons.ts` | The block-reason vocabulary. **Unratified — see the file.** |
+| `stepActions.ts` | Who may act, what each status permits, and the completion gate. Pure. |
 | `journeyStrip.ts` | TAT bands, holds, RAG presentation, prerequisite progress. Pure. |
 | `ribbonSteps.ts` | The one translation between `ObJourneyStepView` and the ribbon's own vocabulary. Pure. |
 
@@ -75,11 +80,9 @@ that nothing on the page asks the window to scroll at all.
 
 ## What this task is not
 
-- **The step update panel** (OB-06 — start, complete, block, the task-list gate,
-  communications, history) is **C-111**, which names C-110 as its dependency for
-  this reason. `JourneyStepPanel` is read-only until then, with **no disabled
-  buttons standing in for the actions** — B-121's line about a dead control
-  teaching the user the board is broken.
+- ~~**The step update panel** is C-111.~~ **Done** — C-111 landed it here, and
+  C-110's prediction that it would "add an action row under this summary;
+  nothing here has to be rebuilt for it" held exactly.
 - **SD/FD in the ribbon meta line and the animated status emojis** are **C-125**.
   `stepState.ts` already has `statusEmoji`; no call site on this page uses it yet.
 - **The client-account panel** (create / reset / disable a portal login) is
@@ -88,3 +91,83 @@ that nothing on the page asks the window to scroll at all.
 - **The stitched client-level communications tab** is **C-112**.
 - **A payments card.** Not an omission — plan §1.2 removed financial tracking
   from the module after the prototype had one.
+
+---
+
+# C-111 — OB-06, the step update panel
+
+The owner's working surface, inside OB-05's expanded accordion. Three rules
+decide almost everything about it.
+
+## 1. The server owns the rules; this mirrors them
+
+CLAUDE.md is explicit that the golden rule lives in the transition service, not
+the UI, and nothing here softens that. What a screen owes its user is to stop
+offering a control whose only outcome is a refusal, and to say *why* before the
+click rather than after it. `stepActions.ts` is that mirror, and every rule in
+it names the server counterpart it transcribes.
+
+The refusal the server makes that this **cannot** predict is `signoffMissing` —
+whether a `SIGNED` sign-off exists is on no read the panel makes. So when the
+server refuses anyway, its own `detail` is surfaced verbatim rather than
+paraphrased into something friendlier that would be inventing a reason.
+
+## 2. Absent, not disabled — except where the owner can act on it
+
+For anybody who is not the owner or backup owner, the action bar renders
+**nothing**. A row of greyed-out controls suggests a permission the reader
+might acquire by asking; the step simply is not theirs, so the panel names who
+does own it instead — the actionable fact.
+
+Complete is the opposite case and *is* rendered disabled: it is the owner's own
+button, held by something the owner can go and fix, and both the tooltip and a
+sentence beside it name which mandatory item is outstanding. (A `title` alone
+is unreachable by keyboard and invisible on touch, hence both.)
+
+## 3. Blocked and waiting-on-client are not interchangeable, and the dialog says so
+
+Plan §5.7: an internal `BLOCKED` step keeps the TAT clock **running** and
+charges the delay to us; `WAITING_ON_CLIENT` **pauses** it and attributes the
+wait to the client. An owner who picks the wrong one is not making a cosmetic
+mistake — they are moving a TAT breach onto the wrong party's account. So the
+block dialog states the difference and points at the alternative, and every
+reason code in `blockReasons.ts` is an *internal* one.
+
+## The two reads behind this panel were written by C-111 too
+
+`GET /onboarding/journey-steps/{stepId}` and
+`PATCH /onboarding/journey-step-items/{itemId}` were in A-118's contract and in
+the MSW mock, and in **no** Java controller. C-103 wrote the rows, C-104 wrote
+the five POST transitions, C-106 wrote the gate over the items — and nothing
+ever read them back. No backlog task owned the read side, so this one built it.
+
+Two things about that server code matter to anybody editing this directory:
+
+**`isDone` means "answered", not "answered yes".** The completion gate filters
+on `answer == null`, so an item answered **False** satisfies it exactly as True
+does. `completionGate` here treats `!isDone` as outstanding, which is correct
+*because* the server maps `isDone = answer != null` — if anybody "fixes" that
+mapping to mean "answered True", this screen starts refusing completions the
+server would allow. A backend test pins it.
+
+🔴 **False-with-remark is unreachable.** The request carries one boolean against
+a three-state column whose False arm requires a remark. Recording "no, and here
+is why" needs a contract change (Stream A's), which is why the checkbox is
+honest about only offering two states.
+
+## Two things deliberately absent
+
+**Skip**, because the caller's own identity cannot support it. `POST /skip`
+needs the onboarding module role `OB_MANAGER` or `OB_ADMIN`
+(`NotAnOnboardingModeratorException`, 403), and **`Me` carries no module role** —
+`MeAllOf` has `permissions`, `projectIds` and `reporteeIds`, none of which say
+anything about `ONBOARDING`. The grants list that would is Admin-only. There is
+no honest way for this panel to decide who should see the button, and rendering
+it for everybody puts a 403 behind a control most callers can never use. It
+lands when `/me` carries the module claim.
+
+**Communications and history**, because they are **C-112**, whose backlog line
+owns "per-step, **plus** the client-level stitched view". `listObStepCommunications`
+and `listObStepHistory` exist and are not called here: splitting the per-step
+timeline from the stitched one across two tasks would mean building the same
+component twice.

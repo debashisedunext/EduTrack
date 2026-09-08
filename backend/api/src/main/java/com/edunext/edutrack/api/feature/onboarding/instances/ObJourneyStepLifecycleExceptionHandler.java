@@ -35,6 +35,15 @@ class ObJourneyStepLifecycleExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
     }
 
+    /** C-111 · no {@code ob_journey_step_items} row for the given id. */
+    @ExceptionHandler(JourneyStepItemNotFoundException.class)
+    ResponseEntity<ProblemDetail> handleItemNotFound(JourneyStepItemNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setTitle("Not found");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
     /**
      * 422 — {@link ObStepOwnership#mayAct} refused. Not field-keyed, on
      * {@code HandoffExceptionHandler}'s reasoning for its own 422: nothing

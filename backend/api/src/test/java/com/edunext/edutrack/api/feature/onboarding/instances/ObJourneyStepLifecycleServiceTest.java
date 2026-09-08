@@ -46,6 +46,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -772,5 +773,199 @@ class ObJourneyStepLifecycleServiceTest {
         ObStepHistory entry = historyRows.get(1);
         assertThat(entry.getPrevHash()).isEqualTo("a".repeat(64));
         assertThat(entry.getRowHash()).isNotEqualTo(entry.getPrevHash());
+    }
+
+    // ── C-111 · the read side, and the checkbox ───────────────────────────
+
+    /**
+     * The whole reason {@code mandatoryByTemplateItemId} was extracted: the
+     * panel that <em>shows</em> the gate and the service that
+     * <em>enforces</em> it must agree about which items hold completion. Two
+     * copies of the template join would drift, and the drift would show as a
+     * screen saying a step can be completed while the server refuses it.
+     */
+    @Test
+    void checklistReportsMandatoryTheSameWayTheCompletionGateDoes() {
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(
+                stepItem(1L, 100L, null, "Signed agreement received"),
+                stepItem(2L, 101L, null, "Nice to have")));
+        when(templateStepItems.findAllById(any())).thenReturn(List.of(
+                templateItem(100L, true), templateItem(101L, false)));
+
+        ObJourneyStepLifecycleService.ObStepChecklist checklist = service.checklistFor(STEP);
+
+        assertThat(checklist.items())
+                .extracting(entry -> entry.row().getLabel(),
+                        ObJourneyStepLifecycleService.ChecklistItem::mandatory)
+                .containsExactly(tuple("Signed agreement received", true), tuple("Nice to have", false));
+    }
+
+    /**
+     * An ad-hoc item — one no template row governs — defaults to mandatory,
+     * matching {@code requireCompletionGate}'s own {@code getOrDefault(...,
+     * true)}. Defaulting the other way would show an item as optional that
+     * the gate then refuses completion over.
+     */
+    @Test
+    void checklistDefaultsAnAdHocItemToMandatory() {
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(
+                stepItem(1L, null, null, "Added for this client alone")));
+
+        ObJourneyStepLifecycleService.ObStepChecklist checklist = service.checklistFor(STEP);
+
+        assertThat(checklist.items()).singleElement()
+                .extracting(ObJourneyStepLifecycleService.ChecklistItem::mandatory)
+                .isEqualTo(true);
+    }
+
+    /**
+     * Required entries are satisfied by counting clean attachments, exactly
+     * as the gate counts them — nothing links one attachment to one entry.
+     * Two required rows and one attachment means the first is satisfied and
+     * the second is not.
+     */
+    @Test
+    void checklistSatisfiesRequiredDocumentsByCountingAttachments() {
+        stepRows.get(STEP).setTemplateStepId(900L);
+        ObJourneyTemplateStepDoc first = templateDoc(true);
+        ObJourneyTemplateStepDoc second = templateDoc(true);
+        second.setId(2L);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(900L)).thenReturn(List.of(first, second));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(1L);
+
+        ObJourneyStepLifecycleService.ObStepChecklist checklist = service.checklistFor(STEP);
+
+        assertThat(checklist.docs())
+                .extracting(ObJourneyStepLifecycleService.ChecklistDoc::satisfied)
+                .containsExactly(true, false);
+    }
+
+    /** An optional entry never holds the gate, so it is never outstanding. */
+    @Test
+    void checklistNeverReportsAnOptionalDocumentAsOutstanding() {
+        stepRows.get(STEP).setTemplateStepId(900L);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(900L)).thenReturn(List.of(templateDoc(false)));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(0L);
+
+        ObJourneyStepLifecycleService.ObStepChecklist checklist = service.checklistFor(STEP);
+
+        assertThat(checklist.docs()).singleElement()
+                .extracting(ObJourneyStepLifecycleService.ChecklistDoc::satisfied)
+                .isEqualTo(true);
+    }
+
+    /**
+     * Reading a step is not acting on it — plan §9's "read-only for anybody
+     * else's step" is a statement that everybody may read one. The method
+     * takes no caller at all, which is the point.
+     */
+    @Test
+    void checklistIsReadableWithoutBeingTheStepOwner() {
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+        when(templateStepItems.findAllById(any())).thenReturn(List.of(templateItem(100L, true)));
+
+        assertThat(service.checklistFor(STEP).items()).hasSize(1);
+    }
+
+    @Test
+    void answeringAnItemRecordsWhoAnsweredItAndWhen() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, true);
+
+        assertThat(answered.getAnswer()).isTrue();
+        assertThat(answered.getAnsweredBy()).isEqualTo(OWNER);
+        assertThat(answered.getAnsweredAt()).isNotNull();
+    }
+
+    /**
+     * Unticking returns the item to unanswered and takes the remark with it:
+     * a remark explains an answer, and keeping one after clearing the other
+     * leaves a reason for a decision no longer recorded.
+     */
+    @Test
+    void untickingAnItemReturnsItToUnansweredAndClearsTheRemark() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem item = stepItem(1L, 100L, Boolean.TRUE, "Signed agreement received");
+        item.setRemark("was fine");
+        item.setAnsweredBy(OWNER);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(item));
+
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, false);
+
+        assertThat(answered.getAnswer()).isNull();
+        assertThat(answered.getAnsweredBy()).isNull();
+        assertThat(answered.getAnsweredAt()).isNull();
+        assertThat(answered.getRemark()).isNull();
+    }
+
+    /**
+     * The item is only ever as writable as the step it belongs to —
+     * {@code ObStepOwnership} applied to the parent, not to the row.
+     */
+    @Test
+    void aStrangerCannotAnswerAnItem() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        assertThatThrownBy(() -> service.answerItem(1L, STRANGER, true))
+                .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    /** The backup owner has the same standing here as everywhere else. */
+    @Test
+    void theBackupOwnerCanAnswerAnItem() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        assertThat(service.answerItem(1L, BACKUP_OWNER, true).getAnswer()).isTrue();
+    }
+
+    /**
+     * A closed step's checklist is the record of how it closed. Editing it
+     * afterwards would change what the completion gate was satisfied by,
+     * retroactively.
+     */
+    @Test
+    void aClosedStepsChecklistCannotBeEdited() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.DONE);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, Boolean.TRUE, "Signed agreement received")));
+
+        assertThatThrownBy(() -> service.answerItem(1L, OWNER, false))
+                .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    @Test
+    void answeringAnItemThatDoesNotExistIsNotFound() {
+        when(stepItems.findById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.answerItem(404L, OWNER, true))
+                .isInstanceOf(JourneyStepItemNotFoundException.class);
+    }
+
+    /**
+     * The agreement `isDone` depends on, pinned. The gate is satisfied by
+     * <em>any</em> answer, True or False — so `isDone` on the wire means
+     * "answered", and a panel treating `isDone: false` as outstanding would
+     * refuse what the server allows.
+     */
+    @Test
+    void anItemAnsweredFalseSatisfiesTheCompletionGate() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(
+                stepItem(1L, 100L, Boolean.FALSE, "Signed agreement received")));
+        when(templateStepItems.findAllById(any())).thenReturn(List.of(templateItem(100L, true)));
+
+        service.complete(STEP, OWNER);
+
+        assertThat(stepRows.get(STEP).getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
     }
 }
