@@ -42,9 +42,32 @@ final class ObClientDtos {
     record ObProductRef(long id, String code, String name) {
     }
 
-    /** {@code ObContact} — {@code ob_client_contacts}, the SPOCs. */
+    /**
+     * {@code ObContact} — {@code ob_client_contacts}, the SPOCs.
+     *
+     * <p>B-103 widened this by three fields rather than adding a second contact
+     * shape: {@code isActive}, without which OB-05 could not tell a departed
+     * SPOC from a current one on a list that deliberately carries both, and the
+     * two consent fields.
+     *
+     * @param whatsappOptInSource carried as a {@code String} rather than as
+     *                            {@link ObConsentSource}, and deliberately. The
+     *                            enum's job is to refuse {@code UNRECORDED} on
+     *                            the way <em>in</em>; on the way out that value
+     *                            has to be readable, because a SPOC whose
+     *                            consent predates its capture is exactly the one
+     *                            OB-05 has to show as needing re-approach. An
+     *                            enum-typed field would have to carry a constant
+     *                            no caller may send, which invites somebody to
+     *                            open {@link ObConsentSource#parse} back up.
+     * @param isPrimary           false while the contact is inactive, whatever
+     *                            the stored flag says — {@code is_primary_key},
+     *                            the generated column the unique index is on, is
+     *                            1 only while a contact is also active
+     */
     record ObContact(long id, String name, String designation, String email, String phone,
-                     boolean whatsappOptIn, boolean isPrimary) {
+                     boolean whatsappOptIn, Instant whatsappOptInAt, String whatsappOptInSource,
+                     boolean isPrimary, boolean isActive) {
     }
 
     /** {@code ObApplication} — one purchased product. No amount, no invoice: plan §1.2. */
@@ -118,6 +141,7 @@ final class ObClientDtos {
             @NotBlank @Email @Size(max = 200) String email,
             @Size(max = 32) String phone,
             Boolean whatsappOptIn,
+            @Size(max = 32) String whatsappOptInSource,
             @NotNull Boolean isPrimary) {
 
         boolean primary() {
@@ -131,6 +155,12 @@ final class ObClientDtos {
          * without it must be re-approached before a single message can go out.
          * An absent field is therefore "not given" rather than "assume yes" —
          * the direction that is recoverable.
+         *
+         * <p>B-103 added {@code whatsappOptInSource} beside it and made the two
+         * inseparable: a {@code true} with no basis recorded is refused with a
+         * 400 rather than stored, because the basis is the half that cannot be
+         * reconstructed afterwards. {@code ObClientWriteService} does the
+         * checking, so the wizard names the offending contact row.
          */
         boolean optedIn() {
             return Boolean.TRUE.equals(whatsappOptIn);

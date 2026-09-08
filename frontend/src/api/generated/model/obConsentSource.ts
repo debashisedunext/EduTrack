@@ -46,58 +46,32 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObContactDesignation } from './obContactDesignation';
-import type { ObContactPhone } from './obContactPhone';
-import type { ObContactWhatsappOptInAt } from './obContactWhatsappOptInAt';
-import type { ObContactWhatsappOptInSource } from './obContactWhatsappOptInSource';
 
 /**
- * `ob_client_contacts` — the SPOCs.
- */
-export interface ObContact {
-  id: number;
-  /** @maxLength 160 */
-  name: string;
-  /** @maxLength 120 */
-  designation?: ObContactDesignation;
-  email: string;
-  /** @maxLength 32 */
-  phone?: ObContactPhone;
-  /** Consent, held per contact rather than per client. WhatsApp
-notification templates need prior opt-in, and a client's SPOCs do
-not all give it.
- */
-  whatsappOptIn?: boolean;
-  /** B-103 · when the consent above was recorded. Null whenever
-`whatsappOptIn` is false — the two move together, and a withdrawal
-clears this rather than leaving a stamp beside a `false`. The
-history of both is in `ob_contact_consent_events`.
- */
-  whatsappOptInAt?: ObContactWhatsappOptInAt;
-  /** B-103 · **how** the client gave it, never which screen recorded it.
-Null whenever `whatsappOptIn` is false.
+ * B-103 · the basis on which a SPOC gave messaging consent.
 
-`UNRECORDED` appears only on rows written before consent capture
-existed and cannot be sent by any caller. It is the honest answer
-for a SPOC who has to be re-approached before a message can go out.
- */
-  whatsappOptInSource?: ObContactWhatsappOptInSource;
-  /** Exactly one per client. The primary SPOC receives the kickoff mail,
-the one-time portal password, and every sign-off request — so a
-client with none is a client nothing can be sent to, and
-`createObClient` requires one.
+A closed vocabulary rather than free text, because this is the field a
+challenged consent is defended with and "yes I think they said ok" is
+not a defence. It describes **how the client gave consent**, not which
+form was open when a colleague typed it in — a source naming the screen
+would read the same on every staff-entered row and carry no information.
+Who recorded it and when are separate columns.
 
-**False while the contact is inactive**, whatever the stored flag
-says: `ob_client_contacts.is_primary_key` — the generated column the
-unique index is on — is 1 only while a contact is *also* active, so
-deactivating a primary releases the slot. Reading the enforced fact
-rather than a second one that could drift from it.
+`UNRECORDED` is **write-refused on every operation**. It exists for the
+rows that predate this capture, whose basis genuinely is not known, and
+it stays visible so those SPOCs get re-approached instead of being
+quietly assumed to have consented.
+
  */
-  isPrimary: boolean;
-  /** B-103 · false for a contact who has left. `removeObClientContact`
-deactivates and never deletes, so OB-05's SPOC panel can still show
-them, still show what they signed off, and reactivate one who comes
-back.
- */
-  isActive: boolean;
-}
+export type ObConsentSource = typeof ObConsentSource[keyof typeof ObConsentSource];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ObConsentSource = {
+  VERBAL: 'VERBAL',
+  EMAIL: 'EMAIL',
+  WRITTEN: 'WRITTEN',
+  CONTRACT: 'CONTRACT',
+  CLIENT_PORTAL: 'CLIENT_PORTAL',
+  UNRECORDED: 'UNRECORDED',
+} as const;

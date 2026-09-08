@@ -208,7 +208,7 @@ class ObClientControllerTest {
         return new ObClientDtos.ObClientCreateRequest(
                 "Horizon Academy", null, LocalDate.of(2026, 9, 7), null, null, null, null,
                 List.of(new ObClientDtos.ObContactWriteRequest(
-                        "SPOC", null, "spoc@example.com", null, false, true)),
+                        "SPOC", null, "spoc@example.com", null, false, null, true)),
                 List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
                 null, false, false);
     }

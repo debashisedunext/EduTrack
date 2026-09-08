@@ -606,11 +606,38 @@ export interface ObProduct {
   totalTatDays: number | null;
 }
 
-/** `ob_client_contacts` — the SPOCs. Exactly one `isPrimary` per client. */
+/**
+ * `ob_client_contacts` — the SPOCs. Exactly one `isPrimary` per client.
+ *
+ * **B-103 · consent is a triple, not a flag.** `whatsappOptIn` alone records
+ * that somebody ticked a box and cannot answer when, or on what basis — the two
+ * questions a challenged consent turns on. The API refuses a `true` with no
+ * source, so a fixture carrying one would let a screen "work" against a state
+ * the server will not produce.
+ *
+ * `whatsappOptInSource` says **how the client gave consent**, never which screen
+ * recorded it. `UNRECORDED` is the value rows written before the capture existed
+ * carry: it reads back, no caller may send it, and it is deliberately ugly on
+ * screen because those SPOCs have to be re-approached before a message goes out.
+ *
+ * `isActive` is false for a contact who has left. Removal deactivates and never
+ * deletes, so OB-05 shows them, can bring them back, and can still explain whose
+ * name is on a past sign-off.
+ */
 export interface ObContact {
   id: number; name: string; designation: string | null;
-  email: string; phone: string | null; whatsappOptIn: boolean; isPrimary: boolean;
+  email: string; phone: string | null;
+  whatsappOptIn: boolean;
+  /** Non-null exactly when `whatsappOptIn` — the two move together. */
+  whatsappOptInAt: string | null;
+  whatsappOptInSource: ObConsentSource | null;
+  isPrimary: boolean;
+  isActive: boolean;
 }
+
+/** B-103 · the basis a SPOC's messaging consent was given on. */
+export type ObConsentSource =
+  | 'VERBAL' | 'EMAIL' | 'WRITTEN' | 'CONTRACT' | 'CLIENT_PORTAL' | 'UNRECORDED';
 
 /**
  * `ob_client_applications` — one purchased product.
@@ -1879,8 +1906,13 @@ const OB_CLIENTS: ObClient[] = [
     licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: true,
     contacts: [
-      { id: 1, name: 'Meena Raghavan', designation: 'IT Head', email: 'meena@northwind.example', phone: '+91 98200 11223', whatsappOptIn: true, isPrimary: true },
-      { id: 2, name: 'Sanjay Bose', designation: 'Finance Lead', email: 'sanjay@northwind.example', phone: null, whatsappOptIn: false, isPrimary: false },
+      { id: 1, name: 'Meena Raghavan', designation: 'IT Head', email: 'meena@northwind.example', phone: '+91 98200 11223', whatsappOptIn: true, whatsappOptInAt: '2026-07-14T10:00:00Z', whatsappOptInSource: 'VERBAL', isPrimary: true, isActive: true },
+      { id: 2, name: 'Sanjay Bose', designation: 'Finance Lead', email: 'sanjay@northwind.example', phone: null, whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: false, isActive: true },
+      // The pre-capture row. Consent on file, basis unknown — B-103's backfill
+      // value, and the one a screen has to render as 'ask again' rather than as
+      // an ordinary consent. Inactive as well, so OB-05's panel has a departed
+      // SPOC to show as removed and to reactivate.
+      { id: 5, name: 'Farida Qureshi', designation: 'Former IT Head', email: 'farida@northwind.example', phone: null, whatsappOptIn: true, whatsappOptInAt: '2026-05-02T09:30:00Z', whatsappOptInSource: 'UNRECORDED', isPrimary: false, isActive: false },
     ],
     applications: [
       { id: 1, productId: 1, licenseType: 'Subscription', units: 250, licenseStart: '2026-08-01', licenseEnd: '2027-07-31' },
@@ -1959,7 +1991,7 @@ const OB_CLIENTS: ObClient[] = [
     licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
     contacts: [
-      { id: 3, name: 'Priya Nair', designation: 'Operations Manager', email: 'priya@acme.example', phone: '+91 99300 44556', whatsappOptIn: true, isPrimary: true },
+      { id: 3, name: 'Priya Nair', designation: 'Operations Manager', email: 'priya@acme.example', phone: '+91 99300 44556', whatsappOptIn: true, whatsappOptInAt: '2026-08-03T11:15:00Z', whatsappOptInSource: 'EMAIL', isPrimary: true, isActive: true },
     ],
     applications: [
       { id: 3, productId: 1, licenseType: 'Subscription', units: 40, licenseStart: '2026-09-01', licenseEnd: '2027-08-31' },
@@ -1987,7 +2019,7 @@ const OB_CLIENTS: ObClient[] = [
     licenseType: 'Perpetual', salesPersonId: 5, status: 'LIVE', liveAt: iso('2026-06-19T11:40:00'),
     hasPortalLogin: true,
     contacts: [
-      { id: 4, name: 'Arjun Sen', designation: 'Registrar', email: 'arjun@contoso.example', phone: '+91 98310 77889', whatsappOptIn: false, isPrimary: true },
+      { id: 4, name: 'Arjun Sen', designation: 'Registrar', email: 'arjun@contoso.example', phone: '+91 98310 77889', whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: true, isActive: true },
     ],
     applications: [
       { id: 4, productId: 1, licenseType: 'Perpetual', units: 120, licenseStart: '2026-04-15', licenseEnd: null },

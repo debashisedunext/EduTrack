@@ -5,9 +5,11 @@ import com.edunext.edutrack.api.security.pan.PanService;
 import com.edunext.edutrack.domain.onboarding.ObClient;
 import com.edunext.edutrack.domain.onboarding.ObClientRepository;
 import com.edunext.edutrack.domain.onboarding.ObClientStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -73,18 +75,38 @@ class ObClientWriteService {
     private final ObJourneyInstantiationService journeys;
     private final PanService pan;
 
+    /** B-103 · one instant per create, stamped onto every contact's consent. */
+    private final Clock clock;
+
+    /**
+     * {@code @Autowired} is not decorative — {@code ObEscalationService}'s own
+     * note: two constructors and no annotation is not an ambiguity Spring
+     * resolves, it is a context that fails to start.
+     */
+    @Autowired
     ObClientWriteService(ObClientRepository clients,
                          ObClientReadRepository reads,
                          ObClientChildWriteRepository children,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
                          PanService pan) {
+        this(clients, reads, children, details, journeys, pan, Clock.systemUTC());
+    }
+
+    ObClientWriteService(ObClientRepository clients,
+                         ObClientReadRepository reads,
+                         ObClientChildWriteRepository children,
+                         ObClientService details,
+                         ObJourneyInstantiationService journeys,
+                         PanService pan,
+                         Clock clock) { // test seam
         this.clients = clients;
         this.reads = reads;
         this.children = children;
         this.details = details;
         this.journeys = journeys;
         this.pan = pan;
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------------
@@ -131,7 +153,7 @@ class ObClientWriteService {
         ObClient saved = clients.saveAndFlush(client);
         long clientId = saved.getId();
 
-        children.insertContacts(clientId, request.contacts());
+        children.insertContacts(clientId, request.contacts(), callerId, clock.instant());
         children.insertApplications(clientId, request.applications());
         children.insertRequirements(clientId, request.requirementsOrEmpty(), callerId);
 
@@ -327,6 +349,30 @@ class ObClientWriteService {
         } else if (primaries > 1) {
             errors.put("contacts", "Only one contact can be the primary SPOC — "
                     + primaries + " are marked.");
+        }
+
+        // B-103 · consent needs a basis, and the wizard is where the
+        // conversation that produced it happened. Storing a bare `true` here
+        // would create exactly the row PHASE-2-BUILD-PLAN.md §6.1 calls "the
+        // one item that is genuinely irreversible" — a SPOC who has to be
+        // re-approached before a single message can go out, and no way to tell
+        // from the data that they do. Keyed to `contacts` so the wizard reopens
+        // its SPOC step.
+        for (ObClientDtos.ObContactWriteRequest contact : request.contacts()) {
+            String basis = contact.whatsappOptInSource();
+            if (contact.optedIn() && ObConsentSource.parse(basis).isEmpty()) {
+                errors.put("contacts", basis == null || basis.isBlank()
+                        ? "Say how " + contact.email().trim() + " gave WhatsApp consent — one of "
+                                + ObConsentSource.settableNames() + ". It cannot be established later."
+                        : "Not a consent basis for " + contact.email().trim() + ". One of "
+                                + ObConsentSource.settableNames());
+                break;
+            }
+            if (!contact.optedIn() && basis != null && !basis.isBlank()) {
+                errors.put("contacts", "There is no consent to attribute for "
+                        + contact.email().trim() + " — whatsappOptIn is false.");
+                break;
+            }
         }
 
         Set<String> emails = new LinkedHashSet<>();

@@ -467,7 +467,7 @@ class ObClientWriteServiceTest {
     // ── fixtures ────────────────────────────────────────────────────────────
 
     private static ObClientDtos.ObContactWriteRequest contact(String email, boolean primary) {
-        return new ObClientDtos.ObContactWriteRequest("SPOC", null, email, null, false, primary);
+        return new ObClientDtos.ObContactWriteRequest("SPOC", null, email, null, false, null, primary);
     }
 
     private static ObClientDtos.ObClientCreateRequest request() {

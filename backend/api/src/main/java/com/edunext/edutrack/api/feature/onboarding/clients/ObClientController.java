@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 /**
  * B-102 · {@code /onboarding/clients} per {@code contracts/openapi.yaml} —
@@ -129,7 +128,7 @@ class ObClientController {
                 writes.create(scopeOf(caller), userId(caller), request);
 
         return ResponseEntity.status(HttpStatus.CREATED)
-                .eTag(etagOf(created))
+                .eTag(ObClientETag.of(created))
                 .body(new ObClientDtos.ObClientDetailResponse(created));
     }
 
@@ -159,73 +158,27 @@ class ObClientController {
     // ------------------------------------------------------------------
 
     /**
-     * {@code If-Match} is required, not optional.
+     * The 404 comes first, then the precondition.
      *
-     * <p>A write without one is 428 rather than allowed through: treating a
-     * missing precondition as "no conflict" means the guard protects only the
-     * callers that already opted in, which is the set that needed it least. The
-     * same status and the same reasoning as B-011's resource form, B-016's
-     * project form, B-023's working week and B-026's client form.
-     *
-     * <p><b>The 404 comes first.</b> Answering 428 for a client that does not
-     * exist — or that this caller cannot see — would send them to fetch a tag
-     * from a URL that will 404 too.
+     * <p>Answering 428 for a client that does not exist — or that this caller
+     * cannot see — would send them to fetch a tag from a URL that will 404 too.
+     * The rules themselves are {@link ObClientETag}, shared with
+     * {@link ObContactController} since B-103: two controllers writing one
+     * resource have to derive its tag identically or produce a 412 that appears
+     * only when both screens are used together.
      */
     private void requirePrecondition(ObClientScope scope, long obClientId, String ifMatch) {
         ObClientDtos.ObClientDetail current = service.findDetail(scope, obClientId)
                 .orElseThrow(() -> new ObClientNotFoundException(obClientId));
-
-        if (ifMatch == null || ifMatch.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
-                    "If-Match is required. GET the client first and send back its ETag.");
-        }
-        if (!matches(ifMatch, etagOf(current))) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
-                    "This client changed since you read it. Reload and reapply your edit.");
-        }
+        ObClientETag.require(ifMatch, current);
     }
 
     private static ResponseEntity<ObClientDtos.ObClientDetailResponse> ok(
             ObClientDtos.ObClientDetail client) {
 
         return ResponseEntity.ok()
-                .eTag(etagOf(client))
+                .eTag(ObClientETag.of(client))
                 .body(new ObClientDtos.ObClientDetailResponse(client));
-    }
-
-    /**
-     * Derived from the content, not from {@code updated_at}.
-     *
-     * <p>A timestamp tag moves when a save rewrites identical values, failing
-     * an edit that conflicts with nothing. Content-derived, two people who
-     * saved the same change do not fight.
-     *
-     * <p><b>The journeys are inside the tag</b>, which is the contract's stated
-     * intent — "{@code ETag} covers the whole document, journeys included, so a
-     * step transition made elsewhere costs the editor a reload rather than a
-     * lost update". That is a deliberate choice to be strict on the one screen
-     * where the client record and the work underneath it are shown together: a
-     * client edited against a stale view of its own journeys is exactly the
-     * save worth refusing.
-     *
-     * <p><b>A 32-bit hash, and two states of one client can collide.</b> B-019
-     * found this the honest way on {@code ProjectSettings}, and
-     * {@code ClientController}, {@code ProjectController} and
-     * {@code SlaPolicyController} all tag the same way. Recorded here rather
-     * than fixed on one screen: a stronger tag across all of them is a change
-     * worth making together.
-     */
-    private static String etagOf(ObClientDtos.ObClientDetail client) {
-        return Integer.toHexString(client.hashCode());
-    }
-
-    /** {@code *} matches anything, per RFC 9110. */
-    private static boolean matches(String ifMatch, String current) {
-        String candidate = ifMatch.trim();
-        if ("*".equals(candidate)) {
-            return true;
-        }
-        return candidate.replace("W/", "").replace("\"", "").equals(current);
     }
 
     private static ObClientScope scopeOf(Authentication caller) {

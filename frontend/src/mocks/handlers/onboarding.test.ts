@@ -29,8 +29,21 @@ interface ClientRow {
   journeyCount: number
 }
 
+interface ContactRow {
+  id: number
+  name: string
+  email: string
+  phone: string | null
+  whatsappOptIn: boolean
+  whatsappOptInAt: string | null
+  whatsappOptInSource: string | null
+  isPrimary: boolean
+  isActive: boolean
+}
+
 interface ClientDetail extends ClientRow {
   pan: string | null
+  contacts: ContactRow[]
   journeys: { id: number; rag: Rag; gateStatus: string; totalTatDays: number; utilizedHours: number;
     heldByJourneyId: number | null; percentComplete: number
     steps: { id: number; rag: Rag; status: string }[] }[]
@@ -306,5 +319,215 @@ describe('A-118 · the two client masters stay disjoint', () => {
   it('404s an onboarding id that only exists in the ticketing master', async () => {
     const ticketingOnlyId = Math.max(...getDb().clients.map((c) => c.id)) + 500
     expect((await fetch(`/api/v1/onboarding/clients/${ticketingOnlyId}`)).status).toBe(404)
+  })
+})
+
+// ── B-103 · the SPOC panel ──────────────────────────────────────────────────
+
+const addContact = (clientId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/contacts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const patchContact = (clientId: number, contactId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/contacts/${contactId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const removeContact = (clientId: number, contactId: number) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/contacts/${contactId}`, { method: 'DELETE' })
+
+/** A SPOC body that passes validation, so each test varies only its own field. */
+const contactBody = (over: Record<string, unknown> = {}) => ({
+  name: 'New SPOC',
+  email: 'new.spoc@northwind.example',
+  isPrimary: false,
+  ...over,
+})
+
+/** Northwind — the only fixture with an inactive SPOC and a pre-capture consent. */
+const NORTHWIND = 1
+
+describe('B-103 · consent is a triple, not a flag', () => {
+  it('refuses a consent with no basis', async () => {
+    const res = await addContact(NORTHWIND, contactBody({ whatsappOptIn: true }))
+
+    // The whole reason this capture is built in a phase that sends no WhatsApp:
+    // a `true` on its own records that somebody ticked a box and cannot say
+    // when, or on what. A mock that accepted it would let a form ship that the
+    // real server rejects.
+    expect(res.status).toBe(400)
+    const body = await json<{ errors: Record<string, string[]> }>(res)
+    expect(body.errors).toHaveProperty('whatsappOptInSource')
+  })
+
+  it('refuses UNRECORDED, which belongs to rows that predate the capture', async () => {
+    const res = await addContact(
+      NORTHWIND,
+      contactBody({ whatsappOptIn: true, whatsappOptInSource: 'UNRECORDED' }),
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('refuses a basis with no consent rather than ignoring it', async () => {
+    // A form sending one beside a `false` has come apart. Accepting both and
+    // storing neither is how somebody later concludes consent was recorded.
+    const res = await addContact(NORTHWIND, contactBody({ whatsappOptInSource: 'VERBAL' }))
+    expect(res.status).toBe(400)
+  })
+
+  it('stamps the consent when a basis is given', async () => {
+    const res = await addContact(
+      NORTHWIND,
+      contactBody({ whatsappOptIn: true, whatsappOptInSource: 'EMAIL' }),
+    )
+    expect(res.status).toBe(201)
+
+    const added = (await json<{ data: ClientDetail }>(res)).data.contacts.find(
+      (c) => c.email === 'new.spoc@northwind.example',
+    )!
+    expect(added.whatsappOptInSource).toBe('EMAIL')
+    expect(added.whatsappOptInAt).not.toBeNull()
+  })
+
+  it('does not re-date a consent an unrelated edit did not change', async () => {
+    const before = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    expect(before.whatsappOptInSource).toBe('VERBAL')
+
+    await patchContact(NORTHWIND, 1, {
+      name: before.name,
+      email: before.email,
+      phone: '+91 90000 00000',
+      whatsappOptIn: true,
+      whatsappOptInSource: 'VERBAL',
+      isPrimary: true,
+    })
+
+    const after = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    // Correcting a phone number must not move the date the consent is dated
+    // from. That destroys the same fact a missing basis destroys, except
+    // silently and by a routine edit.
+    expect(after.phone).toBe('+91 90000 00000')
+    expect(after.whatsappOptInAt).toBe(before.whatsappOptInAt)
+  })
+
+  it('clears the stamp when consent is withdrawn', async () => {
+    await patchContact(NORTHWIND, 1, { name: 'Meena Raghavan',
+      email: 'meena@northwind.example', whatsappOptIn: false, isPrimary: true })
+
+    const after = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    expect(after.whatsappOptIn).toBe(false)
+    expect(after.whatsappOptInAt).toBeNull()
+    expect(after.whatsappOptInSource).toBeNull()
+  })
+
+  it('reads UNRECORDED back, so a pre-capture SPOC is visibly one to re-approach', async () => {
+    const farida = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 5)!
+    expect(farida.whatsappOptIn).toBe(true)
+    expect(farida.whatsappOptInSource).toBe('UNRECORDED')
+  })
+})
+
+describe('B-103 · a client always has exactly one primary SPOC', () => {
+  it('demotes the incumbent when a new primary is added', async () => {
+    const res = await addContact(NORTHWIND, contactBody({ isPrimary: true }))
+    expect(res.status).toBe(201)
+
+    const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
+    // One, not two: uq_ob_client_contacts_primary refuses a second, so the
+    // demotion has to happen in the same write as the promotion.
+    expect(contacts.filter((c) => c.isPrimary)).toHaveLength(1)
+    expect(contacts.find((c) => c.isPrimary)!.email).toBe('new.spoc@northwind.example')
+  })
+
+  it('refuses to demote the only primary', async () => {
+    const res = await patchContact(NORTHWIND, 1, {
+      name: 'Meena Raghavan', email: 'meena@northwind.example', isPrimary: false,
+    })
+
+    // Stricter than the ticketing master, which allows a client to have none.
+    // Onboarding has no gate that reports a missing primary — the kickoff mail,
+    // the portal password and every sign-off request simply go nowhere.
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type).toContain('ob-contact-primary-required')
+  })
+
+  it('refuses to remove the only primary', async () => {
+    expect((await removeContact(NORTHWIND, 1)).status).toBe(409)
+  })
+
+  it('releases the departing primary once a successor holds the slot', async () => {
+    await addContact(NORTHWIND, contactBody({ isPrimary: true }))
+    const res = await removeContact(NORTHWIND, 1)
+
+    expect(res.status).toBe(200)
+    const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
+    expect(contacts.find((c) => c.id === 1)!.isActive).toBe(false)
+    expect(contacts.filter((c) => c.isPrimary)).toHaveLength(1)
+  })
+})
+
+describe('B-103 · removal deactivates and never deletes', () => {
+  it('keeps the contact in the client document', async () => {
+    const res = await removeContact(NORTHWIND, 2)
+    const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
+
+    // The row is what a past sign-off points at. A screen that could not see
+    // them could not reactivate one, and could not say whose name is on it.
+    const removed = contacts.find((c) => c.id === 2)!
+    expect(removed.isActive).toBe(false)
+  })
+
+  it('is not an error the second time', async () => {
+    await removeContact(NORTHWIND, 2)
+    // A setter, and the second half of a double-click must not fail.
+    expect((await removeContact(NORTHWIND, 2)).status).toBe(200)
+  })
+
+  it('brings a departed SPOC back rather than adding a second row', async () => {
+    const res = await patchContact(NORTHWIND, 5, {
+      name: 'Farida Qureshi', email: 'farida@northwind.example',
+      whatsappOptIn: true, whatsappOptInSource: 'WRITTEN', isPrimary: false, isActive: true,
+    })
+
+    const farida = (await json<{ data: ClientDetail }>(res)).data.contacts.find(
+      (c) => c.id === 5,
+    )!
+    expect(farida.isActive).toBe(true)
+    // Re-approached, and the answer recorded — which is what UNRECORDED exists
+    // to prompt.
+    expect(farida.whatsappOptInSource).toBe('WRITTEN')
+  })
+
+  it('refuses a second row for an address a removed contact still holds', async () => {
+    const res = await addContact(
+      NORTHWIND,
+      contactBody({ email: 'farida@northwind.example' }),
+    )
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type).toContain('ob-contact-email-duplicate')
+  })
+
+  it('404s a contact id belonging to another client', async () => {
+    // Resolved by both ids, so the nested route cannot enumerate the SPOC table.
+    expect((await removeContact(2, 1)).status).toBe(404)
+  })
+})
+
+describe('B-103 · every SPOC write answers the whole client document', () => {
+  it('returns the client, not the contact, so the page ETag stays usable', async () => {
+    const res = await addContact(NORTHWIND, contactBody())
+    const { data } = await json<{ data: ClientDetail }>(res)
+
+    // getObClient's ETag covers contacts, so a SPOC write invalidates it.
+    // Answering with the contact alone would leave the Client info card on the
+    // same page holding a tag that is already stale.
+    expect(data.id).toBe(NORTHWIND)
+    expect(data.journeys.length).toBeGreaterThan(0)
+    expect(data.contacts.some((c) => c.email === 'new.spoc@northwind.example')).toBe(true)
   })
 })
