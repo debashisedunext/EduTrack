@@ -16,8 +16,10 @@ behind the viewer, JSON or a file).
 | `ObReportRunner` + six runners | "What are the columns and rows", and nothing else. |
 | `ObStepRag` | The health formula, shared by the chip and the `?rag=` filter. |
 | `ObReportExportService` | The translation into the shared export engine. |
+| `ObReportSensitivity` | B-123 · what a column holds, as a disclosure question. |
+| `ObExportRedaction` | B-123 · masking it, once, before anything can read it. |
 
-## Three things to read before changing anything here
+## Four things to read before changing anything here
 
 ### 1. `ObReportScope` is A-112's rule written a second time
 
@@ -50,7 +52,35 @@ A report is also opened deliberately by one person rather than polled by every
 open browser, which is what made the dashboard rule necessary in the first
 place. OB-02's board — B-121 — reads the summary table and must go on doing so.
 
-### 3. Durations are working hours, computed by `WorkingHoursService`
+### 3. Redaction happens in `run()`, and the task is still called export redaction
+
+B-123. `ObExportRedaction.apply` sits immediately after `runner.run(...)` and
+before the `Report`, the `ETag` and either serialiser — so **no unredacted
+value exists past that line**.
+
+Putting it in `ObReportExportService` would have matched the task's name and
+been wrong in a way that is easy to miss: the viewer renders the JSON from the
+same call, so the spreadsheet would have been safer than the page it was
+downloaded from. Putting it in each runner makes it six rules that drift. It
+rides the same seam scope does, for the reason `ObReportExportService` already
+gives — there is only one `run()`.
+
+**No built report has a sensitive column today**, and that is the point of the
+guard rather than an argument against it. `ObReportDtos.Column`'s constructor
+refuses a column whose key or label reads as a PAN or an amount and is declared
+`ORDINARY`, so the seventh report cannot add one without deciding. Every runner
+here builds its column list under `ObReportRunnersTest`, which is what makes the
+refusal land in CI rather than in somebody's download.
+
+**Exports carry the masked PAN for every role, OB_ADMIN included.** The
+on-screen rule names OB_ADMIN and OB_MANAGER as the roles that may see one, but
+A-113 made the unmasked value a *reveal operation* that writes one audit row per
+disclosure. A five-hundred-row export cannot write five hundred of those, so an
+unmasked column here would be the only bulk read of PAN in the product with no
+trail behind it. `ObExportRedactionTest.ExportPath` pins it for all five module
+roles.
+
+### 4. Durations are working hours, computed by `WorkingHoursService`
 
 A-118 puts it on the contract: `duration` on this surface is working hours,
 "already through the calendar, so a client formatting it must not re-derive it

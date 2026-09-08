@@ -134,13 +134,35 @@ describe('A-118 · LIVE is earned, never set', () => {
 })
 
 describe('A-118 · PAN is masked on the way out', () => {
+  /**
+   * B-123 · the expected value changed with A-113, and the old one is worth
+   * naming rather than quietly replacing: `AABCN****M` showed six of ten
+   * characters — the whole series-and-holder-type prefix and the checksum —
+   * which is the mask PHASE-2-BUILD-PLAN finding 10 rejected. `PanFormat.mask`
+   * on the server keeps the last four only, and this asserts the mock agrees.
+   */
   it('never returns the stored value, even on the detail read', async () => {
     const stored = getDb().obClients.find((c) => c.id === 1)!.pan!
     const detail = await getClient(1)
 
     expect(stored).toBe('AABCN1234M')
-    expect(detail.pan).toBe('AABCN****M')
+    expect(detail.pan).toBe('••••••234M')
     expect(detail.pan).not.toBe(stored)
+  })
+
+  /**
+   * Asserted apart from the exact string, because this is the property the
+   * rule exists for rather than its spelling. The prefix is the identifying
+   * half — positions 1-3 are the series, 4 encodes the holder type and 5 is
+   * the surname initial — so a mask that keeps it beside a client's name
+   * corroborates the name. Length is preserved so the field still reads as a
+   * PAN rather than as a truncated value.
+   */
+  it('discloses none of the identifying prefix', async () => {
+    const detail = await getClient(1)
+
+    expect(detail.pan).not.toContain('AABCN')
+    expect(detail.pan).toHaveLength('AABCN1234M'.length)
   })
 
   it('keeps PAN off the list row entirely', async () => {
