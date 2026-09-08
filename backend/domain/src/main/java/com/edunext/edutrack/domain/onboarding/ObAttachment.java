@@ -18,8 +18,9 @@ import java.time.Instant;
 /**
  * A-102 · {@code ob_attachments} — polymorphic within the module only (see
  * the migration header for why this is not {@code ticket_attachments}).
- * Exactly one of {@link #obClientId}/{@link #stepId}/{@link #signoffId} is
- * set, and exactly one of {@link #uploadedByUser}/{@link #uploadedByContact}.
+ * Exactly one of {@link #obClientId}/{@link #stepId}/{@link #signoffId}/
+ * {@link #prereqTemplateTaskId} is set, and exactly one of
+ * {@link #uploadedByUser}/{@link #uploadedByContact}.
  *
  * <p>First read by C-106's completion gate — {@code step_id +
  * scan_status = CLEAN + deleted_at IS NULL}, counted against the template's
@@ -43,6 +44,22 @@ public class ObAttachment {
 
     @Column(name = "signoff_id")
     private Long signoffId;
+
+    /**
+     * B-124 · the fourth owner — a task on the org-wide prerequisites
+     * master, carrying the admin's {@link ObAttachmentKind#REFERENCE}
+     * documents (OB-14). The migration's own note reserved this widening
+     * for B-125 and was one task out: B-125 owns the <i>instance</i> side,
+     * what a client uploads against their own task, while these belong to
+     * no client at all.
+     *
+     * <p><b>Its foreign key is the one owner arm that cascades</b>, where
+     * the other three restrict — {@code V20260908_1100} §4 has the
+     * argument: these hang off draft content that no client has ever been
+     * shown, so a removed one is not evidence of anything.
+     */
+    @Column(name = "prereq_template_task_id")
+    private Long prereqTemplateTaskId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "kind", nullable = false, length = 12)
@@ -127,6 +144,14 @@ public class ObAttachment {
 
     public void setSignoffId(Long signoffId) {
         this.signoffId = signoffId;
+    }
+
+    public Long getPrereqTemplateTaskId() {
+        return prereqTemplateTaskId;
+    }
+
+    public void setPrereqTemplateTaskId(Long prereqTemplateTaskId) {
+        this.prereqTemplateTaskId = prereqTemplateTaskId;
     }
 
     public ObAttachmentKind getKind() {
