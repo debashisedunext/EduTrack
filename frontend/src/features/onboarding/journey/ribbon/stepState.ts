@@ -1,4 +1,4 @@
-import { CircleDashed, Loader, CheckCircle2, Clock, Ban } from 'lucide-react'
+import { CircleDashed, Loader, CheckCircle2, Clock, Ban, SkipForward } from 'lucide-react'
 
 import type { JourneyStep } from './types'
 
@@ -82,6 +82,15 @@ const BLOCKED: StepTreatment = {
   isBreached: false,
 }
 
+const SKIPPED: StepTreatment = {
+  Icon: SkipForward,
+  label: 'Skipped',
+  card: 'border-ribbon-pending bg-ribbon-pending-bg text-ribbon-pending-text opacity-75',
+  title: 'text-ribbon-pending-text',
+  connector: 'border-t-2 border-dotted border-ribbon-pending',
+  isBreached: false,
+}
+
 const BREACHED_CURRENT: StepTreatment = {
   ...CURRENT,
   label: 'Breached',
@@ -104,12 +113,25 @@ const STEP_TREATMENT: Record<JourneyStep['status'], StepTreatment> = {
   DONE,
   WAITING,
   BLOCKED,
+  SKIPPED,
 }
 
-/** Whichever the scanner (or, before OB3 lands, `tatPercent` alone) says has
- * run past its TAT budget — §5.11's Amber/Red pattern, Red end. */
+/**
+ * Whichever the scanner says has run past its TAT budget — §5.11's Amber/Red
+ * pattern, Red end.
+ *
+ * **`rag` first, `tatPercent` only as the fallback.** C-114 computes RAG
+ * server-side on the working calendar against the org's own amber threshold;
+ * a percentage compared to 100 here is a second opinion about the same fact,
+ * and the two disagreeing on one tile is the kind of defect nobody can
+ * reproduce. It is also the only thing that works on OB-05: `getObJourney`
+ * returns `rag` per step and no percent at all, so a percent-only breach
+ * test would silently never fire on the screen this exists for.
+ */
 function isOverTat(step: JourneyStep): boolean {
-  return (step.status === 'CURRENT' || step.status === 'BLOCKED') && (step.tatPercent ?? 0) >= 100
+  if (step.status !== 'CURRENT' && step.status !== 'BLOCKED') return false
+  if (step.rag != null) return step.rag === 'RED'
+  return (step.tatPercent ?? 0) >= 100
 }
 
 export function treatmentFor(step: JourneyStep): StepTreatment {
@@ -144,7 +166,9 @@ export interface StepEmoji {
  * ported one-for-one from the prototype's own `stEmoji`: 👍 done on time ·
  * 🙌 completed early · 👎 closed delayed (or running breached) · 👏 in
  * progress on time · 😢 blocked/waiting. PENDING draws none, same as the
- * prototype returning `""`.
+ * prototype returning `""`, and neither does SKIPPED: the five are a
+ * judgement about how a service went, and a waived one never ran to be
+ * judged. Its treatment says "Skipped" in words, which is the whole claim.
  */
 export function statusEmoji(step: JourneyStep): StepEmoji | null {
   if (step.status === 'DONE') {
@@ -186,6 +210,11 @@ export function stepAriaLabel(step: JourneyStep): string {
 
   if (step.status === 'DONE') {
     parts.push(step.closed === 'early' ? 'completed early' : step.closed === 'late' ? 'closed delayed' : 'closed on time')
+  } else if (step.status === 'SKIPPED') {
+    // A waived service has no clock and no dates. Reading it a TAT budget it
+    // was never measured against would be the audible half of the same
+    // misstatement folding SKIPPED into DONE would make visually.
+    parts.push(step.note ? `waived: ${step.note}` : 'waived')
   } else if (step.tatPercent != null) {
     parts.push(`${Math.round(step.tatPercent)}% of TAT used`)
   } else {

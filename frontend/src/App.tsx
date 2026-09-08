@@ -10,41 +10,6 @@ import {
   RESOURCE_ROUTE,
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
-import { TicketListPage } from './features/tickets/list/TicketListPage'
-import { BulkReassignWizardPage } from './features/tickets/reassign/BulkReassignWizardPage'
-import { MyTasksPage } from './features/tickets/my-tasks/MyTasksPage'
-import { StageQueuePage } from './features/tickets/stage-queue/StageQueuePage'
-import { DashboardPage } from './features/dashboard/DashboardPage'
-import { ClientListPage } from './features/clients/ClientListPage'
-import { ClientFormPage } from './features/clients/ClientFormPage'
-import { ClientProfilePage } from './features/clients/ClientProfilePage'
-import { ClientImportPage } from './features/imports/ClientImportPage'
-import { ResourceImportPage } from './features/imports/ResourceImportPage'
-import { MastersIndexPage } from './features/masters/MastersIndexPage'
-import { WorkingCalendarPage } from './features/masters/calendar/WorkingCalendarPage'
-import { ProjectFormPage } from './features/masters/projects/ProjectFormPage'
-import { ProjectListPage } from './features/masters/projects/ProjectListPage'
-import { ProjectSettingsPage } from './features/masters/projects/ProjectSettingsPage'
-import { ProjectTeamPage } from './features/masters/projects/ProjectTeamPage'
-import { SlaMatrixPage } from './features/masters/projects/SlaMatrixPage'
-import { NotificationTemplateListPage } from './features/masters/notificationTemplates/NotificationTemplateListPage'
-import { TimesheetPage } from './features/masters/timesheet/TimesheetPage'
-import { PriorityListPage } from './features/masters/priorities/PriorityListPage'
-import { ResourceListPage } from './features/masters/resources/ResourceListPage'
-import { RoleListPage } from './features/masters/roles/RoleListPage'
-import { StatusMasterPage } from './features/masters/statuses/StatusMasterPage'
-import { WorkflowDesignerPage } from './features/masters/designer/WorkflowDesignerPage'
-import { JourneyTemplateDesignerPage } from './features/onboarding/journeys/JourneyTemplateDesignerPage'
-import { ObDashboardPage } from './features/onboarding/dashboard/ObDashboardPage'
-import { ObNotificationCentrePage } from './features/onboarding/notifications/ObNotificationCentrePage'
-import { ObReportsHubPage } from './features/onboarding/reports/ObReportsHubPage'
-import { ObReportViewerPage } from './features/onboarding/reports/ObReportViewerPage'
-import { RolePermissionsPage } from './features/masters/roles/RolePermissionsPage'
-import { TaskTypeListPage } from './features/masters/taskTypes/TaskTypeListPage'
-import { ResourceFormPage } from './features/masters/resources/ResourceFormPage'
-import { ChangePasswordPage } from './features/auth/ChangePasswordPage'
-import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
-import { LoginPage } from './features/auth/LoginPage'
 import { RequireAuth } from './features/auth/RequireAuth'
 
 const AuditLogPage = lazy(() =>
@@ -88,6 +53,12 @@ const MyTasksPage = lazy(() =>
 )
 const NotificationTemplateListPage = lazy(() =>
   import('./features/masters/notificationTemplates/NotificationTemplateListPage').then((m) => ({ default: m.NotificationTemplateListPage })),
+)
+const ObClientDetailPage = lazy(() =>
+  import('./features/onboarding/journey/clientDetail/ObClientDetailPage').then((m) => ({ default: m.ObClientDetailPage })),
+)
+const ObDashboardPage = lazy(() =>
+  import('./features/onboarding/dashboard/ObDashboardPage').then((m) => ({ default: m.ObDashboardPage })),
 )
 const ObNotificationCentrePage = lazy(() =>
   import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
@@ -453,8 +424,6 @@ export default function App() {
             <Route path="/onboarding/reports" element={withSuspense(<ObReportsHubPage />)} />
             <Route path="/onboarding/reports/:reportKey" element={withSuspense(<ObReportViewerPage />)} />
             <Route path="/masters/calendar" element={withSuspense(<WorkingCalendarPage />)} />
-            <Route path="/onboarding/reports" element={<ObReportsHubPage />} />
-            <Route path="/onboarding/reports/:reportKey" element={<ObReportViewerPage />} />
             {/*
               B-121 · OB-02, the onboarding dashboard. Beside the four routes
               above and outside `/masters/**` for the same reason — the
@@ -469,8 +438,31 @@ export default function App() {
               are added *to* — and a board that arrives after the things that
               hang off it is a board nobody can review.
             */}
-            <Route path="/onboarding/dashboard" element={<ObDashboardPage />} />
-            <Route path="/masters/calendar" element={<WorkingCalendarPage />} />
+            <Route path="/onboarding/dashboard" element={withSuspense(<ObDashboardPage />)} />
+            {/*
+              C-110 · OB-05, the onboarding client detail page. Beside the other
+              `/onboarding/**` routes and outside `/masters/**` for the reason
+              they all state — the module's screens are disjoint from the
+              ticketing masters (plan §1.2), and this page is emphatically not
+              S-09's client profile: a different client table with no foreign
+              key to that one (plan §1.2 again), a different vocabulary, and
+              A-115's ArchUnit rule refusing the import between them.
+
+              The path is `/onboarding/clients/:obClientId` because B-108's
+              `ObMailLinks` already sends every onboarding mail there — the
+              route arriving after the mail pointing at it was the exact
+              situation B-112 flagged, and this is the destination those links
+              have been missing. The page's own code lives under
+              `features/onboarding/journey/` rather than `.../clients/`; see its
+              docstring for why the directory and the URL differ.
+
+              Still no onboarding nav section, so this is reached from a mail
+              link or the OB-03 list (B-108) rather than from the sidebar.
+            */}
+            <Route
+              path="/onboarding/clients/:obClientId"
+              element={withSuspense(<ObClientDetailPage />)}
+            />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a
                 page each. There is no `/:id` route to collide with. */}
