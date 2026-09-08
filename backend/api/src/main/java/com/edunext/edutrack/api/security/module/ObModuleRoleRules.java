@@ -20,7 +20,7 @@ import java.util.Set;
  * <h2>In main, because A-114's copy could not enforce anything</h2>
  *
  * <p>A-114 wrote this table in test sources and said so: by the time this
- * branch rebased, thirty-eight rules declared and four applied — skip, and
+ * branch rebased, thirty-eight rules declared and four applied — skip, plus
  * A-117's three module-access routes — with {@code NOT_YET_ENFORCED} counting
  * the difference so it could not grow quietly. A rule set living only where tests can see it
  * describes the application rather than constraining it — the same shape
@@ -164,6 +164,7 @@ public class ObModuleRoleRules {
         put(m, "GET", "/api/v1/onboarding/module-access", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/module-access", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/module-access/{grantId}/revoke", ADMIN_ONLY);
+
         return List.copyOf(m);
     }
 
@@ -177,9 +178,9 @@ public class ObModuleRoleRules {
      * <p>Empty means <b>no rule</b>, not <b>no roles</b>. The two must not be
      * confused: a route with no entry is one nobody has decided about, and the
      * filter lets it through so that adding an onboarding endpoint does not
-     * silently 403 everybody. {@code ObPermissionMatrixTest#everyRouteIsCovered}
-     * is what refuses a route with no entry — at build time, where somebody can
-     * fix it.
+     * silently 403 everybody. {@code
+     * ObPermissionMatrixTest#everyRouteIsCovered} is what refuses a route with
+     * no entry — at build time, where somebody can fix it.
      */
     public Optional<Set<String>> rolesFor(String method, String requestPath) {
         if (method == null || requestPath == null) {

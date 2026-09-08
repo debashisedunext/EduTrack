@@ -179,7 +179,7 @@ class ModuleAccessFilterTest {
         void passesTheGate() throws Exception {
             // DELETE, for the reason `doesNotGuardTicketing` sets out one tree
             // over. Only GET is mapped on the dashboard summary, so DELETE is
-            // answered 405 by the handler mapping -- which sits behind every
+            // answered 405 by the handler mapping — which sits behind every
             // filter and in front of every controller. A 405 is unreachable if
             // the gate refused, and it is produced without invoking a handler,
             // so this request asks no service and opens no transaction.
