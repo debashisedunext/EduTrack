@@ -46,34 +46,38 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObClientCommunicationChannel } from './obClientCommunicationChannel';
+import type { ObClientCommunicationAuthorType } from './obClientCommunicationAuthorType';
+import type { ObClientCommunicationRecordedBy } from './obClientCommunicationRecordedBy';
 
 /**
- * `ob_step_communications.entry_type`, which is **one** column rather
-than a channel beside a kind. C-112 widened the enum instead of
-adding a second field, because the table has carried
-`COMMENT|ESCALATION|SYSTEM` since A-106 wrote it and a reader
-filtering the timeline is choosing between all eight with one
-control.
+ * One row of the **client-level stitched view** (plan section 6) -- every
+communication on every service of one client, newest first, in one
+timeline rather than one per service.
 
-The first five are the only values `createObStepCommunication`
-accepts -- that route is a person recording a conversation. The
-last three are written by other subsystems and are read-only here:
-a portal comment (`COMMENT`, CP-03), the escalation mirror plan
-section 4 lands on this timeline (`ESCALATION`, C-126), and the
-module's own automatic entries (`SYSTEM`).
+It is `ObStepCommunication` plus the four fields that say *where* the
+entry came from, spelled out rather than composed with `allOf`: a
+stitched row is read by a different screen than a step's own timeline
+and the two are free to diverge.
 
  */
-export type ObStepCommunicationChannel = typeof ObStepCommunicationChannel[keyof typeof ObStepCommunicationChannel];
-
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ObStepCommunicationChannel = {
-  CALL: 'CALL',
-  EMAIL: 'EMAIL',
-  MEETING: 'MEETING',
-  WHATSAPP: 'WHATSAPP',
-  OTHER: 'OTHER',
-  COMMENT: 'COMMENT',
-  ESCALATION: 'ESCALATION',
-  SYSTEM: 'SYSTEM',
-} as const;
+export interface ObClientCommunication {
+  id: number;
+  obClientId: number;
+  journeyId: number;
+  /** A journey has no name of its own -- `ob_journeys` is keyed by
+product and the product's name is what every screen calls it.
+ */
+  productName: string;
+  stepId: number;
+  stepName: string;
+  stepSequence: number;
+  channel: ObClientCommunicationChannel;
+  occurredAt: string;
+  summary: string;
+  isClientVisible: boolean;
+  authorType: ObClientCommunicationAuthorType;
+  authorName: string;
+  recordedBy?: ObClientCommunicationRecordedBy;
+  createdAt?: string;
+}

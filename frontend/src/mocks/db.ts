@@ -687,15 +687,31 @@ export interface ObStepDoc {
   attachmentId: number | null;
 }
 
-/** `ob_step_communications` — capture of what was said, not delivery. */
+/**
+ * `ob_step_communications` — capture of what was said, not delivery.
+ *
+ * `channel` is the table's own `entry_type`, which is one column and carries
+ * all eight values (C-112). The last three are never written by
+ * `createObStepCommunication` — a portal comment, C-126's escalation mirror
+ * and the module's own entries reach the table by other routes.
+ */
 export interface ObStepCommunicationRow {
   id: number;
-  channel: 'CALL' | 'EMAIL' | 'MEETING' | 'WHATSAPP' | 'OTHER';
+  channel:
+    | 'CALL' | 'EMAIL' | 'MEETING' | 'WHATSAPP' | 'OTHER'
+    | 'COMMENT' | 'ESCALATION' | 'SYSTEM';
   /** When it happened, which is not when it was typed. */
   occurredAt: string;
   summary: string;
   isClientVisible: boolean;
-  recordedById: number;
+  /**
+   * `ck_ob_comms_author`'s three shapes. A STAFF row sets `recordedById`, a
+   * CLIENT row sets `authorName`, a SYSTEM row sets neither.
+   */
+  authorType: 'STAFF' | 'CLIENT' | 'SYSTEM';
+  recordedById: number | null;
+  /** The client contact's name on a CLIENT row; unused on the other two. */
+  authorName?: string | null;
   createdAt: string;
 }
 
@@ -1875,7 +1891,14 @@ const OB_CLIENTS: ObClient[] = [
       {
         id: 1, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
         steps: [
-          { id: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 19, dependsOnStepId: null },
+          // C-112 · the stitched view needs entries to stitch. Spread across
+          // two journeys, all three author types and both visibilities, so
+          // `listObClientCommunications` renders something recognisable and
+          // its `clientVisibleOnly` filter has both answers to give.
+          { id: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 19, dependsOnStepId: null,
+            communications: [
+              { id: 1, channel: 'MEETING', occurredAt: iso('2026-08-04T10:30:00'), summary: 'Kickoff call with Meena and Sanjay. Scope agreed, SSO confirmed in phase 1.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-04T15:10:00') },
+            ] },
           { id: 2, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 26.5, dependsOnStepId: 1 },
           // C-104 · owned by user 3 (Ravi, the default currentUserId) so the
           // lifecycle routes have a caller who passes ObStepOwnership.mayAct
@@ -1890,8 +1913,21 @@ const OB_CLIENTS: ObClient[] = [
               { id: 31, sequence: 1, label: 'Staff master reconciled', isMandatory: true, isDone: true, doneAt: '2026-08-28T09:00:00.000Z', doneById: 3 },
               { id: 32, sequence: 2, label: 'Student master reconciled', isMandatory: true, isDone: false, doneAt: null, doneById: null },
               { id: 33, sequence: 3, label: 'Legacy ledger archived', isMandatory: false, isDone: false, doneAt: null, doneById: null },
+            ],
+            communications: [
+              { id: 2, channel: 'EMAIL', occurredAt: iso('2026-08-26T09:15:00'), summary: 'Sent the data-migration sign-off pack to Sanjay. Chasing on Friday if nothing back.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-26T09:20:00') },
+              // Internal, and it must stay internal — the portal read filters
+              // on exactly this flag.
+              { id: 3, channel: 'OTHER', occurredAt: iso('2026-08-27T16:00:00'), summary: 'Their Tally export is missing FY25 opening balances. Do not raise it until we have checked our own importer.', isClientVisible: false, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-27T16:02:00') },
+              // Written through the portal (CP-03), so no staff user at all.
+              { id: 4, channel: 'COMMENT', occurredAt: iso('2026-08-29T11:40:00'), summary: 'Finance is still reviewing. We should have the signed pack to you early next week.', isClientVisible: true, authorType: 'CLIENT', recordedById: null, authorName: 'Sanjay Bose', createdAt: iso('2026-08-29T11:40:00') },
             ] },
-          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null, ownerUserId: 3 },
+          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null, ownerUserId: 3,
+            communications: [
+              // Nobody typed this one. `recordedBy` is null and `authorName`
+              // falls back to "System" on the wire.
+              { id: 5, channel: 'SYSTEM', occurredAt: iso('2026-09-01T08:00:00'), summary: 'Service paused — waiting on the client. The TAT clock is frozen.', isClientVisible: false, authorType: 'SYSTEM', recordedById: null, createdAt: iso('2026-09-01T08:00:00') },
+            ] },
           // No dependency check yet (C-119's own task) — startable today even
           // though its nominal dependency (step 3) is still BLOCKED, exactly
           // as ObJourneyStepLifecycleService.start actually behaves.
@@ -1905,7 +1941,12 @@ const OB_CLIENTS: ObClient[] = [
         // ownership.
         id: 2, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 1,
         steps: [
-          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null, ownerUserId: 3 },
+          // The second journey's own entry — the one that makes the stitched
+          // view different from a step's timeline.
+          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null, ownerUserId: 3,
+            communications: [
+              { id: 6, channel: 'CALL', occurredAt: iso('2026-09-02T14:00:00'), summary: 'Meena asked whether biometric devices can ship before the ERP go-live. Told her yes, subject to the gate.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-09-02T14:25:00') },
+            ] },
           { id: 7, sequence: 2, name: 'Attendance Policy Mapping', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: 6 },
         ],
       },
@@ -2132,7 +2173,11 @@ export function createDb(): Db {
     chatThreads: [], chatMessages: [], chatAttachments: [], statusRequests: [],
     timesheetApprovals: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
-    seq: {},
+    // C-112 · past the six communications OB_CLIENTS seeds by hand, so the
+    // first recorded one does not collide with them. `nextId` starts at 1 for
+    // any key not named here, which is right for every collection whose ids
+    // are allocated rather than written into the fixture.
+    seq: { obStepCommunications: 6 },
     twoFactor: {}, // opt-in, so nobody starts enrolled
     // C-027 · §4B.4's published defaults, which is also what the migration
     // seeds — 10 MB per file, 50 MB and 20 files per ticket.

@@ -46,9 +46,24 @@ export interface JourneyAccordionProps {
    * the reader to look up an id. */
   siblings: readonly ObJourneyStrip[]
   users: readonly UserRef[]
+  /**
+   * C-112 · the client this journey belongs to. `ObJourneyStrip` does not
+   * carry it — the strip is always read in the context of one client, so the
+   * contract does not repeat the id on every row — and the step panel's
+   * communications timeline needs it to refresh the client-level stitched
+   * view when an entry is recorded. Passed down rather than re-fetched.
+   */
+  obClientId: number
 }
 
-export function JourneyAccordion({ journey, isOpen, onToggle, siblings, users }: JourneyAccordionProps) {
+export function JourneyAccordion({
+  journey,
+  isOpen,
+  onToggle,
+  siblings,
+  users,
+  obClientId,
+}: JourneyAccordionProps) {
   const [selectedStepId, setSelectedStepId] = React.useState<string | null>(null)
 
   const detail = useGetObJourney(journey.id, { query: { enabled: isOpen } })
@@ -143,7 +158,14 @@ export function JourneyAccordion({ journey, isOpen, onToggle, siblings, users }:
             selectedStepId={activeStepId ?? undefined}
             onSelectStep={(step) => setSelectedStepId(step.id)}
           />
-          {activeStep && <JourneyStepPanel step={activeStep} resolveUser={resolveUser} hold={hold} />}
+          {activeStep && (
+            <JourneyStepPanel
+              step={activeStep}
+              resolveUser={resolveUser}
+              hold={hold}
+              obClientId={obClientId}
+            />
+          )}
         </>
       )}
     </ObAccordion>

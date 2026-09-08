@@ -8344,6 +8344,61 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
+  /onboarding/clients/{obClientId}/communications:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: listObClientCommunications
+      summary: Everything said to this client, across every service (plan section 6)
+      description: |
+        C-112 . the **stitched view**. Section 6 asks for per-step timelines
+        *and* a client-level one, and this is the half no screen in section 9
+        draws -- the module plan calls it what management actually asks for,
+        which is "what has anyone said to this client lately", a question no
+        per-service timeline can answer because the answer spans services.
+
+        **Newest first**, unlike the per-step timeline, and that is the whole
+        difference between the two reads. A service's own timeline is a
+        narrative you read forwards; a client's is a feed you check, and the
+        entry that matters is the last one.
+
+        Ordered and cursored on `(occurredAt, id)` -- **when the conversation
+        happened**, not when it was typed, the same distinction
+        `ObStepCommunication.occurredAt` draws. A Friday call recorded on
+        Monday sorts to Friday here too.
+
+        Scoped exactly as every other onboarding read: an out-of-scope or
+        unknown client answers an **empty list**, not a 403 -- the same
+        "indistinguishable from not found" rule `listObEscalations` follows,
+        and for the same reason.
+
+        **Prerequisite comment threads are not stitched in yet**, and section 6
+        says they join this view. No prerequisite table exists in any migration
+        today (A-118 drafted the routes; B-124 builds the master), so there is
+        nothing to join. Recorded here rather than approximated.
+      parameters:
+        - name: journeyId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Narrow to one service's own share of the stitched view.
+        - name: clientVisibleOnly
+          in: query
+          schema: { type: boolean, default: false }
+          description: |
+            What the client can see in the portal, from the staff side -- the
+            answer to "did we say that to them, or only to each other" before
+            somebody repeats an internal note on a call.
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientCommunicationListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
   /onboarding/journey-steps/{stepId}/history:
     parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
     get:
@@ -17367,13 +17422,27 @@ components:
         attachmentId: { type: [integer, 'null'], format: int64 }
     ObStepCommunication:
       type: object
-      required: [id, stepId, channel, occurredAt, summary, isClientVisible, recordedBy]
+      required: [id, stepId, channel, occurredAt, summary, isClientVisible, authorType, authorName]
       properties:
         id: { type: integer, format: int64 }
         stepId: { type: integer, format: int64 }
         channel:
           type: string
-          enum: [CALL, EMAIL, MEETING, WHATSAPP, OTHER]
+          enum: [CALL, EMAIL, MEETING, WHATSAPP, OTHER, COMMENT, ESCALATION, SYSTEM]
+          description: |
+            `ob_step_communications.entry_type`, which is **one** column rather
+            than a channel beside a kind. C-112 widened the enum instead of
+            adding a second field, because the table has carried
+            `COMMENT|ESCALATION|SYSTEM` since A-106 wrote it and a reader
+            filtering the timeline is choosing between all eight with one
+            control.
+
+            The first five are the only values `createObStepCommunication`
+            accepts -- that route is a person recording a conversation. The
+            last three are written by other subsystems and are read-only here:
+            a portal comment (`COMMENT`, CP-03), the escalation mirror plan
+            section 4 lands on this timeline (`ESCALATION`, C-126), and the
+            module's own automatic entries (`SYSTEM`).
         occurredAt:
           type: string
           format: date-time
@@ -17387,8 +17456,79 @@ components:
           description: |
             False by default. True publishes it to the portal thread, and
             there is no way to unpublish something a client has already read.
-        recordedBy: { $ref: '#/components/schemas/UserRef' }
+        authorType:
+          type: string
+          enum: [STAFF, CLIENT, SYSTEM]
+          description: |
+            Which of `ob_step_communications`' two author columns is set --
+            a staff user, a client contact through the portal, or neither.
+            The DDL's own `ck_ob_comms_author` says exactly this, and it is
+            three shapes rather than "one of two is not null".
+        authorName:
+          type: string
+          description: |
+            The one string a timeline row renders, whichever side wrote it:
+            the staff user's name, the client contact's name, or `System`.
+            Always present -- a row whose author cannot be rendered is the
+            thing `ck_ob_comms_author` exists to make unrepresentable.
+        recordedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            The **staff** identity, and null on a `CLIENT` or `SYSTEM` entry --
+            `ObEscalation.escalatedTo`'s own shape for the same reason. Read
+            `authorName` to render the row; read this to link to a user.
         createdAt: { type: string, format: date-time }
+    ObClientCommunication:
+      type: object
+      required:
+        [id, obClientId, journeyId, productName, stepId, stepName, stepSequence,
+         channel, occurredAt, summary, isClientVisible, authorType, authorName]
+      description: |
+        One row of the **client-level stitched view** (plan section 6) -- every
+        communication on every service of one client, newest first, in one
+        timeline rather than one per service.
+
+        It is `ObStepCommunication` plus the four fields that say *where* the
+        entry came from, spelled out rather than composed with `allOf`: a
+        stitched row is read by a different screen than a step's own timeline
+        and the two are free to diverge.
+      properties:
+        id: { type: integer, format: int64 }
+        obClientId: { type: integer, format: int64 }
+        journeyId: { type: integer, format: int64 }
+        productName:
+          type: string
+          description: |
+            A journey has no name of its own -- `ob_journeys` is keyed by
+            product and the product's name is what every screen calls it.
+        stepId: { type: integer, format: int64 }
+        stepName: { type: string }
+        stepSequence: { type: integer }
+        channel:
+          type: string
+          enum: [CALL, EMAIL, MEETING, WHATSAPP, OTHER, COMMENT, ESCALATION, SYSTEM]
+        occurredAt: { type: string, format: date-time }
+        summary: { type: string }
+        isClientVisible: { type: boolean }
+        authorType:
+          type: string
+          enum: [STAFF, CLIENT, SYSTEM]
+        authorName: { type: string }
+        recordedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        createdAt: { type: string, format: date-time }
+    ObClientCommunicationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObClientCommunication' }
+        meta: { $ref: '#/components/schemas/Meta' }
     ObStepCommunicationResponse:
       type: object
       required: [data]

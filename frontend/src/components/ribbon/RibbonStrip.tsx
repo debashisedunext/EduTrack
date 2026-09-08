@@ -119,6 +119,32 @@ function isSameSegment(selected: SelectedSegment | undefined, segment: RibbonSeg
  * it. A group's segments are never dropped from `ribbon.segments` — only from
  * which row renders them — so expanding it does not re-fetch anything.
  *
+ * ## C-116 · what a reader who cannot see the strip was missing
+ *
+ * Two of the three fixes are in `segmentState.ts` — the spoken position, and
+ * the live clock no longer being announced under the sealed figure's words.
+ * See `segmentAriaLabel`'s own header for both. This file supplies the
+ * position (**1-based over `ribbon.segments`, never over `rows`**, so folding
+ * a `…` group does not renumber the stages behind it) and owns the third:
+ *
+ * **A handoff was silent.** The strip re-renders on every `stage.changed`
+ * frame `D-058` pushes, and a ticket moving from Development to QA under an
+ * open page produced a scroll, a moved `CURRENT` tile and a changed colour —
+ * three signals, all of them visual. A screen-reader user was told nothing at
+ * all, which is WCAG 2.1 4.1.3 (Status Messages, AA) and is CLAUDE.md's
+ * "accessibility is not optional" line at its most concrete. There is now a
+ * polite live region below, announcing the stage the ticket has moved into.
+ *
+ * It is deliberately **silent on the first resolution**. A live region that
+ * speaks when the ribbon first loads is announcing the page, not a change,
+ * and it would talk over whatever the reader was actually navigating to. So
+ * the first current stage is recorded without being spoken, and only a
+ * genuine move from one stage to another is news. The same reasoning keys it
+ * on the current segment's own identity — stage code plus iteration — as the
+ * auto-centring effect below: a ticket sent *back* to Development is a real
+ * move and says so, because the iteration differs even though the stage does
+ * not.
+ *
  * **Auto-centring** depends on the *current stage*, not on which row holds
  * the roving tab stop. Arrowing across the strip to read it must not drag the
  * scroll position along for the same reason B-052's tab stop does not follow
@@ -160,8 +186,44 @@ export function RibbonStrip({
   // rovers over nothing, which `useRovingFocus` handles rather than divides by.
   const roving = useRovingFocus(rows.length, Math.max(currentRowIndex, 0))
 
+  // Identity, not a search per tile: `buildRibbonRows` hands back the same
+  // objects it was given, collapsed or not, so one pass builds the whole map
+  // and a collapsed run keeps the numbers of the stages it folded.
+  const positionOf = React.useMemo(() => {
+    const map = new Map<RibbonSegmentData, number>()
+    segments.forEach((segment, index) => map.set(segment, index + 1))
+    return map
+  }, [segments])
+
   const scrollRef = React.useRef<HTMLDivElement | null>(null)
   const currentKey = currentSegment ? `${currentSegment.stageCode ?? ''}:${currentSegment.iterationNo ?? 1}` : undefined
+
+  /*
+   * C-116 · the handoff a screen reader could not hear. See the docstring.
+   *
+   * The sentence is held in a ref rather than named in the effect's deps: the
+   * effect must fire on a change of *stage*, and putting the rendered label in
+   * there would also fire it when a stage was merely renamed under an open
+   * page. Reading the ref is what keeps "when to speak" and "what to say" two
+   * separate questions.
+   */
+  const [stageAnnouncement, setStageAnnouncement] = React.useState('')
+  const currentLabel = currentSegment
+    ? `${currentSegment.displayName ?? currentSegment.stageCode ?? 'Stage'}` +
+      ((currentSegment.iterationNo ?? 1) > 1 ? `, iteration ${currentSegment.iterationNo}` : '')
+    : undefined
+  const latestLabel = React.useRef(currentLabel)
+  latestLabel.current = currentLabel
+
+  const announcedKey = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => {
+    if (!currentKey) return
+    const previous = announcedKey.current
+    announcedKey.current = currentKey
+    // `undefined` is the ribbon arriving, not the ticket moving.
+    if (previous === undefined || previous === currentKey) return
+    setStageAnnouncement(`Now in ${latestLabel.current}`)
+  }, [currentKey])
 
   React.useEffect(() => {
     if (!currentKey) return
@@ -200,58 +262,87 @@ export function RibbonStrip({
   }
 
   return (
-    <div
-      ref={scrollRef}
-      role="list"
-      aria-label="Workflow stages"
-      // One listener on the container rather than eight on the tiles, and the
-      // one place a key that is not ours is left alone — `nextFocusIndex`
-      // returns null and nothing is prevented, so Tab still leaves the strip.
-      onKeyDown={roving.onKeyDown}
-      className="flex items-start overflow-x-auto pb-1"
-    >
-      {rows.map((row, index) => {
-        const { ref, tabIndex, onFocus } = roving.itemProps(index)
-        const isLastRow = index === rows.length - 1
+    <>
+      {/*
+        Outside the list, so it is neither an unlabelled `listitem` nor inside
+        a container a reader may be browsing. Present from first paint, because
+        a live region added to the DOM at the same moment its text changes is a
+        region most screen readers never announce.
 
-        if (row.kind === 'group') {
+        **`aria-live` and `aria-atomic` rather than `role="status"`**, which is
+        what those two attributes *are*. The announcement is identical and the
+        role is not, and the difference matters because this strip is shared:
+        `TicketDetailPage` already renders a `role="status"` banner for a
+        sealed cycle, and `attachment-picker.tsx` documents having avoided
+        landing "a second `role="status"` beside" it for the same reason. A
+        second one here would not break a screen reader — but it would make
+        `getByRole('status')` ambiguous on every page that mounts a ribbon,
+        which is a shared component making three other people's tests
+        someone's problem. Contributing no role at all costs nothing here.
+      */}
+      <p
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="ribbon-stage-announcement"
+        className="sr-only"
+      >
+        {stageAnnouncement}
+      </p>
+      <div
+        ref={scrollRef}
+        role="list"
+        aria-label="Workflow stages"
+        // One listener on the container rather than eight on the tiles, and the
+        // one place a key that is not ours is left alone — `nextFocusIndex`
+        // returns null and nothing is prevented, so Tab still leaves the strip.
+        onKeyDown={roving.onKeyDown}
+        className="flex items-start overflow-x-auto pb-1"
+      >
+        {rows.map((row, index) => {
+          const { ref, tabIndex, onFocus } = roving.itemProps(index)
+          const isLastRow = index === rows.length - 1
+
+          if (row.kind === 'group') {
+            return (
+              <div role="listitem" key={`group:${row.key}`}>
+                <CollapsedGroupTile
+                  ref={ref}
+                  tabIndex={tabIndex}
+                  onFocus={onFocus}
+                  segments={row.segments}
+                  expanded={row.expanded}
+                  onToggle={() => toggleGroup(row.key)}
+                  isLast={isLastRow}
+                />
+              </div>
+            )
+          }
+
+          const segment = row.segment
+          const isCurrent = segment.state === SegmentState.CURRENT
+          const index1Based = positionOf.get(segment)
           return (
-            <div role="listitem" key={`group:${row.key}`}>
-              <CollapsedGroupTile
+            <div
+              role="listitem"
+              key={`${segment.stageCode ?? 'segment'}:${segment.iterationNo ?? 1}`}
+              data-ribbon-current={isCurrent || undefined}
+            >
+              <RibbonSegment
                 ref={ref}
                 tabIndex={tabIndex}
                 onFocus={onFocus}
-                segments={row.segments}
-                expanded={row.expanded}
-                onToggle={() => toggleGroup(row.key)}
+                segment={segment}
                 isLast={isLastRow}
+                onSelect={onSelectSegment}
+                isSelected={isSameSegment(selectedSegment, segment)}
+                actionSlot={isCurrent && currentStageAction ? currentStageAction : undefined}
+                position={index1Based ? { index: index1Based, total: segments.length } : undefined}
               />
             </div>
           )
-        }
-
-        const segment = row.segment
-        const isCurrent = segment.state === SegmentState.CURRENT
-        return (
-          <div
-            role="listitem"
-            key={`${segment.stageCode ?? 'segment'}:${segment.iterationNo ?? 1}`}
-            data-ribbon-current={isCurrent || undefined}
-          >
-            <RibbonSegment
-              ref={ref}
-              tabIndex={tabIndex}
-              onFocus={onFocus}
-              segment={segment}
-              isLast={isLastRow}
-              onSelect={onSelectSegment}
-              isSelected={isSameSegment(selectedSegment, segment)}
-              actionSlot={isCurrent && currentStageAction ? currentStageAction : undefined}
-            />
-          </div>
-        )
-      })}
-    </div>
+        })}
+      </div>
+    </>
   )
 }
 

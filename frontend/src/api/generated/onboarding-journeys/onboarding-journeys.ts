@@ -67,10 +67,12 @@ import type {
 
 import type {
   ConflictResponse,
+  ListObClientCommunicationsParams,
   ListObJourneysParams,
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
   ObBlockJourneyStepRequest,
+  ObClientCommunicationListResponse,
   ObCompletionGateProblem,
   ObJourneyArchiveRequest,
   ObJourneyDetailResponse,
@@ -2003,6 +2005,132 @@ export const useCreateObStepCommunication = <TError = ValidationFailedResponse |
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * C-112 . the **stitched view**. Section 6 asks for per-step timelines
+*and* a client-level one, and this is the half no screen in section 9
+draws -- the module plan calls it what management actually asks for,
+which is "what has anyone said to this client lately", a question no
+per-service timeline can answer because the answer spans services.
+
+**Newest first**, unlike the per-step timeline, and that is the whole
+difference between the two reads. A service's own timeline is a
+narrative you read forwards; a client's is a feed you check, and the
+entry that matters is the last one.
+
+Ordered and cursored on `(occurredAt, id)` -- **when the conversation
+happened**, not when it was typed, the same distinction
+`ObStepCommunication.occurredAt` draws. A Friday call recorded on
+Monday sorts to Friday here too.
+
+Scoped exactly as every other onboarding read: an out-of-scope or
+unknown client answers an **empty list**, not a 403 -- the same
+"indistinguishable from not found" rule `listObEscalations` follows,
+and for the same reason.
+
+**Prerequisite comment threads are not stitched in yet**, and section 6
+says they join this view. No prerequisite table exists in any migration
+today (A-118 drafted the routes; B-124 builds the master), so there is
+nothing to join. Recorded here rather than approximated.
+
+ * @summary Everything said to this client, across every service (plan section 6)
+ */
+export const listObClientCommunications = (
+    obClientId: number,
+    params?: ListObClientCommunicationsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientCommunicationListResponse>(
+      {url: `/onboarding/clients/${obClientId}/communications`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObClientCommunicationsQueryKey = (obClientId?: number,
+    params?: ListObClientCommunicationsParams,) => {
+    return [
+    `/onboarding/clients/${obClientId}/communications`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObClientCommunicationsQueryOptions = <TData = Awaited<ReturnType<typeof listObClientCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(obClientId: number,
+    params?: ListObClientCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObClientCommunicationsQueryKey(obClientId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObClientCommunications>>> = ({ signal }) => listObClientCommunications(obClientId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(obClientId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObClientCommunicationsQueryResult = NonNullable<Awaited<ReturnType<typeof listObClientCommunications>>>
+export type ListObClientCommunicationsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObClientCommunications<TData = Awaited<ReturnType<typeof listObClientCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number,
+    params: undefined |  ListObClientCommunicationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObClientCommunications>>,
+          TError,
+          Awaited<ReturnType<typeof listObClientCommunications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObClientCommunications<TData = Awaited<ReturnType<typeof listObClientCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number,
+    params?: ListObClientCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObClientCommunications>>,
+          TError,
+          Awaited<ReturnType<typeof listObClientCommunications>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObClientCommunications<TData = Awaited<ReturnType<typeof listObClientCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number,
+    params?: ListObClientCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Everything said to this client, across every service (plan section 6)
+ */
+
+export function useListObClientCommunications<TData = Awaited<ReturnType<typeof listObClientCommunications>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obClientId: number,
+    params?: ListObClientCommunicationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObClientCommunications>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObClientCommunicationsQueryOptions(obClientId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
  * `ob_step_history` is append-only and hash-chained. **There is no
 `PATCH`, `PUT` or `DELETE` on this path and there will not be one** —
 CONVENTIONS §8, and the same guarantee `ticket_history` carries. A

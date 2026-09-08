@@ -48,32 +48,18 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * `ob_step_communications.entry_type`, which is **one** column rather
-than a channel beside a kind. C-112 widened the enum instead of
-adding a second field, because the table has carried
-`COMMENT|ESCALATION|SYSTEM` since A-106 wrote it and a reader
-filtering the timeline is choosing between all eight with one
-control.
-
-The first five are the only values `createObStepCommunication`
-accepts -- that route is a person recording a conversation. The
-last three are written by other subsystems and are read-only here:
-a portal comment (`COMMENT`, CP-03), the escalation mirror plan
-section 4 lands on this timeline (`ESCALATION`, C-126), and the
-module's own automatic entries (`SYSTEM`).
+ * Which of `ob_step_communications`' two author columns is set --
+a staff user, a client contact through the portal, or neither.
+The DDL's own `ck_ob_comms_author` says exactly this, and it is
+three shapes rather than "one of two is not null".
 
  */
-export type ObStepCommunicationChannel = typeof ObStepCommunicationChannel[keyof typeof ObStepCommunicationChannel];
+export type ObStepCommunicationAuthorType = typeof ObStepCommunicationAuthorType[keyof typeof ObStepCommunicationAuthorType];
 
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ObStepCommunicationChannel = {
-  CALL: 'CALL',
-  EMAIL: 'EMAIL',
-  MEETING: 'MEETING',
-  WHATSAPP: 'WHATSAPP',
-  OTHER: 'OTHER',
-  COMMENT: 'COMMENT',
-  ESCALATION: 'ESCALATION',
+export const ObStepCommunicationAuthorType = {
+  STAFF: 'STAFF',
+  CLIENT: 'CLIENT',
   SYSTEM: 'SYSTEM',
 } as const;

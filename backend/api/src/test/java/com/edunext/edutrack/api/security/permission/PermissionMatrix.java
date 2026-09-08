@@ -763,6 +763,11 @@ final class PermissionMatrix {
     private static final String RESOLVE_ESCALATION = """
             {"note":"Matrix fixture — resolved"}""";
 
+    /** C-112 · {@code createObStepCommunication}'s three mandatory fields. */
+    private static final String RECORD_COMMUNICATION = """
+            {"channel":"CALL","occurredAt":"2026-09-05T09:00:00Z",\
+            "summary":"Matrix fixture — spoke to the SPOC"}""";
+
     /**
      * B-102 · {@code ObClientCreateRequest}: {@code name} is {@code @NotBlank},
      * {@code onboardingDate} is {@code @NotNull}, and {@code contacts} and
@@ -2144,6 +2149,25 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/escalations/{escalationId}/acknowledge"),
             everyRole("POST", "/api/v1/onboarding/escalations/{escalationId}/resolve", RESOLVE_ESCALATION),
 
+            // ── C-112 · communication capture, plan §6 ──────────────────────
+            //
+            // isAuthenticated() only, the same interim state every /onboarding/**
+            // controller in this file declares. A-112 row-scope is enforced in
+            // ObCommunicationService/ObCommunicationScope: a caller with no
+            // ONBOARDING standing gets an empty timeline on either GET
+            // (ObCommunicationScope.deniesEverything's own fast path, the two
+            // blocks above for the identical reasoning) and 404 on the POST
+            // (CommunicationStepNotFoundException — an out-of-scope step and a
+            // nonexistent one answer the same way).
+            //
+            // THREE ROUTES, AND THE ABSENT ONES ARE THE POINT.
+            // ob_step_communications is append-only, so there is no PATCH and no
+            // DELETE to give a row to. That is CLAUDE.md's layer 2, and this file
+            // is where its absence is visible to a reader rather than merely true.
+            everyRole("GET", "/api/v1/onboarding/journey-steps/{stepId}/communications"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/communications",
+                    RECORD_COMMUNICATION),
+            everyRole("GET", "/api/v1/onboarding/clients/{obClientId}/communications"),
             // ── B-102 · OB-03/OB-04/OB-05, the onboarding client master ───────
             //
             // isAuthenticated() only, the same interim state every /onboarding/**

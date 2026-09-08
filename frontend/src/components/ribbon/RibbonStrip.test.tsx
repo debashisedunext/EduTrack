@@ -631,3 +631,132 @@ describe('RibbonStrip · B-053 auto-centred scroll', () => {
     expect(scrollSpy()).toHaveBeenCalledWith(expect.objectContaining({ inline: 'center' }))
   })
 })
+
+/*
+ * C-116 · a handoff produced three signals and all three were visual: the
+ * strip scrolled, the CURRENT tile moved, and a colour changed. A screen
+ * reader was told nothing, which is WCAG 2.1 4.1.3.
+ */
+describe('RibbonStrip · C-116 · what a reader who cannot see it is told', () => {
+  const journey = (currentStage: string) => [
+    seg({ stageCode: 'INTAKE', displayName: 'Intake', state: SegmentState.COMPLETED }),
+    seg({
+      stageCode: 'DEV',
+      displayName: 'Development',
+      state: currentStage === 'DEV' ? SegmentState.CURRENT : SegmentState.COMPLETED,
+      durationMins: currentStage === 'DEV' ? null : 2940,
+    }),
+    seg({
+      stageCode: 'QA',
+      displayName: 'QA',
+      state: currentStage === 'QA' ? SegmentState.CURRENT : SegmentState.PENDING,
+      durationMins: null,
+    }),
+  ]
+
+  it('says which stage of how many, so arrowing across the strip is not blind', () => {
+    render(
+      <RibbonStrip
+        ribbon={ribbon([
+          seg({ stageCode: 'INTAKE', displayName: 'Intake' }),
+          seg({ stageCode: 'TRIAGE', displayName: 'Triage' }),
+          seg({ stageCode: 'DEV', displayName: 'Development' }),
+        ])}
+        onSelectSegment={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /Triage, stage 2 of 3/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Development, stage 3 of 3/ })).toBeInTheDocument()
+  })
+
+  /*
+   * The numbers are the *journey's*, not the strip's. Folding three completed
+   * stages into a "…" tile must not turn stage 7 into stage 5 — a reader who
+   * expands the group would find the ribbon had renumbered itself under them.
+   */
+  it('numbers stages over the journey, not over the rows a collapsed group leaves', async () => {
+    const user = userEvent.setup()
+    const long = [
+      ...['S1', 'S2', 'S3', 'S4', 'S5'].map((code, i) =>
+        seg({ stageCode: code, displayName: `Stage ${i + 1}`, state: SegmentState.COMPLETED }),
+      ),
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.CURRENT, durationMins: null }),
+    ]
+    render(<RibbonStrip ribbon={ribbon(long)} onSelectSegment={() => {}} />)
+
+    // Stages 4 and 5 are folded away; 6 is still 6.
+    expect(screen.getByRole('button', { name: /Development, stage 6 of 6/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Stage 4, stage 4 of 6/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /completed stages collapsed/i }))
+
+    expect(screen.getByRole('button', { name: /Stage 4, stage 4 of 6/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stage 5, stage 5 of 6/ })).toBeInTheDocument()
+  })
+
+  /*
+   * Queried by test id rather than by role: the region is `aria-live` without
+   * `role="status"`, so that a ribbon mounted on a page which already has a
+   * status region — `TicketDetailPage`'s sealed-cycle banner — does not make
+   * `getByRole('status')` ambiguous there. See `RibbonStrip.tsx`.
+   */
+  it('announces politely, without adding a second status role to whatever page it is on', () => {
+    render(<RibbonStrip ribbon={ribbon(journey('DEV'))} />)
+
+    const region = screen.getByTestId('ribbon-stage-announcement')
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('says nothing on first paint — a live region that speaks on load is announcing the page', () => {
+    render(<RibbonStrip ribbon={ribbon(journey('DEV'))} />)
+
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('')
+  })
+
+  it('announces the stage a ticket has moved into', () => {
+    const { rerender } = render(<RibbonStrip ribbon={ribbon(journey('DEV'))} />)
+
+    rerender(<RibbonStrip ribbon={ribbon(journey('QA'))} />)
+
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('Now in QA')
+  })
+
+  /*
+   * A ticket sent back to a stage it has already been in is a real move and
+   * has to say so — which is why the effect keys on stage *plus iteration*
+   * rather than on the stage code alone.
+   */
+  it('announces a loop back to the same stage, because the iteration differs', () => {
+    const atQa = [
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.CURRENT, durationMins: null }),
+    ]
+    const sentBack = [
+      seg({ stageCode: 'DEV', displayName: 'Development', state: SegmentState.COMPLETED }),
+      seg({ stageCode: 'QA', displayName: 'QA', state: SegmentState.COMPLETED }),
+      seg({
+        stageCode: 'DEV',
+        displayName: 'Development',
+        state: SegmentState.CURRENT,
+        iterationNo: 2,
+        durationMins: null,
+      }),
+    ]
+    const { rerender } = render(<RibbonStrip ribbon={ribbon(atQa)} />)
+
+    rerender(<RibbonStrip ribbon={ribbon(sentBack)} />)
+
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('Now in Development, iteration 2')
+  })
+
+  it('stays quiet when the ribbon re-renders without the stage moving', () => {
+    const segments = journey('DEV')
+    const { rerender } = render(<RibbonStrip ribbon={ribbon(segments)} />)
+
+    rerender(<RibbonStrip ribbon={ribbon(segments)} selectedSegment={{ stageCode: 'INTAKE' }} />)
+
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('')
+  })
+})

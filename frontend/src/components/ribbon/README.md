@@ -21,6 +21,9 @@ task IDs still needs the ordinary sign-off.
 | `collapsedGroup.ts` | B-053 | Segments + which groups are expanded → the strip's row list. `buildRibbonRows` is pure. |
 | `CollapsedGroupTile.tsx` | B-053 | The "…" tile — a run of completed stages folded into one control, or unfolded back into them. |
 
+`C-116` is the accessibility pass over all of the above. It added no file; see
+its own section at the bottom.
+
 ## What C-052 built, and what still sits above this directory
 
 Selection: `RibbonStrip` takes `selectedSegment`/`onSelectSegment`, forwards
@@ -268,3 +271,70 @@ on it — the same optional-chained `scrollIntoView` `HandoffDialog.tsx` already
 uses for its own auto-scroll, not a new pattern. `prefers-reduced-motion`
 decides `smooth` versus `auto`, checked the same way `useCountUp.ts` already
 does; the scroll still happens either way, it simply has no motion.
+
+## C-116 — the accessibility pass, and the three things it found
+
+B-050 wrote the ARIA labels, B-052 the keyboard, B-053 the collapsed group.
+By the time this task ran, most of §4A.3's closing bullet was already true —
+which is why what is here is three specific defects rather than a rebuild.
+
+**1. A screen-reader user was told the wrong number.** `segmentAriaLabel`
+printed the current segment's live clock under the words `in stage`. Those are
+two different units and this directory has said so from the start: a sealed
+segment's `durationMins` is *working* minutes computed against the calendar,
+and the running timer is wall clock. A ticket handed to Deployment at 18:00 on
+Friday reads `62h elapsed` on Monday morning against the ~8h that gets
+recorded. The tile has always drawn the distinction — it prints `elapsed` and
+`in stage` in different places for exactly this reason — and the accessible
+name flattened it, so a reader who could not see the tile was told the ticket
+had spent two and a half working days somewhere it had spent one. The label
+now carries whichever word matches the figure.
+
+**2. Position was missing, and B-052 is why.** Making the strip a composite
+widget — one tab stop, arrows inside it — is the right call and the reasoning
+above stands. What it costs is the one thing `role="list"` was providing for
+free: a reader who tabs in lands directly on the current tile, hears "list, 8
+items" once if at all, and then arrows between tiles with nothing telling them
+where in the eight they are. A sighted reader has the whole strip in
+peripheral vision and never has to ask. So `segmentAriaLabel` now says **stage
+3 of 8**, right after the stage name.
+
+The numbers are the **journey's, not the strip's** — 1-based over
+`ribbon.segments`, never over `rows`. Folding three completed stages into a
+"…" must not turn stage 7 into stage 5; a reader who then expanded the group
+would find the ribbon had renumbered itself under them. `RibbonStrip` builds
+one `Map` from segment identity to index and hands it down, which works
+because `buildRibbonRows` returns the same objects it was given.
+
+**3. A handoff was silent.** The strip re-renders on every `stage.changed`
+frame `D-058` pushes, and a ticket moving from Development to QA under an open
+page produced three signals — the auto-centre scroll, the moved `CURRENT`
+tile, the changed colour — every one of them visual. That is WCAG 2.1 4.1.3
+(Status Messages, AA). `RibbonStrip` now carries a polite live region
+announcing the stage the ticket has moved into.
+
+It is `aria-live="polite" aria-atomic="true"` and **not `role="status"`**,
+which is what those two attributes are. The announcement is identical; the role
+is not, and this is a shared component. `TicketDetailPage` already renders a
+`role="status"` banner for a sealed cycle, and `attachment-picker.tsx` records
+having avoided landing "a second `role="status"` beside" it for the same
+reason — a second one here made `getByRole('status')` ambiguous on that page
+and took three of its tests red. Contributing no role costs nothing here and
+stops a shared component becoming three other people's problem.
+
+Two further details are deliberate. It is **silent on the first resolution**,
+because a live region that speaks when the ribbon loads is announcing the page
+rather than a change, and it would talk over whatever the reader was actually
+navigating to. And it keys on **stage plus iteration**, the same identity the
+auto-centring effect uses, so a ticket *sent back* to Development announces
+itself — a loop is a real move even though the stage code did not change.
+
+**What this pass looked at and left alone.** `aria-pressed` on a selectable
+tile is correct: `TicketDetailPage.selectSegment` genuinely toggles the filter
+off on a second click, so the tile is a toggle button and says so.
+`RibbonDots`' native `title` per dot stays a `title` — B-051's section above
+argues that case and 200 focusable marks in a grid is still the wrong answer.
+The contextual action button is a second tab stop inside the composite, which
+APG permits; it is reachable, and folding it into the roving would make
+`Enter` on a segment ambiguous.
+

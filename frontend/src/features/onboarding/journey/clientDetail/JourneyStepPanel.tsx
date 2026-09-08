@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns'
 import { useGetMe } from '@/api/generated/auth/auth'
 import { useGetObJourneyStep } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { Chip } from '@/components/ui/chip'
+import { StepCommunicationsPanel } from '../communications/StepCommunicationsPanel'
 import { ragLabel, ragVariant, type JourneyHold } from './journeyStrip'
 import type { ResolveUser } from './ribbonSteps'
 import { StepActionBar } from './StepActionBar'
@@ -43,11 +44,32 @@ import { completionGate, mayActOnStep } from './stepActions'
  *
  * ## What OB-06 does not include
  *
- * **Communications and history are C-112**, whose backlog line is explicit
- * that it owns "per-step, **plus** the client-level stitched view". The
- * endpoints exist (`listObStepCommunications`, `listObStepHistory`) and are
- * deliberately not called here: splitting the per-step timeline from the
- * stitched one across two tasks would mean building the same component twice.
+ * **History is still absent.** `listObStepHistory` exists and nothing calls
+ * it; the append-only narrative of a step's state changes has no screen yet.
+ * C-112 took the communications half of that line — see below — and left this
+ * one, because a history tab is a different read with a different shape and
+ * folding it into the communications component would be building the wrong
+ * thing to save a file.
+ *
+ * ## C-112 · the communications timeline, under everything else
+ *
+ * Plan §6's per-step half, and it sits **below the action bar** rather than
+ * between the summary and the actions. The order is the argument the whole
+ * panel is built on: what the service *is*, then what you can *do* to it,
+ * then what has been *said* about it. A reader who came here to act should
+ * not have to scroll a conversation to reach the button.
+ *
+ * `StepCommunicationsPanel` is self-contained — its own read, its own empty
+ * state, its own form — so this file stays a renderer of
+ * `ObJourneyStepView` and gains no third data fetch of its own.
+ *
+ * **It is not gated on `canAct`,** unlike the task list and the action bar.
+ * Those two change the service, and only its owner or backup may. Recording
+ * that a call happened is not changing the service: a PM or a manager
+ * chasing a client has every reason to write one down on a step they do not
+ * own, and the server scopes that read and write by journey visibility
+ * rather than by step ownership. Hiding the form from them would be the UI
+ * inventing a rule the service does not have.
  *
  * **Skip is absent, and that is a gap in the caller's identity rather than a
  * choice.** `POST /skip` requires the onboarding module role `OB_MANAGER` or
@@ -79,6 +101,7 @@ export function JourneyStepPanel({
   step,
   resolveUser,
   hold = null,
+  obClientId,
 }: {
   step: ObJourneyStepView
   resolveUser?: ResolveUser
@@ -87,6 +110,13 @@ export function JourneyStepPanel({
    * startable, and the server answers `journey-not-open` for two quite
    * different reasons this separates. */
   hold?: JourneyHold
+  /**
+   * C-112 · lets an entry recorded here also refresh the client-level stitched
+   * view. Optional, because a caller that renders a step panel outside OB-05
+   * (a preview, a story) has no client in hand and the per-step timeline is
+   * still correct without one.
+   */
+  obClientId?: number
 }) {
   const owner: UserRef | undefined = step.ownerUserId != null ? resolveUser?.(step.ownerUserId) : undefined
   const backup: UserRef | undefined =
@@ -198,6 +228,11 @@ export function JourneyStepPanel({
           {backup && `, with ${backup.displayName} as backup`}. Only they can update it.
         </p>
       )}
+
+      {/* Plan §6, per-step, and last for the reason the class docstring gives.
+          The stitched client-level view is the same entries seen from the
+          other end — `ClientCommunicationsPanel`. */}
+      <StepCommunicationsPanel stepId={step.id} obClientId={obClientId} />
     </div>
   )
 }

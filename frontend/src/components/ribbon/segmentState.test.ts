@@ -105,9 +105,23 @@ describe('segmentAriaLabel', () => {
     expect(segmentAriaLabel(seg({ state: SegmentState.CURRENT }))).not.toContain('now')
   })
 
-  it('prefers the live elapsed figure when one is passed', () => {
+  /*
+   * C-116 · the live clock and the sealed figure are different units, and this
+   * label used to print both under the words "in stage". The tile has always
+   * drawn the distinction; announcing the wall-clock figure as working minutes
+   * told a screen-reader user the ticket had spent two and a half working days
+   * in a stage it had spent one. See `useElapsedMins` and this directory's
+   * README for the 62h-versus-8h example.
+   */
+  it('prefers the live elapsed figure when one is passed, and says "elapsed" for it', () => {
     const label = segmentAriaLabel(seg({ state: SegmentState.CURRENT, durationMins: null }), 135)
-    expect(label).toContain('2h 15m in stage')
+    expect(label).toContain('2h 15m elapsed')
+    expect(label).not.toContain('in stage')
+  })
+
+  it('says "in stage" for the sealed working-hours figure, which is a different unit', () => {
+    expect(segmentAriaLabel(seg())).toContain('2d 1h in stage')
+    expect(segmentAriaLabel(seg())).not.toContain('elapsed')
   })
 
   it('announces the loop count, singular and plural', () => {
@@ -128,5 +142,23 @@ describe('segmentAriaLabel', () => {
     expect(segmentAriaLabel({ stageCode: 'QA' })).toBe(
       'QA, Unassigned, pending, — in stage, — effort',
     )
+  })
+
+  /*
+   * C-116 · B-052 made the strip one tab stop with arrows inside it, which is
+   * the right shape and costs the one thing `role="list"` gave for free: a
+   * reader arrowing across eight tiles had nothing telling them where in the
+   * eight they were. A sighted reader never has to ask.
+   */
+  describe('the position, C-116', () => {
+    it('names where the stage sits, right after the stage itself', () => {
+      expect(segmentAriaLabel(seg(), undefined, { index: 3, total: 8 })).toBe(
+        'Development, stage 3 of 8, Ravi Kumar, completed, 2d 1h in stage, 14.5 h effort',
+      )
+    })
+
+    it('is omitted entirely when the caller has no strip to be third of', () => {
+      expect(segmentAriaLabel(seg())).not.toContain('stage 3 of')
+    })
   })
 })
