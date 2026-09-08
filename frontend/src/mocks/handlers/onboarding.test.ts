@@ -943,3 +943,172 @@ describe('B-106 · removing a requirement takes nothing with it', () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ── B-107 · client attachments ───────────────────────────────────────────────
+
+/**
+ * **The upload route is exercised by its own unit tests on the server, not
+ * here, and that is a limitation of vitest rather than a choice.** Under jsdom
+ * `FormData`, `Blob` and `File` are jsdom's while `fetch` and `Request` are
+ * Node's, and Node refuses to serialise a foreign `FormData` — so no genuine
+ * multipart body ever reaches a handler. `request.formData()` does not fail
+ * there, it *hangs*, and every test that uploads times out with no hint why:
+ * `handlers/rest.ts` says so on the import upload, and
+ * `uploadTicketAttachment.test.ts` records the whole realm gap at length.
+ *
+ * So what is asserted here is everything the card is built against that is not
+ * the POST: which rows are readable, which removals leave a mark, and that a
+ * removed file keeps its row.
+ */
+
+interface AttachmentRow {
+  id: number
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  kind: 'REFERENCE' | 'SUBMISSION'
+  uploadedByType: 'STAFF' | 'CLIENT'
+  scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED' | 'FAILED'
+  downloadUrl: string | null
+  isDeleted: boolean
+  deletedAt: string | null
+  deletedBy: { id: number; displayName: string } | null
+}
+
+const listAttachments = (clientId: number) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/attachments`)
+
+const deleteAttachment = (clientId: number, attachmentId: number) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/attachments/${attachmentId}`, {
+    method: 'DELETE',
+  })
+
+/** A row filed straight into the fixture, standing in for the POST above. */
+const seedAttachment = (clientId: number, uploadedById: number, fileName: string) => {
+  const db = getDb()
+  const client = db.obClients.find((c) => c.id === clientId)!
+  const id = Math.max(0, ...db.obClients.flatMap((c) => c.attachments.map((a) => a.id))) + 1
+  client.attachments.push({
+    id,
+    fileName,
+    contentType: 'application/pdf',
+    sizeBytes: 1024,
+    kind: 'SUBMISSION',
+    uploadedByType: 'STAFF',
+    uploadedById,
+    scanStatus: 'CLEAN',
+    deletedAt: null,
+    deletedById: null,
+    createdAt: new Date().toISOString(),
+  })
+  return id
+}
+
+describe('B-107 · a document becomes readable only after the scan', () => {
+  it('gives a CLEAN row a download URL and a PENDING row none', async () => {
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+
+    const clean = rows.find((a) => a.scanStatus === 'CLEAN')!
+    const pending = rows.find((a) => a.scanStatus === 'PENDING')!
+
+    expect(clean.downloadUrl).not.toBeNull()
+    // The whole enforcement, and the reason it is an absent URL rather than an
+    // absent row: a card that hid pending files would make a scan delay look
+    // like a failed upload and leave somebody re-attaching the same file.
+    expect(pending.downloadUrl).toBeNull()
+  })
+
+  it('returns a PENDING row rather than hiding it', async () => {
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    expect(rows.some((a) => a.scanStatus === 'PENDING')).toBe(true)
+  })
+
+  it('carries both kinds a client-owned file can be, and neither of the other two', async () => {
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+
+    // REFERENCE is a document staff attached for the client to read;
+    // SUBMISSION is what the client sent in. It decides what the portal may do
+    // with the row, so a card that ignored it would offer a client a replace
+    // action on a document they may never touch.
+    expect(rows.some((a) => a.kind === 'REFERENCE')).toBe(true)
+    expect(rows.some((a) => a.kind === 'SUBMISSION')).toBe(true)
+    // DELIVERABLE belongs to a service and EVIDENCE to a sign-off — other owner
+    // arms of the same table, and neither can appear on a client-owned file.
+    expect(rows.every((a) => a.kind === 'REFERENCE' || a.kind === 'SUBMISSION')).toBe(true)
+  })
+})
+
+describe('B-107 · removal keeps the row and sometimes says so', () => {
+  it('shows a tombstone for a removal that was not the uploader own', async () => {
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const tombstone = rows.find((a) => a.isDeleted)!
+
+    // "File removed by X on date" — the supervisory removal the record is
+    // supposed to keep, and the one state nothing else in this fixture produces.
+    expect(tombstone.deletedAt).not.toBeNull()
+    expect(tombstone.deletedBy).not.toBeNull()
+    // A tombstone never carries a URL: the bytes are gone, not merely hidden.
+    expect(tombstone.downloadUrl).toBeNull()
+  })
+
+  it('hides the tombstone when the uploader removes their own file promptly', async () => {
+    // Uploaded by user 1, which is who the mock signs every write as.
+    const id = seedAttachment(NORTHWIND, 1, 'wrong-client.pdf')
+
+    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+
+    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    // Gone from the listing entirely. Somebody who drops the wrong PDF and
+    // removes it ten seconds later has not done anything the client record
+    // needs to remember, and a permanent note for every mis-drop would train
+    // everyone to read past the line that matters.
+    expect(after.map((a) => a.id)).not.toContain(id)
+
+    // But the row itself survives — the object goes, the record does not.
+    const stored = getDb().obClients.find((c) => c.id === NORTHWIND)!.attachments
+    expect(stored.find((a) => a.id === id)!.deletedAt).not.toBeNull()
+  })
+
+  it('shows the tombstone when somebody else removes it, inside the window', async () => {
+    // Uploaded by user 5, removed by user 1 seconds later. Time alone would
+    // hide this; the uploader comparison is what makes the rule right — a
+    // supervisory removal is exactly the kind the record should keep.
+    const id = seedAttachment(NORTHWIND, 5, 'leaked-pricing.pdf')
+
+    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+
+    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const tombstone = after.find((a) => a.id === id)!
+    expect(tombstone.isDeleted).toBe(true)
+    expect(tombstone.downloadUrl).toBeNull()
+  })
+
+  it('is idempotent and does not re-stamp who removed it', async () => {
+    const id = seedAttachment(NORTHWIND, 1, 'duplicate-delete.pdf')
+
+    await deleteAttachment(NORTHWIND, id)
+    const row = getDb().obClients.find((c) => c.id === NORTHWIND)!.attachments
+      .find((a) => a.id === id)!
+    const firstStamp = row.deletedAt
+
+    // 204 rather than 404: the caller asked for the file to be gone and it is
+    // gone, and refusing would distinguish "already removed" from "never
+    // existed" for anyone allowed to ask.
+    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+    expect(row.deletedAt).toBe(firstStamp)
+  })
+
+  it('404s an attachment id belonging to another client', async () => {
+    const db = getDb()
+    const other = db.obClients.find(
+      (c) => c.id !== NORTHWIND && c.attachments.length > 0,
+    )!
+
+    // Resolved by BOTH ids. These ids are drawn from a sequence shared with
+    // every journey step and sign-off file, so a status that distinguished
+    // "not yours" from "not there" would enumerate the module whole upload
+    // history one integer at a time.
+    const res = await deleteAttachment(NORTHWIND, other.attachments[0].id)
+    expect(res.status).toBe(404)
+  })
+})

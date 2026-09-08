@@ -8488,6 +8488,192 @@ paths:
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
 
+  /onboarding/clients/{obClientId}/attachments:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    get:
+      tags: [onboarding]
+      operationId: listObClientAttachments
+      summary: Documents filed against a client (OB-05)
+      description: |
+        B-107 - the signed contract, the purchase order, the branding pack:
+        whatever the boarding team files against the client record.
+
+        **The same upload pipeline as a ticket attachment, unchanged.** The bytes
+        are validated by extension allow-list *and* MIME sniffing, EXIF is
+        stripped, the file is virus-scanned, and it becomes readable only once
+        the scan passes. Onboarding, chat and tickets call the same beans, so
+        there is one answer to "is this file safe" rather than three that can
+        drift. What is different is the table (`ob_attachments`, A-102 - plan
+        section 2's separability requirement reaching the bucket) and the storage
+        namespace, `onboarding/clients/{obClientId}/{uuid}`.
+
+        **`PENDING` and `INFECTED` rows are returned, not hidden.** Hiding them
+        would make a scan delay indistinguishable from a failed upload and would
+        leave somebody re-attaching the same file. The requirement is that the
+        file not become *readable*, and that is enforced by the absent
+        `downloadUrl` - a signed URL that is never issued is stronger than a row
+        that is merely filtered out.
+
+        **Tombstones appear only when the removal is one the record should
+        keep** - see `deleteObClientAttachment`. A tombstone never carries a
+        `downloadUrl`: the bytes are gone, not merely hidden.
+
+        **No `ETag`.** Every other read on this client is preconditioned; this
+        one is not, because the set changes with no user action behind it - a
+        `PENDING` row becomes `CLEAN` on a background thread and grows a
+        `downloadUrl`. A tag minted here would be stale before it was useful,
+        and the signed URLs are re-minted on every read anyway because they
+        expire in minutes. For the same reason attachments are **not** inside
+        `getObClient`'s document: folding them in would move the client's `ETag`
+        for a change nobody made, and hand a `412` to whoever happened to be
+        editing the address.
+
+        Reading is every module role's - OB Viewer is "everything, read-only".
+      responses:
+        '200':
+          description: OK. Oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObAttachmentListResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding]
+      operationId: uploadObClientAttachment
+      summary: File a document against a client (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        B-107 - multipart, for `uploadAttachment`'s reason: a base64 JSON body
+        inflates the payload by a third and buffers the whole file as a String
+        before anything has decided whether it is acceptable. A file that is
+        going to be refused should be refused having cost as little as possible.
+
+        **`kind` is `REFERENCE` or `SUBMISSION`, and never the column's other
+        two.** A-102 gives `ob_attachments.kind` four values because the table
+        serves four owners: `DELIVERABLE` belongs to a service and `EVIDENCE` to
+        a sign-off. A document filed against the *client* is neither, and the
+        database cannot draw that line - its CHECK constrains which owner column
+        is set and says nothing about which kinds go with which owner. Sending
+        one of the other two is `400`. Omitting `kind` means `SUBMISSION`, which
+        is the column default and the common case.
+
+        The distinction is not decoration: it decides what the portal may do
+        with the row. A client may replace their own `SUBMISSION` and may never
+        touch a `REFERENCE`.
+
+        **The per-file cap is `edutrack.attachments.max-file-bytes`** - the same
+        bean and the same number as every other upload surface, so an
+        administrator raising it raises it everywhere at once. There is
+        deliberately **no per-client total**: section 4B.4's 50 MB and 20-file
+        caps are stated per *ticket*, the onboarding plan publishes no
+        equivalent for a client, and refusing a legitimate twenty-first document
+        on nobody's authority is worse than the gap. Plan section 11's portal
+        upload caps are decided with CP-04.
+
+        Writes are OB Admin, Onboarding Manager, or Sales for a client they
+        created.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                kind:
+                  type: string
+                  enum: [REFERENCE, SUBMISSION]
+                  default: SUBMISSION
+      responses:
+        '201':
+          description: |
+            Accepted. `scanStatus` is `PENDING` and there is no `downloadUrl`
+            until the scan passes - not an error state; the card reloads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObAttachmentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '413':
+          description: The file is larger than `edutrack.attachments.max-file-bytes`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '415':
+          description: Extension or sniffed MIME type not allowed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/clients/{obClientId}/attachments/{attachmentId}:
+    parameters:
+      - { $ref: '#/components/parameters/ObClientId' }
+      - { $ref: '#/components/parameters/ObAttachmentId' }
+    delete:
+      tags: [onboarding]
+      operationId: deleteObClientAttachment
+      summary: Remove a document from a client (OB-05)
+      description: |
+        B-107 - section 4B.4's deletion rule, one module over. **The stored
+        object is removed in every case; the row always survives.**
+
+        The row surviving is A-102's own instruction - "removed by deactivation,
+        never by DELETE - a file referenced by a sign-off or a completed step is
+        evidence, and the row has to keep resolving" - and
+        `ck_ob_attachments_deleted` makes the stamp and its actor move together
+        at the column.
+
+        What differs is whether the removal leaves a **visible tombstone**:
+
+        - **The uploader, within 15 minutes** - no tombstone. The row disappears
+          from `listObClientAttachments` entirely. Somebody who drops the wrong
+          PDF and removes it ten seconds later has not done anything the client
+          record needs to remember.
+        - **Anyone else, or after 15 minutes** - the row is returned with
+          `isDeleted: true` and both tombstone fields set, rendering as "file
+          removed by X on date".
+
+        Both facts are already on the row, so this needed no column: *who*
+        removed it against who uploaded it, and *when* against when it arrived.
+
+        **Who may: the uploader, an OB Admin, or an Onboarding Manager.** The
+        widening past the uploader has section 4B.4's reason - a document filed
+        against the wrong client is one company's paperwork disclosed to whoever
+        opens another company's record, and waiting out a timer to remove it
+        would be absurd. Sales is not on that list although Sales may upload:
+        their scope already limits them to clients they created, and within
+        those the supervisory removal belongs to the two roles section 3 gives
+        oversight to. A salesperson can still remove what they uploaded, which
+        is the whole of the mistake they can make.
+
+        A file uploaded from the client portal has no staff uploader at all, so
+        removing one is always an Admin or Manager act and always leaves a mark.
+
+        **Idempotent.** Removing an already-removed document answers `204`, not
+        `404` - the caller asked for the file to be gone and it is gone, and
+        refusing would distinguish "already removed" from "never existed". It
+        does not re-stamp the tombstone either, so a retry cannot rewrite who
+        removed a file.
+
+        **`204`, where the other panels on this screen answer `200` with the
+        client document.** That follows from attachments not being inside it:
+        there is no fresh `ETag` to hand back, and returning the client would be
+        returning something this operation did not change.
+      responses:
+        '204': { description: Removed. The object is gone; the row is tombstoned. }
+        '403':
+          description: |
+            Visible to this caller, but not theirs to remove - they are neither
+            the uploader nor an OB Admin or Onboarding Manager. Deliberately
+            **not** `404`: the caller is looking at the row in a listing they
+            just fetched, so there is no existence to conceal. Module scope is a
+            separate question and is answered as `404` before this one is asked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
   # ── A-118 · journey instances and the step panel ───────────────────────────
   # The template side (OB-07) is above; this is what a template becomes once a
   # client buys the product. `ObJourneyStrip` deliberately stops at the
@@ -11399,6 +11585,20 @@ components:
         B-106 · an `ob_client_requirements` id. Nested under the client on
         purpose: a requirement belonging to a *different* `ob_clients` row is
         `404`, not `403` — `ObContactId`'s reasoning, unchanged.
+    ObAttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        B-107 - an `ob_attachments` id. Nested under the client on purpose: a
+        file belonging to a *different* `ob_clients` row is `404`, not `403` -
+        `ObContactId`'s reasoning, with one thing worth adding about this table.
+        `ob_attachments` is polymorphic within the module, so its ids are drawn
+        from a sequence shared with every journey step's and sign-off's file. A
+        status that distinguished "not yours" from "not there" would enumerate
+        not just this client's documents but the module's entire upload history
+        one integer at a time.
     ObJourneyId:
       name: journeyId
       in: path
@@ -17717,6 +17917,103 @@ components:
         requirement would close it again with nobody having asked.
         `updateObClient` refused a full representation for the identical reason
         about `status`.
+    ObAttachment:
+      type: object
+      required: [id, fileName, contentType, sizeBytes, kind, uploadedByType, scanStatus, isDeleted, createdAt]
+      description: |
+        B-107 - one file in `ob_attachments` (A-102).
+
+        **The same safety pipeline as a ticket attachment**, and deliberately so:
+        the bytes are sniffed and reconciled against the declared name, EXIF is
+        stripped, and the file is virus-scanned before it becomes readable.
+        Onboarding, chat and tickets call the same beans, so there is one answer
+        to "is this file safe" rather than three that can drift.
+
+        What differs is everything an onboarding file does not have. There is no
+        `cycleNo` and no `stageCode` - it hangs off a client, not a ticket - and
+        no `thumbnailUrl`, because C-026's reduction is a ticket-gallery feature
+        and OB-05 lists documents by name. There is also no `isClientVisible`:
+        visibility on the portal follows `kind` and the owner arm rather than a
+        per-row flag, which is A-102's design and not an omission here.
+      properties:
+        id: { type: integer, format: int64 }
+        fileName: { type: string }
+        # The **sniffed** type, never the declared one. It is served back on a
+        # presigned GET, and serving back a caller-supplied text/html is stored
+        # XSS against whoever opens the link.
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        kind:
+          type: string
+          enum: [REFERENCE, SUBMISSION]
+          description: |
+            What the file is *for*, which is not the same as who owns it.
+            `REFERENCE` is a document staff attached for the client to read;
+            `SUBMISSION` is what the client sent in. It decides what the portal
+            may do with the row: a client may replace their own submission and
+            may never touch a reference.
+
+            The column also carries `DELIVERABLE` and `EVIDENCE` for the service
+            and sign-off owner arms of the same table. Neither can appear on a
+            client-owned file, so neither is on this enum.
+        uploadedByType:
+          type: string
+          enum: [STAFF, CLIENT]
+          description: |
+            Which side of the portal the file came from. A staff user and a
+            client contact live in different tables, so this says which of the
+            two id columns is set rather than the client inferring it from a
+            null.
+        scanStatus:
+          type: string
+          enum: [PENDING, CLEAN, INFECTED, FAILED]
+          description: |
+            Not downloadable until `CLEAN`. Returned rather than hidden: a
+            pending row that vanished would be indistinguishable from a failed
+            upload and would leave somebody re-attaching the same file.
+        downloadUrl:
+          type: [string, 'null']
+          description: |
+            Short-lived signed URL, present only for a `CLEAN` row that has not
+            been tombstoned. Never a public bucket path, and re-minted on every
+            read because it expires in minutes.
+        isDeleted:
+          type: boolean
+          description: |
+            True on a tombstone. A listing returns a removed row ONLY when the
+            removal is one worth recording - see `deleteObClientAttachment`. A
+            tombstone never carries a `downloadUrl`; the bytes are gone, not
+            merely hidden.
+        uploadedBy:
+          description: |
+            The staff user who uploaded it, or `null` when the file came from
+            the client portal - `uploadedByContact` is a row of a different
+            table and B-126 is what makes that case reachable. The client
+            renders the portal side from `uploadedByType`.
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        deletedBy:
+          description: |
+            The two halves of "file removed by X on date", with `deletedAt`.
+            Both null unless `isDeleted`; `deletedBy` is additionally null when
+            the account that removed it no longer exists, and the client renders
+            the tombstone without an actor rather than inventing a name.
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        deletedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    ObAttachmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObAttachment' }
+    ObAttachmentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObAttachment' } }
     ObJourneyStrip:
       type: object
       required: [id, product, gateStatus, percentComplete, steps]

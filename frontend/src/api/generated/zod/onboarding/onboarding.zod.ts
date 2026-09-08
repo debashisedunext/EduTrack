@@ -1776,6 +1776,180 @@ export const deleteObClientRequirementResponse = zod.object({
 })
 
 /**
+ * B-107 - the signed contract, the purchase order, the branding pack:
+whatever the boarding team files against the client record.
+
+**The same upload pipeline as a ticket attachment, unchanged.** The bytes
+are validated by extension allow-list *and* MIME sniffing, EXIF is
+stripped, the file is virus-scanned, and it becomes readable only once
+the scan passes. Onboarding, chat and tickets call the same beans, so
+there is one answer to "is this file safe" rather than three that can
+drift. What is different is the table (`ob_attachments`, A-102 - plan
+section 2's separability requirement reaching the bucket) and the storage
+namespace, `onboarding/clients/{obClientId}/{uuid}`.
+
+**`PENDING` and `INFECTED` rows are returned, not hidden.** Hiding them
+would make a scan delay indistinguishable from a failed upload and would
+leave somebody re-attaching the same file. The requirement is that the
+file not become *readable*, and that is enforced by the absent
+`downloadUrl` - a signed URL that is never issued is stronger than a row
+that is merely filtered out.
+
+**Tombstones appear only when the removal is one the record should
+keep** - see `deleteObClientAttachment`. A tombstone never carries a
+`downloadUrl`: the bytes are gone, not merely hidden.
+
+**No `ETag`.** Every other read on this client is preconditioned; this
+one is not, because the set changes with no user action behind it - a
+`PENDING` row becomes `CLEAN` on a background thread and grows a
+`downloadUrl`. A tag minted here would be stale before it was useful,
+and the signed URLs are re-minted on every read anyway because they
+expire in minutes. For the same reason attachments are **not** inside
+`getObClient`'s document: folding them in would move the client's `ETag`
+for a change nobody made, and hand a `412` to whoever happened to be
+editing the address.
+
+Reading is every module role's - OB Viewer is "everything, read-only".
+
+ * @summary Documents filed against a client (OB-05)
+ */
+export const listObClientAttachmentsParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const listObClientAttachmentsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "fileName": zod.string(),
+  "contentType": zod.string(),
+  "sizeBytes": zod.number(),
+  "kind": zod.enum(['REFERENCE', 'SUBMISSION']).describe('What the file is \*for\*, which is not the same as who owns it.\n`REFERENCE` is a document staff attached for the client to read;\n`SUBMISSION` is what the client sent in. It decides what the portal\nmay do with the row: a client may replace their own submission and\nmay never touch a reference.\n\nThe column also carries `DELIVERABLE` and `EVIDENCE` for the service\nand sign-off owner arms of the same table. Neither can appear on a\nclient-owned file, so neither is on this enum.\n'),
+  "uploadedByType": zod.enum(['STAFF', 'CLIENT']).describe('Which side of the portal the file came from. A staff user and a\nclient contact live in different tables, so this says which of the\ntwo id columns is set rather than the client inferring it from a\nnull.\n'),
+  "scanStatus": zod.enum(['PENDING', 'CLEAN', 'INFECTED', 'FAILED']).describe('Not downloadable until `CLEAN`. Returned rather than hidden: a\npending row that vanished would be indistinguishable from a failed\nupload and would leave somebody re-attaching the same file.\n'),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a `CLEAN` row that has not\nbeen tombstoned. Never a public bucket path, and re-minted on every\nread because it expires in minutes.\n'),
+  "isDeleted": zod.boolean().describe('True on a tombstone. A listing returns a removed row ONLY when the\nremoval is one worth recording - see `deleteObClientAttachment`. A\ntombstone never carries a `downloadUrl`; the bytes are gone, not\nmerely hidden.\n'),
+  "uploadedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('The staff user who uploaded it, or `null` when the file came from\nthe client portal - `uploadedByContact` is a row of a different\ntable and B-126 is what makes that case reachable. The client\nrenders the portal side from `uploadedByType`.\n'),
+  "deletedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('The two halves of \"file removed by X on date\", with `deletedAt`.\nBoth null unless `isDeleted`; `deletedBy` is additionally null when\nthe account that removed it no longer exists, and the client renders\nthe tombstone without an actor rather than inventing a name.\n'),
+  "deletedAt": zod.string().datetime({}).nullish(),
+  "createdAt": zod.string().datetime({})
+}).describe('B-107 - one file in `ob_attachments` (A-102).\n\n\*\*The same safety pipeline as a ticket attachment\*\*, and deliberately so:\nthe bytes are sniffed and reconciled against the declared name, EXIF is\nstripped, and the file is virus-scanned before it becomes readable.\nOnboarding, chat and tickets call the same beans, so there is one answer\nto \"is this file safe\" rather than three that can drift.\n\nWhat differs is everything an onboarding file does not have. There is no\n`cycleNo` and no `stageCode` - it hangs off a client, not a ticket - and\nno `thumbnailUrl`, because C-026\'s reduction is a ticket-gallery feature\nand OB-05 lists documents by name. There is also no `isClientVisible`:\nvisibility on the portal follows `kind` and the owner arm rather than a\nper-row flag, which is A-102\'s design and not an omission here.\n'))
+})
+
+/**
+ * B-107 - multipart, for `uploadAttachment`'s reason: a base64 JSON body
+inflates the payload by a third and buffers the whole file as a String
+before anything has decided whether it is acceptable. A file that is
+going to be refused should be refused having cost as little as possible.
+
+**`kind` is `REFERENCE` or `SUBMISSION`, and never the column's other
+two.** A-102 gives `ob_attachments.kind` four values because the table
+serves four owners: `DELIVERABLE` belongs to a service and `EVIDENCE` to
+a sign-off. A document filed against the *client* is neither, and the
+database cannot draw that line - its CHECK constrains which owner column
+is set and says nothing about which kinds go with which owner. Sending
+one of the other two is `400`. Omitting `kind` means `SUBMISSION`, which
+is the column default and the common case.
+
+The distinction is not decoration: it decides what the portal may do
+with the row. A client may replace their own `SUBMISSION` and may never
+touch a `REFERENCE`.
+
+**The per-file cap is `edutrack.attachments.max-file-bytes`** - the same
+bean and the same number as every other upload surface, so an
+administrator raising it raises it everywhere at once. There is
+deliberately **no per-client total**: section 4B.4's 50 MB and 20-file
+caps are stated per *ticket*, the onboarding plan publishes no
+equivalent for a client, and refusing a legitimate twenty-first document
+on nobody's authority is worse than the gap. Plan section 11's portal
+upload caps are decided with CP-04.
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created.
+
+ * @summary File a document against a client (OB-05)
+ */
+export const uploadObClientAttachmentParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const uploadObClientAttachmentHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const uploadObClientAttachmentBodyKindDefault = "SUBMISSION";
+
+export const uploadObClientAttachmentBody = zod.object({
+  "file": zod.instanceof(File),
+  "kind": zod.enum(['REFERENCE', 'SUBMISSION']).default(uploadObClientAttachmentBodyKindDefault)
+})
+
+/**
+ * B-107 - section 4B.4's deletion rule, one module over. **The stored
+object is removed in every case; the row always survives.**
+
+The row surviving is A-102's own instruction - "removed by deactivation,
+never by DELETE - a file referenced by a sign-off or a completed step is
+evidence, and the row has to keep resolving" - and
+`ck_ob_attachments_deleted` makes the stamp and its actor move together
+at the column.
+
+What differs is whether the removal leaves a **visible tombstone**:
+
+- **The uploader, within 15 minutes** - no tombstone. The row disappears
+  from `listObClientAttachments` entirely. Somebody who drops the wrong
+  PDF and removes it ten seconds later has not done anything the client
+  record needs to remember.
+- **Anyone else, or after 15 minutes** - the row is returned with
+  `isDeleted: true` and both tombstone fields set, rendering as "file
+  removed by X on date".
+
+Both facts are already on the row, so this needed no column: *who*
+removed it against who uploaded it, and *when* against when it arrived.
+
+**Who may: the uploader, an OB Admin, or an Onboarding Manager.** The
+widening past the uploader has section 4B.4's reason - a document filed
+against the wrong client is one company's paperwork disclosed to whoever
+opens another company's record, and waiting out a timer to remove it
+would be absurd. Sales is not on that list although Sales may upload:
+their scope already limits them to clients they created, and within
+those the supervisory removal belongs to the two roles section 3 gives
+oversight to. A salesperson can still remove what they uploaded, which
+is the whole of the mistake they can make.
+
+A file uploaded from the client portal has no staff uploader at all, so
+removing one is always an Admin or Manager act and always leaves a mark.
+
+**Idempotent.** Removing an already-removed document answers `204`, not
+`404` - the caller asked for the file to be gone and it is gone, and
+refusing would distinguish "already removed" from "never existed". It
+does not re-stamp the tombstone either, so a retry cannot rewrite who
+removed a file.
+
+**`204`, where the other panels on this screen answer `200` with the
+client document.** That follows from attachments not being inside it:
+there is no fresh `ETag` to hand back, and returning the client would be
+returning something this operation did not change.
+
+ * @summary Remove a document from a client (OB-05)
+ */
+export const deleteObClientAttachmentParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n'),
+  "attachmentId": zod.number().describe('B-107 - an `ob_attachments` id. Nested under the client on purpose: a\nfile belonging to a \*different\* `ob_clients` row is `404`, not `403` -\n`ObContactId`\'s reasoning, with one thing worth adding about this table.\n`ob_attachments` is polymorphic within the module, so its ids are drawn\nfrom a sequence shared with every journey step\'s and sign-off\'s file. A\nstatus that distinguished \"not yours\" from \"not there\" would enumerate\nnot just this client\'s documents but the module\'s entire upload history\none integer at a time.\n')
+})
+
+/**
  * The accordion that sits **above** the journey accordions on OB-05, and
 the interactive half of CP-03. Its strip is `gateStatus` plus
 `mandatoryVerified / mandatoryTotal`; expanded, it is `tasks`.

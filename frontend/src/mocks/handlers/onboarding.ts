@@ -1,10 +1,10 @@
 import { http } from 'msw';
 import type {
-  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct,
+  Db, ObApplication, ObAttachmentRow, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct,
   ObRequirement, ObStep,
 } from '../db';
 import { getDb, nextId } from '../db';
-import { notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
+import { noContent, notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
 
 /**
  * A-118 · mocks for the Client Onboarding module.
@@ -43,6 +43,56 @@ import { notFound, ok, paginate, problem, url, userRef, validationFailed } from 
  */
 
 // ── mappers to the contract's shapes ────────────────────────────────────────
+
+/**
+ * B-107 · one `ob_attachments` row as the contract's `ObAttachment`.
+ *
+ * The two rules the server enforces are enforced here rather than waved
+ * through, because a documents card built against a permissive mock would
+ * discover both from the real API on the day it is wired up:
+ *
+ * 1. **`downloadUrl` exists only for a `CLEAN`, untombstoned row.** Not a
+ *    hidden row, an absent URL — that is what "the file does not become
+ *    readable" actually means, and a mock that handed a URL to a `PENDING` row
+ *    would let a card render a download button the server never grants.
+ * 2. **A tombstone carries no URL either.** The bytes are gone, not hidden.
+ */
+const obAttachmentDto = (a: ObAttachmentRow, db: Db) => {
+  const readable = a.scanStatus === 'CLEAN' && a.deletedAt === null;
+  return {
+    id: a.id,
+    fileName: a.fileName,
+    contentType: a.contentType,
+    sizeBytes: a.sizeBytes,
+    kind: a.kind,
+    uploadedByType: a.uploadedByType,
+    scanStatus: a.scanStatus,
+    downloadUrl: readable ? `https://minio.local/onboarding/${a.id}?signature=mock` : null,
+    isDeleted: a.deletedAt !== null,
+    uploadedBy: userRef(a.uploadedById, db),
+    deletedBy: userRef(a.deletedById, db),
+    deletedAt: a.deletedAt,
+    createdAt: a.createdAt,
+  };
+};
+
+/**
+ * B-107 · whether a removed document still says so on OB-05.
+ *
+ * Derived from two facts already on the row rather than stored, exactly as the
+ * server derives it: **who** removed it against who uploaded it, and **when**
+ * against when it arrived. The uploader fixing their own mistake inside fifteen
+ * minutes leaves nothing behind; anybody else, or later, always does — a
+ * supervisory removal is precisely the kind the record should keep.
+ */
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+
+const isVisibleTombstone = (a: ObAttachmentRow) => {
+  if (a.deletedAt === null) return false;
+  if (a.uploadedByType !== 'STAFF' || a.uploadedById === null) return true;
+  if (a.uploadedById !== a.deletedById) return true;
+  return Date.parse(a.deletedAt) > Date.parse(a.createdAt) + FIFTEEN_MINUTES_MS;
+};
 
 const productRef = (id: number, db: Db) => {
   const p = db.obProducts.find((x) => x.id === id);
@@ -662,6 +712,8 @@ export const onboardingHandlers = [
         licenseStart: a.licenseStart ?? null,
         licenseEnd: a.licenseEnd ?? null,
       })),
+      // B-107 · a new client has no documents; OB-04 has no upload step.
+      attachments: [],
       // B-106 · rows, numbered in the order they were entered. Blank bodies
       // are dropped rather than refused, exactly as the server does: a wizard
       // textarea produces them by accident.
@@ -1034,6 +1086,83 @@ export const onboardingHandlers = [
       // 200 with the document, not 204 — every write in this package answers
       // with the client so the page never holds a stale ETag.
       return ok(obClientDetailDto(c, db));
+    },
+  ),
+  // ── B-107 · OB-05's documents card ───────────────────────────────────────
+
+  http.get(url('/onboarding/clients/:obClientId/attachments'), ({ params }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    // Reading is every module role's, so there is no write check here — and
+    // PENDING and INFECTED rows are returned rather than filtered: hiding them
+    // would make a scan delay look like a failed upload.
+    const rows = c.attachments.filter((a) => a.deletedAt === null || isVisibleTombstone(a));
+    return ok(rows.map((a) => obAttachmentDto(a, db)));
+  }),
+
+  http.post(url('/onboarding/clients/:obClientId/attachments'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!(file instanceof File)) {
+      return validationFailed({ file: ['A file is required'] });
+    }
+
+    // The kind is narrowed to the two a client-owned file can be. DELIVERABLE
+    // belongs to a service and EVIDENCE to a sign-off — other owner arms of the
+    // same table — and the database cannot draw that line, so the service does.
+    const kind = (form.get('kind') as string | null)?.toUpperCase() ?? 'SUBMISSION';
+    if (kind !== 'REFERENCE' && kind !== 'SUBMISSION') {
+      return validationFailed({ kind: ['A client document is REFERENCE or SUBMISSION.'] });
+    }
+
+    const row: ObAttachmentRow = {
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.attachments.map((a) => a.id))) + 1,
+      fileName: file.name,
+      // The **sniffed** type on the server, which the mock stands in for with
+      // the browser's own. Never what a form field claimed it was.
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      kind,
+      uploadedByType: 'STAFF',
+      uploadedById: 1,
+      // PENDING, always. The scan has not run, so there is no download URL —
+      // which is the state a card must be able to draw, not an error.
+      scanStatus: 'PENDING',
+      deletedAt: null,
+      deletedById: null,
+      createdAt: new Date().toISOString(),
+    };
+    c.attachments.push(row);
+
+    return ok(obAttachmentDto(row, db), undefined, { status: 201 });
+  }),
+
+  http.delete(
+    url('/onboarding/clients/:obClientId/attachments/:attachmentId'),
+    ({ params }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      // Resolved by BOTH ids, as every nested onboarding route is: a real
+      // attachment under another client is 404, never 403.
+      const row = c.attachments.find((a) => a.id === Number(params.attachmentId));
+      if (!row) return notFound('Attachment');
+
+      // Idempotent — the caller asked for the file to be gone and it is gone.
+      // Re-stamping would let a retry rewrite who removed it.
+      if (row.deletedAt !== null) return noContent();
+
+      // The bytes go; the row never does. Whether anybody SEES the tombstone is
+      // decided at read time from what this write leaves behind.
+      row.deletedAt = new Date().toISOString();
+      row.deletedById = 1;
+      return noContent();
     },
   ),
 ];
