@@ -10,7 +10,6 @@ import {
   RESOURCE_ROUTE,
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
-import { ObDashboardPage } from './features/onboarding/dashboard/ObDashboardPage'
 import { RequireAuth } from './features/auth/RequireAuth'
 
 const AuditLogPage = lazy(() =>
