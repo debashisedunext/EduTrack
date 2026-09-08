@@ -5,7 +5,6 @@ import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import com.edunext.edutrack.api.security.permission.RolePermissions;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -243,25 +242,18 @@ class SkipControllerIT {
      * the four with an integration test at all.
      *
      * <p><b>Stream A's {@code domain/journal}/{@code TicketStageTransitionRepository}
-     * — flagged, not fixed here</b>, on CLAUDE.md's ownership boundary. Disabled
-     * rather than left red: CLAUDE.md's verification gate merges no PR with a
-     * failing check, and a build that cannot merge is not a more honest record
-     * of the gap than a disabled test whose reason names the exact exception,
-     * the exact query, and the exact commit that introduced the conflict.
-     * Re-enable once that lock/immutability interaction is resolved upstream —
-     * at that point this test is the CI signal that it was.
+     * defect is resolved</b> — {@code 14b708c5} ("stop the append-only journal's
+     * tail-lock crashing on immutable entities") replaced the {@code @Lock}
+     * request with a native {@code FOR UPDATE} query, so the chain-tail read no
+     * longer asks Hibernate to upgrade an already-managed {@code @Immutable}
+     * entity's lock mode. Re-enabled here and proved green against a real
+     * database by this exact case.
      */
     @Nested
     @DisplayName("a skip actually moves the ticket, in a real database")
     class SuccessPath {
 
         @Test
-        @Disabled("Blocked on a Stream A defect confirmed by this test: advance() -> TicketJournal.append() -> "
-                + "TicketStageTransitionRepository.findFirstByTicketIdOrderByIdDesc's @Lock(PESSIMISTIC_WRITE) "
-                + "throws org.hibernate.UnsupportedLockAttemptException against the already-managed, @Immutable "
-                + "TicketStageTransition open hop. Shared by handoff/rework/force-move/skip alike; see this "
-                + "class's own javadoc and STREAM-C-TICKETS.md's C-047 entry. Not Stream C's to fix "
-                + "(domain/journal, TicketStageTransitionRepository) — re-enable once Stream A resolves it.")
         @DisplayName("QA (optional) is skipped, the ribbon shows it struck through, DEPLOY becomes current")
         void skipsForward() throws Exception {
             String ticketCode = insertTicketStandingIn("QA");
