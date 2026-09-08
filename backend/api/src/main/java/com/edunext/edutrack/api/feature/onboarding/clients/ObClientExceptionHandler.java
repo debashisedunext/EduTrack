@@ -22,7 +22,8 @@ import java.util.Map;
  * §3 is explicit that clients branch on {@code type} and never on prose, so
  * these three strings are the API and the sentences beside them are not.
  */
-@RestControllerAdvice(assignableTypes = {ObClientController.class, ObContactController.class})
+@RestControllerAdvice(assignableTypes = {ObClientController.class, ObContactController.class,
+        ObApplicationController.class})
 class ObClientExceptionHandler {
 
     private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
@@ -38,6 +39,10 @@ class ObClientExceptionHandler {
             URI.create("https://edutrack/errors/ob-contact-email-duplicate");
     private static final URI CONTACT_PRIMARY_REQUIRED =
             URI.create("https://edutrack/errors/ob-contact-primary-required");
+    private static final URI APPLICATION_DUPLICATE_PRODUCT =
+            URI.create("https://edutrack/errors/ob-application-duplicate-product");
+    private static final URI APPLICATION_PRODUCT_IMMUTABLE =
+            URI.create("https://edutrack/errors/ob-application-product-immutable");
 
     /** 404 — no such client, or one out of the caller's A-112 scope. Indistinguishable, by design. */
     @ExceptionHandler(ObClientNotFoundException.class)
@@ -222,6 +227,64 @@ class ObClientExceptionHandler {
         problem.setDetail(e.getMessage());
         problem.setProperty("forceable", false);
         problem.setProperty("errors", Map.of("isPrimary", new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * 404 — no such purchase under this client, or one belonging to somebody
+     * else's. Indistinguishable, by design.
+     */
+    @ExceptionHandler(ObApplicationNotFoundException.class)
+    ResponseEntity<ProblemDetail> handleApplicationNotFound(ObApplicationNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problem.setType(NOT_FOUND);
+        problem.setTitle("Not found");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    /**
+     * 409 {@code ob-application-duplicate-product} — final, but not a dead end.
+     *
+     * <p>{@code existingApplicationId} is carried as its own property because the
+     * thing the caller actually wants is one URL away: more seats or a renewed
+     * licence is a {@code PATCH} of the purchase already on file. A 409 that says
+     * "already bought" without saying which of five rows to open leaves the panel
+     * with nothing to do but refuse.
+     *
+     * <p>{@code errors} is keyed on {@code productId} so the message lands on the
+     * product picker, which is the field that caused it.
+     */
+    @ExceptionHandler(DuplicateApplicationProductException.class)
+    ResponseEntity<ProblemDetail> handleDuplicateProduct(DuplicateApplicationProductException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(APPLICATION_DUPLICATE_PRODUCT);
+        problem.setTitle("This client has already bought that product");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("forceable", false);
+        problem.setProperty("existingApplicationId", e.existingApplicationId());
+        problem.setProperty("errors", Map.of("productId", new String[]{e.getMessage()}));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * 409 {@code ob-application-product-immutable} — a purchase cannot be
+     * repointed at a different product.
+     *
+     * <p>{@code forceable: false} carried explicitly, on {@code
+     * handleDuplicatePan}'s reasoning: this panel shows two 409s and neither is
+     * overridable, while the wizard one screen away shows one that is. A client
+     * left to infer which is which from the {@code type} will eventually offer
+     * "do it anyway" beside one that cannot be.
+     */
+    @ExceptionHandler(ApplicationProductImmutableException.class)
+    ResponseEntity<ProblemDetail> handleProductImmutable(ApplicationProductImmutableException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(APPLICATION_PRODUCT_IMMUTABLE);
+        problem.setTitle("A purchase cannot change product");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("forceable", false);
+        problem.setProperty("errors", Map.of("productId", new String[]{e.getMessage()}));
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 

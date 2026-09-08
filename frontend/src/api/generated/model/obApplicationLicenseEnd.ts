@@ -48,9 +48,12 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Captured now so the renewals module, when it arrives, finds its
-data waiting rather than needing a backfill nobody can source
-(plan §1.1 item 11). Nothing in this module reads it.
+ * Captured so the renewals module, when it arrives, finds its data
+waiting rather than needing a backfill nobody can source (plan §1.1
+item 11). Nothing in this module *reads* it — but since B-104 it can
+be moved, which is the half that makes it an anchor rather than a
+boarding-day snapshot. A licence renewed every year and only ever
+writable at boarding would tell that module every client lapsed.
 
  */
 export type ObApplicationLicenseEnd = string | null;

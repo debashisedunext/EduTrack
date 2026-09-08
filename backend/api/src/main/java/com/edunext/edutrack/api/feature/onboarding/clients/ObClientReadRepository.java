@@ -6,7 +6,6 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -230,7 +229,15 @@ class ObClientReadRepository {
                 .param("gateStatus", blankToNull(gateStatus))
                 .param("productId", productId)
                 .param("salesPersonId", salesPersonId)
-                .param("cursorDate", decoded == null ? null : Date.valueOf(LocalDate.parse(decoded.sortKey())))
+                // B-104 · the LocalDate itself, not Date.valueOf(..). The
+                // keyset cursor is compared against c.onboarding_date, which is
+                // the same DATE column localDate() reads — and java.sql.Date
+                // carries an instant, so binding one lets the driver convert it
+                // through a zone on the way out. That is A-067's defect on the
+                // bind side, and while the read was ALSO shifted the two
+                // cancelled; fixing only the read would have left page two
+                // starting a day off. See localDate()'s note.
+                .param("cursorDate", decoded == null ? null : LocalDate.parse(decoded.sortKey()))
                 .param("cursorId", decoded == null ? null : decoded.id())
                 .param("limit", fetchSize);
         if (rag != null && !rag.isBlank()) {
@@ -351,15 +358,57 @@ class ObClientReadRepository {
     }
 
     List<ApplicationRow> applicationsOf(long clientId) {
-        return jdbc.sql("""
-                SELECT a.id AS id, a.license_type AS licenseType, a.units AS units,
-                       a.license_start AS licenseStart, a.license_end AS licenseEnd,
-                       p.id AS productId, p.code AS productCode, p.name AS productName
-                  FROM ob_client_applications a
-                  JOIN ob_products p ON p.id = a.product_id
+        return jdbc.sql(APPLICATION_COLUMNS + """
                  WHERE a.ob_client_id = :id
                  ORDER BY p.name, p.id
                 """).param("id", clientId).query(APPLICATION_MAPPER).list();
+    }
+
+    /**
+     * One purchase of one client, resolved by both ids at once.
+     *
+     * <p>B-104 · the {@code ob_client_id} is in the {@code WHERE} rather than
+     * checked afterwards, so a real purchase belonging to a different client
+     * returns nothing and becomes a 404 — {@link #contactOf}'s reasoning, and it
+     * matters slightly more here. Enumerating this table one integer at a time
+     * would enumerate which organisations bought which products, which is a fact
+     * about other clients' commercial relationships rather than about the
+     * caller's own work.
+     *
+     * <p>Unscoped for {@link #contactOf}'s reason: A-112's rule has already been
+     * applied to the <em>client</em> by {@code findDetail}, and expressing it a
+     * third time over a table it says nothing about is how two copies of one
+     * security rule drift apart.
+     */
+    Optional<ApplicationRow> applicationOf(long clientId, long applicationId) {
+        return jdbc.sql(APPLICATION_COLUMNS + """
+                 WHERE a.ob_client_id = :clientId AND a.id = :applicationId
+                """)
+                .param("clientId", clientId)
+                .param("applicationId", applicationId)
+                .query(APPLICATION_MAPPER)
+                .optional();
+    }
+
+    /**
+     * Whether this client has already bought this product, and which row holds
+     * it.
+     *
+     * <p>B-104 · {@code uq_ob_client_applications} is on {@code (ob_client_id,
+     * product_id)}, so this asks exactly the question the index will answer. The
+     * row is returned rather than a boolean because the refusal names the
+     * product and offers the existing purchase to edit — a 409 that says "already
+     * bought" without saying <em>which</em> row to open is a dead end on a panel
+     * that may be showing five.
+     */
+    Optional<ApplicationRow> applicationByProduct(long clientId, long productId) {
+        return jdbc.sql(APPLICATION_COLUMNS + """
+                 WHERE a.ob_client_id = :clientId AND a.product_id = :productId
+                """)
+                .param("clientId", clientId)
+                .param("productId", productId)
+                .query(APPLICATION_MAPPER)
+                .optional();
     }
 
     List<String> requirementsOf(long clientId) {
@@ -546,6 +595,28 @@ class ObClientReadRepository {
               FROM ob_client_contacts ct
             """;
 
+    /**
+     * B-104 · one projection of {@code ob_client_applications}, shared by the
+     * detail read and by the purchases panel's two lookups.
+     *
+     * <p>Extracted for {@code CONTACT_COLUMNS}' reason: three statements over one
+     * table that differ only in their {@code WHERE} are three chances for a
+     * column added to one to go missing from the others, and the mapper would
+     * fail at runtime rather than at compile time.
+     */
+    private static final String APPLICATION_COLUMNS = """
+            SELECT a.id            AS id,
+                   a.license_type  AS licenseType,
+                   a.units         AS units,
+                   a.license_start AS licenseStart,
+                   a.license_end   AS licenseEnd,
+                   p.id            AS productId,
+                   p.code          AS productCode,
+                   p.name          AS productName
+              FROM ob_client_applications a
+              JOIN ob_products p ON p.id = a.product_id
+            """;
+
     private static final RowMapper<ListRow> LIST_MAPPER = (rs, n) -> listRow(rs);
 
     private static final RowMapper<DetailRow> DETAIL_MAPPER = (rs, n) -> new DetailRow(
@@ -618,9 +689,29 @@ class ObClientReadRepository {
         return value == null ? null : value.toInstant();
     }
 
+    /**
+     * B-104 · {@code getObject(.., LocalDate.class)}, never
+     * {@code getDate(..).toLocalDate()} — <b>A-067's defect</b>, and this was the
+     * last repository still carrying it.
+     *
+     * <p>{@code rs.getDate} builds a {@code java.sql.Date} from an instant and
+     * {@code toLocalDate} renders it through the <b>JVM default zone</b>, so a
+     * date stored in a UTC database and read on an IST machine came back a day
+     * early. {@code TicketReportRepository}, {@code ReportScheduleRepository} and
+     * {@code WidgetRepository} all say the same thing at their own call sites;
+     * {@code ObContactWriteRepository.Consent.atTimestamp} is the write-side
+     * counterpart on a {@code DATETIME(6)}.
+     *
+     * <p>Found by {@code ObApplicationsIT.aRenewalMovesTheEndDate}, which is the
+     * first assertion anywhere to compare a date written through this package
+     * against the same date read back out of it. It was silently wrong for
+     * <b>every</b> caller of this mapper, not only the licence window: {@code
+     * onboardingDate} on the OB-03 list and the OB-05 header went through it too,
+     * so a client boarded on the 7th displayed as the 6th. A {@code DATE} has no
+     * instant and must not be given one; {@code getObject} does not.
+     */
     private static LocalDate localDate(ResultSet rs, String column) throws SQLException {
-        Date value = rs.getDate(column);
-        return value == null ? null : value.toLocalDate();
+        return rs.getObject(column, LocalDate.class);
     }
 
     private static String blankToNull(String value) {

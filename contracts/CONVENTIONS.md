@@ -229,6 +229,15 @@ been shown the row, `403` concedes nothing and `404` reads as a bug. Out-of-scop
 rows on those same routes remain `404`: that is the scope guard, and the services
 run the scoped read first so the two refusals cannot be confused.
 
+B-104's purchases panel joins that set on the identical argument — a Viewer has
+already rendered a client's purchases and journey strips through `getObClient`.
+It is worth naming the split those nested panels keep, because it is what stops
+the exemption widening into "the whole route answers 403": **who** may write is
+the `403`; **whether this particular row** may take the write is a `409`, because
+that depends on the row rather than on the caller. `ob-contact-primary-required`
+and `ob-application-product-immutable` are the two, and C-033 records the same
+split between `deleteComment`'s `403` and `editComment`'s `422`.
+
 ### 8 · No mutation verb on append-only paths
 
 `/tickets/{id}/history`, `/tickets/{id}/effort-logs` and `/audit-logs` expose
