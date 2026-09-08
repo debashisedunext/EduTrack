@@ -695,10 +695,24 @@ describe('RibbonStrip · C-116 · what a reader who cannot see it is told', () =
     expect(screen.getByRole('button', { name: /Stage 5, stage 5 of 6/ })).toBeInTheDocument()
   })
 
+  /*
+   * Queried by test id rather than by role: the region is `aria-live` without
+   * `role="status"`, so that a ribbon mounted on a page which already has a
+   * status region — `TicketDetailPage`'s sealed-cycle banner — does not make
+   * `getByRole('status')` ambiguous there. See `RibbonStrip.tsx`.
+   */
+  it('announces politely, without adding a second status role to whatever page it is on', () => {
+    render(<RibbonStrip ribbon={ribbon(journey('DEV'))} />)
+
+    const region = screen.getByTestId('ribbon-stage-announcement')
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('says nothing on first paint — a live region that speaks on load is announcing the page', () => {
     render(<RibbonStrip ribbon={ribbon(journey('DEV'))} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('')
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('')
   })
 
   it('announces the stage a ticket has moved into', () => {
@@ -706,7 +720,7 @@ describe('RibbonStrip · C-116 · what a reader who cannot see it is told', () =
 
     rerender(<RibbonStrip ribbon={ribbon(journey('QA'))} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Now in QA')
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('Now in QA')
   })
 
   /*
@@ -734,7 +748,7 @@ describe('RibbonStrip · C-116 · what a reader who cannot see it is told', () =
 
     rerender(<RibbonStrip ribbon={ribbon(sentBack)} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Now in Development, iteration 2')
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('Now in Development, iteration 2')
   })
 
   it('stays quiet when the ribbon re-renders without the stage moving', () => {
@@ -743,6 +757,6 @@ describe('RibbonStrip · C-116 · what a reader who cannot see it is told', () =
 
     rerender(<RibbonStrip ribbon={ribbon(segments)} selectedSegment={{ stageCode: 'INTAKE' }} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('')
+    expect(screen.getByTestId('ribbon-stage-announcement')).toHaveTextContent('')
   })
 })

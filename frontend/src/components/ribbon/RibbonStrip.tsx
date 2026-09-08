@@ -263,11 +263,29 @@ export function RibbonStrip({
 
   return (
     <>
-      {/* Outside the list, so it is neither an unlabelled `listitem` nor
-          inside a container a reader may be browsing. Present from first
-          paint, because a live region added to the DOM at the same moment its
-          text changes is a region most screen readers never announce. */}
-      <p role="status" aria-live="polite" className="sr-only">
+      {/*
+        Outside the list, so it is neither an unlabelled `listitem` nor inside
+        a container a reader may be browsing. Present from first paint, because
+        a live region added to the DOM at the same moment its text changes is a
+        region most screen readers never announce.
+
+        **`aria-live` and `aria-atomic` rather than `role="status"`**, which is
+        what those two attributes *are*. The announcement is identical and the
+        role is not, and the difference matters because this strip is shared:
+        `TicketDetailPage` already renders a `role="status"` banner for a
+        sealed cycle, and `attachment-picker.tsx` documents having avoided
+        landing "a second `role="status"` beside" it for the same reason. A
+        second one here would not break a screen reader — but it would make
+        `getByRole('status')` ambiguous on every page that mounts a ribbon,
+        which is a shared component making three other people's tests
+        someone's problem. Contributing no role at all costs nothing here.
+      */}
+      <p
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="ribbon-stage-announcement"
+        className="sr-only"
+      >
         {stageAnnouncement}
       </p>
       <div

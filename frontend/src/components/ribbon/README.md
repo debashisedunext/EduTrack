@@ -313,7 +313,16 @@ tile, the changed colour — every one of them visual. That is WCAG 2.1 4.1.3
 (Status Messages, AA). `RibbonStrip` now carries a polite live region
 announcing the stage the ticket has moved into.
 
-Two details about it are deliberate. It is **silent on the first resolution**,
+It is `aria-live="polite" aria-atomic="true"` and **not `role="status"`**,
+which is what those two attributes are. The announcement is identical; the role
+is not, and this is a shared component. `TicketDetailPage` already renders a
+`role="status"` banner for a sealed cycle, and `attachment-picker.tsx` records
+having avoided landing "a second `role="status"` beside" it for the same
+reason — a second one here made `getByRole('status')` ambiguous on that page
+and took three of its tests red. Contributing no role costs nothing here and
+stops a shared component becoming three other people's problem.
+
+Two further details are deliberate. It is **silent on the first resolution**,
 because a live region that speaks when the ribbon loads is announcing the page
 rather than a change, and it would talk over whatever the reader was actually
 navigating to. And it keys on **stage plus iteration**, the same identity the
