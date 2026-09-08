@@ -47,11 +47,26 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObStepCommunicationChannel } from './obStepCommunicationChannel';
-import type { UserRef } from './userRef';
+import type { ObStepCommunicationAuthorType } from './obStepCommunicationAuthorType';
+import type { ObStepCommunicationRecordedBy } from './obStepCommunicationRecordedBy';
 
 export interface ObStepCommunication {
   id: number;
   stepId: number;
+  /** `ob_step_communications.entry_type`, which is **one** column rather
+than a channel beside a kind. C-112 widened the enum instead of
+adding a second field, because the table has carried
+`COMMENT|ESCALATION|SYSTEM` since A-106 wrote it and a reader
+filtering the timeline is choosing between all eight with one
+control.
+
+The first five are the only values `createObStepCommunication`
+accepts -- that route is a person recording a conversation. The
+last three are written by other subsystems and are read-only here:
+a portal comment (`COMMENT`, CP-03), the escalation mirror plan
+section 4 lands on this timeline (`ESCALATION`, C-126), and the
+module's own automatic entries (`SYSTEM`).
+ */
   channel: ObStepCommunicationChannel;
   /** When the conversation happened, which is not when it was typed —
 people record a Friday call on Monday, and a communication audit
@@ -63,6 +78,22 @@ that ordered by entry time would misreport every one of them.
 there is no way to unpublish something a client has already read.
  */
   isClientVisible: boolean;
-  recordedBy: UserRef;
+  /** Which of `ob_step_communications`' two author columns is set --
+a staff user, a client contact through the portal, or neither.
+The DDL's own `ck_ob_comms_author` says exactly this, and it is
+three shapes rather than "one of two is not null".
+ */
+  authorType: ObStepCommunicationAuthorType;
+  /** The one string a timeline row renders, whichever side wrote it:
+the staff user's name, the client contact's name, or `System`.
+Always present -- a row whose author cannot be rendered is the
+thing `ck_ob_comms_author` exists to make unrepresentable.
+ */
+  authorName: string;
+  /** The **staff** identity, and null on a `CLIENT` or `SYSTEM` entry --
+`ObEscalation.escalatedTo`'s own shape for the same reason. Read
+`authorName` to render the row; read this to link to a user.
+ */
+  recordedBy?: ObStepCommunicationRecordedBy;
   createdAt?: string;
 }

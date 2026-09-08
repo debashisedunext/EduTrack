@@ -7,6 +7,7 @@ import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
 import { JourneyAccordion } from './JourneyAccordion'
 import { PrereqAccordion } from './PrereqAccordion'
 import { ragLabel, ragVariant } from './journeyStrip'
@@ -42,12 +43,26 @@ import { ragLabel, ragVariant } from './journeyStrip'
  * - **The step update panel** — start, complete, block, the task-list gate and
  *   the history — is **C-111** (OB-06). `JourneyStepPanel` renders the step
  *   read-only until then, with no dead controls standing in for the actions.
- * - **SD/FD in the ribbon meta line and the animated status emojis** are
- *   **C-125**, which names C-110 as its dependency for exactly this reason.
  * - **The client-account panel** — create, reset and disable a portal login —
  *   is **B-126**, on Stream B's side of the ownership map. The page's
  *   `hasPortalLogin` line is the read-only fact until it lands.
- * - **The stitched client-level communications tab** is **C-112**.
+ * - **SD/FD in the ribbon meta line and the animated status emojis** remain
+ *   **C-125**'s.
+ *
+ * <h2>C-112 · the stitched communications panel, and why it is at the bottom</h2>
+ *
+ * §9's order is the argument the page is built on — the gate first, because
+ * nothing below it can move while it is locked, then the journeys. The
+ * communications panel is not actionable in that sense: it is the record of
+ * what has been said, read before a call rather than worked down. So it sits
+ * under the accordions, where it does not push the one thing a reader has to
+ * act on further down the page.
+ *
+ * It is a **panel rather than a tab**, which is a departure from the task's own
+ * wording. OB-05 has no tab strip — the page is an accordion stack — and
+ * introducing one for a single additional section would restructure a screen
+ * §9 lays out deliberately. The panel keeps its own two filters instead, which
+ * is what the tab would have carried anyway.
  *
  * <h2>Where this file lives</h2>
  *
@@ -201,11 +216,16 @@ export function ObClientDetailPage() {
                 journey={journey}
                 siblings={journeys}
                 users={userList}
+                obClientId={obClientId}
                 isOpen={open.has(`journey-${journey.id}`)}
                 onToggle={() => toggle(`journey-${journey.id}`)}
               />
             ))
           )}
+
+          {/* C-112 · plan §6's client-level half. See the page docstring for
+              why it is a panel here and not a tab. */}
+          <ClientCommunicationsPanel obClientId={obClientId} journeys={journeys} />
         </>
       )}
     </div>

@@ -31,6 +31,39 @@ const productRef = (id: number, db: Db) => {
   return p ? { id: p.id, code: p.code, name: p.name } : null;
 };
 
+/**
+ * C-112 · one communication on the wire.
+ *
+ * `authorName` is the **one string a timeline row renders**, whichever side
+ * wrote it, and `recordedBy` is the staff identity behind it or null — two
+ * fields because they answer different questions, one text and one link.
+ * `ck_ob_comms_author`'s three shapes are why a single `recordedBy` could not
+ * carry both.
+ */
+const stepCommunicationDto = (c: ObStepCommunicationRow, stepId: number, db: Db) => ({
+  id: c.id,
+  stepId,
+  channel: c.channel,
+  occurredAt: c.occurredAt,
+  summary: c.summary,
+  isClientVisible: c.isClientVisible,
+  authorType: c.authorType,
+  authorName: communicationAuthorName(c, db),
+  recordedBy: c.recordedById == null ? null : userRef(c.recordedById, db),
+  createdAt: c.createdAt,
+});
+
+const communicationAuthorName = (c: ObStepCommunicationRow, db: Db): string => {
+  if (c.authorType === 'STAFF' && c.recordedById != null) {
+    return userRef(c.recordedById, db)?.displayName ?? 'System';
+  }
+  if (c.authorType === 'CLIENT') return c.authorName ?? 'System';
+  return 'System';
+};
+
+const byOccurredAtAscending = (a: ObStepCommunicationRow, b: ObStepCommunicationRow) =>
+  a.occurredAt === b.occurredAt ? a.id - b.id : a.occurredAt < b.occurredAt ? -1 : 1;
+
 // ── A-118 · journey instances and the step panel ────────────────────────────
 //
 // The template side is `onboardingJourneys.ts` (C-102). This is what a
@@ -398,18 +431,13 @@ export const obJourneyHandlers = [
     const db = getDb();
     const found = findStep(db, Number(params.stepId));
     if (!found) return notFound('Step');
-    const page = paginate(found.step.communications ?? [], new URL(request.url));
+    // Oldest first — a service's timeline is a narrative read forwards, and
+    // the server orders on `occurred_at` rather than on insertion, so a
+    // backdated entry lands where it belongs rather than at the end.
+    const ordered = [...(found.step.communications ?? [])].sort(byOccurredAtAscending);
+    const page = paginate(ordered, new URL(request.url));
     return ok(
-      page.page.map((c) => ({
-        id: c.id,
-        stepId: found.step.id,
-        channel: c.channel,
-        occurredAt: c.occurredAt,
-        summary: c.summary,
-        isClientVisible: c.isClientVisible,
-        recordedBy: userRef(c.recordedById, db),
-        createdAt: c.createdAt,
-      })),
+      page.page.map((c) => stepCommunicationDto(c, found.step.id, db)),
       page.meta,
     );
   }),
@@ -439,24 +467,66 @@ export const obJourneyHandlers = [
       // Defaults false. An internal note that reaches the portal because a
       // default went the other way is not recoverable by deleting it after.
       isClientVisible: body.isClientVisible ?? false,
+      // This route is a person at a desk. A portal comment and C-126's
+      // escalation mirror carry their own author type and never come through
+      // here — which is why the create request's channel enum is narrower
+      // than the one the response can carry.
+      authorType: 'STAFF',
       recordedById: db.currentUserId,
       createdAt: new Date().toISOString(),
     };
     found.step.communications.push(created);
     return ok(
-      {
-        id: created.id,
-        stepId: found.step.id,
-        channel: created.channel,
-        occurredAt: created.occurredAt,
-        summary: created.summary,
-        isClientVisible: created.isClientVisible,
-        recordedBy: userRef(created.recordedById, db),
-        createdAt: created.createdAt,
-      },
+      stepCommunicationDto(created, found.step.id, db),
       undefined,
       { status: 201 },
     );
+  }),
+
+  /**
+   * C-112 · the client-level stitched view (plan §6).
+   *
+   * **Newest first**, which is the whole difference from the per-step read
+   * above: a service's timeline is a narrative you read forwards, a client's
+   * is a feed you check. Ordered on `occurredAt` — when the conversation
+   * happened, not when it was typed — so a Friday call recorded on Monday
+   * sorts to Friday here too.
+   *
+   * An unknown client answers an **empty list**, not a 404: the server scopes
+   * this read and an out-of-scope client is indistinguishable from an unknown
+   * one, so a mock that 404'd would teach the screen an error state the real
+   * server never produces.
+   */
+  http.get(url('/onboarding/clients/:obClientId/communications'), ({ params, request }) => {
+    const db = getDb();
+    const obClientId = Number(params.obClientId);
+    const client = db.obClients.find((c) => c.id === obClientId);
+    const requestUrl = new URL(request.url);
+    const journeyFilter = requestUrl.searchParams.get('journeyId');
+    const clientVisibleOnly = requestUrl.searchParams.get('clientVisibleOnly') === 'true';
+
+    const stitched = (client?.journeys ?? [])
+      .filter((journey) => !journeyFilter || journey.id === Number(journeyFilter))
+      .flatMap((journey) =>
+        journey.steps.flatMap((step) =>
+          (step.communications ?? [])
+            .filter((c) => !clientVisibleOnly || c.isClientVisible)
+            .map((c) => ({
+              ...stepCommunicationDto(c, step.id, db),
+              obClientId,
+              journeyId: journey.id,
+              productName: productRef(journey.productId, db)?.name ?? 'Service',
+              stepName: step.name,
+              stepSequence: step.sequence,
+            })),
+        ),
+      )
+      .sort((a, b) =>
+        a.occurredAt === b.occurredAt ? b.id - a.id : a.occurredAt < b.occurredAt ? 1 : -1,
+      );
+
+    const page = paginate(stitched, requestUrl);
+    return ok(page.page, page.meta);
   }),
 
   http.get(url('/onboarding/journey-steps/:stepId/history'), ({ params, request }) => {

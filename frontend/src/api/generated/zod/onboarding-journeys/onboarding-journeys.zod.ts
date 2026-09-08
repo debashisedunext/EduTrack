@@ -1120,17 +1120,19 @@ export const listObStepCommunicationsResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
   "stepId": zod.number(),
-  "channel": zod.enum(['CALL', 'EMAIL', 'MEETING', 'WHATSAPP', 'OTHER']),
+  "channel": zod.enum(['CALL', 'EMAIL', 'MEETING', 'WHATSAPP', 'OTHER', 'COMMENT', 'ESCALATION', 'SYSTEM']).describe('`ob_step_communications.entry_type`, which is \*\*one\*\* column rather\nthan a channel beside a kind. C-112 widened the enum instead of\nadding a second field, because the table has carried\n`COMMENT|ESCALATION|SYSTEM` since A-106 wrote it and a reader\nfiltering the timeline is choosing between all eight with one\ncontrol.\n\nThe first five are the only values `createObStepCommunication`\naccepts -- that route is a person recording a conversation. The\nlast three are written by other subsystems and are read-only here:\na portal comment (`COMMENT`, CP-03), the escalation mirror plan\nsection 4 lands on this timeline (`ESCALATION`, C-126), and the\nmodule\'s own automatic entries (`SYSTEM`).\n'),
   "occurredAt": zod.string().datetime({}).describe('When the conversation happened, which is not when it was typed —\npeople record a Friday call on Monday, and a communication audit\nthat ordered by entry time would misreport every one of them.\n'),
   "summary": zod.string(),
   "isClientVisible": zod.boolean().describe('False by default. True publishes it to the portal thread, and\nthere is no way to unpublish something a client has already read.\n'),
-  "recordedBy": zod.object({
+  "authorType": zod.enum(['STAFF', 'CLIENT', 'SYSTEM']).describe('Which of `ob_step_communications`\' two author columns is set --\na staff user, a client contact through the portal, or neither.\nThe DDL\'s own `ck_ob_comms_author` says exactly this, and it is\nthree shapes rather than \"one of two is not null\".\n'),
+  "authorName": zod.string().describe('The one string a timeline row renders, whichever side wrote it:\nthe staff user\'s name, the client contact\'s name, or `System`.\nAlways present -- a row whose author cannot be rendered is the\nthing `ck_ob_comms_author` exists to make unrepresentable.\n'),
+  "recordedBy": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),
+}),zod.null()]).optional().describe('The \*\*staff\*\* identity, and null on a `CLIENT` or `SYSTEM` entry --\n`ObEscalation.escalatedTo`\'s own shape for the same reason. Read\n`authorName` to render the row; read this to link to a user.\n'),
   "createdAt": zod.string().datetime({}).optional()
 })),
   "meta": zod.object({
@@ -1169,6 +1171,82 @@ export const createObStepCommunicationBody = zod.object({
   "occurredAt": zod.string().datetime({}),
   "summary": zod.string().min(1).max(createObStepCommunicationBodySummaryMax),
   "isClientVisible": zod.boolean().optional()
+})
+
+/**
+ * C-112 . the **stitched view**. Section 6 asks for per-step timelines
+*and* a client-level one, and this is the half no screen in section 9
+draws -- the module plan calls it what management actually asks for,
+which is "what has anyone said to this client lately", a question no
+per-service timeline can answer because the answer spans services.
+
+**Newest first**, unlike the per-step timeline, and that is the whole
+difference between the two reads. A service's own timeline is a
+narrative you read forwards; a client's is a feed you check, and the
+entry that matters is the last one.
+
+Ordered and cursored on `(occurredAt, id)` -- **when the conversation
+happened**, not when it was typed, the same distinction
+`ObStepCommunication.occurredAt` draws. A Friday call recorded on
+Monday sorts to Friday here too.
+
+Scoped exactly as every other onboarding read: an out-of-scope or
+unknown client answers an **empty list**, not a 403 -- the same
+"indistinguishable from not found" rule `listObEscalations` follows,
+and for the same reason.
+
+**Prerequisite comment threads are not stitched in yet**, and section 6
+says they join this view. No prerequisite table exists in any migration
+today (A-118 drafted the routes; B-124 builds the master), so there is
+nothing to join. Recorded here rather than approximated.
+
+ * @summary Everything said to this client, across every service (plan section 6)
+ */
+export const listObClientCommunicationsParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const listObClientCommunicationsQueryClientVisibleOnlyDefault = false;export const listObClientCommunicationsQueryLimitDefault = 50;
+export const listObClientCommunicationsQueryLimitMax = 200;
+
+
+
+export const listObClientCommunicationsQueryParams = zod.object({
+  "journeyId": zod.number().optional().describe('Narrow to one service\'s own share of the stitched view.'),
+  "clientVisibleOnly": zod.boolean().optional().describe('What the client can see in the portal, from the staff side -- the\nanswer to \"did we say that to them, or only to each other\" before\nsomebody repeats an internal note on a call.\n'),
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObClientCommunicationsQueryLimitMax).default(listObClientCommunicationsQueryLimitDefault)
+})
+
+export const listObClientCommunicationsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "journeyId": zod.number(),
+  "productName": zod.string().describe('A journey has no name of its own -- `ob_journeys` is keyed by\nproduct and the product\'s name is what every screen calls it.\n'),
+  "stepId": zod.number(),
+  "stepName": zod.string(),
+  "stepSequence": zod.number(),
+  "channel": zod.enum(['CALL', 'EMAIL', 'MEETING', 'WHATSAPP', 'OTHER', 'COMMENT', 'ESCALATION', 'SYSTEM']),
+  "occurredAt": zod.string().datetime({}),
+  "summary": zod.string(),
+  "isClientVisible": zod.boolean(),
+  "authorType": zod.enum(['STAFF', 'CLIENT', 'SYSTEM']),
+  "authorName": zod.string(),
+  "recordedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+}).describe('One row of the \*\*client-level stitched view\*\* (plan section 6) -- every\ncommunication on every service of one client, newest first, in one\ntimeline rather than one per service.\n\nIt is `ObStepCommunication` plus the four fields that say \*where\* the\nentry came from, spelled out rather than composed with `allOf`: a\nstitched row is read by a different screen than a step\'s own timeline\nand the two are free to diverge.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
 })
 
 /**
