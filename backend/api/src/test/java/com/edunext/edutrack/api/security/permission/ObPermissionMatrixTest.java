@@ -119,7 +119,7 @@ class ObPermissionMatrixTest {
     }
 
     @Test
-    @DisplayName("exactly one route enforces its rule today, and the gap is 25")
+    @DisplayName("eight routes enforce their rule today, and the gap is 29")
     void theEnforcementGapIsExact() {
         // THE RATCHET, and the reason this file is not just a coverage check.
         //
@@ -132,14 +132,34 @@ class ObPermissionMatrixTest {
         //
         // WHEN THIS FAILS BECAUSE THE NUMBER WENT DOWN, that is A-122 working.
         // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(28);
+        assertThat(ObPermissionMatrix.ENTRIES).hasSize(37);
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
-                .hasSize(27);
+                .hasSize(29);
 
+        // THE FIGURES WENT UP, AND THAT IS NOT THE RATCHET SLIPPING. Eleven
+        // routes arrived that A-114 could not have known about — nine from the
+        // client master on this branch, two from C-111 already on develop — so
+        // the declared set grew by eleven and the gap by four. The ratio moved
+        // the right way: seven of the eleven enforce their rule on arrival.
+        //
+        // A-122's job is unchanged and is still measured here: 29 is what it
+        // has to drive to zero.
         Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
         enforced.removeAll(ObPermissionMatrix.NOT_YET_ENFORCED);
         assertThat(enforced)
-                .containsExactly("POST /api/v1/onboarding/journey-steps/{stepId}/skip");
+                .as("ObClientScope.mayWrite is the second enforcement point in the module — "
+                        + "it refuses OB_VIEWER and OB_STEP_OWNER on every write to a client "
+                        + "record or to one of its child rows, and ObClientsIT, ObContactsIT "
+                        + "and ObApplicationsIT each prove it against real MySQL")
+                .containsExactly(
+                        "DELETE /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
+                        "PATCH /api/v1/onboarding/clients/{obClientId}",
+                        "PATCH /api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
+                        "PATCH /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
+                        "POST /api/v1/onboarding/clients",
+                        "POST /api/v1/onboarding/clients/{obClientId}/applications",
+                        "POST /api/v1/onboarding/clients/{obClientId}/contacts",
+                        "POST /api/v1/onboarding/journey-steps/{stepId}/skip");
     }
 }

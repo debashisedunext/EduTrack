@@ -65,6 +65,21 @@ final class ObPermissionMatrix {
     /** A step's own owner acts on it; a moderator overrides it. */
     private static final Set<String> STEP_ACTORS = Set.of(OB_ADMIN, OB_MANAGER, OB_STEP_OWNER);
 
+    /**
+     * §3's Sales column — "Board clients, capture sale details, view progress"
+     * — beside the two roles that see everything.
+     *
+     * <p>The client record is the one resource Sales <b>writes</b>, and the only
+     * place §3 gives a verb to a role that is not Admin or Manager. Viewer is
+     * read-only and a Step Owner owns steps rather than the client the steps
+     * hang off, so neither appears here.
+     *
+     * <p>Sales needs no extra clause for "clients they created": {@code
+     * ObClientScope.predicate} has already reduced their visible set to exactly
+     * those, so the two rules meet rather than overlap — that class's own note.
+     */
+    private static final Set<String> CLIENT_WRITERS = Set.of(OB_ADMIN, OB_MANAGER, OB_SALES);
+
     private ObPermissionMatrix() {
     }
 
@@ -127,6 +142,47 @@ final class ObPermissionMatrix {
         // own step. ObJourneyStepLifecycleService#skip checks it and answers
         // 404 rather than 403, on the guard's own not-found reasoning.
         m.put("POST /api/v1/onboarding/journey-steps/{stepId}/skip", ADMIN_AND_MANAGER);
+
+        // --- the client master (B-102, B-103, B-104) -------------------------
+        //
+        // A-114 landed before these routes existed, so it had none of them; they
+        // are added here by the branch that brings them, which is what
+        // `everyRouteIsCovered` is for.
+        //
+        // FOUR OF THE NINE ARE B-102's AND ARE ALREADY ON DEVELOP (PR #399),
+        // which means develop fails this test on its own — verified on a clean
+        // checkout. B-102 merged without them because A-114's matrix and B-102's
+        // routes were in flight at the same time and neither PR could see the
+        // other; `cb04fdeb` had already repaired the identical collision for
+        // C-111's two. They are covered here rather than left for a third repair
+        // commit, because a branch cannot go green while its base is red and
+        // this branch is the next thing through.
+        //
+        // The reads are EVERY_ROLE and the writes are not, which is §3's own
+        // split: Viewer is "everything, read-only" and a Step Owner reads the
+        // journeys containing their steps, so both reach the client they are
+        // working against — but neither has a verb over the record itself. WHICH
+        // clients each of them sees is ObClientScope.predicate's answer (A-112),
+        // not this matrix's: a Sales user reaching the read still sees only the
+        // clients they created.
+        m.put("GET /api/v1/onboarding/clients", EVERY_ROLE);
+        m.put("GET /api/v1/onboarding/clients/{obClientId}", EVERY_ROLE);
+        m.put("POST /api/v1/onboarding/clients", CLIENT_WRITERS);
+        m.put("PATCH /api/v1/onboarding/clients/{obClientId}", CLIENT_WRITERS);
+
+        // The SPOC panel and the purchases panel inherit the rule of the client
+        // they hang off — ObContactService and ObApplicationService both run
+        // ObClientScope.mayWrite against the client before touching a child row,
+        // so a role that may not edit the client may not edit its contacts or
+        // its purchases either. Stated per route rather than by reference,
+        // because a reader checking one of these should not have to find the
+        // parent to learn the answer.
+        m.put("POST /api/v1/onboarding/clients/{obClientId}/contacts", CLIENT_WRITERS);
+        m.put("PATCH /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", CLIENT_WRITERS);
+        m.put("DELETE /api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", CLIENT_WRITERS);
+        m.put("POST /api/v1/onboarding/clients/{obClientId}/applications", CLIENT_WRITERS);
+        m.put("PATCH /api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
+                CLIENT_WRITERS);
 
         // --- escalations -----------------------------------------------------
         //
@@ -201,5 +257,14 @@ final class ObPermissionMatrix {
             "GET /api/v1/onboarding/reports/{reportKey}",
             "GET /api/v1/onboarding/notifications",
             "PATCH /api/v1/onboarding/notifications/read-all",
-            "PATCH /api/v1/onboarding/notifications/{notificationId}/read"));
+            "PATCH /api/v1/onboarding/notifications/{notificationId}/read",
+
+            // B-102/B-104 · the two client READS. Their declared rule is
+            // EVERY_ROLE, and nothing applies it: ModuleAccessGuard is still
+            // unwired, so a caller holding no onboarding grant at all reaches
+            // them. What such a caller gets is zero rows — ObClientScope
+            // .deniesEverything answers the `1 = 0` predicate — which is a row
+            // rule (A-112) rather than the module-role reach this set counts.
+            "GET /api/v1/onboarding/clients",
+            "GET /api/v1/onboarding/clients/{obClientId}"));
 }
