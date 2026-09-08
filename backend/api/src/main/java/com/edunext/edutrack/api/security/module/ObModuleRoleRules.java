@@ -81,6 +81,16 @@ public class ObModuleRoleRules {
      */
     private static final Set<String> ADMIN_AND_SALES = Set.of(OB_ADMIN, OB_SALES);
 
+    /**
+     * B-107 · the three roles {@code ObClientScope.mayWrite} lets edit a client
+     * they can see. Used by the documents card, where the filter must be able to
+     * reach every arm of the service's own check — see the block on the
+     * attachment routes for why this is deliberately wider than
+     * {@link #ADMIN_AND_SALES}.
+     */
+    private static final Set<String> CLIENT_DOCUMENT_ACTORS =
+            Set.of(OB_ADMIN, OB_MANAGER, OB_SALES);
+
     private static final PathPatternParser PARSER = new PathPatternParser();
 
     /**
@@ -208,6 +218,32 @@ public class ObModuleRoleRules {
                 ADMIN_AND_SALES);
         put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
                 ADMIN_AND_SALES);
+
+        // B-107 · OB-05's documents card. The read is every role's, on §3's
+        // "Viewer sees everything, read-only".
+        //
+        // The two writes are NOT ADMIN_AND_SALES, which is the first block on
+        // this client that is not, so the reason is written down rather than
+        // left to look like a slip. ObClientAttachmentService decides both with
+        // ObClientScope.mayWrite() — Admin, Manager, Sales — and the filter has
+        // to be able to reach every arm of a check the service makes, or the
+        // Manager arm is dead code that nothing exercises and nothing notices
+        // rotting. The product reading agrees: what these routes carry is
+        // evidence about the work (a signed acceptance, a returned form), not
+        // the client record's own fields, and §3 gives the Manager oversight of
+        // the work while giving Sales the record.
+        //
+        // Worth noting in passing rather than fixing here: the contract's
+        // updateObClient names "OB Admin, Onboarding Manager, and Sales" as its
+        // writers too, so the ADMIN_AND_SALES rows above are already narrower
+        // than the contract they enforce. That is Stream A's call to reconcile,
+        // and B-107 deliberately did not widen somebody else's rows to make its
+        // own look consistent.
+        put(m, "GET", "/api/v1/onboarding/clients/{obClientId}/attachments", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/attachments",
+                CLIENT_DOCUMENT_ACTORS);
+        put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}/attachments/{attachmentId}",
+                CLIENT_DOCUMENT_ACTORS);
 
         // C-112 · the communication log, which landed on develop while this
         // branch was open. Reading one is every role's — Viewer sees

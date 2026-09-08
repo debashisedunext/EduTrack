@@ -392,6 +392,18 @@ final class PermissionMatrix {
      */
     static final String MULTIPART = " multipart";
 
+    /** B-124 · {@code ObPrereqTemplateTaskWriteRequest}: title, tatDays and isMandatory are required. */
+    private static final String PREREQ_TEMPLATE_TASK = """
+            {"title":"Signed MSA","description":"Countersigned copy","tatDays":5,"isMandatory":true}""";
+
+    /** B-124 · {@code ObPrereqTemplateTaskOrderRequest}: the whole draft's ids, and never empty. */
+    private static final String PREREQ_TASK_ORDER = """
+            {"taskIds":[1,2]}""";
+
+    /** B-124 · {@code ObPrereqTemplateTaskDocWriteRequest}: both fields required. */
+    private static final String PREREQ_TASK_DOC = """
+            {"label":"Blank MSA","attachmentId":1}""";
+
     /** {@code HolidayWrite}: date and name are required. */
     private static final String HOLIDAY = """
             {"date":"2026-01-26","name":"Republic Day"}""";
@@ -2430,6 +2442,57 @@ final class PermissionMatrix {
                     UPSERT_OB_REQUIREMENT),
             everyRole("DELETE",
                     "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}"),
+
+            // ── B-124 · OB-14, the org-wide prerequisites master ─────────────
+            //
+            // ⚠ These nine reached develop with no entry here at all, so every
+            // role's outcome on them was unasserted while reading exactly like a
+            // route that had been reasoned about — the failure this suite exists
+            // for. Added by B-107 rather than left red: it is the same stream's
+            // omission, and a route that arrives unasserted stays unasserted
+            // until somebody claims it.
+            //
+            // Every role, on the client blocks' reasoning unchanged: who may
+            // author the prerequisites master is an *onboarding* role question
+            // (OB Admin alone, per ObModuleRoleRules), and none of the six
+            // ticketing-role fixtures here carries onboarding standing at all.
+            // What they meet is ModuleGuard, not a capability in this file.
+            //
+            // The four routes with a required @Valid body carry a fixture, for
+            // the reason this class's header gives: without one the 400 from
+            // argument resolution arrives before @PreAuthorize and the row
+            // asserts nothing whatever the annotation says.
+            everyRole("GET", "/api/v1/onboarding/prereq-template"),
+            everyRole("POST", "/api/v1/onboarding/prereq-template/revisions"),
+            everyRole("POST", "/api/v1/onboarding/prereq-template/publish"),
+            everyRole("POST", "/api/v1/onboarding/prereq-template/tasks", PREREQ_TEMPLATE_TASK),
+            everyRole("PUT", "/api/v1/onboarding/prereq-template/tasks/order", PREREQ_TASK_ORDER),
+            everyRole("PATCH", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}",
+                    PREREQ_TEMPLATE_TASK),
+            everyRole("DELETE", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}"),
+            everyRole("POST", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}/docs",
+                    PREREQ_TASK_DOC),
+            everyRole("DELETE", "/api/v1/onboarding/prereq-template-task-docs/{docId}"),
+
+            // ── B-107 · OB-05's documents card ────────────────────────────────
+            //
+            // Every role, on the three blocks above's reasoning unchanged: who
+            // may file or remove a client document is an *onboarding* role
+            // question, and none of the six ticketing-role fixtures here carries
+            // onboarding standing at all. Each gets 404 — the scoped client read
+            // runs before anything else in ObClientAttachmentService and finds
+            // nothing.
+            //
+            // The POST carries MULTIPART rather than a JSON fixture, and D-053's
+            // row one screen up records why it matters: the handler declares
+            // `consumes = multipart/form-data`, so a request that is not
+            // multipart is refused 415 during handler *mapping* — earlier than
+            // argument resolution and earlier than @PreAuthorize. All six rows
+            // would have passed on that 415 with authorisation never consulted.
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/attachments", MULTIPART),
+            everyRole("GET", "/api/v1/onboarding/clients/{obClientId}/attachments"),
+            everyRole("DELETE",
+                    "/api/v1/onboarding/clients/{obClientId}/attachments/{attachmentId}"),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //

@@ -794,6 +794,31 @@ export interface ObRequirement {
   createdById: number | null; createdAt: string; updatedAt: string | null;
 }
 
+/**
+ * B-107 · `ob_attachments`, the `ob_client_id` arm — OB-05's documents card.
+ *
+ * The table is polymorphic within the module (A-102) and this is one of its
+ * four owner arms; the mock models only the arm B-107 builds routes for.
+ *
+ * Two fields are **derived on read and never stored**, exactly as on the
+ * server, because a mock that stored them would let a card be built against a
+ * rule the API does not have:
+ *
+ * - `downloadUrl` exists only for a `CLEAN`, untombstoned row. A signed URL
+ *   that is never issued is the enforcement; hiding the row is not.
+ * - whether a tombstone is *visible* — the uploader removing their own file
+ *   within fifteen minutes leaves no trace, anybody else always does.
+ */
+export interface ObAttachmentRow {
+  id: number; fileName: string; contentType: string; sizeBytes: number;
+  kind: 'REFERENCE' | 'SUBMISSION';
+  uploadedByType: 'STAFF' | 'CLIENT';
+  uploadedById: number | null;
+  scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED' | 'FAILED';
+  deletedAt: string | null; deletedById: number | null;
+  createdAt: string;
+}
+
 /** `ob_clients`. No payment columns — see {@link ObApplication}. */
 export interface ObClient {
   id: number; name: string; description: string | null; onboardingDate: string;
@@ -807,6 +832,7 @@ export interface ObClient {
   contacts: ObContact[];
   applications: ObApplication[];
   requirements: ObRequirement[];
+  attachments: ObAttachmentRow[];
   journeys: ObJourney[];
   createdById: number; createdAt: string;
 }
@@ -1957,6 +1983,20 @@ const OB_CLIENTS: ObClient[] = [
       { id: 1, sequence: 0, title: 'Single sign-on', bodyHtml: '<p>Against their <strong>Azure AD</strong> tenant</p>', bodyText: 'Against their Azure AD tenant', isMet: true, metAt: '2026-08-14T11:20:00Z', metById: 3, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: '2026-08-14T11:20:00Z' },
       { id: 2, sequence: 1, title: 'Tally migration', bodyHtml: '<p>Data migration from Tally for FY25-26</p>', bodyText: 'Data migration from Tally for FY25-26', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: null },
     ],
+    attachments: [
+      // The ordinary case: filed, scanned, downloadable.
+      { id: 1, fileName: 'northwind-msa-signed.pdf', contentType: 'application/pdf', sizeBytes: 412_338, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 5, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-07-15T10:05:00') },
+      // Seconds old and not yet vouched for. The card has to render this
+      // without a download action and without calling it an error — it is the
+      // common state right after an upload, not a failure.
+      { id: 2, fileName: 'campus-network-diagram.png', contentType: 'image/png', sizeBytes: 88_120, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'PENDING', deletedAt: null, deletedById: null, createdAt: iso('2026-09-02T16:41:00') },
+      // A document staff attached FOR the client, not one the client sent.
+      { id: 3, fileName: 'data-migration-signoff-form.pdf', contentType: 'application/pdf', sizeBytes: 61_004, kind: 'REFERENCE', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-08-26T09:18:00') },
+      // A visible tombstone: removed by somebody who did not upload it, which
+      // is the supervisory act the record is supposed to keep. Nothing else in
+      // this fixture makes the card render "removed by X on date".
+      { id: 4, fileName: 'internal-pricing-notes.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: 24_880, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 5, scanStatus: 'CLEAN', deletedAt: iso('2026-08-30T12:15:00'), deletedById: 3, createdAt: iso('2026-08-30T11:55:00') },
+    ],
     journeys: [
       {
         id: 1, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
@@ -2035,6 +2075,7 @@ const OB_CLIENTS: ObClient[] = [
       { id: 3, productId: 1, licenseType: 'Subscription', units: 40, licenseStart: '2026-09-01', licenseEnd: '2027-08-31' },
     ],
     requirements: [],
+    attachments: [],
     journeys: [
       {
         id: 3, productId: 1, gateStatus: 'LOCKED', heldByJourneyId: null,
@@ -2064,6 +2105,9 @@ const OB_CLIENTS: ObClient[] = [
     ],
     requirements: [
       { id: 3, sequence: 0, title: null, bodyHtml: '<p>Bulk student import from their existing MIS</p>', bodyText: 'Bulk student import from their existing MIS', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-20T10:00:00Z', updatedAt: null },
+    ],
+    attachments: [
+      { id: 5, fileName: 'contoso-go-live-acceptance.pdf', contentType: 'application/pdf', sizeBytes: 233_190, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-06-19T11:45:00') },
     ],
     journeys: [
       {
