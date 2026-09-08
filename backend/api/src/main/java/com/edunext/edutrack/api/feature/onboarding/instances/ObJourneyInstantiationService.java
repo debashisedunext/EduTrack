@@ -33,11 +33,6 @@ import java.util.Map;
  * than a half-finished implementation to untangle:
  *
  * <ul>
- *   <li><b>No step activation.</b> Every step is born
- *       {@code PENDING} regardless of the journey's own
- *       {@link ObGateStatus} — even a journey born {@link ObGateStatus#OPEN}
- *       (a product bought after this client's gate already cleared).
- *       Activating the first wave of dependency-free steps is C-119's job.</li>
  *   <li><b>No service-level dependency.</b> {@link ObJourney#getHeldByJourneyId()}
  *       is always left {@code null}. Resolving it against the template's
  *       service-dependency graph is C-123's job.</li>
@@ -47,6 +42,18 @@ import java.util.Map;
  *       pinned {@code ownerUserId} carries forward; everything else lands on
  *       {@link #unassignedSteps()}.</li>
  * </ul>
+ *
+ * <p><b>C-119 · the one exception.</b> Every step is still born
+ * {@code PENDING} in {@link #cloneSteps} — activating the first wave of
+ * dependency-free steps is not duplicated in the clone itself, on
+ * {@link ObJourneyStep}'s own class javadoc. But a journey born
+ * {@link ObGateStatus#OPEN} (a product bought after this client's gate
+ * already cleared) needs that first wave activated by <em>something</em>,
+ * since nothing else will ever call {@code complete}/{@code skip} on a step
+ * that is still {@code PENDING} — so {@link #instantiate} calls
+ * {@link ObJourneyStepLifecycleService#activateEligibleSteps} once the
+ * journey is saved, the same re-evaluation a step completion triggers
+ * mid-journey.
  */
 @Service
 @UnscopedAccess("""
@@ -60,6 +67,7 @@ public class ObJourneyInstantiationService {
     private final ObJourneyTemplateStepRepository templateSteps;
     private final ObJourneyTemplateStepItemRepository templateStepItems;
     private final PurchasedProductAccess purchasedProducts;
+    private final ObJourneyStepLifecycleService stepLifecycle;
 
     public ObJourneyInstantiationService(ObJourneyRepository journeys,
                                           ObJourneyStepRepository journeySteps,
@@ -67,7 +75,8 @@ public class ObJourneyInstantiationService {
                                           ObJourneyTemplateRepository templates,
                                           ObJourneyTemplateStepRepository templateSteps,
                                           ObJourneyTemplateStepItemRepository templateStepItems,
-                                          PurchasedProductAccess purchasedProducts) {
+                                          PurchasedProductAccess purchasedProducts,
+                                          ObJourneyStepLifecycleService stepLifecycle) {
         this.journeys = journeys;
         this.journeySteps = journeySteps;
         this.journeyStepItems = journeyStepItems;
@@ -75,6 +84,7 @@ public class ObJourneyInstantiationService {
         this.templateSteps = templateSteps;
         this.templateStepItems = templateStepItems;
         this.purchasedProducts = purchasedProducts;
+        this.stepLifecycle = stepLifecycle;
     }
 
     /**
@@ -118,6 +128,13 @@ public class ObJourneyInstantiationService {
 
         ObJourney saved = journeys.save(journey);
         cloneSteps(template.getId(), saved.getId());
+        if (saved.getGateStatus() == ObGateStatus.OPEN) {
+            // C-119 · the "instantiate directly OPEN" edge case ObJourneyStep's
+            // own class javadoc assigns here: nothing else will ever call
+            // complete/skip on a step that is still PENDING, so the first
+            // wave of dependency-free steps needs this explicit kick.
+            stepLifecycle.activateEligibleSteps(saved.getId());
+        }
         return saved;
     }
 

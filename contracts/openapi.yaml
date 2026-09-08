@@ -7673,8 +7673,8 @@ paths:
         `PENDING` → `IN_PROGRESS`. `422` if the journey's gate is still
         `LOCKED` or the journey is held by another; `422` if the caller is
         neither the step's owner nor its backup owner; `422` if the step is
-        not `PENDING`. No dependency-graph check yet — that refusal, "naming
-        the blocker", is C-119's.
+        not `PENDING`; `422` (C-119) if `dependsOnStepId` has not finished —
+        the problem body's `blockingStepId`/`blockingStepName` name it.
       responses:
         '200':
           description: Started.
@@ -7683,7 +7683,9 @@ paths:
               schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '422':
-          description: Journey not open, caller not the owner/backup owner, or the step is not `PENDING`.
+          description: >-
+            Journey not open, caller not the owner/backup owner, the step is
+            not `PENDING`, or (C-119) `dependsOnStepId` has not finished.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

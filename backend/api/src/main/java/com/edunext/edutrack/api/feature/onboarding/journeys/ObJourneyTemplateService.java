@@ -45,13 +45,15 @@ import java.util.Set;
  *       it supersedes (if any) is retired in the same transaction.</li>
  * </ol>
  *
- * <p>Cross-template dependency cycles ({@code dependsOnTemplateId}) and the
- * "earlier step in this template" rule on {@code dependsOnStepId} are both
- * out of scope here — the migration's own comments assign the first to
- * C-123 and the second to C-119, since neither is expressible as a database
- * constraint. This service only guards what deleting or revising could
- * otherwise corrupt: a dangling dependency, or a published row edited in
- * place.
+ * <p>Cross-template dependency cycles ({@code dependsOnTemplateId}) are out
+ * of scope here — the migration's own comments assign that to C-123, since
+ * it is not expressible as a database constraint. The "earlier step in this
+ * template" rule on {@code dependsOnStepId} is C-119's: {@link #addStep}
+ * refuses a {@code dependsOnStepId} that does not name a step of this same
+ * template, and needs no other check — see that method's own javadoc for
+ * why "earlier" needs nothing further. This service otherwise only guards
+ * what deleting or revising could corrupt: a dangling dependency, or a
+ * published row edited in place.
  */
 @Service
 public class ObJourneyTemplateService {
@@ -191,11 +193,28 @@ public class ObJourneyTemplateService {
         }
     }
 
+    /**
+     * @throws StepNotFoundException C-119 · {@code dependsOnStepId} is not
+     *         null and does not name a step of this same template — the
+     *         composite FK would refuse it anyway, but as a raw constraint
+     *         violation rather than a clean refusal. "Earlier step" needs no
+     *         separate check beyond this: a new step always receives the
+     *         highest sequence in the template ({@link #nextStepSequence}),
+     *         so any step that already exists in it is earlier by
+     *         construction, and no step can depend on one that does not
+     *         exist yet — a cycle is therefore structurally unreachable
+     *         through this method.
+     */
     @Transactional
     public ObJourneyTemplateStep addStep(long templateId, String name, String description, int tatDays,
                                           Long ownerUserId, String ownerRole, Long backupOwnerUserId,
                                           boolean requiresSignoff, Long dependsOnStepId) {
         ObJourneyTemplate template = requireEditable(templateId);
+        if (dependsOnStepId != null) {
+            steps.findById(dependsOnStepId)
+                    .filter(dependency -> dependency.getTemplateId().equals(template.getId()))
+                    .orElseThrow(() -> new StepNotFoundException(dependsOnStepId));
+        }
 
         ObJourneyTemplateStep step = new ObJourneyTemplateStep();
         step.setTemplateId(template.getId());

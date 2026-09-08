@@ -33,6 +33,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -69,9 +71,11 @@ class ObJourneyInstantiationServiceTest {
     private final ObJourneyTemplateStepRepository templateSteps = mock(ObJourneyTemplateStepRepository.class);
     private final ObJourneyTemplateStepItemRepository templateStepItems = mock(ObJourneyTemplateStepItemRepository.class);
     private final PurchasedProductAccess purchasedProducts = mock(PurchasedProductAccess.class);
+    private final ObJourneyStepLifecycleService stepLifecycle = mock(ObJourneyStepLifecycleService.class);
 
     private final ObJourneyInstantiationService service = new ObJourneyInstantiationService(
-            journeys, journeySteps, journeyStepItems, templates, templateSteps, templateStepItems, purchasedProducts);
+            journeys, journeySteps, journeyStepItems, templates, templateSteps, templateStepItems, purchasedProducts,
+            stepLifecycle);
 
     @BeforeEach
     void wireFakes() {
@@ -214,6 +218,32 @@ class ObJourneyInstantiationServiceTest {
             assertThat(journey.getGateStatus()).isEqualTo(ObGateStatus.OPEN);
             assertThat(journey.getGateOpenedAt()).isNotNull();
             assertThat(journey.getGateOpenedBy()).isNull();
+        }
+
+        @Test
+        @DisplayName("C-119 · born already OPEN triggers the first-wave activation pass")
+        void bornOpenActivatesTheFirstWave() {
+            ObJourney priorJourney = new ObJourney();
+            priorJourney.setId(1L);
+            priorJourney.setObClientId(CLIENT);
+            priorJourney.setProductId(PRODUCT + 1);
+            priorJourney.setGateStatus(ObGateStatus.OPEN);
+            journeyRows.put(1L, priorJourney);
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of());
+
+            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+
+            verify(stepLifecycle).activateEligibleSteps(journey.getId());
+        }
+
+        @Test
+        @DisplayName("C-119 · born LOCKED triggers no activation pass")
+        void bornLockedActivatesNothing() {
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of());
+
+            service.instantiate(CLIENT, PRODUCT);
+
+            verify(stepLifecycle, never()).activateEligibleSteps(anyLong());
         }
     }
 

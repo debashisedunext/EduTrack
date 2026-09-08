@@ -48,20 +48,6 @@ import java.util.stream.Collectors;
  * {BLOCKED, WAITING_ON_CLIENT} → DONE} shape; {@code SKIPPED} is C-107's own
  * transition (see {@link #skip}) and is not one of the five.
  *
- * <h2>What this service deliberately does not do</h2>
- *
- * <p>Following {@code ObJourneyInstantiationService}'s own precedent of
- * naming its boundary rather than leaving it to be discovered:
- *
- * <ul>
- *   <li><b>No dependency-graph check on {@link #start}.</b> A step whose
- *       {@code dependsOnStepId} points at a step that has not finished can
- *       still be started manually today. Refusing that, "naming the
- *       blocker", is C-119's own line in the backlog — adding a partial
- *       version of it here would be exactly the kind of design C-119 would
- *       then have to unpick rather than build on.</li>
- * </ul>
- *
  * <h2>C-105 · the clock</h2>
  *
  * <p>{@link #start} now computes {@code due_at} working-calendar-aware from
@@ -103,6 +89,24 @@ import java.util.stream.Collectors;
  * covers, gated by {@link #requireModerator} exactly like {@link #skip}
  * rather than {@link #requireOwnership}: an owner reassigning themselves off
  * their own step is the one rewrite this route must not permit silently.
+ *
+ * <h2>C-119 · the dependency graph</h2>
+ *
+ * <p>{@code dependsOnStepId} (plan §5.6): {@link #start} now refuses a step
+ * whose dependency has not finished, naming the blocker (see
+ * {@link #requireDependencySatisfied}), and {@link #complete} and
+ * {@link #skip} both re-evaluate the whole journey afterwards and move
+ * every newly-eligible {@code PENDING} step straight to {@code IN_PROGRESS}
+ * — see {@link #activateEligibleSteps}. A step with no dependency needs
+ * none of this: it was always eligible, which is what "dependency-free
+ * steps run in parallel" means in practice — nothing here ever blocks one.
+ *
+ * <p>{@link #activateEligibleSteps} is also {@code
+ * ObJourneyInstantiationService}'s own call for a journey instantiated
+ * already {@code OPEN} (a product bought after this client's gate cleared)
+ * — see {@code ObJourneyStep}'s class javadoc for why that path defers to
+ * this method instead of duplicating the same eligibility check in the
+ * clone constructor.
  */
 @Service
 @UnscopedAccess("""
@@ -174,6 +178,7 @@ public class ObJourneyStepLifecycleService {
      * @throws NotStepOwnerException             caller is neither owner nor backup owner
      * @throws JourneyNotOpenException           the journey is locked or held
      * @throws InvalidStepTransitionException    step is not {@code PENDING}
+     * @throws StepDependencyNotSatisfiedException C-119 · {@code dependsOnStepId} has not finished
      */
     @Transactional
     public ObJourneyStep start(long stepId, long callerId) {
@@ -188,6 +193,7 @@ public class ObJourneyStepLifecycleService {
             throw new JourneyNotOpenException(journey.getId(),
                     journey.getGateStatus() != ObGateStatus.OPEN, journey.getHeldByJourneyId());
         }
+        requireDependencySatisfied(step);
 
         Instant startedAt = Instant.now();
         step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
@@ -199,7 +205,10 @@ public class ObJourneyStepLifecycleService {
     /**
      * {@code IN_PROGRESS → DONE}. C-106's completion gate runs after the
      * transition check and before anything is written — see
-     * {@link #requireCompletionGate} and the class javadoc.
+     * {@link #requireCompletionGate} and the class javadoc. C-119 · once
+     * {@code DONE}, {@link #activateEligibleSteps} re-evaluates the journey:
+     * any sibling step whose only dependency was this one moves straight to
+     * {@code IN_PROGRESS}.
      *
      * @throws JourneyStepNotFoundException  no such step
      * @throws NotStepOwnerException          caller is neither owner nor backup owner
@@ -217,6 +226,7 @@ public class ObJourneyStepLifecycleService {
 
         step.setStatus(ObJourneyStepStatus.DONE);
         step.setFinishedAt(Instant.now());
+        activateEligibleSteps(step.getJourneyId());
         return step;
     }
 
@@ -429,6 +439,7 @@ public class ObJourneyStepLifecycleService {
         step.setSkippedBy(callerId);
 
         appendSkippedHistory(journey, step, previousStatus, callerId, reason);
+        activateEligibleSteps(step.getJourneyId());
         return step;
     }
 
@@ -725,6 +736,86 @@ public class ObJourneyStepLifecycleService {
     private void requireStatus(ObJourneyStep step, String action, ObJourneyStepStatus required) {
         if (step.getStatus() != required) {
             throw new InvalidStepTransitionException(step.getId(), action, step.getStatus());
+        }
+    }
+
+    /**
+     * C-119 · plan §5.6's "manual start of a step whose dependency is
+     * incomplete is refused, naming the blocking step." {@code
+     * dependsOnStepId} is {@code null} = parallel ({@link ObJourneyStep}'s
+     * own javadoc), so a dependency-free step never reaches the lookup
+     * below at all.
+     *
+     * <p>The composite FK ({@code fk_ob_journey_steps_depends_on}, scoped to
+     * {@code (journey_id, id)}) guarantees the referenced step exists and is
+     * a sibling in the same journey — {@code findById} failing here would
+     * mean the row it points at was deleted out from under a live FK, not a
+     * caller mistake, so it is an {@link IllegalStateException} rather than
+     * a checked business refusal.
+     */
+    private void requireDependencySatisfied(ObJourneyStep step) {
+        Long dependsOnStepId = step.getDependsOnStepId();
+        if (dependsOnStepId == null) {
+            return;
+        }
+        ObJourneyStep blocker = journeySteps.findById(dependsOnStepId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "journey step " + step.getId() + " depends on step " + dependsOnStepId
+                                + " which does not exist"));
+        if (blocker.getStatus() != ObJourneyStepStatus.DONE && blocker.getStatus() != ObJourneyStepStatus.SKIPPED) {
+            throw new StepDependencyNotSatisfiedException(step.getId(), blocker.getId(), blocker.getName(),
+                    blocker.getStatus());
+        }
+    }
+
+    /**
+     * C-119 · plan §5.6: "completing any step re-evaluates the whole journey
+     * and activates every step whose dependency is now satisfied." Called
+     * after {@link #complete} and {@link #skip} — either can be the
+     * dependency a sibling {@code PENDING} step was waiting on — and by
+     * {@code ObJourneyInstantiationService} for a journey instantiated
+     * already {@code OPEN}, where this is the first evaluation any step in
+     * it has ever had.
+     *
+     * <p>A no-op while the journey is {@code LOCKED} or held: {@link #skip}
+     * does not itself require the journey be open (its own javadoc), so
+     * this re-checks fresh rather than trusting the caller's own state —
+     * the same defence-in-depth {@link #start}'s own gate check already
+     * applies to a manual transition.
+     *
+     * <p>One pass over every {@code PENDING} step is enough — activating a
+     * step moves it to {@code IN_PROGRESS}, which does not itself satisfy
+     * anyone else's dependency (only {@code DONE}/{@code SKIPPED} does), so
+     * there is nothing for a second pass in the same call to find that the
+     * first did not already see.
+     */
+    void activateEligibleSteps(long journeyId) {
+        ObJourney journey = journeys.findById(journeyId)
+                .orElseThrow(() -> new IllegalStateException("journey " + journeyId + " does not exist"));
+        if (journey.getGateStatus() != ObGateStatus.OPEN || journey.getHeldByJourneyId() != null) {
+            return;
+        }
+
+        List<ObJourneyStep> steps = journeySteps.findByJourneyIdOrderBySequenceAsc(journeyId);
+        Map<Long, ObJourneyStep> byId = steps.stream()
+                .collect(Collectors.toMap(ObJourneyStep::getId, s -> s));
+        Instant activatedAt = Instant.now();
+
+        for (ObJourneyStep candidate : steps) {
+            if (candidate.getStatus() != ObJourneyStepStatus.PENDING) {
+                continue;
+            }
+            Long dependsOnStepId = candidate.getDependsOnStepId();
+            ObJourneyStep blocker = dependsOnStepId == null ? null : byId.get(dependsOnStepId);
+            boolean satisfied = dependsOnStepId == null
+                    || (blocker != null && (blocker.getStatus() == ObJourneyStepStatus.DONE
+                            || blocker.getStatus() == ObJourneyStepStatus.SKIPPED));
+            if (!satisfied) {
+                continue;
+            }
+            candidate.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+            candidate.setStartedAt(activatedAt);
+            candidate.setDueAt(computeDueAt(activatedAt, candidate.getTatDays()));
         }
     }
 
