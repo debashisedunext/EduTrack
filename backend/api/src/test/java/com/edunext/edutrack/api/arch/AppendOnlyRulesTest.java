@@ -83,7 +83,13 @@ class AppendOnlyRulesTest {
 
     /** The three protected tables as they appear in a URL. */
     private static final Pattern PROTECTED_RESOURCE =
-            Pattern.compile("(?i).*/(history|effort-logs?|stage-transitions?)(/.*)?");
+            // A-115 · `communications` joins the three ticketing segments.
+            // V20260903_1745 gives ob_step_communications the same hash chain
+            // and triggers as ob_step_history, and this pattern matches on the
+            // path segment rather than on a module prefix — which is why
+            // `.../history` under /onboarding was already covered and needed no
+            // edit, and why naming the segment once covers it wherever it lands.
+            Pattern.compile("(?i).*/(history|effort-logs?|stage-transitions?|communications?)(/.*)?");
 
 
     /**
