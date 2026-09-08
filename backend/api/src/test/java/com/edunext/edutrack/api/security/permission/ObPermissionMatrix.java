@@ -104,6 +104,19 @@ final class ObPermissionMatrix {
         // not this matrix's — a Step Owner passing here still sees only
         // journeys containing their own steps. Sales and Viewer hold no verb
         // over a running step: Sales "views progress", Viewer is read-only.
+        // C-111 · OB-06's step panel, added by PR #405 six minutes before the
+        // matrix itself merged — so develop was briefly red on
+        // everyRouteIsCovered, which is the ratchet doing exactly its job.
+        //
+        // The read is EVERY_ROLE for the reason the template read is: Viewer
+        // sees everything read-only, and a Step Owner who cannot open their own
+        // step's panel cannot do the one thing §3 gives them.
+        m.put("GET /api/v1/onboarding/journey-steps/{stepId}", EVERY_ROLE);
+        // Ticking a checklist entry is working the step, so it is the step
+        // actors' — Sales views progress and Viewer is read-only, and neither
+        // holds a verb over a running step.
+        m.put("PATCH /api/v1/onboarding/journey-step-items/{itemId}", STEP_ACTORS);
+
         m.put("POST /api/v1/onboarding/journey-steps/{stepId}/start", STEP_ACTORS);
         m.put("POST /api/v1/onboarding/journey-steps/{stepId}/complete", STEP_ACTORS);
         m.put("POST /api/v1/onboarding/journey-steps/{stepId}/block", STEP_ACTORS);
@@ -173,6 +186,8 @@ final class ObPermissionMatrix {
             "POST /api/v1/onboarding/journey-template-steps/{stepId}/items",
             "DELETE /api/v1/onboarding/journey-template-step-docs/{docId}",
             "DELETE /api/v1/onboarding/journey-template-step-items/{itemId}",
+            "GET /api/v1/onboarding/journey-steps/{stepId}",
+            "PATCH /api/v1/onboarding/journey-step-items/{itemId}",
             "POST /api/v1/onboarding/journey-steps/{stepId}/start",
             "POST /api/v1/onboarding/journey-steps/{stepId}/complete",
             "POST /api/v1/onboarding/journey-steps/{stepId}/block",

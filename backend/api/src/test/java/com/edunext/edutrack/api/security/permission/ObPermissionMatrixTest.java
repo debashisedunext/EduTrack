@@ -132,10 +132,10 @@ class ObPermissionMatrixTest {
         //
         // WHEN THIS FAILS BECAUSE THE NUMBER WENT DOWN, that is A-122 working.
         // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(26);
+        assertThat(ObPermissionMatrix.ENTRIES).hasSize(28);
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
-                .hasSize(25);
+                .hasSize(27);
 
         Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
         enforced.removeAll(ObPermissionMatrix.NOT_YET_ENFORCED);

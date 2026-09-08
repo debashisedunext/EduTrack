@@ -161,6 +161,17 @@ public class SecurityConfig {
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
             "/api/v1/webhooks/email/**",
+            // A-120 · the public sign-off surface. OB-09 and the CSAT page are
+            // the only unauthenticated routes in the onboarding module, and the
+            // contract declares them `security: []` — a client following a link
+            // from an email holds a token and no session, so a 401 from the
+            // chain would refuse the very caller the surface exists for.
+            //
+            // What stands in for authentication here is the token itself:
+            // PublicSignoffAccess spends a rate-limit budget and resolves it
+            // through ObSignoffTokens, which checks the SHA-256, the TTL and
+            // the PENDING status. Opening the path does not open the data.
+            "/api/v1/public/onboarding/**",
     };
 
     static final String[] PUBLIC_INFRA_PATHS = {

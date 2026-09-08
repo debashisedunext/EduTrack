@@ -22,12 +22,12 @@ import java.util.HexFormat;
  * call — a cost paid by every legitimate user, every fifteen minutes, to defend
  * against an attack that cannot happen.
  */
-final class Digests {
+public final class Digests {
 
     private Digests() {
     }
 
-    static String sha256Hex(String input) {
+    public static String sha256Hex(String input) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(input.getBytes(StandardCharsets.UTF_8));
