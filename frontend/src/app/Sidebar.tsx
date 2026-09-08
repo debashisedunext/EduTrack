@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
+  Building2,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -41,6 +42,28 @@ const NAV_ITEMS: NavItem[] = [
     may open beyond their own is the server's decision, not this list's.
   */
   { to: '/timesheet', label: 'Timesheet', icon: CalendarClock },
+  /*
+    B-109 · the entry every `/onboarding/**` route's own comment has deferred
+    to this task since B-112 — "there is no onboarding nav section yet". A
+    single flat item, on the same call every other row here already makes:
+    this list has no sub-menu concept to extend, and building one is a bigger
+    change than one wizard task should make unilaterally to a file every
+    stream's screens render inside. Points at the client list (OB-03) rather
+    than the module launcher (`/launcher`) — that screen is the dual-module
+    *chooser* shown once at sign-in, not a destination to return to, the same
+    reason `/tickets` is this list's entry rather than a ticketing launcher.
+
+    Not `adminOnly`, and there is no `onboardingOnly` to reach for: the
+    module's own entitlement (`user_module_access`, plan §2.1) has no
+    client-side signal at all today — `isAdmin` below reads the *platform*
+    role a session logged in with, and the onboarding module's roles
+    (OB_ADMIN, OB_SALES, …) are a separate, server-only vocabulary this
+    sidebar cannot see. Every route this points at already accepts that:
+    `ObModuleGuard` answers a caller with no entitlement 404, same as every
+    other onboarding route today, and hiding the link for everyone would not
+    change who can reach the screen — only whether they can find it.
+  */
+  { to: '/onboarding/clients', label: 'Onboarding', icon: Building2 },
   { to: '/masters', label: 'Masters', icon: Database, adminOnly: true },
   // A-071 · S-16. adminOnly like Masters, and for a stronger reason: `audit.view`
   // is Admin's alone in §2, so for every other role this link is a 403 waiting to

@@ -10,7 +10,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.Immutable;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -94,9 +96,17 @@ public class ObPrereqHistory {
     @Column(name = "chain_payload_version", nullable = false)
     private int chainPayloadVersion = 1;
 
+    /**
+     * Hex SHA-256, {@code CHAR(64)} with {@code ascii_bin} (PLAN.md §3.1) —
+     * {@code TicketStageTransition.prevHash}'s exact idiom. {@link
+     * SqlTypes#CHAR} is what makes {@code ddl-auto=validate} agree; without
+     * it Hibernate expects {@code VARCHAR} and refuses to start.
+     */
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "prev_hash", length = 64)
     private String prevHash;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "row_hash", length = 64)
     private String rowHash;
 

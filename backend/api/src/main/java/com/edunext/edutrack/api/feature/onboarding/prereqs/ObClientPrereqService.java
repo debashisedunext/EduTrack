@@ -123,6 +123,17 @@ public class ObClientPrereqService {
         return workingHours.addWorkingHours(from, ObStepTatBudget.hours(workingCalendars, tatDays));
     }
 
+    /**
+     * B-109 · the wizard's own pre-check, mirroring {@code
+     * ObClientWriteService.requirePublishedTemplates}'s shape for journey
+     * templates: fail before the client row exists, not after {@link
+     * #instantiate} has already refused inside the transaction.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasActivePrereqMaster() {
+        return master.activeVersion().isPresent();
+    }
+
     @Transactional(readOnly = true)
     public java.util.Optional<ObClientPrereqs> headerOf(long obClientId) {
         return headers.findByObClientId(obClientId);

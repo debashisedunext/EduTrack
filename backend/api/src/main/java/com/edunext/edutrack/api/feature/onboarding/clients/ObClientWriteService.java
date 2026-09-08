@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
 import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
+import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
 import com.edunext.edutrack.api.security.pan.PanService;
 import com.edunext.edutrack.domain.onboarding.ObClient;
 import com.edunext.edutrack.domain.onboarding.ObClientRepository;
@@ -36,15 +37,21 @@ import java.util.Set;
  * silent</h2>
  *
  * <ul>
- *   <li><b>No prerequisites instance.</b> There is no {@code ob_prereq_*} table
- *       on {@code develop} — B-124 brings the master and B-125 the per-client
- *       instances. Every journey is still created {@code LOCKED}, which is the
- *       state the gate exists to hold; what is missing is the checklist that
- *       opens it, not the hold.</li>
  *   <li><b>No portal login.</b> {@code createPortalLogin: true} is refused
  *       rather than ignored — see {@link PortalLoginUnavailableException} for
  *       why refusing is the safer of the two.</li>
  * </ul>
+ *
+ * <h2>B-109 · the prerequisites instance</h2>
+ *
+ * <p>{@link ObClientPrereqService#instantiate} snapshots the active OB-14
+ * master onto the new client, inside this same transaction, right after the
+ * locked journeys — a client boarded with journeys and no checklist behind
+ * the gate is exactly the half-state the class javadoc above refuses. {@link
+ * ObClientPrereqService#hasActivePrereqMaster()} is checked alongside {@link
+ * #requirePublishedTemplates}, before the client row is written, on the same
+ * reasoning: a boarder finds out nothing was published <em>before</em> typing
+ * four steps, not after.</p>
  *
  * <h2>The two guards are deliberately unlike each other</h2>
  *
@@ -76,6 +83,7 @@ class ObClientWriteService {
     private final ObRequirementBody requirementBodies;
     private final ObClientService details;
     private final ObJourneyInstantiationService journeys;
+    private final ObClientPrereqService prereqs;
     private final PanService pan;
 
     /** B-103 · one instant per create, stamped onto every contact's consent. */
@@ -94,8 +102,9 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
+                         ObClientPrereqService prereqs,
                          PanService pan) {
-        this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
+        this(clients, reads, children, requirements, requirementBodies, details, journeys, prereqs, pan,
                 Clock.systemUTC());
     }
 
@@ -106,6 +115,7 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
+                         ObClientPrereqService prereqs,
                          PanService pan,
                          Clock clock) { // test seam
         this.clients = clients;
@@ -115,6 +125,7 @@ class ObClientWriteService {
         this.requirementBodies = requirementBodies;
         this.details = details;
         this.journeys = journeys;
+        this.prereqs = prereqs;
         this.pan = pan;
         this.clock = clock;
     }
@@ -144,6 +155,7 @@ class ObClientWriteService {
             guardAgainstSimilarNames(scope, request.name());
         }
         requirePublishedTemplates(request);
+        requirePublishedPrereqMaster();
 
         ObClient client = new ObClient(request.name().trim(), request.onboardingDate(), callerId);
         client.setDescription(trimmedOrNull(request.description()));
@@ -174,6 +186,11 @@ class ObClientWriteService {
         for (ObClientDtos.ObApplicationWriteRequest application : request.applications()) {
             journeys.instantiate(clientId, application.productId());
         }
+
+        // B-109 · the checklist behind the gate. See ObClientPrereqService's
+        // own javadoc: idempotent by refusal, so this must run exactly once,
+        // which "a client just created" already guarantees.
+        prereqs.instantiate(clientId);
 
         return details.findDetail(scope, clientId)
                 .orElseThrow(() -> new IllegalStateException(
@@ -380,6 +397,17 @@ class ObClientWriteService {
         List<Long> without = productIds.stream().filter(id -> !withTemplate.contains(id)).toList();
         if (!without.isEmpty()) {
             throw new ProductWithoutTemplateException(without);
+        }
+    }
+
+    /**
+     * The prerequisites master mirror of {@link #requirePublishedTemplates}.
+     * One master, org-wide — see {@link ObClientPrereqService} for why it
+     * carries no product id to check per selection.
+     */
+    private void requirePublishedPrereqMaster() {
+        if (!prereqs.hasActivePrereqMaster()) {
+            throw new NoPublishedPrerequisitesException();
         }
     }
 
