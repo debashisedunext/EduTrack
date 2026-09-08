@@ -84,6 +84,13 @@ describe('the step list renders a draft template', () => {
     expect(screen.getByRole('button', { name: 'Add step' })).toBeInTheDocument()
   })
 
+  it('totals TAT in the header and the steps heading — C-120', async () => {
+    // Device Rollout (6) + Attendance Policy Mapping (3) = 9.
+    await openDesigner(2)
+    expect(screen.getByText('Total TAT: 9 working days')).toBeInTheDocument()
+    expect(within(stepsRegion()).getByText('9 working days total')).toBeInTheDocument()
+  })
+
   it('names what a step depends on, and calls out a parallel one', async () => {
     await openDesigner(2)
     expect(within(stepRow('Device Rollout')).getByText('Parallel from journey start')).toBeInTheDocument()
@@ -102,6 +109,13 @@ describe('a published, active version is read-only', () => {
     expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Move .* up$/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Remove /u })).toBeNull()
+  })
+
+  it('totals TAT for a five-step published template too — C-120', async () => {
+    // 3 + 4 + 8 + 5 + 4 = 24, same figure a client's own journey would show
+    // on OB-05's strip once instantiated from this exact template.
+    await openDesigner(1)
+    expect(screen.getByText('Total TAT: 24 working days')).toBeInTheDocument()
   })
 })
 

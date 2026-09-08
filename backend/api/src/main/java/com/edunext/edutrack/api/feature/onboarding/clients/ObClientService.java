@@ -5,9 +5,13 @@ import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
 import com.edunext.edutrack.common.pagination.PageMeta;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,10 +33,15 @@ class ObClientService {
 
     private final ObClientReadRepository reads;
     private final PanService pan;
+    private final ObJourneyStepRepository journeySteps;
+    private final ObJourneyStepRagService rag;
 
-    ObClientService(ObClientReadRepository reads, PanService pan) {
+    ObClientService(ObClientReadRepository reads, PanService pan,
+            ObJourneyStepRepository journeySteps, ObJourneyStepRagService rag) {
         this.reads = reads;
         this.pan = pan;
+        this.journeySteps = journeySteps;
+        this.rag = rag;
     }
 
     /**
@@ -185,12 +194,31 @@ class ObClientService {
                     percentComplete(journey.stepsSettled(), journey.stepCount()),
                     journey.heldByJourneyId(),
                     journey.totalTatDays(),
-                    // C-120's roll-up over ob_step_clock_events. Null rather
-                    // than 0.0 — see ObJourneyStrip's own note.
-                    null,
+                    utilizedHours(journey.id()),
                     dots.getOrDefault(journey.id(), List.of())));
         }
         return strips;
+    }
+
+    /**
+     * C-120 · one journey's utilized-so-far, in hours — the sum of {@link
+     * ObJourneyStepRagService#hoursConsumed} across every one of its steps.
+     *
+     * <p>A separate read per journey, on {@code ObJourneyStepRagService}'s
+     * own single-step shape: {@code hoursConsumed} needs each step's live
+     * clock state (a {@code WAITING_ON_CLIENT} step reads its last pause),
+     * which {@link ObClientReadRepository#stepDotsOf} was never asked to
+     * carry and OB-05's client is a handful of journeys, never hundreds.
+     *
+     * <p>0.0 for a journey with no steps or none yet started — not null.
+     * {@code ObJourneyStrip}'s own note is about the feature being unbuilt,
+     * not about a journey that has genuinely consumed no time.
+     */
+    private Double utilizedHours(long journeyId) {
+        BigDecimal total = journeySteps.findByJourneyIdOrderBySequenceAsc(journeyId).stream()
+                .map(rag::hoursConsumed)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return total.setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 
     /**

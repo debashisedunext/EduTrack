@@ -125,6 +125,58 @@ class ObJourneyStepRagServiceTest {
         assertThat(service.ragFor(step)).isEqualTo(ObRag.RED);
     }
 
+    // ── hoursConsumed — C-120's roll-up input ──────────────────────────
+
+    @Test
+    void pendingStepHoursConsumedIsZeroWithoutTouchingTheCalendarOrClock() {
+        ObJourneyStep step = stepWithStatus(ObJourneyStepStatus.PENDING);
+
+        assertThat(service.hoursConsumed(step)).isEqualByComparingTo(BigDecimal.ZERO);
+        verifyNoInteractions(workingHours, clockEvents);
+    }
+
+    @Test
+    void skippedStepHoursConsumedIsZeroWithoutTouchingTheCalendarOrClock() {
+        ObJourneyStep step = stepWithStatus(ObJourneyStepStatus.SKIPPED);
+
+        assertThat(service.hoursConsumed(step)).isEqualByComparingTo(BigDecimal.ZERO);
+        verifyNoInteractions(workingHours, clockEvents);
+    }
+
+    @Test
+    void inProgressHoursConsumedIsBudgetMinusWhatRemains() {
+        // 8h budget (1 day), 6h remaining → 2h consumed.
+        ObJourneyStep step = stepWithStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(workingHours.workingHoursBetween(any(), eq(DUE_AT))).thenReturn(BigDecimal.valueOf(6));
+
+        assertThat(service.hoursConsumed(step)).isEqualByComparingTo(BigDecimal.valueOf(2));
+    }
+
+    @Test
+    void waitingOnClientHoursConsumedFreezesAtTheLastPauseNotNow() {
+        Instant pausedAt = Instant.parse("2026-09-08T10:00:00Z");
+        ObJourneyStep step = stepWithStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        ObStepClockEvent pause = pauseEventAt(pausedAt);
+        when(clockEvents.findFirstByStepIdAndEventTypeOrderByOccurredAtDescIdDesc(
+                step.getId(), ObStepClockEventType.PAUSED)).thenReturn(Optional.of(pause));
+        when(workingHours.workingHoursBetween(pausedAt, DUE_AT)).thenReturn(BigDecimal.valueOf(2));
+
+        // 8h budget, 2h remaining as of the pause → 6h consumed.
+        assertThat(service.hoursConsumed(step)).isEqualByComparingTo(BigDecimal.valueOf(6));
+    }
+
+    @Test
+    void doneHoursConsumedFreezesAtFinishedAtNotNow() {
+        Instant finishedAt = Instant.parse("2026-09-09T09:00:00Z");
+        ObJourneyStep step = stepWithStatus(ObJourneyStepStatus.DONE);
+        step.setFinishedAt(finishedAt);
+        when(workingHours.workingHoursBetween(finishedAt, DUE_AT)).thenReturn(BigDecimal.ZERO);
+
+        // 8h budget, nothing remaining → the whole budget consumed.
+        assertThat(service.hoursConsumed(step)).isEqualByComparingTo(BigDecimal.valueOf(8));
+        verifyNoInteractions(clockEvents);
+    }
+
     private static ObJourneyStep stepWithStatus(ObJourneyStepStatus status) {
         ObJourneyStep step = new ObJourneyStep();
         step.setId(1L);
