@@ -773,6 +773,27 @@ export interface ObJourney {
   archivedAt?: string | null;
 }
 
+/**
+ * B-106 · `ob_client_requirements` — one thing this client needs.
+ *
+ * Rows rather than strings since B-106: an `array<string>` had no id, so
+ * nothing could be edited, removed or ticked off, and no markup, so a
+ * requirement with two clauses and a link was one run-on line.
+ *
+ * `bodyHtml` here is already sanitised, exactly as the server stores it. The
+ * mock deliberately does **not** re-implement PLAN.md §3.9 — a second
+ * allow-list that drifts from the real one is worse than none, and the browser
+ * copy in `components/ui/rich-text.ts` is advice rather than the boundary. What
+ * the handlers do implement is the shape of the refusal, so a form built
+ * against the mock handles the 400 the server will actually send.
+ */
+export interface ObRequirement {
+  id: number; sequence: number; title: string | null;
+  bodyHtml: string; bodyText: string;
+  isMet: boolean; metAt: string | null; metById: number | null;
+  createdById: number | null; createdAt: string; updatedAt: string | null;
+}
+
 /** `ob_clients`. No payment columns — see {@link ObApplication}. */
 export interface ObClient {
   id: number; name: string; description: string | null; onboardingDate: string;
@@ -785,7 +806,7 @@ export interface ObClient {
   hasPortalLogin: boolean;
   contacts: ObContact[];
   applications: ObApplication[];
-  requirements: string[];
+  requirements: ObRequirement[];
   journeys: ObJourney[];
   createdById: number; createdAt: string;
 }
@@ -1879,6 +1900,20 @@ const OB_PRODUCTS: ObProduct[] = [
   { id: 1, code: 'ERP', name: 'ERP Suite', isActive: true, hasActiveTemplate: true, totalTatDays: 24 },
   { id: 2, code: 'BIOMETRIC', name: 'Biometric Attendance', isActive: true, hasActiveTemplate: false, totalTatDays: null },
   { id: 3, code: 'LMS', name: 'Learning Management', isActive: false, hasActiveTemplate: true, totalTatDays: 12 },
+  // B-104 · the fourth product exists so that "a client buys another product"
+  // is reachable at all. The other three cover a client's *first* purchases and
+  // the two ways one can be refused, but between them no client could make a
+  // legitimate new purchase: Northwind already holds both sellable products,
+  // BIOMETRIC has no template and LMS is retired. So the one case B-104 is for
+  // — a purchase made after boarding, instantiating a journey into a client
+  // whose gate has already opened — could not be exercised without inventing
+  // this row, which is the same reason the fixture carries a locked client and
+  // a live one rather than three of the same shape.
+  //
+  // `HRMS` and not `PAYROLL`: A-118's product-create test posts that code to
+  // prove a new product is born without a template, and a fixture holding it
+  // would turn that 201 into a duplicate-code 409.
+  { id: 4, code: 'HRMS', name: 'HR & Payroll', isActive: true, hasActiveTemplate: true, totalTatDays: 16 },
 ];
 
 /**
@@ -1918,7 +1953,10 @@ const OB_CLIENTS: ObClient[] = [
       { id: 1, productId: 1, licenseType: 'Subscription', units: 250, licenseStart: '2026-08-01', licenseEnd: '2027-07-31' },
       { id: 2, productId: 2, licenseType: 'Perpetual', units: 8, licenseStart: '2026-08-01', licenseEnd: null },
     ],
-    requirements: ['Single sign-on against their Azure AD', 'Data migration from Tally for FY25-26'],
+    requirements: [
+      { id: 1, sequence: 0, title: 'Single sign-on', bodyHtml: '<p>Against their <strong>Azure AD</strong> tenant</p>', bodyText: 'Against their Azure AD tenant', isMet: true, metAt: '2026-08-14T11:20:00Z', metById: 3, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: '2026-08-14T11:20:00Z' },
+      { id: 2, sequence: 1, title: 'Tally migration', bodyHtml: '<p>Data migration from Tally for FY25-26</p>', bodyText: 'Data migration from Tally for FY25-26', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: null },
+    ],
     journeys: [
       {
         id: 1, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
@@ -2024,7 +2062,9 @@ const OB_CLIENTS: ObClient[] = [
     applications: [
       { id: 4, productId: 1, licenseType: 'Perpetual', units: 120, licenseStart: '2026-04-15', licenseEnd: null },
     ],
-    requirements: ['Bulk student import from their existing MIS'],
+    requirements: [
+      { id: 3, sequence: 0, title: null, bodyHtml: '<p>Bulk student import from their existing MIS</p>', bodyText: 'Bulk student import from their existing MIS', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-20T10:00:00Z', updatedAt: null },
+    ],
     journeys: [
       {
         id: 4, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,

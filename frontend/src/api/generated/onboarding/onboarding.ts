@@ -78,6 +78,7 @@ import type {
   ListObPrereqCommentsParams,
   ListObPrereqHistoryParams,
   ListObSignoffsParams,
+  ObApplicationWriteRequest,
   ObClientCreateRequest,
   ObClientDetailResponse,
   ObClientEscalationListResponse,
@@ -111,6 +112,8 @@ import type {
   ObPrereqVerifyRequest,
   ObReportCatalogueResponse,
   ObReportResponse,
+  ObRequirementUpdateRequest,
+  ObRequirementWriteRequest,
   ObSignoffAcceptRequest,
   ObSignoffAcceptResultResponse,
   ObSignoffCancelRequest,
@@ -807,6 +810,488 @@ export const useRemoveObClientContact = <TError = ForbiddenResponse | ObModuleGa
       > => {
 
       const mutationOptions = getRemoveObClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-104 · OB-05's purchases panel, adding — the client bought another
+product.
+
+**This instantiates a journey**, in the same transaction, exactly as
+`createObClient` does for the wizard's products. A purchase is what a
+journey is instantiated from, so a purchase without one leaves the client
+with a product they are not being onboarded through and nothing that
+reports it. The response carries the new journey strip for the same
+reason it carries the new purchase.
+
+**A product bought after this client's gate has already opened
+instantiates `OPEN`, not `LOCKED`** (plan §5.3 item 3). The client is not
+re-gated on prerequisites they have already satisfied — which is
+precisely the case this route creates and the wizard never could.
+
+**Buying a product this client already has is `409`
+`ob-application-duplicate-product`.** More seats, a different licence type
+or a renewal is an edit to the existing purchase, and the problem document
+carries `existingApplicationId` so the panel can open it.
+`uq_ob_client_applications` is on `(ob_client_id, product_id)`, and a
+second row would mean a second journey for one product.
+
+**The product must be on sale and must have a published journey
+template** — a retired product is out of the picker by definition, and one
+with no template has nothing to instantiate from (`409`
+`ob-product-no-template`, as on the wizard).
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Record a purchase (OB-05)
+ */
+export const addObClientApplication = (
+    obClientId: number,
+    obApplicationWriteRequest: ObApplicationWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/applications`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obApplicationWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObClientApplicationMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext> => {
+
+const mutationKey = ['addObClientApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObClientApplication>>, {obClientId: number;data: ObApplicationWriteRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  addObClientApplication(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObClientApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof addObClientApplication>>>
+    export type AddObClientApplicationMutationBody = ObApplicationWriteRequest
+    export type AddObClientApplicationMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse
+
+    /**
+ * @summary Record a purchase (OB-05)
+ */
+export const useAddObClientApplication = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObClientApplication>>,
+        TError,
+        {obClientId: number;data: ObApplicationWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObClientApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-104 · the seat count, the licence type, and the licence window — which
+is to say, **this is what a renewal is**. `licenseEnd` moving forward a
+year had no representation in the API before this operation existed.
+
+**The body is the whole representation, not a sparse patch** — an absent
+`licenseEnd` is a cleared one. `ObContactUpsertRequest`'s call, one panel
+over, for the same reason: the row editor sends every field on every save.
+
+**`productId` is echoed back and may not change.** A body naming a
+different product is `409` `ob-application-product-immutable`, refused
+rather than ignored. `ob_journeys` carries a composite foreign key
+straight to `(ob_client_id, product_id)`, so MySQL would refuse the
+repoint anyway — and succeeding would be worse: the journey's
+`template_id` is pinned to the template of the product that was actually
+bought, so the client would be onboarded through the old product's steps
+under the new product's name. Add the other product as its own purchase
+instead.
+
+**The product is not re-checked for sale or for a template.** Whether a
+product may be *bought* and whether an existing purchase may be
+*corrected* are different questions with opposite answers: a product
+retired last quarter still has clients onboarding through it, and refusing
+to renew their licence would make a retirement retroactively strand
+everyone who already bought it.
+
+**A licence cannot end before it starts** — `400`, keyed on `licenseEnd`
+because that is the field a renewal moves. Either date alone may be null:
+an open-ended perpetual licence has no end.
+
+**There is no `DELETE` on this path, deliberately.**
+`fk_ob_journeys_application` is `RESTRICT` and every purchase carries a
+journey from the moment it is made, so the operation could only be a route
+that always fails or one that reaches into `ob_journeys` and destroys the
+record of work that was done. Archiving does not help — `archived_at`
+leaves the row in place and `RESTRICT` still refuses. Unpicking an
+instantiated journey belongs beside C-103's instantiation, not here.
+
+The `If-Match` comes from `getObClient`, as the SPOC patch's does. Two
+people renewing the same licence to different end dates is a lost update
+nothing else in the system would surface, because nothing downstream reads
+`licenseEnd` yet to notice it went the wrong way.
+
+ * @summary Edit a purchase (OB-05)
+ */
+export const updateObClientApplication = (
+    obClientId: number,
+    applicationId: number,
+    obApplicationWriteRequest: ObApplicationWriteRequest,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/applications/${applicationId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obApplicationWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObClientApplicationMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext> => {
+
+const mutationKey = ['updateObClientApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObClientApplication>>, {obClientId: number;applicationId: number;data: ObApplicationWriteRequest}> = (props) => {
+          const {obClientId,applicationId,data} = props ?? {};
+
+          return  updateObClientApplication(obClientId,applicationId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObClientApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClientApplication>>>
+    export type UpdateObClientApplicationMutationBody = ObApplicationWriteRequest
+    export type UpdateObClientApplicationMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a purchase (OB-05)
+ */
+export const useUpdateObClientApplication = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObClientApplication>>,
+        TError,
+        {obClientId: number;applicationId: number;data: ObApplicationWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObClientApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-106 · OB-05's requirements list, adding.
+
+**Requirements stopped being strings here.** Until B-106 they were an
+`array<string>` captured once by the wizard and never touchable again —
+no id, so nothing could be edited, removed, or marked done; no markup, so
+a requirement with two clauses and a link was one run-on line. Plan §9
+shows OB-05 rendering them as *a list somebody works through*, and a
+string has nowhere to record having been worked through.
+
+**`bodyHtml` goes through PLAN.md §3.9's allow-list on the server, on
+write, always.** The same sanitiser as the ticket description and the
+comment body — `api/text/RichTextSanitizer`, one copy, so tightening the
+list retroactively protects every field it governs. What is stored is the
+sanitised result, never what was sent, and `bodyText` is derived from it
+rather than supplied. A body that sanitises to nothing is `400`, not an
+empty row: `<script>alert(1)</script>` is a 27-character string Bean
+Validation accepts and that means nothing once §3.9 has run.
+
+**New requirements land at the end of the list.** `sequence` is the order
+they were entered and the order OB-05 prints them; a requirement raised in
+month three belongs after the ones raised at boarding, not interleaved by
+id.
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Add a requirement (OB-05)
+ */
+export const addObClientRequirement = (
+    obClientId: number,
+    obRequirementWriteRequest: ObRequirementWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/requirements`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obRequirementWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObClientRequirementMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientRequirement>>, TError,{obClientId: number;data: ObRequirementWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObClientRequirement>>, TError,{obClientId: number;data: ObRequirementWriteRequest}, TContext> => {
+
+const mutationKey = ['addObClientRequirement'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObClientRequirement>>, {obClientId: number;data: ObRequirementWriteRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  addObClientRequirement(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObClientRequirementMutationResult = NonNullable<Awaited<ReturnType<typeof addObClientRequirement>>>
+    export type AddObClientRequirementMutationBody = ObRequirementWriteRequest
+    export type AddObClientRequirementMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse
+
+    /**
+ * @summary Add a requirement (OB-05)
+ */
+export const useAddObClientRequirement = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientRequirement>>, TError,{obClientId: number;data: ObRequirementWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObClientRequirement>>,
+        TError,
+        {obClientId: number;data: ObRequirementWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObClientRequirementMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-106 · the label, the body, and whether it has been satisfied.
+
+**Partial by field, unlike the purchases panel.**
+`ObApplicationWriteRequest` is the whole representation because a purchase
+is five fields a row editor submits together. This body carries `isMet`,
+which is not a field of the same kind: a full-representation PATCH would
+make every wording correction also re-assert the met flag, and
+re-asserting `true` while somebody else reopened the requirement would
+close it again without anybody having asked. `updateObClient` refused a
+full representation for the identical reason about `status`. An omitted
+field is untouched; an explicit `null` on `title` clears it.
+
+**`isMet` carries its own evidence.** Setting it `true` stamps `metAt` and
+`metBy` from the server clock and the caller — neither is accepted from
+the body. Setting it `false` clears both.
+`ck_ob_client_requirements_met` says the same thing at the column, so a
+flag without a stamp is refused by the database and not only here. What
+this is *not* is a sign-off: journey sign-off is C-112's gate over
+`ob_signoff_requests`, and a requirements tick is the person doing the
+work saying they have done it.
+
+**Re-marking an already-met requirement does not re-stamp it.** Correcting
+the wording in November must not re-date a requirement met in March —
+`ObContactService`'s consent rule, applied to the same class of evidence.
+The stamp moves only when the flag does.
+
+**`bodyHtml` is re-sanitised on every edit**, never merged with what is
+stored. A body that sanitises to nothing is `400`; omitting `bodyHtml`
+leaves the stored markup and its projection alone.
+
+The `If-Match` comes from `getObClient`, as the SPOC and purchase patches
+do. Two people editing one requirement is the ordinary case on a list
+several people work through at once.
+
+ * @summary Edit a requirement, or mark it met (OB-05)
+ */
+export const updateObClientRequirement = (
+    obClientId: number,
+    requirementId: number,
+    obRequirementUpdateRequest: ObRequirementUpdateRequest,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/requirements/${requirementId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obRequirementUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObClientRequirementMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientRequirement>>, TError,{obClientId: number;requirementId: number;data: ObRequirementUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObClientRequirement>>, TError,{obClientId: number;requirementId: number;data: ObRequirementUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObClientRequirement'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObClientRequirement>>, {obClientId: number;requirementId: number;data: ObRequirementUpdateRequest}> = (props) => {
+          const {obClientId,requirementId,data} = props ?? {};
+
+          return  updateObClientRequirement(obClientId,requirementId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObClientRequirementMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClientRequirement>>>
+    export type UpdateObClientRequirementMutationBody = ObRequirementUpdateRequest
+    export type UpdateObClientRequirementMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a requirement, or mark it met (OB-05)
+ */
+export const useUpdateObClientRequirement = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientRequirement>>, TError,{obClientId: number;requirementId: number;data: ObRequirementUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObClientRequirement>>,
+        TError,
+        {obClientId: number;requirementId: number;data: ObRequirementUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObClientRequirementMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-106 · a requirement entered by mistake, or one the client withdrew.
+
+**This path has a `DELETE` where the purchases panel deliberately does
+not**, and the difference is worth stating because the two sit on one
+screen. A purchase carries a journey from the moment it is made and
+`fk_ob_journeys_application` is `RESTRICT`, so removing one could only
+fail or destroy the record of work that was done. Nothing hangs off a
+requirement: no foreign key points at `ob_client_requirements`, no
+journey is instantiated from it, and no history references it. A row
+removed here takes nothing with it.
+
+**A hard delete rather than a tombstone.** The rows this removes are
+typos and duplicates from a wizard textarea — `insertRequirements` has
+dropped blank ones since B-102 for the same reason. A tombstoned typo is
+a line every future reader of the list has to decide to ignore. A
+requirement that was genuinely agreed and later dropped is `isMet: false`
+with the reason in its body, which is a different act and stays visible.
+
+**Answers `200` with the client document, not `204`.** Every other write
+in this package returns it with a fresh `ETag`, and a `204` here would
+leave the caller holding the tag of a client that has just changed —
+their next save would be a `412` they cannot account for.
+
+The sequence numbers of the remaining requirements are left as they are.
+`ix_ob_client_requirements_client` orders by `sequence, id` and gaps do
+not affect that; renumbering would rewrite every following row to make a
+column nobody reads look tidy.
+
+ * @summary Remove a requirement (OB-05)
+ */
+export const deleteObClientRequirement = (
+    obClientId: number,
+    requirementId: number,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/requirements/${requirementId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteObClientRequirementMutationOptions = <TError = ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObClientRequirement>>, TError,{obClientId: number;requirementId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteObClientRequirement>>, TError,{obClientId: number;requirementId: number}, TContext> => {
+
+const mutationKey = ['deleteObClientRequirement'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteObClientRequirement>>, {obClientId: number;requirementId: number}> = (props) => {
+          const {obClientId,requirementId} = props ?? {};
+
+          return  deleteObClientRequirement(obClientId,requirementId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteObClientRequirementMutationResult = NonNullable<Awaited<ReturnType<typeof deleteObClientRequirement>>>
+    
+    export type DeleteObClientRequirementMutationError = ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Remove a requirement (OB-05)
+ */
+export const useDeleteObClientRequirement = <TError = ForbiddenResponse | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObClientRequirement>>, TError,{obClientId: number;requirementId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteObClientRequirement>>,
+        TError,
+        {obClientId: number;requirementId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteObClientRequirementMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

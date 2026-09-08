@@ -53,6 +53,7 @@ import type { ObClientCreateRequestSalesPersonId } from './obClientCreateRequest
 import type { ObClientCreateRequestLicenseType } from './obClientCreateRequestLicenseType';
 import type { ObContactWriteRequest } from './obContactWriteRequest';
 import type { ObApplicationWriteRequest } from './obApplicationWriteRequest';
+import type { ObRequirementWriteRequest } from './obRequirementWriteRequest';
 
 export interface ObClientCreateRequest {
   /** @maxLength 200 */
@@ -86,7 +87,17 @@ would board a client with nothing to onboard them through.
    * @minItems 1
    */
   applications: ObApplicationWriteRequest[];
-  requirements?: string[];
+  /** B-106 · the wizard's requirements step, now rich text rather than
+bare strings. Each entry is sanitised against PLAN.md §3.9's
+allow-list before it is stored, exactly as one added later through
+`addObClientRequirement` is — one write path and one sanitiser, so a
+requirement typed at boarding and one typed in month three are the
+same row.
+
+Optional and may be empty: a client with nothing recorded yet is
+ordinary, unlike one with no SPOC or no purchase.
+ */
+  requirements?: ObRequirementWriteRequest[];
   /** The wizard's "Create client portal login now" checkbox. Creates a
 `client_accounts` row with a generated username and a one-time
 password emailed to the primary SPOC.

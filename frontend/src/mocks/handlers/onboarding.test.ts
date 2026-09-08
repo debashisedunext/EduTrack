@@ -41,9 +41,31 @@ interface ContactRow {
   isActive: boolean
 }
 
+interface ApplicationRow {
+  id: number
+  product: { id: number; code: string; name: string }
+  licenseType: string | null
+  units: number | null
+  licenseStart: string | null
+  licenseEnd: string | null
+}
+
+interface RequirementRow {
+  id: number
+  sequence: number
+  title: string | null
+  bodyHtml: string
+  bodyText: string
+  isMet: boolean
+  metAt: string | null
+  metBy: { id: number; displayName: string } | null
+}
+
 interface ClientDetail extends ClientRow {
   pan: string | null
   contacts: ContactRow[]
+  applications: ApplicationRow[]
+  requirements: RequirementRow[]
   journeys: { id: number; rag: Rag; gateStatus: string; totalTatDays: number; utilizedHours: number;
     heldByJourneyId: number | null; percentComplete: number
     steps: { id: number; rag: Rag; status: string }[] }[]
@@ -529,5 +551,395 @@ describe('B-103 · every SPOC write answers the whole client document', () => {
     expect(data.id).toBe(NORTHWIND)
     expect(data.journeys.length).toBeGreaterThan(0)
     expect(data.contacts.some((c) => c.email === 'new.spoc@northwind.example')).toBe(true)
+  })
+})
+
+
+// ── B-104 · the purchases panel ───────────────────────────────
+
+const addApplication = (clientId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/applications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const patchApplication = (clientId: number, applicationId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/applications/${applicationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** A product this client has not bought, that is on sale and has a template. */
+const unboughtSellableProduct = (clientId: number) => {
+  const db = getDb()
+  const client = db.obClients.find((c) => c.id === clientId)!
+  const owned = new Set(client.applications.map((a) => a.productId))
+  return db.obProducts.find((p) => p.isActive && p.hasActiveTemplate && !owned.has(p.id))!
+}
+
+describe('B-104 · a purchase brings its journey with it', () => {
+  it('instantiates one journey for the product just bought', async () => {
+    const before = await getClient(NORTHWIND)
+    const product = unboughtSellableProduct(NORTHWIND)
+
+    const res = await addApplication(NORTHWIND, {
+      productId: product.id,
+      licenseType: 'Subscription',
+      units: 50,
+      licenseStart: '2026-10-01',
+      licenseEnd: '2027-09-30',
+    })
+    expect(res.status).toBe(201)
+
+    // The point of the whole task. A purchase is what a journey is instantiated
+    // from, so a purchase without one leaves the client holding a product they
+    // are not being onboarded through and nothing that reports it.
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.applications).toHaveLength(before.applications.length + 1)
+    expect(after.journeys).toHaveLength(before.journeys.length + 1)
+
+    const bought = after.applications.find((a) => a.product.id === product.id)!
+    expect(bought.licenseEnd).toBe('2027-09-30')
+  })
+
+  it('opens the gate on a product bought after this client cleared theirs', async () => {
+    // Plan §5.3 item 3. Northwind is past its gate, so the journey this
+    // purchase creates is born OPEN — the client is not re-gated on
+    // prerequisites they already satisfied. This is precisely the case the route
+    // creates and the wizard never could, which is why the mock models it rather
+    // than defaulting every new journey to LOCKED.
+    const before = await getClient(NORTHWIND)
+    expect(before.journeys.some((j) => j.gateStatus === 'OPEN')).toBe(true)
+
+    const product = unboughtSellableProduct(NORTHWIND)
+    const res = await addApplication(NORTHWIND, { productId: product.id })
+    const after = (await json<{ data: ClientDetail }>(res)).data
+
+    const fresh = after.journeys.filter((j) => !before.journeys.some((b) => b.id === j.id))
+    expect(fresh).toHaveLength(1)
+    expect(fresh[0].gateStatus).toBe('OPEN')
+  })
+
+  it('answers the whole client document, not the purchase it wrote', async () => {
+    // getObClient's ETag covers applications AND journeys, so this write moves
+    // it twice over. A purchase-shaped response would leave every other card on
+    // OB-05 editing against a tag that is already stale.
+    const product = unboughtSellableProduct(NORTHWIND)
+    const res = await addApplication(NORTHWIND, { productId: product.id })
+
+    const data = (await json<{ data: ClientDetail }>(res)).data
+    expect(data.id).toBe(NORTHWIND)
+    expect(data.contacts.length).toBeGreaterThan(0)
+    expect(data.journeys.length).toBeGreaterThan(0)
+  })
+
+  it('refuses a product the client already bought, and says which row to edit', async () => {
+    const client = await getClient(NORTHWIND)
+    const owned = client.applications[0]
+
+    const res = await addApplication(NORTHWIND, { productId: owned.product.id, units: 500 })
+
+    // uq_ob_client_applications is on (ob_client_id, product_id): more seats is
+    // an edit, and a second row would mean a second journey for one product.
+    expect(res.status).toBe(409)
+    const body = await json<{ type: string; existingApplicationId: number }>(res)
+    expect(body.type).toContain('ob-application-duplicate-product')
+    // Not a dead end — the panel is told which purchase to open.
+    expect(body.existingApplicationId).toBe(owned.id)
+  })
+
+  it('refuses a product with no published journey template', async () => {
+    const db = getDb()
+    const client = db.obClients.find((c) => c.id === NORTHWIND)!
+    const owned = new Set(client.applications.map((a) => a.productId))
+    const templateless = db.obProducts.find((p) => p.isActive && !p.hasActiveTemplate && !owned.has(p.id))
+
+    if (!templateless) return
+
+    const res = await addApplication(NORTHWIND, { productId: templateless.id })
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type).toContain('ob-product-no-template')
+  })
+
+  it('refuses a product that is no longer on sale', async () => {
+    const db = getDb()
+    const retired = db.obProducts.find((p) => !p.isActive)
+    if (!retired) return
+
+    // A retired product is out of the picker by definition — buying one today
+    // would instantiate a journey from a template nobody maintains.
+    const res = await addApplication(NORTHWIND, { productId: retired.id })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('B-104 · the licence window is the renewal anchor', () => {
+  it('moves the end date forward, which is what a renewal is', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseType: purchase.licenseType,
+      units: purchase.units,
+      licenseStart: purchase.licenseStart,
+      licenseEnd: '2028-07-31',
+    })
+    expect(res.status).toBe(200)
+
+    const renewed = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(renewed.licenseEnd).toBe('2028-07-31')
+    // Nothing else moved: this is an edit to one row, not a replace of the set.
+    expect(renewed.product.id).toBe(purchase.product.id)
+  })
+
+  it('refuses a licence that ends before it starts', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseStart: '2027-01-01',
+      licenseEnd: '2026-12-31',
+    })
+    expect(res.status).toBe(400)
+    // Keyed to licenseEnd, because that is the field a renewal moves — a message
+    // on the start date would point at the half nobody touched.
+    expect((await json<{ errors: Record<string, string[]> }>(res)).errors)
+      .toHaveProperty('licenseEnd')
+  })
+
+  it('allows an open-ended perpetual licence', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseType: 'Perpetual',
+      licenseStart: '2026-08-01',
+      licenseEnd: null,
+    })
+    expect(res.status).toBe(200)
+
+    const saved = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(saved.licenseEnd).toBeNull()
+  })
+
+  it('clears an absent field rather than leaving it, because this is not a sparse patch', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications.find((a) => a.units != null)!
+
+    const res = await patchApplication(NORTHWIND, purchase.id, { productId: purchase.product.id })
+    expect(res.status).toBe(200)
+
+    const saved = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(saved.units).toBeNull()
+    expect(saved.licenseType).toBeNull()
+  })
+})
+
+describe('B-104 · the product identifies a purchase and is not a field on it', () => {
+  it('refuses a PATCH naming a different product rather than ignoring it', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+    const other = unboughtSellableProduct(NORTHWIND)
+
+    const res = await patchApplication(NORTHWIND, purchase.id, { productId: other.id })
+
+    // Refused, not ignored. ob_journeys keys straight to (ob_client_id,
+    // product_id) and the journey's template is pinned to the product actually
+    // bought — succeeding would onboard the client through the old product's
+    // steps under the new product's name.
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type)
+      .toContain('ob-application-product-immutable')
+  })
+
+  it('accepts the same product echoed back, which is the normal case', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      units: 300,
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('404s a purchase id belonging to another client', async () => {
+    const db = getDb()
+    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.applications.length > 0)!
+    const theirs = other.applications[0]
+
+    // The nested route resolves by BOTH ids, so a real purchase under somebody
+    // else answers exactly as an invented one does — which is what stops it
+    // enumerating which organisations bought which products.
+    const res = await patchApplication(NORTHWIND, theirs.id, { productId: theirs.productId })
+    expect(res.status).toBe(404)
+  })
+})
+
+
+// ── B-106 · requirements ─────────────────────────────────────────────────────
+
+const addRequirement = (clientId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const patchRequirement = (clientId: number, requirementId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements/${requirementId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const deleteRequirement = (clientId: number, requirementId: number) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/requirements/${requirementId}`, {
+    method: 'DELETE',
+  })
+
+describe('B-106 · requirements are rows, not strings', () => {
+  it('adds at the end of the list and derives the plain-text projection', async () => {
+    const before = await getClient(NORTHWIND)
+
+    const res = await addRequirement(NORTHWIND, {
+      title: 'Branding',
+      bodyHtml: '<p>Logo and <strong>colour palette</strong> in the portal</p>',
+    })
+    expect(res.status).toBe(201)
+
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.requirements).toHaveLength(before.requirements.length + 1)
+
+    const added = after.requirements[after.requirements.length - 1]
+    expect(added.title).toBe('Branding')
+    // Derived, never supplied — the screen reads both fields and a mock that
+    // left bodyText empty would let a list ship that renders blank rows.
+    expect(added.bodyText).toBe('Logo and colour palette in the portal')
+    expect(added.sequence).toBeGreaterThan(before.requirements[before.requirements.length - 1].sequence)
+    expect(added.isMet).toBe(false)
+    expect(added.metAt).toBeNull()
+  })
+
+  it('refuses a body with no text in it', async () => {
+    // The one §3.9 outcome the mock reproduces. A screen built against a mock
+    // that accepted this would ship with no handling for the 400 the server
+    // answers — and the allow-list itself is the server's, deliberately not
+    // reimplemented here.
+    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p><br></p>' })
+
+    expect(res.status).toBe(400)
+    const body = await json<{ errors: Record<string, string[]> }>(res)
+    expect(body.errors).toHaveProperty('bodyHtml')
+  })
+
+  it('answers the whole client document, so the page ETag stays usable', async () => {
+    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p>Handover pack</p>' })
+    const body = await json<{ data: ClientDetail }>(res)
+
+    // Not the requirement — the client, with its contacts and journeys, exactly
+    // as every other write in this package answers.
+    expect(body.data.id).toBe(NORTHWIND)
+    expect(body.data.contacts.length).toBeGreaterThan(0)
+    expect(body.data.journeys.length).toBeGreaterThan(0)
+  })
+})
+
+describe('B-106 · the met flag carries its own evidence', () => {
+  it('stamps who and when on the way in, and clears both on the way out', async () => {
+    const client = await getClient(NORTHWIND)
+    const unmet = client.requirements.find((r) => !r.isMet)!
+
+    const met = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, unmet.id, { isMet: true }),
+    )).data.requirements.find((r) => r.id === unmet.id)!
+
+    expect(met.isMet).toBe(true)
+    expect(met.metAt).not.toBeNull()
+    expect(met.metBy).not.toBeNull()
+
+    const reopened = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, unmet.id, { isMet: false }),
+    )).data.requirements.find((r) => r.id === unmet.id)!
+
+    // Cleared rather than left behind — a stamp beside a false flag is what
+    // ck_ob_client_requirements_met refuses at the column.
+    expect(reopened.isMet).toBe(false)
+    expect(reopened.metAt).toBeNull()
+    expect(reopened.metBy).toBeNull()
+  })
+
+  it('does not re-date a requirement that was already met', async () => {
+    const client = await getClient(NORTHWIND)
+    const already = client.requirements.find((r) => r.isMet)!
+    const stamped = already.metAt
+
+    const after = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, already.id, { bodyHtml: '<p>Reworded in November</p>' }),
+    )).data.requirements.find((r) => r.id === already.id)!
+
+    // The rule the three-column design exists for: correcting the wording in
+    // November must not re-date a requirement met in March.
+    expect(after.bodyText).toBe('Reworded in November')
+    expect(after.isMet).toBe(true)
+    expect(after.metAt).toBe(stamped)
+  })
+
+  it('leaves an omitted field alone and clears an explicit null title', async () => {
+    const client = await getClient(NORTHWIND)
+    const titled = client.requirements.find((r) => r.title !== null)!
+
+    const untouched = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, titled.id, { bodyHtml: '<p>New wording</p>' }),
+    )).data.requirements.find((r) => r.id === titled.id)!
+    expect(untouched.title).toBe(titled.title)
+
+    const cleared = (await json<{ data: ClientDetail }>(
+      await patchRequirement(NORTHWIND, titled.id, { title: null }),
+    )).data.requirements.find((r) => r.id === titled.id)!
+    expect(cleared.title).toBeNull()
+    // And the body the previous request set is still there — partial by field.
+    expect(cleared.bodyText).toBe('New wording')
+  })
+})
+
+describe('B-106 · removing a requirement takes nothing with it', () => {
+  it('removes the row, keeps the gap, and answers 200 with the document', async () => {
+    const before = await getClient(NORTHWIND)
+    const target = before.requirements[0]
+    const survivor = before.requirements[1]
+
+    const res = await deleteRequirement(NORTHWIND, target.id)
+    // 200 and not 204: every write here answers with the client so the page
+    // never holds a tag for a client that has just changed.
+    expect(res.status).toBe(200)
+
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.requirements.map((r) => r.id)).not.toContain(target.id)
+    // The surviving row keeps the sequence it had — renumbering would rewrite
+    // every following row to tidy a column nobody reads.
+    expect(after.requirements.find((r) => r.id === survivor.id)!.sequence)
+      .toBe(survivor.sequence)
+    // And nothing else on the client moved.
+    expect(after.journeys).toHaveLength(before.journeys.length)
+    expect(after.contacts).toHaveLength(before.contacts.length)
+  })
+
+  it('404s a requirement id belonging to another client', async () => {
+    const db = getDb()
+    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.requirements.length > 0)!
+
+    // Resolved by BOTH ids, as every nested onboarding route is: a real
+    // requirement under somebody else answers exactly as an invented one does.
+    const res = await deleteRequirement(NORTHWIND, other.requirements[0].id)
+    expect(res.status).toBe(404)
   })
 })

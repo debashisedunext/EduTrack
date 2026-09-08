@@ -868,6 +868,36 @@ final class PermissionMatrix {
             {"tatDays":5}""";
 
     /**
+     * B-104 · {@code ObApplicationWriteRequest} — the body of both purchases
+     * routes, because one shape serves the {@code POST} and the {@code PATCH}.
+     *
+     * <p>{@code productId} only. The licence window is optional on the wire and
+     * every rule that would reject this body — the product being on sale, having
+     * a template, or already bought — is evaluated <em>after</em> the guard this
+     * file is testing, so a fuller fixture would prove nothing extra and would
+     * couple the matrix to whichever product ids the seed happens to carry.
+     */
+    private static final String UPSERT_OB_APPLICATION = """
+            {"productId":1}""";
+
+    /**
+     * B-106 · {@code ObRequirementWriteRequest}, for the {@code POST}.
+     *
+     * <p>{@code bodyHtml} only, and already inside PLAN.md §3.9's allow-list.
+     * Everything that would reject a body — the sanitiser reducing it to nothing,
+     * the length bound over the sanitised value — is evaluated <em>after</em> the
+     * guard this file is testing, so markup that survives keeps the matrix about
+     * authorisation rather than about the allow-list.
+     *
+     * <p>The {@code PATCH} takes {@code ObRequirementUpdateRequest}, which is
+     * partial by field, and this body is valid against it too: {@code bodyHtml}
+     * is the one property both shapes share. One fixture rather than two, on
+     * {@code UPSERT_OB_APPLICATION}'s reasoning.
+     */
+    private static final String UPSERT_OB_REQUIREMENT = """
+            {"bodyHtml":"<p>Matrix fixture requirement</p>"}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -2356,6 +2386,50 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/module-access"),
             everyRole("POST", "/api/v1/onboarding/module-access", GRANT_OB_MODULE_ACCESS),
             everyRole("POST", "/api/v1/onboarding/module-access/{grantId}/revoke"),
+
+            // ── B-104 · OB-05's purchases panel ───────────────────────────────
+            //
+            // Every role, and for the SPOC block's reason unchanged: who may
+            // record a purchase is an *onboarding* role question, and none of
+            // the six ticketing-role fixtures here carries onboarding standing
+            // at all. Each gets 404 — the scoped client read runs before
+            // anything else in ObApplicationService and finds nothing.
+            //
+            // Two rows and not three. There is no DELETE on a purchase:
+            // fk_ob_journeys_application is RESTRICT and every purchase carries
+            // a journey from the moment it is made, so the route would either
+            // always fail or would have to destroy another stream's work.
+            // ObApplicationService's class javadoc has the argument;
+            // ObApplicationsIT exercises the two facts it rests on.
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/applications",
+                    UPSERT_OB_APPLICATION),
+            everyRole("PATCH",
+                    "/api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
+                    UPSERT_OB_APPLICATION),
+
+            // ── B-106 · OB-05's requirements list ─────────────────────────────
+            //
+            // Every role, on the two blocks above's reasoning unchanged: who may
+            // raise or tick off a requirement is an *onboarding* role question,
+            // and none of the six ticketing-role fixtures here carries onboarding
+            // standing at all. Each gets 404 — the scoped client read runs before
+            // anything else in ObRequirementService and finds nothing.
+            //
+            // Three rows, where the purchases block has two, and the difference
+            // is a fact about the schema. Nothing references
+            // ob_client_requirements — no journey is instantiated from one, no
+            // history references one, no sign-off names one — so a DELETE here
+            // takes nothing with it, where a purchase carries a journey behind a
+            // RESTRICT key. ObRequirementService.delete has the argument;
+            // ObRequirementsIT counts the journeys and steps on both sides of a
+            // delete rather than leaving it as prose.
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/requirements",
+                    UPSERT_OB_REQUIREMENT),
+            everyRole("PATCH",
+                    "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}",
+                    UPSERT_OB_REQUIREMENT),
+            everyRole("DELETE",
+                    "/api/v1/onboarding/clients/{obClientId}/requirements/{requirementId}"),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //

@@ -53,6 +53,7 @@ import type { ObClientDetailAllOfPan } from './obClientDetailAllOfPan';
 import type { ObClientDetailAllOfStatusReason } from './obClientDetailAllOfStatusReason';
 import type { ObContact } from './obContact';
 import type { ObApplication } from './obApplication';
+import type { ObRequirement } from './obRequirement';
 import type { ObJourneyStrip } from './obJourneyStrip';
 import type { UserRef } from './userRef';
 
@@ -86,8 +87,18 @@ reactivate one — nor explain whose name is on a past sign-off.
  */
   contacts?: ObContact[];
   applications?: ObApplication[];
-  /** Free-text capture from the wizard's requirements step. */
-  requirements?: string[];
+  /** B-106 · in `sequence` order, met and unmet together. **This was
+an `array<string>` until B-106** — a breaking change made at the
+only moment it is free, before any screen rendered it: OB-05's
+requirements card is B-108's and does not exist yet, so the sole
+consumer of the old shape is the generated client this document
+produces. Waiting would have meant a `v2` for a field nobody had
+read.
+
+Not paginated, for `journeys`' reason: a client's requirements
+are a handful and the card needs the set to render any of it.
+ */
+  requirements?: ObRequirement[];
   /** One per purchased product, in the admin-ordered service
 sequence. Not paginated — a client's purchases are a handful,
 and the accordion needs the set to render the page.

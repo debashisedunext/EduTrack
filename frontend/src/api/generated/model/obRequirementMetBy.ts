@@ -46,12 +46,15 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { UserRef } from './userRef';
 
 /**
- * Must not precede `licenseStart` — `400`, keyed on this field because
-it is the one a renewal moves. Either alone may be null: an
-open-ended perpetual licence has no end, and a start recorded before
-the end has been negotiated is an ordinary state of a real purchase.
+ * The staff user who marked it met. Null-able even when `isMet` is
+true, and deliberately outside the CHECK that binds the flag to its
+stamp: after B-126 a client confirms requirements through their own
+portal login, and attributing that to a staff user would be a false
+attribution on the one field whose job is attribution.
+`whatsappOptInBy` makes the identical call one table over.
 
  */
-export type ObApplicationWriteRequestLicenseEnd = string | null;
+export type ObRequirementMetBy = UserRef | null;

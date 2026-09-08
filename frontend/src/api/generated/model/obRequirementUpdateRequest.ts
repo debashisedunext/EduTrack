@@ -46,12 +46,27 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObRequirementUpdateRequestTitle } from './obRequirementUpdateRequestTitle';
 
 /**
- * Must not precede `licenseStart` — `400`, keyed on this field because
-it is the one a renewal moves. Either alone may be null: an
-open-ended perpetual licence has no end, and a start recorded before
-the end has been negotiated is an ordinary state of a real purchase.
+ * **Partial by field.** Every property is optional: an omitted one is left
+alone, and an explicit `null` on `title` clears it.
+
+This is the one place in the onboarding client package where a `PATCH`
+does not take the whole representation, and the reason is `isMet`.
+`ObApplicationWriteRequest` can be a full representation because a
+purchase is five fields a row editor submits together; a full
+representation here would make every wording correction also re-assert
+the met flag, so a correction saved while somebody else reopened the
+requirement would close it again with nobody having asked.
+`updateObClient` refused a full representation for the identical reason
+about `status`.
 
  */
-export type ObApplicationWriteRequestLicenseEnd = string | null;
+export interface ObRequirementUpdateRequest {
+  /** @maxLength 200 */
+  title?: ObRequirementUpdateRequestTitle;
+  /** @maxLength 20000 */
+  bodyHtml?: string;
+  isMet?: boolean;
+}

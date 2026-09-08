@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
+ * Seats. `ck_ob_client_applications_units` says the same thing.
  * @minimum 1
  */
 export type ObApplicationWriteRequestUnits = number | null;

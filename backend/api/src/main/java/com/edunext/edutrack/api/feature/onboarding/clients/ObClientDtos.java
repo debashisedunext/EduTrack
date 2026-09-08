@@ -75,6 +75,38 @@ final class ObClientDtos {
                          LocalDate licenseStart, LocalDate licenseEnd) {
     }
 
+    /**
+     * {@code ObRequirement} — {@code ob_client_requirements}, one thing this
+     * client needs before or during onboarding.
+     *
+     * <p><b>B-106 made these rows rather than strings.</b> Until this task the
+     * detail carried {@code List<String>}: no id, so nothing could be edited,
+     * removed or ticked off, and no markup, so a requirement with two clauses
+     * and a link was one run-on line. Plan §9 renders OB-05's requirements as a
+     * list somebody works through, and a string has nowhere to record having
+     * been worked through.
+     *
+     * @param bodyHtml the <em>sanitised</em> markup, never what the caller sent
+     * @param bodyText the projection of {@code bodyHtml}, derived on write —
+     *                 {@code ticket_comments} keeps the same pair for the same
+     *                 reason, so neither search nor a mail body derives it at
+     *                 read time
+     * @param metAt    stamped when {@code isMet} becomes true and cleared when
+     *                 it becomes false. Never moved by an unrelated edit:
+     *                 correcting the wording in November must not re-date a
+     *                 requirement met in March
+     * @param metBy    null-able even when {@code isMet} is true, and outside
+     *                 {@code ck_ob_client_requirements_met} on purpose — after
+     *                 B-126 a client confirms requirements through their own
+     *                 portal login, and attributing that to a staff user would
+     *                 be a false attribution on the field whose job is
+     *                 attribution
+     */
+    record ObRequirement(long id, int sequence, String title, String bodyHtml, String bodyText,
+                         boolean isMet, Instant metAt, UserRef metBy,
+                         UserRef createdBy, Instant createdAt, Instant updatedAt) {
+    }
+
     /** {@code ObStepDot} — one dot on OB-05's collapsed strip. */
     record ObStepDot(long id, int sequence, String name, String status, String rag, Long dependsOnStepId) {
     }
@@ -120,7 +152,7 @@ final class ObClientDtos {
                           Instant liveAt, boolean hasPortalLogin,
                           String description, String address, String licenseType, String pan,
                           String statusReason, List<ObContact> contacts, List<ObApplication> applications,
-                          List<String> requirements, List<ObJourneyStrip> journeys,
+                          List<ObRequirement> requirements, List<ObJourneyStrip> journeys,
                           UserRef createdBy, Instant createdAt) {
     }
 
@@ -167,13 +199,81 @@ final class ObClientDtos {
         }
     }
 
-    /** {@code ObApplicationWriteRequest} — the wizard's product multi-select. */
+    /**
+     * {@code ObApplicationWriteRequest} — the wizard's product multi-select, and
+     * since B-104 the body of both purchases-panel operations too.
+     *
+     * <p><b>One record for three uses, rather than an upsert twin.</b> B-103
+     * needed {@code ObContactUpsertRequest} beside {@code ObContactWriteRequest}
+     * because the panel's shape genuinely differs from the wizard's — it carries
+     * {@code isActive}, which a create has no use for. Nothing differs here: a
+     * purchase is the same five fields whether it is made at boarding or six
+     * months later. A second record identical to this one would be a shape that
+     * can drift from its twin for no benefit, and the contract reuses the schema
+     * for the same reason.
+     *
+     * <p>It is <b>the whole representation, not a sparse patch</b> — an absent
+     * licence end is a cleared one, on {@code ObContactUpsertRequest}'s call.
+     * {@code productId} stays {@code @NotNull} on the {@code PATCH} as well, so
+     * the panel echoes back the product it read; {@code ObApplicationService}
+     * refuses an echo that names a <em>different</em> product rather than
+     * ignoring it, because on this record the product is the identity and not a
+     * field.
+     */
     record ObApplicationWriteRequest(
             @NotNull Long productId,
             @Size(max = 64) String licenseType,
             @Min(1) Integer units,
             LocalDate licenseStart,
             LocalDate licenseEnd) {
+
+        /**
+         * A licence that ends before it starts — {@code
+         * ck_ob_client_applications_licence_window} in Java, so the refusal is a
+         * sentence rather than a constraint name.
+         *
+         * <p>Either date alone is fine and stays fine: an open-ended perpetual
+         * licence has no end, and a start recorded before the end has been
+         * negotiated is an ordinary state of a real purchase. Only the pair, and
+         * only in the wrong order.
+         */
+        boolean hasInvertedWindow() {
+            return licenseStart != null && licenseEnd != null && licenseEnd.isBefore(licenseStart);
+        }
+    }
+
+    /**
+     * {@code ObRequirementWriteRequest} — the body of {@code POST
+     * .../requirements}, and of each entry in the wizard's requirements step.
+     *
+     * <p><b>One record for both, on {@code ObApplicationWriteRequest}'s
+     * call:</b> a requirement is the same three fields whether it is raised at
+     * boarding or in month three. The {@code PATCH} does <em>not</em> reuse it —
+     * {@link ObRequirementUpdateRequest} explains why partial-by-field is a
+     * different shape from a create, and it comes down to {@code isMet}.
+     *
+     * <p>{@code @Size(max = 20_000)} is §3.9's bound on what was <em>sent</em>.
+     * {@code ObRequirementService} checks the sanitised result against it too,
+     * because escaping makes strings longer and §3.9's sentence is about what
+     * gets stored — {@code CommentSanitizer}'s class note found that the hard
+     * way. There is no {@code metAt} field and there will not be one: a caller
+     * who could supply it could backdate the evidence.
+     */
+    record ObRequirementWriteRequest(
+            @Size(max = 200) String title,
+            @NotBlank @Size(max = 20_000) String bodyHtml,
+            Boolean isMet) {
+
+        /**
+         * Met defaults to false.
+         *
+         * <p>A requirement is normally raised before it is satisfied, so an
+         * absent flag is "not yet" rather than "assume done" — the direction a
+         * mistake is visible in. One recorded after the fact may say so.
+         */
+        boolean met() {
+            return Boolean.TRUE.equals(isMet);
+        }
     }
 
     /**
@@ -198,7 +298,7 @@ final class ObClientDtos {
             @Size(max = 64) String licenseType,
             @NotEmpty @Valid List<ObContactWriteRequest> contacts,
             @NotEmpty @Valid List<ObApplicationWriteRequest> applications,
-            List<@Size(max = 5000) String> requirements,
+            @Valid List<ObRequirementWriteRequest> requirements,
             Boolean createPortalLogin,
             Boolean acknowledgeSimilarNames) {
 
@@ -210,7 +310,14 @@ final class ObClientDtos {
             return Boolean.TRUE.equals(acknowledgeSimilarNames);
         }
 
-        List<String> requirementsOrEmpty() {
+        /**
+         * B-106 · the wizard's requirements step is optional and may be empty.
+         *
+         * <p>Unlike {@code contacts} and {@code applications}, which are
+         * {@code @NotEmpty} because a client without either cannot be onboarded
+         * at all. A client with nothing recorded yet is an ordinary client.
+         */
+        List<ObRequirementWriteRequest> requirementsOrEmpty() {
             return requirements == null ? List.of() : requirements;
         }
     }

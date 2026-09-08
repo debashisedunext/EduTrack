@@ -6,7 +6,6 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -230,7 +229,15 @@ class ObClientReadRepository {
                 .param("gateStatus", blankToNull(gateStatus))
                 .param("productId", productId)
                 .param("salesPersonId", salesPersonId)
-                .param("cursorDate", decoded == null ? null : Date.valueOf(LocalDate.parse(decoded.sortKey())))
+                // B-104 · the LocalDate itself, not Date.valueOf(..). The
+                // keyset cursor is compared against c.onboarding_date, which is
+                // the same DATE column localDate() reads — and java.sql.Date
+                // carries an instant, so binding one lets the driver convert it
+                // through a zone on the way out. That is A-067's defect on the
+                // bind side, and while the read was ALSO shifted the two
+                // cancelled; fixing only the read would have left page two
+                // starting a day off. See localDate()'s note.
+                .param("cursorDate", decoded == null ? null : LocalDate.parse(decoded.sortKey()))
                 .param("cursorId", decoded == null ? null : decoded.id())
                 .param("limit", fetchSize);
         if (rag != null && !rag.isBlank()) {
@@ -351,23 +358,116 @@ class ObClientReadRepository {
     }
 
     List<ApplicationRow> applicationsOf(long clientId) {
-        return jdbc.sql("""
-                SELECT a.id AS id, a.license_type AS licenseType, a.units AS units,
-                       a.license_start AS licenseStart, a.license_end AS licenseEnd,
-                       p.id AS productId, p.code AS productCode, p.name AS productName
-                  FROM ob_client_applications a
-                  JOIN ob_products p ON p.id = a.product_id
+        return jdbc.sql(APPLICATION_COLUMNS + """
                  WHERE a.ob_client_id = :id
                  ORDER BY p.name, p.id
                 """).param("id", clientId).query(APPLICATION_MAPPER).list();
     }
 
-    List<String> requirementsOf(long clientId) {
-        return jdbc.sql("""
-                SELECT body FROM ob_client_requirements
+    /**
+     * One purchase of one client, resolved by both ids at once.
+     *
+     * <p>B-104 · the {@code ob_client_id} is in the {@code WHERE} rather than
+     * checked afterwards, so a real purchase belonging to a different client
+     * returns nothing and becomes a 404 — {@link #contactOf}'s reasoning, and it
+     * matters slightly more here. Enumerating this table one integer at a time
+     * would enumerate which organisations bought which products, which is a fact
+     * about other clients' commercial relationships rather than about the
+     * caller's own work.
+     *
+     * <p>Unscoped for {@link #contactOf}'s reason: A-112's rule has already been
+     * applied to the <em>client</em> by {@code findDetail}, and expressing it a
+     * third time over a table it says nothing about is how two copies of one
+     * security rule drift apart.
+     */
+    Optional<ApplicationRow> applicationOf(long clientId, long applicationId) {
+        return jdbc.sql(APPLICATION_COLUMNS + """
+                 WHERE a.ob_client_id = :clientId AND a.id = :applicationId
+                """)
+                .param("clientId", clientId)
+                .param("applicationId", applicationId)
+                .query(APPLICATION_MAPPER)
+                .optional();
+    }
+
+    /**
+     * Whether this client has already bought this product, and which row holds
+     * it.
+     *
+     * <p>B-104 · {@code uq_ob_client_applications} is on {@code (ob_client_id,
+     * product_id)}, so this asks exactly the question the index will answer. The
+     * row is returned rather than a boolean because the refusal names the
+     * product and offers the existing purchase to edit — a 409 that says "already
+     * bought" without saying <em>which</em> row to open is a dead end on a panel
+     * that may be showing five.
+     */
+    Optional<ApplicationRow> applicationByProduct(long clientId, long productId) {
+        return jdbc.sql(APPLICATION_COLUMNS + """
+                 WHERE a.ob_client_id = :clientId AND a.product_id = :productId
+                """)
+                .param("clientId", clientId)
+                .param("productId", productId)
+                .query(APPLICATION_MAPPER)
+                .optional();
+    }
+
+    /**
+     * B-106 · one client's requirements, in the order OB-05 prints them.
+     *
+     * <p>{@code ORDER BY sequence, id} rather than by {@code sequence} alone,
+     * and the tiebreak is load-bearing: {@code sequence} is not unique — the
+     * migration says so — so two requirements sharing a position would
+     * otherwise come back in whatever order InnoDB felt like, and a list that
+     * reshuffles itself between two reads of the same unchanged client looks
+     * like somebody else edited it.
+     */
+    List<RequirementRow> requirementsOf(long clientId) {
+        return jdbc.sql(REQUIREMENT_COLUMNS + """
+                 WHERE r.ob_client_id = :id
+                 ORDER BY r.sequence, r.id
+                """).param("id", clientId).query(REQUIREMENT_MAPPER).list();
+    }
+
+    /**
+     * One requirement of one client, resolved by both ids at once.
+     *
+     * <p>B-106 · {@link #applicationOf}'s reasoning verbatim — the
+     * {@code ob_client_id} is in the {@code WHERE} rather than checked
+     * afterwards, so a real requirement belonging to a different client returns
+     * nothing and becomes a 404 rather than a row this caller has no business
+     * knowing exists. Unscoped for the same reason too: A-112's rule has
+     * already been applied to the <em>client</em> by {@code findDetail}, and
+     * expressing it a second time over a table it says nothing about is how two
+     * copies of one security rule drift apart.
+     */
+    Optional<RequirementRow> requirementOf(long clientId, long requirementId) {
+        return jdbc.sql(REQUIREMENT_COLUMNS + """
+                 WHERE r.ob_client_id = :clientId AND r.id = :requirementId
+                """)
+                .param("clientId", clientId)
+                .param("requirementId", requirementId)
+                .query(REQUIREMENT_MAPPER)
+                .optional();
+    }
+
+    /**
+     * The position a newly added requirement takes: after every one already
+     * there.
+     *
+     * <p>B-106 · {@code COALESCE(MAX(sequence) + 1, 0)} rather than a count.
+     * A count would collide with an existing row the moment anything is deleted
+     * — the delete deliberately leaves gaps rather than renumbering — and two
+     * requirements sharing a position is exactly what {@link #requirementsOf}'s
+     * tiebreak exists to survive rather than to be handed routinely. This is
+     * read inside the write transaction, so two concurrent adds serialise on
+     * the row lock rather than both reading the same maximum.
+     */
+    int nextRequirementSequence(long clientId) {
+        Integer next = jdbc.sql("""
+                SELECT COALESCE(MAX(sequence) + 1, 0) FROM ob_client_requirements
                  WHERE ob_client_id = :id
-                 ORDER BY sequence, id
-                """).param("id", clientId).query(String.class).list();
+                """).param("id", clientId).query(Integer.class).single();
+        return next == null ? 0 : next;
     }
 
     // ------------------------------------------------------------------
@@ -518,6 +618,20 @@ class ObClientReadRepository {
                           LocalDate licenseEnd, long productId, String productCode, String productName) {
     }
 
+    /**
+     * B-106 · one requirement, with both user names already joined.
+     *
+     * <p>{@code createdByName} and {@code metByName} come back beside their
+     * ids for {@code DetailRow.createdByName}'s reason: OB-05 prints "met by
+     * Priya" inline, and a second query per row to turn an id into a name is
+     * the N+1 this projection exists to avoid.
+     */
+    record RequirementRow(long id, int sequence, String title, String bodyHtml, String bodyText,
+                          boolean isMet, Instant metAt, Long metBy, String metByName,
+                          Long createdBy, String createdByName,
+                          Instant createdAt, Instant updatedAt) {
+    }
+
     record JourneyStripRow(long id, String gateStatus, Long heldByJourneyId, long productId,
                       String productCode, String productName, int stepCount, int stepsSettled,
                       int totalTatDays, String rag) {
@@ -544,6 +658,65 @@ class ObClientReadRepository {
                    ct.is_primary      AS isPrimary,
                    ct.is_active       AS isActive
               FROM ob_client_contacts ct
+            """;
+
+    /**
+     * B-104 · one projection of {@code ob_client_applications}, shared by the
+     * detail read and by the purchases panel's two lookups.
+     *
+     * <p>Extracted for {@code CONTACT_COLUMNS}' reason: three statements over one
+     * table that differ only in their {@code WHERE} are three chances for a
+     * column added to one to go missing from the others, and the mapper would
+     * fail at runtime rather than at compile time.
+     */
+    private static final String APPLICATION_COLUMNS = """
+            SELECT a.id            AS id,
+                   a.license_type  AS licenseType,
+                   a.units         AS units,
+                   a.license_start AS licenseStart,
+                   a.license_end   AS licenseEnd,
+                   p.id            AS productId,
+                   p.code          AS productCode,
+                   p.name          AS productName
+              FROM ob_client_applications a
+              JOIN ob_products p ON p.id = a.product_id
+            """;
+
+    /**
+     * B-106 · one projection of {@code ob_client_requirements}, shared by the
+     * detail read and by the requirements panel's lookup.
+     *
+     * <p>Extracted on {@code APPLICATION_COLUMNS}' reason, which is
+     * {@code CONTACT_COLUMNS}' reason: statements over one table that differ
+     * only in their {@code WHERE} are that many chances for a column added to
+     * one to go missing from the others, and the mapper would not notice.
+     *
+     * <p>Both user joins are {@code LEFT}. {@code created_by} has been
+     * null-able since V20260903_1210 — a requirement written by an import has
+     * no staff author — and {@code met_by} is null-able by the design
+     * V20260908_1210 states: after B-126 a client confirms a requirement
+     * through their own portal login and there is no staff user to name. An
+     * inner join on either would silently drop those rows from the list, which
+     * is the worst of the available failures: the requirement is still there,
+     * still unmet, and no longer on screen.
+     */
+    private static final String REQUIREMENT_COLUMNS = """
+            SELECT r.id         AS id,
+                   r.sequence   AS sequence,
+                   r.title      AS title,
+                   r.body_html  AS bodyHtml,
+                   r.body_text  AS bodyText,
+                   r.is_met     AS isMet,
+                   r.met_at     AS metAt,
+                   r.met_by     AS metBy,
+                   mb.full_name AS metByName,
+                   r.created_by AS createdBy,
+                   cb.full_name AS createdByName,
+                   r.created_at AS createdAt,
+                   r.updated_at AS updatedAt
+              FROM ob_client_requirements r
+              LEFT JOIN users mb ON mb.id = r.met_by
+              LEFT JOIN users cb ON cb.id = r.created_by
             """;
 
     private static final RowMapper<ListRow> LIST_MAPPER = (rs, n) -> listRow(rs);
@@ -573,6 +746,14 @@ class ObClientReadRepository {
             rs.getLong("id"), rs.getString("licenseType"), nullableInt(rs, "units"),
             localDate(rs, "licenseStart"), localDate(rs, "licenseEnd"),
             rs.getLong("productId"), rs.getString("productCode"), rs.getString("productName"));
+
+    private static final RowMapper<RequirementRow> REQUIREMENT_MAPPER = (rs, n) -> new RequirementRow(
+            rs.getLong("id"), rs.getInt("sequence"), rs.getString("title"),
+            rs.getString("bodyHtml"), rs.getString("bodyText"),
+            rs.getBoolean("isMet"), instant(rs, "metAt"),
+            nullableLong(rs, "metBy"), rs.getString("metByName"),
+            nullableLong(rs, "createdBy"), rs.getString("createdByName"),
+            instant(rs, "createdAt"), instant(rs, "updatedAt"));
 
     private static final RowMapper<JourneyStripRow> JOURNEY_MAPPER = (rs, n) -> new JourneyStripRow(
             rs.getLong("id"), rs.getString("gateStatus"), nullableLong(rs, "heldByJourneyId"),
@@ -618,9 +799,29 @@ class ObClientReadRepository {
         return value == null ? null : value.toInstant();
     }
 
+    /**
+     * B-104 · {@code getObject(.., LocalDate.class)}, never
+     * {@code getDate(..).toLocalDate()} — <b>A-067's defect</b>, and this was the
+     * last repository still carrying it.
+     *
+     * <p>{@code rs.getDate} builds a {@code java.sql.Date} from an instant and
+     * {@code toLocalDate} renders it through the <b>JVM default zone</b>, so a
+     * date stored in a UTC database and read on an IST machine came back a day
+     * early. {@code TicketReportRepository}, {@code ReportScheduleRepository} and
+     * {@code WidgetRepository} all say the same thing at their own call sites;
+     * {@code ObContactWriteRepository.Consent.atTimestamp} is the write-side
+     * counterpart on a {@code DATETIME(6)}.
+     *
+     * <p>Found by {@code ObApplicationsIT.aRenewalMovesTheEndDate}, which is the
+     * first assertion anywhere to compare a date written through this package
+     * against the same date read back out of it. It was silently wrong for
+     * <b>every</b> caller of this mapper, not only the licence window: {@code
+     * onboardingDate} on the OB-03 list and the OB-05 header went through it too,
+     * so a client boarded on the 7th displayed as the 6th. A {@code DATE} has no
+     * instant and must not be given one; {@code getObject} does not.
+     */
     private static LocalDate localDate(ResultSet rs, String column) throws SQLException {
-        Date value = rs.getDate(column);
-        return value == null ? null : value.toLocalDate();
+        return rs.getObject(column, LocalDate.class);
     }
 
     private static String blankToNull(String value) {

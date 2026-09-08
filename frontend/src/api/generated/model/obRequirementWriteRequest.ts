@@ -46,12 +46,41 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObRequirementWriteRequestTitle } from './obRequirementWriteRequestTitle';
 
 /**
- * Must not precede `licenseStart` — `400`, keyed on this field because
-it is the one a renewal moves. Either alone may be null: an
-open-ended perpetual licence has no end, and a start recorded before
-the end has been negotiated is an ordinary state of a real purchase.
+ * The body of `addObClientRequirement`, and of each entry in
+`createObClient`'s `requirements` list.
+
+**The wizard and the panel share this schema** rather than having an
+upsert twin, `ObApplicationWriteRequest`'s call: a requirement is the
+same three fields whether it is raised at boarding or in month three.
+The `PATCH` does *not* reuse it — see `ObRequirementUpdateRequest` for
+why partial-by-field is not the same shape as a create.
 
  */
-export type ObApplicationWriteRequestLicenseEnd = string | null;
+export interface ObRequirementWriteRequest {
+  /** @maxLength 200 */
+  title?: ObRequirementWriteRequestTitle;
+  /**
+   * Rich text, sanitised on the server against PLAN.md §3.9's allow-list
+before anything is stored. The 20 000 is §3.9's bound on what is
+*submitted*; the sanitised result is checked against it too, because
+escaping makes strings longer and §3.9's sentence is about what gets
+stored.
+
+**A body that sanitises to nothing is `400`, not an empty row.**
+`<script>alert(1)</script>` is a non-blank 27-character string that
+passes every length and blank check and means nothing once the
+allow-list has run.
+
+   * @maxLength 20000
+   */
+  bodyHtml: string;
+  /** Rarely true on a create — a requirement is normally raised before it
+is met — but accepted, because a requirement recorded after the fact
+is an ordinary thing. `metAt` is stamped by the server; there is no
+field for it here, and one would let a caller backdate the evidence.
+ */
+  isMet?: boolean;
+}

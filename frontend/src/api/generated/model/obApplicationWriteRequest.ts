@@ -51,12 +51,40 @@ import type { ObApplicationWriteRequestUnits } from './obApplicationWriteRequest
 import type { ObApplicationWriteRequestLicenseStart } from './obApplicationWriteRequestLicenseStart';
 import type { ObApplicationWriteRequestLicenseEnd } from './obApplicationWriteRequestLicenseEnd';
 
+/**
+ * The wizard's product multi-select, and since B-104 the body of both
+purchases-panel operations too.
+
+**One schema for all three uses, rather than an upsert twin.** B-103
+needed `ObContactUpsertRequest` beside `ObContactWriteRequest` because
+the panel's shape genuinely differs from the wizard's — it carries
+`isActive`, which a create has no use for. Nothing differs here: a
+purchase is the same five fields whether it is made at boarding or six
+months later, and a second schema identical to this one would be a shape
+that can drift from its twin for no benefit.
+
+ */
 export interface ObApplicationWriteRequest {
+  /** B-104 · required on the `PATCH` as well as the `POST`, because the
+body is the whole representation and the panel echoes back what it
+read. On the `PATCH` it may not *change*: a body naming a different
+product is `409` `ob-application-product-immutable`, refused rather
+than ignored. The product is what identifies a purchase — `ob_journeys`
+keys straight to `(ob_client_id, product_id)` — not a field on it.
+ */
   productId: number;
   /** @maxLength 64 */
   licenseType?: ObApplicationWriteRequestLicenseType;
-  /** @minimum 1 */
+  /**
+   * Seats. `ck_ob_client_applications_units` says the same thing.
+   * @minimum 1
+   */
   units?: ObApplicationWriteRequestUnits;
   licenseStart?: ObApplicationWriteRequestLicenseStart;
+  /** Must not precede `licenseStart` — `400`, keyed on this field because
+it is the one a renewal moves. Either alone may be null: an
+open-ended perpetual licence has no end, and a start recorded before
+the end has been negotiated is an ordinary state of a real purchase.
+ */
   licenseEnd?: ObApplicationWriteRequestLicenseEnd;
 }

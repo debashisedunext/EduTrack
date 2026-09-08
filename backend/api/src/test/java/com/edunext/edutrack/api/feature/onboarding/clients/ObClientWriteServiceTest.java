@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.onboarding.clients;
 
 import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
 import com.edunext.edutrack.api.security.pan.PanService;
+import com.edunext.edutrack.api.text.RichTextSanitizer;
 import com.edunext.edutrack.domain.onboarding.ObClient;
 import com.edunext.edutrack.domain.onboarding.ObClientRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,7 @@ class ObClientWriteServiceTest {
     private ObClientRepository clients;
     private ObClientReadRepository reads;
     private ObClientChildWriteRepository children;
+    private ObRequirementWriteRepository requirements;
     private ObClientService details;
     private ObJourneyInstantiationService journeys;
     private PanService pan;
@@ -58,10 +60,16 @@ class ObClientWriteServiceTest {
         clients = mock(ObClientRepository.class);
         reads = mock(ObClientReadRepository.class);
         children = mock(ObClientChildWriteRepository.class);
+        requirements = mock(ObRequirementWriteRepository.class);
         details = mock(ObClientService.class);
         journeys = mock(ObJourneyInstantiationService.class);
         pan = mock(PanService.class);
-        service = new ObClientWriteService(clients, reads, children, details, journeys, pan);
+        // B-106 · ObRequirementBody is real rather than mocked. It is the
+        // §3.9 allow-list, and a mock of it would make every assertion in this
+        // class about what the wizard stores an assertion about a stub —
+        // including the one that says a body reducing to nothing is refused.
+        service = new ObClientWriteService(clients, reads, children, requirements,
+                new ObRequirementBody(new RichTextSanitizer()), details, journeys, pan);
 
         // The happy defaults: one product, on sale, with a published template.
         when(children.sellableProductIds(any())).thenReturn(Set.of(1L));

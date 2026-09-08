@@ -48,10 +48,6 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Must not precede `licenseStart` — `400`, keyed on this field because
-it is the one a renewal moves. Either alone may be null: an
-open-ended perpetual licence has no end, and a start recorded before
-the end has been negotiated is an ordinary state of a real purchase.
-
+ * @maxLength 200
  */
-export type ObApplicationWriteRequestLicenseEnd = string | null;
+export type ObRequirementWriteRequestTitle = string | null;

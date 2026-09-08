@@ -1,6 +1,7 @@
 import { http } from 'msw';
 import type {
-  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct, ObStep,
+  Db, ObApplication, ObClient, ObConsentSource, ObContact, ObJourney, ObProduct,
+  ObRequirement, ObStep,
 } from '../db';
 import { getDb, nextId } from '../db';
 import { notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
@@ -208,11 +209,77 @@ function obClientDetailDto(c: ObClient, db: Db) {
     pan: maskPan(c.pan),
     contacts: c.contacts.map(contactDto),
     applications: c.applications.map((a) => applicationDto(a, db)),
-    requirements: c.requirements,
+    requirements: c.requirements.map((r) => requirementDto(r, db)),
     journeys: c.journeys.map((j) => journeyDto(j, db)),
     createdBy: userRef(c.createdById, db),
     createdAt: c.createdAt,
   };
+}
+
+/**
+ * B-106 · one requirement, wire-shaped.
+ *
+ * `metBy` and `createdBy` are `UserRef | null` — an unmet requirement has no
+ * one who met it, and both of the server's joins are `LEFT` for the same
+ * reason.
+ */
+function requirementDto(r: ObRequirement, db: Db) {
+  return {
+    id: r.id,
+    sequence: r.sequence,
+    title: r.title,
+    bodyHtml: r.bodyHtml,
+    bodyText: r.bodyText,
+    isMet: r.isMet,
+    metAt: r.metAt,
+    metBy: userRef(r.metById, db),
+    createdBy: userRef(r.createdById, db),
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+interface RequirementWrite {
+  title?: string | null;
+  bodyHtml?: string;
+  isMet?: boolean | null;
+}
+
+/**
+ * The plain-text projection, block-aware.
+ *
+ * Deliberately *not* a sanitiser. PLAN.md §3.9 runs on the server and the mock
+ * re-implementing it would be a second allow-list that can drift from the real
+ * one — the exact failure `RichTextSanitizer`'s note describes, where the
+ * weaker copy becomes the vulnerability and nothing fails a build to say so.
+ * What this reproduces is the projection, so a screen bound against the mock
+ * renders the same two fields it will get from the server.
+ */
+function plainText(html: string): string {
+  return html
+    .replace(/<\/(p|li|ul|ol|pre|blockquote|h3|h4)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+/**
+ * The one §3.9 outcome the mock *does* reproduce: a body that means nothing.
+ *
+ * Not by running an allow-list, but by the crude test that catches the case a
+ * form has to handle — markup with no text in it at all. A screen built against
+ * a mock that accepted `<script>alert(1)</script>` would ship with no handling
+ * for the 400 the server answers.
+ */
+function requirementErrors(body: RequirementWrite, field = 'bodyHtml') {
+  if (body.bodyHtml === undefined) return null;
+  if (!body.bodyHtml?.trim() || !plainText(body.bodyHtml).trim()) {
+    return {
+      [field]: ['A requirement needs something to say. Nothing in that body survived the allow-list.'],
+    };
+  }
+  return null;
 }
 
 // ── the similar-name guard ──────────────────────────────────────────────────
@@ -332,6 +399,74 @@ const duplicateEmail = (holder: ObContact) =>
     },
   });
 
+/**
+ * `409` — this client already bought this product.
+ *
+ * `uq_ob_client_applications` is on `(ob_client_id, product_id)`: more seats, a
+ * different licence type or a renewal is an **edit** to the row already there,
+ * and a second row would mean a second journey for one product. Not a dead end,
+ * which is why `existingApplicationId` is carried — a 409 that says "already
+ * bought" without saying which of five rows to open leaves the panel with
+ * nothing to do but refuse.
+ */
+const duplicateProduct = (existing: ObApplication, productName: string) =>
+  problem(409, 'ob-application-duplicate-product',
+    'This client has already bought that product', {
+      forceable: false,
+      existingApplicationId: existing.id,
+      errors: {
+        productId: [
+          `${productName} is already purchased by this client. Buying more seats, changing the `
+          + 'licence type or renewing the licence window is an edit to that purchase.',
+        ],
+      },
+    });
+
+/**
+ * `409` — a purchase cannot be repointed at a different product.
+ *
+ * The product is what identifies a purchase rather than a field on it:
+ * `ob_journeys` keys straight to `(ob_client_id, product_id)`, and the journey's
+ * pinned `templateId` belongs to the product that was actually bought. Refused
+ * rather than ignored — a body naming a different product is a form that has
+ * come apart, and silently keeping the old one is how somebody concludes the
+ * change landed.
+ */
+const productImmutable = (currentProductName: string) =>
+  problem(409, 'ob-application-product-immutable', 'A purchase cannot change product', {
+    forceable: false,
+    errors: {
+      productId: [
+        `This purchase is for ${currentProductName} and cannot be repointed at another product. `
+        + 'Add the other product as its own purchase instead.',
+      ],
+    },
+  });
+
+/** The one rule Bean Validation cannot state: a window is a relationship between two fields. */
+const applicationErrors = (body: ApplicationWrite): Record<string, string[]> | null => {
+  const errors: Record<string, string[]> = {};
+  if (body.productId == null) errors.productId = ['A product is required'];
+  if (body.units != null && body.units < 1) errors.units = ['Seats must be at least 1'];
+  if (body.licenseStart && body.licenseEnd && body.licenseEnd < body.licenseStart) {
+    // Keyed to licenseEnd rather than to the pair, because the end date is the
+    // one a renewal moves — a message on the start date points at the half
+    // nobody touched.
+    errors.licenseEnd = [
+      `A licence cannot end before it starts — ${body.licenseEnd} is earlier than ${body.licenseStart}.`,
+    ];
+  }
+  return Object.keys(errors).length ? errors : null;
+};
+
+interface ApplicationWrite {
+  productId?: number;
+  licenseType?: string | null;
+  units?: number | null;
+  licenseStart?: string | null;
+  licenseEnd?: string | null;
+}
+
 export const onboardingHandlers = [
   // ── products ──────────────────────────────────────────────────────────────
   http.get(url('/onboarding/products'), ({ request }) => {
@@ -442,7 +577,7 @@ export const onboardingHandlers = [
       contacts?: ContactUpsert[];
       applications?: { productId: number; licenseType?: string | null; units?: number | null;
         licenseStart?: string | null; licenseEnd?: string | null }[];
-      requirements?: string[];
+      requirements?: RequirementWrite[];
       createPortalLogin?: boolean;
       acknowledgeSimilarNames?: boolean;
     };
@@ -491,6 +626,7 @@ export const onboardingHandlers = [
     const clientId = Math.max(0, ...db.obClients.map((c) => c.id)) + 1;
     let contactId = Math.max(0, ...db.obClients.flatMap((c) => c.contacts.map((x) => x.id)));
     let applicationId = Math.max(0, ...db.obClients.flatMap((c) => c.applications.map((x) => x.id)));
+    let requirementId = Math.max(0, ...db.obClients.flatMap((c) => c.requirements.map((r) => r.id)));
     let journeyId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.map((j) => j.id)));
     let stepId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.flatMap((j) => j.steps.map((s) => s.id))));
 
@@ -526,7 +662,24 @@ export const onboardingHandlers = [
         licenseStart: a.licenseStart ?? null,
         licenseEnd: a.licenseEnd ?? null,
       })),
-      requirements: body.requirements ?? [],
+      // B-106 · rows, numbered in the order they were entered. Blank bodies
+      // are dropped rather than refused, exactly as the server does: a wizard
+      // textarea produces them by accident.
+      requirements: (body.requirements ?? [])
+        .filter((r) => r.bodyHtml?.trim())
+        .map((r, index) => ({
+          id: ++requirementId,
+          sequence: index,
+          title: r.title?.trim() || null,
+          bodyHtml: r.bodyHtml!,
+          bodyText: plainText(r.bodyHtml!),
+          isMet: Boolean(r.isMet),
+          metAt: r.isMet ? new Date().toISOString() : null,
+          metById: r.isMet ? 1 : null,
+          createdById: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: null,
+        })),
       // One journey per purchased product, every one LOCKED. Steps are copied
       // from an existing journey for that product, which stands in for the
       // template snapshot the real service takes — the point being that the
@@ -683,4 +836,204 @@ export const onboardingHandlers = [
     contact.isActive = false;
     return ok(obClientDetailDto(c, db));
   }),
+
+  // ── B-104 · the purchases panel ──────────────────────────────────
+  //
+  // Both answer the whole client document, on the SPOC panel's reasoning above.
+  // It matters more here: the POST also adds a journey strip, so a caller that
+  // did not re-read would be looking at an accordion missing what they just
+  // created.
+  //
+  // There is no DELETE, and its absence is the design rather than an omission
+  // this mock has not caught up with — `fk_ob_journeys_application` is RESTRICT
+  // and every purchase carries a journey from the moment it is made.
+
+  http.post(url('/onboarding/clients/:obClientId/applications'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const body = (await request.json()) as ApplicationWrite;
+    const invalid = applicationErrors(body);
+    if (invalid) return validationFailed(invalid);
+
+    const existing = c.applications.find((a) => a.productId === body.productId);
+    if (existing) {
+      const name = db.obProducts.find((x) => x.id === existing.productId)?.name ?? 'That product';
+      return duplicateProduct(existing, name);
+    }
+
+    // On sale, and with something to instantiate from. Both are the wizard's
+    // own guards; a mock that waved them through would let a picker ship that
+    // offers products the server refuses.
+    const product = db.obProducts.find((x) => x.id === body.productId);
+    if (!product || !product.isActive) {
+      return validationFailed({
+        productId: [`No product on sale with id ${body.productId}. A retired product is out of the picker by definition.`],
+      });
+    }
+    if (!product.hasActiveTemplate) {
+      return problem(409, 'ob-product-no-template',
+        `${product.name} has no active journey template`, {
+          forceable: false,
+          productIds: [product.id],
+          errors: { applications: ['A purchase with no template to instantiate would board this client into nothing.'] },
+        });
+    }
+
+    c.applications.push({
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.applications.map((a) => a.id))) + 1,
+      productId: product.id,
+      licenseType: body.licenseType ?? null,
+      units: body.units ?? null,
+      licenseStart: body.licenseStart ?? null,
+      licenseEnd: body.licenseEnd ?? null,
+    });
+
+    // The journey, in the same breath — a purchase is what one is instantiated
+    // from, and a purchase without one leaves the client with a product they
+    // are not being onboarded through.
+    //
+    // OPEN rather than LOCKED when this client's gate has already opened (plan
+    // §5.3 item 3). A client is not re-gated on prerequisites they have already
+    // satisfied, which is exactly the case this route creates and the wizard
+    // never could.
+    let journeyId = Math.max(0, ...db.obClients.flatMap((x) => x.journeys.map((j) => j.id)));
+    let stepId = Math.max(0, ...db.obClients.flatMap((x) => x.journeys.flatMap((j) => j.steps.map((t) => t.id))));
+    const specimen = db.obClients.flatMap((x) => x.journeys).find((j) => j.productId === product.id);
+    c.journeys.push({
+      id: ++journeyId,
+      productId: product.id,
+      gateStatus: c.journeys.some((j) => j.gateStatus === 'OPEN') ? 'OPEN' : 'LOCKED',
+      heldByJourneyId: null,
+      steps: (specimen?.steps ?? []).map((t) => ({
+        id: ++stepId,
+        sequence: t.sequence,
+        name: t.name,
+        status: 'PENDING' as const,
+        tatDays: t.tatDays,
+        usedHours: 0,
+        dependsOnStepId: null,
+      })),
+    });
+
+    return ok(obClientDetailDto(c, db), undefined, { status: 201 });
+  }),
+
+  http.patch(
+    url('/onboarding/clients/:obClientId/applications/:applicationId'),
+    async ({ params, request }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      // Resolved by BOTH ids: a real purchase under another client is 404, so
+      // the nested route cannot enumerate who bought what.
+      const application = c.applications.find((a) => a.id === Number(params.applicationId));
+      if (!application) return notFound('Application');
+
+      const body = (await request.json()) as ApplicationWrite;
+
+      if (body.productId != null && body.productId !== application.productId) {
+        const name = db.obProducts.find((x) => x.id === application.productId)?.name ?? 'this product';
+        return productImmutable(name);
+      }
+
+      const invalid = applicationErrors(body);
+      if (invalid) return validationFailed(invalid);
+
+      // The whole representation, not a sparse patch — an absent licence end is
+      // a cleared one. The product is untouched by construction: it is not in
+      // the SET list on the server either.
+      application.licenseType = body.licenseType ?? null;
+      application.units = body.units ?? null;
+      application.licenseStart = body.licenseStart ?? null;
+      application.licenseEnd = body.licenseEnd ?? null;
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
+
+  // ── B-106 · OB-05's requirements list ────────────────────────────────────
+
+  http.post(url('/onboarding/clients/:obClientId/requirements'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const body = (await request.json()) as RequirementWrite;
+    if (!body.bodyHtml?.trim()) return validationFailed({ bodyHtml: ['A body is required'] });
+    const invalid = requirementErrors(body);
+    if (invalid) return validationFailed(invalid);
+
+    // MAX(sequence) + 1, not a count: a delete leaves gaps on purpose, and a
+    // count would collide with a row that is still there.
+    c.requirements.push({
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.requirements.map((r) => r.id))) + 1,
+      sequence: Math.max(-1, ...c.requirements.map((r) => r.sequence)) + 1,
+      title: body.title?.trim() || null,
+      bodyHtml: body.bodyHtml,
+      bodyText: plainText(body.bodyHtml),
+      isMet: Boolean(body.isMet),
+      metAt: body.isMet ? new Date().toISOString() : null,
+      metById: body.isMet ? 1 : null,
+      createdById: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+    });
+
+    return ok(obClientDetailDto(c, db), undefined, { status: 201 });
+  }),
+
+  http.patch(
+    url('/onboarding/clients/:obClientId/requirements/:requirementId'),
+    async ({ params, request }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      // Resolved by BOTH ids, as every nested onboarding route is: a real
+      // requirement under another client is 404, never 403.
+      const requirement = c.requirements.find((r) => r.id === Number(params.requirementId));
+      if (!requirement) return notFound('Requirement');
+
+      const body = (await request.json()) as RequirementWrite;
+      const invalid = requirementErrors(body);
+      if (invalid) return validationFailed(invalid);
+
+      // Partial by field. An omitted key is untouched; an explicit null title
+      // clears the label, which is the one place a null means something here.
+      if ('title' in body) requirement.title = body.title?.trim() || null;
+      if (body.bodyHtml !== undefined && body.bodyHtml !== null) {
+        requirement.bodyHtml = body.bodyHtml;
+        requirement.bodyText = plainText(body.bodyHtml);
+      }
+      // The stamp moves only when the flag moves — correcting the wording in
+      // November must not re-date a requirement met in March.
+      if (body.isMet !== undefined && body.isMet !== null && body.isMet !== requirement.isMet) {
+        requirement.isMet = body.isMet;
+        requirement.metAt = body.isMet ? new Date().toISOString() : null;
+        requirement.metById = body.isMet ? 1 : null;
+      }
+      requirement.updatedAt = new Date().toISOString();
+
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
+
+  http.delete(
+    url('/onboarding/clients/:obClientId/requirements/:requirementId'),
+    ({ params }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      const index = c.requirements.findIndex((r) => r.id === Number(params.requirementId));
+      if (index < 0) return notFound('Requirement');
+
+      // A hard delete, unlike the purchases panel which has no delete at all:
+      // nothing references a requirement, so the row takes nothing with it. The
+      // remaining sequence numbers keep their gaps rather than renumbering.
+      c.requirements.splice(index, 1);
+      // 200 with the document, not 204 — every write in this package answers
+      // with the client so the page never holds a stale ETag.
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
 ];
