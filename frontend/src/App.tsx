@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { DashboardPage } from './features/dashboard/DashboardPage'
+import { LauncherPage } from './features/launcher/LauncherPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { ScreenPlaceholder } from './app/ScreenPlaceholder'
 import {
@@ -205,6 +206,18 @@ export default function App() {
             that all redirect back here would be a menu of dead ends.
           */}
           <Route path="/change-password" element={withSuspense(<ChangePasswordPage />)} />
+
+          {/*
+            A-116 · OB-01, the module launcher. Shell-less for S-03's reason,
+            one line above: a screen about choosing a module, framed by a
+            sidebar full of one module's links, is a menu of dead ends.
+
+            Eager rather than lazy, for A-073's reason: it is a *landing*
+            route — LandingRoutes.forUser sends every dual-module user here the
+            moment they sign in — so deferring it would put a round trip in
+            front of the first screen those users ever see.
+          */}
+          <Route path="/launcher" element={<LauncherPage />} />
 
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />

@@ -115,7 +115,23 @@ const FALLBACK_LANDING = '/dashboard';
  * C-062 to the router is the only change needed to make `/stages/queue` start
  * working — no server change, no edit here.
  */
-const RENDERABLE_LANDINGS: readonly string[] = ['/dashboard', '/my-tasks', '/tickets'];
+const RENDERABLE_LANDINGS: readonly string[] = [
+  '/dashboard',
+  '/my-tasks',
+  '/tickets',
+  // A-116 · both new destinations LandingRoutes.forUser can now return. The
+  // launcher for a dual-module user, the onboarding dashboard for somebody who
+  // holds that module alone.
+  //
+  // Adding the server route without adding it here is a silent no-op, and it
+  // was: the login response carried "/launcher", this guard did not recognise
+  // it, and every dual-module user landed on the ticketing dashboard with only
+  // a console warning to say why. That is the failure mode the warning exists
+  // for, working exactly as designed — and the reason this list is the second
+  // half of any landing-route change, never an afterthought.
+  '/launcher',
+  '/onboarding/dashboard',
+];
 
 /**
  * Falls back when the server names a destination this build cannot serve.
