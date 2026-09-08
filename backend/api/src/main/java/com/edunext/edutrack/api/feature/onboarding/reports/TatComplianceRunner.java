@@ -84,7 +84,7 @@ class TatComplianceRunner implements ObReportRunner {
         List<ObReportDtos.Column> columns = List.of(
                 new ObReportDtos.Column("product", "Product", STRING),
                 new ObReportDtos.Column("service", "Service", STRING),
-                new ObReportDtos.Column("owner", "Owner", STRING),
+                new ObReportDtos.Column("owner", "Implementor", STRING),
                 new ObReportDtos.Column("completed", "Completed", NUMBER),
                 new ObReportDtos.Column("measured", "With a TAT", NUMBER),
                 new ObReportDtos.Column("onTime", "On time", NUMBER),
