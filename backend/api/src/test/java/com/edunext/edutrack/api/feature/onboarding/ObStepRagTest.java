@@ -1,4 +1,4 @@
-package com.edunext.edutrack.api.feature.onboarding.reports;
+package com.edunext.edutrack.api.feature.onboarding;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
