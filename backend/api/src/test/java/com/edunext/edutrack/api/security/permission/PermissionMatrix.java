@@ -769,6 +769,39 @@ final class PermissionMatrix {
             "summary":"Matrix fixture — spoke to the SPOC"}""";
 
     /**
+     * B-102 · {@code ObClientCreateRequest}: {@code name} is {@code @NotBlank},
+     * {@code onboardingDate} is {@code @NotNull}, and {@code contacts} and
+     * {@code applications} are both {@code @NotEmpty} with their own nested
+     * constraints — so the fixture carries one valid contact and one purchase
+     * or the 400 arrives before the guard is consulted.
+     *
+     * <p>{@code pan} is deliberately absent. Bean Validation would accept one,
+     * but a fixture PAN would be sealed and blind-indexed on every allowed row
+     * this file drives, and the six of them would then collide with each other
+     * on {@code uq_ob_clients_pan_blind} — a failure that has nothing to do
+     * with authorisation, in the one suite whose only subject is authorisation.
+     *
+     * <p>The product id names no real row, on this file's standing rule: an
+     * allowed role is entitled to reach the service and be refused there.
+     */
+    private static final String CREATE_OB_CLIENT = """
+            {"name":"Matrix Fixture Client","onboardingDate":"2026-09-07",\
+            "contacts":[{"name":"Matrix Fixture SPOC","email":"matrix@example.com","isPrimary":true}],\
+            "applications":[{"productId":1}]}""";
+
+    /**
+     * B-102 · {@code ObClientUpdateRequest} — every field optional, so an empty
+     * object satisfies the binding layer and the guard is what answers.
+     *
+     * <p>An empty body would <em>not</em> do: {@code @RequestBody} is required
+     * and its absence is a 400 raised during argument resolution, before
+     * method-security advice runs, which is the hole this file's own javadoc
+     * documents at length.
+     */
+    private static final String UPDATE_OB_CLIENT = """
+            {"name":"Matrix Fixture Client"}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -2135,6 +2168,34 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/communications",
                     RECORD_COMMUNICATION),
             everyRole("GET", "/api/v1/onboarding/clients/{obClientId}/communications"),
+            // ── B-102 · OB-03/OB-04/OB-05, the onboarding client master ───────
+            //
+            // isAuthenticated() only, the same interim state every /onboarding/**
+            // controller above declares — ModuleAccessGuard is written and not
+            // wired into SecurityConfig, and "OB Admin, Onboarding Manager and
+            // Sales" is an *onboarding* role question this file cannot express:
+            // it lives in the moduleRoles claim, which JwtAuthoritiesConverter
+            // does not turn into a Spring authority, so none of the six
+            // ticketing-role fixtures below carries any onboarding standing.
+            //
+            // What each of them actually gets is worth stating, because it is
+            // not "nothing happens":
+            //   GET   — an empty page (ObClientScope.deniesEverything's fast
+            //           path) and 404 by id, never a 403.
+            //   POST  — 404 (NotAnOnboardingClientWriterException), on
+            //           ModuleAccessGuard's "indistinguishable from not found"
+            //           rule for a caller with no module grant.
+            //   PATCH — 404 as well, because the scoped read runs first and
+            //           finds nothing. The 403 this route can also give
+            //           (ObClientReadOnlyException) needs a real OB Viewer or
+            //           Step Owner, which is ObClientsIT's case and not this
+            //           file's — none of these six can reach it.
+            // 404 is not 403, so every row here is "everyRole", exactly as the
+            // five onboarding blocks above.
+            everyRole("GET", "/api/v1/onboarding/clients"),
+            everyRole("GET", "/api/v1/onboarding/clients/{obClientId}"),
+            everyRole("POST", "/api/v1/onboarding/clients", CREATE_OB_CLIENT),
+            everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}", UPDATE_OB_CLIENT),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //
