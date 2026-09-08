@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -133,8 +134,29 @@ class ModuleAccessFilterTest {
         void doesNotGuardTicketing() throws Exception {
             // The counterweight. A filter that refused everything would satisfy
             // every assertion above and be entirely broken.
-            mvc.perform(get(TICKETING).with(authentication(caller(List.of("TICKETING")))))
-                    .andExpect(status().is(not404()));
+            //
+            // DELETE, and the method is the whole care of this test. Only GET
+            // and POST are mapped on /api/v1/tickets, so DELETE is answered 405
+            // by the handler mapping — which sits behind the entire filter chain
+            // and in front of every controller. That is the narrowest place a
+            // response can prove this filter passed the request on: a 405 is
+            // unreachable if the gate refused, and it is produced without
+            // invoking a handler, so it asks no service and opens no
+            // transaction.
+            //
+            // This asserted `get(TICKETING)` first and it cost a red build.
+            // Listing tickets is `isAuthenticated()`, which this caller is, so
+            // the request ran the real handler, which opened a transaction and
+            // asked for a connection: green on a developer's machine with the
+            // compose stack up, and CannotCreateTransactionException in CI,
+            // where the MySQL service exists for the integration tests and does
+            // not carry the application's credentials. A surefire test that
+            // passes or fails on whether a database happens to be reachable is
+            // testing the machine. The class note above promises these requests
+            // "reach no service and no datasource" — that promise held for the
+            // six refusals and was broken by this one.
+            mvc.perform(delete(TICKETING).with(authentication(caller(List.of("TICKETING")))))
+                    .andExpect(status().isMethodNotAllowed());
         }
     }
 
