@@ -130,6 +130,19 @@ tags:
       never mutates it, it opens a new draft. The per-client journey
       *instances* this versioning protects (A-104) are a separate slice, not
       this tag.
+  - name: portal
+    description: |
+      A-127 · the CLIENT principal's own route tree (plan §2.3). Every operation
+      under this tag is served to a customer, never to a colleague:
+      `PortalRouteGuard` answers **404** for a staff token on the portal prefix
+      and for a client token anywhere else, and `ClientScopeResolver` pins every
+      query to the ids carried on the caller's own token.
+
+      **Its schemas are `Portal`-prefixed and separate on purpose.** Plan §9
+      requires "separate portal DTO serializers, never staff DTOs with fields
+      hidden client-side" — a staff schema reaching this tag would leave the
+      never-visible list (owners, internal comments, escalations, TAT internals,
+      other clients' anything) one forgotten annotation away from a customer.
 
 security:
   - bearerAuth: []
@@ -11339,6 +11352,136 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
+  # ══════════════════════════════════════════════════════ client portal ═══════
+  # A-127 · CP-06/07 — the client's own tickets, read-only.
+  #
+  # Four reads and nothing else. Plan §1: "No client-raised tickets. The
+  # portal's ticketing side is view-only" — so there is no write verb here to be
+  # loosened later, and "no raise-ticket" is a property of the contract rather
+  # than a rule somebody has to remember.
+  #
+  # ⚠️ contracts/ is Stream D's path and carries no CODEOWNERS entry, so it
+  # falls to the `*` rule — Debashis. Flagged for his sign-off, as A-060 was.
+  /portal/tickets:
+    get:
+      tags: [portal]
+      operationId: listPortalTickets
+      summary: The signed-in client's own tickets (CP-06)
+      description: |
+        Scoped to `ClientScopeResolver.ticketingClientId` — the id on the
+        caller's own token — and never to a `clientId` the caller sends. **There
+        is no such parameter**, which is the point: a filter the caller supplies
+        is a filter the caller can widen.
+
+        `tickets.client_id` is nullable and an internally-raised ticket leaves it
+        null, so an equality against the caller's id excludes those without
+        needing a rule of its own.
+
+        The client additionally needs `client_contacts.portal_access` — the
+        second dormant hook plan §2.3 names. An account whose contact has had
+        portal access withdrawn lists nothing rather than 403ing, for the same
+        no-existence-leak reason the detail read answers 404.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/StatusCode' } }
+        - { name: excludeClosed, in: query, schema: { type: boolean }, description: 'True to exclude tickets in CLOSED status.' }
+        - { name: sort, in: query, schema: { type: string, default: '-dateReported' } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalTicketListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /portal/tickets/{ticketId}:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [portal]
+      operationId: getPortalTicket
+      summary: One of the client's own tickets, read-only (CP-07)
+      description: |
+        **404 for a ticket belonging to another client, and the same 404 for one
+        that does not exist.** CONVENTIONS §7's no-existence-leak rule matters
+        more here than anywhere else it is applied: the caller is outside the
+        organisation, and a 403 would confirm that another company's ticket id is
+        real.
+      parameters: [{ $ref: '#/components/parameters/IfNoneMatch' }]
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalTicketResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /portal/tickets/{ticketId}/comments:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [portal]
+      operationId: listPortalTicketComments
+      summary: Client-visible comments on the client's own ticket (CP-07)
+      description: |
+        **`is_client_visible = TRUE` is applied in the query, not in the
+        serializer.** A row the client may not read is never loaded, so no later
+        mapping change can publish one — the blueprint's dormant flag activated
+        for exactly its intended purpose (plan §2.3).
+
+        **There is no parameter that turns the filter off.** `listComments` on
+        the staff tree serves the whole thread to colleagues; this operation is
+        not that one with a flag, and cannot be made into it.
+
+        Tombstoned comments are omitted rather than served as tombstones. "A
+        message was removed" is an internal fact about the record — §4B.5's
+        tombstone exists so colleagues can see what happened, not so a customer
+        can infer that something did.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalCommentListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /portal/tickets/{ticketId}/attachments:
+    parameters: [{ $ref: '#/components/parameters/TicketId' }]
+    get:
+      tags: [portal]
+      operationId: listPortalTicketAttachments
+      summary: Client-visible attachments on the client's own ticket (CP-07)
+      description: |
+        Filtered by `is_client_visible = TRUE` **and** `scan_status = 'CLEAN'`
+        **and** not tombstoned, all three in the query.
+
+        A file that has not cleared the scanner is not listed at all, rather than
+        listed and undownloadable. The staff surface serves `scanStatus` because
+        a colleague uploaded the file and is waiting on it; a customer has
+        nothing to wait for, and a PENDING row on this surface would only invite
+        a retry against a file that may yet turn out to be infected.
+
+        `downloadUrl` is the same short-lived signed URL the staff surface
+        issues. The bucket is never public.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalAttachmentListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 # ══════════════════════════════════════════════════════════ components ═══════
 components:
 
@@ -20398,3 +20541,116 @@ components:
                 Every tag a body may contain. Served rather than documented,
                 so a tag added with a new event is offered the same day.
 
+
+    # ── A-127 · the client portal's own serializers ──────────────────────────
+    # Plan §9: "separate portal DTO serializers, never staff DTOs with fields
+    # hidden client-side." Every schema below is a deliberate subset, and the
+    # never-visible list is what decides each omission — owners, internal
+    # comments, escalations, TAT internals, other clients' anything.
+    #
+    # None of them carries `isClientVisible`. Every row that reaches this
+    # surface has already been filtered on it, so the field would be a constant
+    # true — and ChatAttachment's note records why that is worse than absent: a
+    # flag that is always one value is one somebody eventually sets to the
+    # other.
+    PortalTicket:
+      type: object
+      required: [id, ticketId, title, status, projectName, dateReported, lastUpdatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        ticketId: { $ref: '#/components/schemas/TicketId' }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/StatusCode' }
+        projectName:
+          type: string
+          description: >
+            The client's own project, by name. Never `projectId` — an id is a
+            staff handle, and one the caller could try on the staff tree.
+        taskTypeName: { type: [string, 'null'] }
+        dateReported: { type: string, format: date-time }
+        plannedCloseDate:
+          type: [string, 'null']
+          format: date
+          description: >
+            When the ticket is due. The date itself is a commitment already made
+            to this client; the SLA ladder that produced it, the breach flags and
+            the stage clocks are TAT internals and are not served here.
+        actualCloseDate: { type: [string, 'null'], format: date }
+        lastUpdatedAt: { type: string, format: date-time }
+    # Deliberately absent from PortalTicket, each for the reason beside it:
+    #   assignee / owner / reportedBy — the never-visible list's first entry.
+    #   level, escalationLevel        — an internal escalation is not the
+    #                                   client's business and naming it invites
+    #                                   "why am I only L1".
+    #   stageCode, ribbon, cycles     — the workflow is how the work is done,
+    #                                   not what was promised.
+    #   isDelayed, slaBreached, TAT   — TAT internals, named on the list.
+    #   effortHours                   — what the work cost is never a customer
+    #                                   fact; §16 keeps it internal.
+    PortalTicketResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/PortalTicket' } }
+    PortalTicketListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/PortalTicket' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    PortalComment:
+      type: object
+      required: [id, body, authorType, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        body: { type: string }
+        authorType:
+          type: string
+          enum: [STAFF, CLIENT]
+          description: >
+            Whether a colleague or this client's own contact wrote it. The
+            portal thread is read-only in phase 1, so `CLIENT` appears only on
+            entries a contact left through another surface.
+        authorName:
+          type: [string, 'null']
+          description: >
+            A display name only — never a `UserRef`, which carries the id and
+            email that make up a staff handle. Serving the name at all is
+            deliberate and follows `ObStepCommunication`, which already
+            publishes exactly this to exactly this principal: an author who
+            marked a comment client-visible wrote it *to* the customer, which is
+            not the ownership fact the never-visible list is about. Null when the
+            account no longer exists, rendered without an actor rather than with
+            an invented one.
+        createdAt: { type: string, format: date-time }
+    # No inlined `attachments`, unlike the staff `Comment`. There the composer
+    # attaches to the comment it is posting, so the thread and its files are one
+    # object; the portal thread is read-only, and its files are served by
+    # `listPortalTicketAttachments` where the CLEAN and tombstone rules are
+    # stated once instead of twice.
+    PortalCommentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/PortalComment' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    PortalAttachment:
+      type: object
+      required: [id, fileName, contentType, sizeBytes, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        downloadUrl: { type: [string, 'null'], description: Short-lived signed URL. Never a public bucket path. }
+        thumbnailUrl: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    # No `scanStatus` and no `uploadedBy`: the first because only CLEAN rows are
+    # listed, so the field could only ever say CLEAN; the second because it is an
+    # owner, and owners are the never-visible list's first entry.
+    PortalAttachmentListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/PortalAttachment' } }
+        meta: { $ref: '#/components/schemas/Meta' }
