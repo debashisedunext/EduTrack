@@ -95,7 +95,14 @@ class RouteAuthorizationTest {
             "POST /api/v1/auth/forgot-password",
             "POST /api/v1/auth/reset-password",
             "POST /api/v1/webhooks/email/bounce",
-            "POST /api/v1/webhooks/email/inbound");
+            "POST /api/v1/webhooks/email/inbound",
+            // A-121 · the module's only unauthenticated routes. The caller is a
+            // customer following a link from an email: they hold a token and no
+            // account, so a 401 from the chain would refuse the very caller the
+            // surface exists for. The token is what authenticates, and
+            // PublicSignoffAccess is where it is checked.
+            "POST /api/v1/public/onboarding/signoff/otp",
+            "POST /api/v1/public/onboarding/signoff/otp/verify");
 
     /**
      * By name: actuator contributes a second
