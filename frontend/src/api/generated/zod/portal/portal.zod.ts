@@ -92,8 +92,8 @@ export const listPortalTicketsResponse = zod.object({
   "projectName": zod.string().describe('The client\'s own project, by name. Never `projectId` — an id is a staff handle, and one the caller could try on the staff tree.\n'),
   "taskTypeName": zod.string().nullish(),
   "dateReported": zod.string().datetime({}),
-  "plannedCloseDate": zod.string().date().nullish().describe('When the ticket is due. The date itself is a commitment already made to this client; the SLA ladder that produced it, the breach flags and the stage clocks are TAT internals and are not served here.\n'),
-  "actualCloseDate": zod.string().date().nullish(),
+  "plannedCloseDate": zod.string().datetime({}).nullish().describe('When the ticket is due. The date itself is a commitment already made to this client; the SLA ladder that produced it, the breach flags and the stage clocks are TAT internals and are not served here.\n`date-time`, matching the staff `Ticket` and the `DATETIME(6)` column behind it. Truncating to a date on the server would bake in a timezone, and CLAUDE.md puts that in the presentation layer.\n'),
+  "actualCloseDate": zod.string().datetime({}).nullish(),
   "lastUpdatedAt": zod.string().datetime({})
 })),
   "meta": zod.object({
@@ -136,8 +136,8 @@ export const getPortalTicketResponse = zod.object({
   "projectName": zod.string().describe('The client\'s own project, by name. Never `projectId` — an id is a staff handle, and one the caller could try on the staff tree.\n'),
   "taskTypeName": zod.string().nullish(),
   "dateReported": zod.string().datetime({}),
-  "plannedCloseDate": zod.string().date().nullish().describe('When the ticket is due. The date itself is a commitment already made to this client; the SLA ladder that produced it, the breach flags and the stage clocks are TAT internals and are not served here.\n'),
-  "actualCloseDate": zod.string().date().nullish(),
+  "plannedCloseDate": zod.string().datetime({}).nullish().describe('When the ticket is due. The date itself is a commitment already made to this client; the SLA ladder that produced it, the breach flags and the stage clocks are TAT internals and are not served here.\n`date-time`, matching the staff `Ticket` and the `DATETIME(6)` column behind it. Truncating to a date on the server would bake in a timezone, and CLAUDE.md puts that in the presentation layer.\n'),
+  "actualCloseDate": zod.string().datetime({}).nullish(),
   "lastUpdatedAt": zod.string().datetime({})
 })
 })

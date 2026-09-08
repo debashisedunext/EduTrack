@@ -49,6 +49,7 @@ the database rejects mutation independently via triggers and grants.
 
 /**
  * When the ticket is due. The date itself is a commitment already made to this client; the SLA ladder that produced it, the breach flags and the stage clocks are TAT internals and are not served here.
+`date-time`, matching the staff `Ticket` and the `DATETIME(6)` column behind it. Truncating to a date on the server would bake in a timezone, and CLAUDE.md puts that in the presentation layer.
 
  */
 export type PortalTicketPlannedCloseDate = string | null;
