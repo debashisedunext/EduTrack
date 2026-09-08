@@ -2549,7 +2549,32 @@ final class PermissionMatrix {
             // The module gate that would make a caller with no ONBOARDING
             // entitlement a 404 before any of this is A-111's, still unwired,
             // exactly as above.
-            everyRole("GET", "/api/v1/onboarding/dashboard/summary"));
+            everyRole("GET", "/api/v1/onboarding/dashboard/summary"),
+
+            // ── A-127 · CP-06/07, the client portal's ticketing side ─────
+            //
+            // Every row is "everyRole", on the same reading as the onboarding
+            // block above: 404 is not 403.
+            //
+            // None of these six can reach a portal route at all -- PortalRouteFilter
+            // answers 404 to a staff token on /api/v1/portal/**, and 404 to a
+            // client token everywhere else. That fork is about which *kind* of
+            // principal is calling, which is not a question this matrix speaks:
+            // its vocabulary is blueprint §2's six platform roles, and a CLIENT
+            // principal holds none of them.
+            //
+            // So what these rows assert is the honest and narrow thing -- the
+            // controller's @PreAuthorize("isAuthenticated()") refuses nobody who
+            // is signed in, and no platform-role restriction was invented here
+            // to look like the guard. The guard itself is PortalRouteFilterTest's
+            // subject, and the scoping is PortalTicketServiceTest's.
+            //
+            // Reads with no @RequestBody, so no fixtures: argument resolution has
+            // nothing to reject before @PreAuthorize runs.
+            everyRole("GET", "/api/v1/portal/tickets"),
+            everyRole("GET", "/api/v1/portal/tickets/{ticketId}"),
+            everyRole("GET", "/api/v1/portal/tickets/{ticketId}/comments"),
+            everyRole("GET", "/api/v1/portal/tickets/{ticketId}/attachments"));
 
     /**
      * One route and what each role may do with it.

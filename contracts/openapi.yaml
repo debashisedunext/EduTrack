@@ -20571,12 +20571,16 @@ components:
         dateReported: { type: string, format: date-time }
         plannedCloseDate:
           type: [string, 'null']
-          format: date
+          format: date-time
           description: >
             When the ticket is due. The date itself is a commitment already made
             to this client; the SLA ladder that produced it, the breach flags and
             the stage clocks are TAT internals and are not served here.
-        actualCloseDate: { type: [string, 'null'], format: date }
+
+            `date-time`, matching the staff `Ticket` and the `DATETIME(6)` column
+            behind it. Truncating to a date on the server would bake in a
+            timezone, and CLAUDE.md puts that in the presentation layer.
+        actualCloseDate: { type: [string, 'null'], format: date-time }
         lastUpdatedAt: { type: string, format: date-time }
     # Deliberately absent from PortalTicket, each for the reason beside it:
     #   assignee / owner / reportedBy — the never-visible list's first entry.
