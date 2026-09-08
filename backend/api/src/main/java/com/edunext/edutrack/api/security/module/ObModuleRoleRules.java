@@ -22,7 +22,12 @@ import java.util.Set;
  * <p>A-114 wrote this table in test sources and said so: by the time this
  * branch rebased, thirty-eight rules declared and four applied — skip, plus
  * A-117's three module-access routes — with {@code NOT_YET_ENFORCED} counting
- * the difference so it could not grow quietly. A rule set living only where tests can see it
+ * the difference so it could not grow quietly.
+ *
+ * <p>Forty-two rules live here, not thirty-eight. The four extra are B-103's
+ * three SPOC-contact writes and C-108's step PATCH, which reached develop with
+ * no module-role rule at all — the coverage check was red on them before this
+ * branch rebased onto it, which is the ratchet doing its job. A rule set living only where tests can see it
  * describes the application rather than constraining it — the same shape
  * {@code ModuleAccessGuard} was in for three weeks before A-111's second half.
  *
@@ -113,6 +118,13 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/resume", STEP_ACTORS);
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/waiting-on-client", STEP_ACTORS);
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/skip", ADMIN_AND_MANAGER);
+        // C-108 · reassign or re-plan a live step. A moderator's, not a step
+        // actor's, and ObJourneyStepLifecycleService#update already says so
+        // through the same requireModerator that gates skip: an owner
+        // reassigning the step off themselves is the one rewrite the route
+        // must not grant silently. The rule is repeated here so it survives
+        // that method rather than depending on it.
+        put(m, "PATCH", "/api/v1/onboarding/journey-steps/{stepId}", ADMIN_AND_MANAGER);
 
         // B-102 · the client master. Reads are every role's — Viewer sees
         // everything read-only, and Sales sees the clients they created, which
@@ -121,6 +133,14 @@ public class ObModuleRoleRules {
         put(m, "GET", "/api/v1/onboarding/clients/{obClientId}", EVERY_ROLE);
         put(m, "POST", "/api/v1/onboarding/clients", ADMIN_AND_SALES);
         put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
+
+        // B-103 · the SPOC contacts, which are part of the client record
+        // rather than of a journey, so they take the client's own rule.
+        // There is no read here because there is no read route: contacts
+        // arrive inside the client response, already covered above.
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/contacts", ADMIN_AND_SALES);
+        put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", ADMIN_AND_SALES);
+        put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}", ADMIN_AND_SALES);
 
         // C-112 · the communication log, which landed on develop while this
         // branch was open. Reading one is every role's — Viewer sees
