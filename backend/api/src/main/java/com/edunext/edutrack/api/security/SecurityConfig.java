@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import com.edunext.edutrack.api.security.module.ModuleAccessFilter;
 import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
+import com.edunext.edutrack.api.security.module.ObModuleRoleFilter;
+import com.edunext.edutrack.api.security.module.ObModuleRoleRules;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -216,6 +218,7 @@ public class SecurityConfig {
                                          CsrfTokenRequestHandler csrfTokenRequests,
                                          RequestMatcher cookieAuthenticatedRoutes,
                                          ModuleAccessGuard moduleGuard,
+                                         ObModuleRoleRules moduleRoleRules,
                                          ObjectMapper objectMapper) throws Exception {
         return http
                 // A-074. Enabled for the two cookie-authenticated routes and no
@@ -316,6 +319,15 @@ public class SecurityConfig {
                 // the unentitled. Method security still runs later, so this is
                 // before RolesGuard in the sense the guard's javadoc means.
                 .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper), AuthorizationFilter.class)
+
+                // A-122 · after the module gate, never before. That gate answers
+                // 404 to a caller with no ONBOARDING grant; running the role
+                // check first would answer 403 to the same caller and leak, in a
+                // status code, exactly what the gate exists to withhold.
+                //
+                // So: authorization refuses the unauthenticated, the module gate
+                // refuses the unentitled, and this refuses the wrongly-roled.
+                .addFilterAfter(new ObModuleRoleFilter(moduleRoleRules, objectMapper), ModuleAccessFilter.class)
 
                 // Consumes the single JwtDecoder bean, which carries the signature,
                 // issuer, expiry and A-025 revocation checks together.

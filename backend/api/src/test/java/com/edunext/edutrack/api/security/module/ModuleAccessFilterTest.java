@@ -67,7 +67,17 @@ class ModuleAccessFilterTest {
                 .claim("role", "ADMIN")
                 .claim("projects", List.of())
                 .claim("modules", modules)
-                .claim("moduleRoles", Map.of())
+                // A-122 · a real grant always carries a module_role — the
+                // column is NOT NULL — and as of A-122 a caller holding the
+                // module with no role recorded is refused 404 by
+                // ObModuleRoleFilter, because they can do nothing either way.
+                // Map.of() was a fixture no database can produce, and it made
+                // `passesTheGate` assert that such a caller reaches a handler.
+                // This file is about the MODULE gate; the role rules have
+                // ObModuleRoleFilterTest.
+                .claim("moduleRoles", modules.contains("ONBOARDING")
+                        ? Map.of("ONBOARDING", "OB_ADMIN")
+                        : Map.of())
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300))
                 .build();
@@ -167,13 +177,24 @@ class ModuleAccessFilterTest {
         @Test
         @DisplayName("passes the gate — whatever the handler then answers, it is not this filter")
         void passesTheGate() throws Exception {
-            // Deliberately not asserting 200. This test owns the gate, not the
-            // dashboard: the handler runs without a datasource here and may
-            // fail for its own reasons. What must not happen is a 404 from the
-            // filter, and asserting 200 would couple this file to whatever
-            // ObDashboardController does next.
-            mvc.perform(get(ONBOARDING).with(authentication(caller(List.of("TICKETING", "ONBOARDING")))))
-                    .andExpect(status().is(not404()));
+            // DELETE, for the reason `doesNotGuardTicketing` sets out one tree
+            // over. Only GET is mapped on the dashboard summary, so DELETE is
+            // answered 405 by the handler mapping -- which sits behind every
+            // filter and in front of every controller. A 405 is unreachable if
+            // the gate refused, and it is produced without invoking a handler,
+            // so this request asks no service and opens no transaction.
+            //
+            // This asserted `get(ONBOARDING)` and not404() until A-122, and it
+            // was green only because the caller's empty `moduleRoles` made the
+            // dashboard give up before it reached a database. Once the fixture
+            // above started carrying the OB_ADMIN that a real grant always
+            // carries, the same request ran the whole handler and CI answered
+            // CannotGetJdbcConnectionException. The class note's promise that
+            // these requests "reach no service and no datasource" was true of
+            // the six refusals and was being kept, for this one, by a handler
+            // that happened to fail early.
+            mvc.perform(delete(ONBOARDING).with(authentication(caller(List.of("TICKETING", "ONBOARDING")))))
+                    .andExpect(status().isMethodNotAllowed());
         }
 
         @Test
@@ -188,15 +209,5 @@ class ModuleAccessFilterTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(GATE_DETAIL)));
         }
-    }
-
-    /**
-     * A 404 from the gate is what these assert the absence of. Spring has no
-     * "is not this status" matcher, and a bare {@code isOk()} would be wrong —
-     * the handler may legitimately answer 500 without a datasource, or 403 from
-     * method security, and neither is this filter refusing.
-     */
-    private static org.hamcrest.Matcher<Integer> not404() {
-        return org.hamcrest.Matchers.not(404);
     }
 }
