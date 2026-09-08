@@ -229,7 +229,7 @@ been shown the row, `403` concedes nothing and `404` reads as a bug. Out-of-scop
 rows on those same routes remain `404`: that is the scope guard, and the services
 run the scoped read first so the two refusals cannot be confused.
 
-B-104's purchases panel joins that set on the identical argument — a Viewer has
+B-104's purchases panel and B-106's requirements list join that set on the identical argument — a Viewer has
 already rendered a client's purchases and journey strips through `getObClient`.
 It is worth naming the split those nested panels keep, because it is what stops
 the exemption widening into "the whole route answers 403": **who** may write is
