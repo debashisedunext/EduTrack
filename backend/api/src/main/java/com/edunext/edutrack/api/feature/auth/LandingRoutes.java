@@ -1,5 +1,8 @@
 package com.edunext.edutrack.api.feature.auth;
 
+import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,6 +54,12 @@ final class LandingRoutes {
 
     static final String DASHBOARD = "/dashboard";
 
+    /** A-116 · the module launcher. Only a caller holding both modules sees it. */
+    static final String LAUNCHER = "/launcher";
+
+    /** Where a caller who holds onboarding and not ticketing belongs. */
+    static final String ONBOARDING_DASHBOARD = "/onboarding/dashboard";
+
     /**
      * Keyed on the role <i>code</i>, never the surrogate id — the same choice
      * {@code AuthUserRepository} makes for the {@code role} claim, and for the
@@ -66,6 +75,49 @@ final class LandingRoutes {
             "DEPLOYMENT", "/stages/queue");
 
     private LandingRoutes() {
+    }
+
+    /**
+     * A-116 · the landing route, now that a user may hold one module or two.
+     *
+     * <h2>Only a dual-module caller sees the launcher</h2>
+     *
+     * <p>Onboarding plan §2.2 is explicit — the launcher is "after login for
+     * dual-module users" — and A-116's line finishes the thought: "single-module
+     * users skip it entirely". A chooser with one card is not a choice; it is an
+     * extra click between somebody and the only place they can go.
+     *
+     * <p>So the diversion is narrow by construction. A caller holding both
+     * modules lands on the launcher; a caller holding onboarding alone lands on
+     * its dashboard; everybody else lands exactly where {@link #BY_ROLE_CODE}
+     * has sent them since A-031. That last clause is doing real work: no user
+     * without an explicit onboarding grant changes behaviour at all, which is
+     * why {@code AuthLoginIT}'s per-role assertions still hold — its users carry
+     * no module grants, and the role map answers them unchanged.
+     *
+     * <h2>Why the role map is not consulted for the onboarding-only case</h2>
+     *
+     * <p>{@code BY_ROLE_CODE} is ticketing-shaped: its destinations are the
+     * ticket list, the stage queue, my-tasks. Sending an onboarding-only caller
+     * to {@code /my-tasks} because they happen to be a DEVELOPER would land them
+     * on a screen A-111's gate has nothing to do with and their grant does not
+     * cover — a working page showing an empty module. The module they hold is
+     * the better answer than the role they have.
+     *
+     * @param modules the caller's grants; never null, empty for the great
+     *                majority of users, who are unaffected by everything above
+     */
+    static String forUser(String roleCode, List<String> modules) {
+        boolean onboarding = modules != null && modules.contains(ModuleAccessGuard.ONBOARDING);
+        boolean ticketing = modules != null && modules.contains(ModuleAccessGuard.TICKETING);
+
+        if (onboarding && ticketing) {
+            return LAUNCHER;
+        }
+        if (onboarding) {
+            return ONBOARDING_DASHBOARD;
+        }
+        return forRole(roleCode);
     }
 
     static String forRole(String roleCode) {

@@ -49,7 +49,27 @@ record Me(
         List<Long> reporteeIds,
 
         @Schema(description = "Display timezone. Storage is UTC everywhere; this is applied at presentation.")
-        String timezone
+        String timezone,
+
+        /**
+         * A-116 · which modules this user may reach — {@code TICKETING},
+         * {@code ONBOARDING}, or both.
+         *
+         * <p>Advisory to the UI in exactly the sense {@code permissions} is,
+         * and for the same reason: A-111's {@code ModuleAccessFilter} decides
+         * reachability server-side on every request and answers 404, so a
+         * client that rendered a card for a module it does not hold would get
+         * a not-found rather than a leak. What this buys is the launcher being
+         * able to render the right cards on first paint instead of discovering
+         * the answer by firing two requests and watching one 404.
+         *
+         * <p>The same staleness bargain the claim makes: a grant revoked
+         * mid-session stays visible here until the access token expires, at
+         * most fifteen minutes. Stated rather than discovered.
+         */
+        @Schema(description = "Modules this user may reach: TICKETING, ONBOARDING, or both. "
+                + "Advisory to the UI; reachability is decided server-side per request.")
+        List<String> modules
 ) {
 
     static Me from(AuthenticatedUser user) {
@@ -62,6 +82,7 @@ record Me(
                 user.permissions(),
                 user.projectIds(),
                 user.reporteeIds(),
-                user.timezone());
+                user.timezone(),
+                user.modules());
     }
 }

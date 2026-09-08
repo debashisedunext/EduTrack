@@ -46,14 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { MeAllOfModulesItem } from './meAllOfModulesItem';
 
-export type MeAllOf = {
-  username?: string;
-  email?: string;
-  permissions?: string[];
-  projectIds?: number[];
-  reporteeIds?: number[];
-  timezone?: string;
-  modules?: MeAllOfModulesItem[];
-};
+export type MeAllOfModulesItem = typeof MeAllOfModulesItem[keyof typeof MeAllOfModulesItem];
+
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const MeAllOfModulesItem = {
+  TICKETING: 'TICKETING',
+  ONBOARDING: 'ONBOARDING',
+} as const;

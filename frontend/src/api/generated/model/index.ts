@@ -406,6 +406,7 @@ export * from './listUsersParams';
 export * from './loginRequest';
 export * from './me';
 export * from './meAllOf';
+export * from './meAllOfModulesItem';
 export * from './meResponse';
 export * from './meta';
 export * from './metaNextCursor';

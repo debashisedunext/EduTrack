@@ -50,7 +50,7 @@ record Session(
                 token.value(),
                 token.expiresInSeconds(),
                 user.mustChangePassword(),
-                LandingRoutes.forRole(user.roleCode()),
+                LandingRoutes.forUser(user.roleCode(), user.modules()),
                 Me.from(user));
     }
 }
