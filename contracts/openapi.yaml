@@ -11265,6 +11265,17 @@ components:
             projectIds: { type: array, items: { type: integer, format: int64 } }
             reporteeIds: { type: array, items: { type: integer, format: int64 } }
             timezone: { type: string, examples: ['Asia/Kolkata'] }
+            # A-116 · which modules this user may reach. Advisory to the UI in
+            # exactly the sense `permissions` is: A-111's module gate decides
+            # reachability server-side per request and answers 404, so a client
+            # rendering a card for a module it does not hold gets a not-found
+            # rather than a leak. It exists so the launcher can draw the right
+            # cards on first paint rather than firing two requests and watching
+            # one fail.
+            modules:
+              type: array
+              items: { type: string, enum: [TICKETING, ONBOARDING] }
+              examples: [['TICKETING', 'ONBOARDING']]
     MeResponse:
       type: object
       required: [data]

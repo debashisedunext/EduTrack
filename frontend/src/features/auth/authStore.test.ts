@@ -39,7 +39,11 @@ describe('the landing route the store keeps', () => {
     vi.restoreAllMocks();
   });
 
-  it.each(['/dashboard', '/my-tasks', '/tickets'])('keeps %s, which this build can render', (route) => {
+  // A-116 adds the last two. The launcher and the onboarding dashboard are
+  // both destinations LandingRoutes.forUser can now return, and both were
+  // silently rewritten to /dashboard until they were registered — a dual-module
+  // user logged in and landed on ticketing with nothing but a console warning.
+  it.each(['/dashboard', '/my-tasks', '/tickets', '/launcher', '/onboarding/dashboard'])('keeps %s, which this build can render', (route) => {
     useAuthStore.getState().signIn(session(route));
     expect(useAuthStore.getState().landingRoute).toBe(route);
   });

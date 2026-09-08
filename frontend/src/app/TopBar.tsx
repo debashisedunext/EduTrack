@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ProjectSwitcher } from './ProjectSwitcher'
+// A-116 · Stream A's, flagged rather than dropped in quietly: this file is
+// C-005's. Renders nothing unless the caller holds both modules, so the top bar
+// is unchanged for every single-module user in the product.
+import { ModuleSwitcher } from '@/features/launcher/ModuleSwitcher'
 import { NotificationBell } from './NotificationBell'
 import { ChatBadge } from './ChatBadge'
 import { AvatarMenu } from './AvatarMenu'
@@ -67,6 +71,7 @@ export function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        <ModuleSwitcher />
         <ProjectSwitcher />
         <NotificationBell />
         <ChatBadge />

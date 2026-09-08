@@ -94,7 +94,8 @@ export const loginResponse = zod.object({
   "permissions": zod.array(zod.string()).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
-  "timezone": zod.string().optional()
+  "timezone": zod.string().optional(),
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
 }))
 })
 })
@@ -128,7 +129,8 @@ export const refreshSessionResponse = zod.object({
   "permissions": zod.array(zod.string()).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
-  "timezone": zod.string().optional()
+  "timezone": zod.string().optional(),
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
 }))
 })
 })
@@ -175,7 +177,8 @@ export const getMeResponse = zod.object({
   "permissions": zod.array(zod.string()).optional(),
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
-  "timezone": zod.string().optional()
+  "timezone": zod.string().optional(),
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
 }))
 })
 

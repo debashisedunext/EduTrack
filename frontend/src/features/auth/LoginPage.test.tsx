@@ -136,6 +136,38 @@ describe('signing in', () => {
 
     await waitFor(() => expect(landedOn()).toBe('/tickets/PRJ-0001'));
   });
+
+  it.each(['/', '/login'])(
+    'ignores a bounce from %s and uses the landing route instead',
+    async (bouncedFrom) => {
+      // A-116 · the regression this pins is the one that shipped. Opening the
+      // app at `/` bounces through RequireAuth with from='/', `from` won, the
+      // sign-in went back to `/`, and the index route redirected to
+      // /dashboard — so every dual-module user landed on ticketing and the
+      // launcher was unreachable, while the server was correctly answering
+      // "/launcher" and nothing on the client ever read it.
+      //
+      // Neither path is a destination anybody chose: `/` is a redirect stub
+      // and `/login` is where they have just been.
+      server.use(
+        http.post(LOGIN_URL, () =>
+          HttpResponse.json({
+            data: {
+              accessToken: 'token',
+              expiresIn: 900,
+              landingRoute: '/launcher',
+              user: { id: 7, displayName: 'Priya Nair' },
+            },
+          }),
+        ),
+      );
+
+      renderLogin({ pathname: '/login', state: { from: { pathname: bouncedFrom } } });
+      await signIn();
+
+      await waitFor(() => expect(landedOn()).toBe('/launcher'));
+    },
+  );
 });
 
 describe('the failure message never names a field', () => {

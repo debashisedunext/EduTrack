@@ -78,11 +78,27 @@ export function LoginPage() {
  * matched — that is how the user reached `RequireAuth` in the first place — and
  * putting it through a list of landing destinations would send anyone who
  * followed a link to a ticket to the dashboard instead.
+ *
+ * <h2>Except the root, which is not a destination anybody chose</h2>
+ *
+ * A-116. Opening the application at `/` bounces through `RequireAuth` with
+ * `from = '/'`, and `from` winning meant the sign-in went straight back to `/`
+ * — where the index route redirects to `/dashboard`. So **every dual-module
+ * user landed on ticketing and the launcher was unreachable**, with the server
+ * correctly answering `/launcher` and nothing on the client ever reading it.
+ *
+ * The rule the paragraph above states is still right; `/` is simply not an
+ * instance of it. Nobody follows a link to the root meaning to arrive there —
+ * it is a redirect stub, and the whole purpose of `landingRoute` is to decide
+ * what it should resolve to for this user. `/login` is excluded for the same
+ * reason: it is where they have just been, not where they were going.
  */
 function useAfterLogin() {
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const bouncedFrom = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  // `/` and `/login` are not places anybody was going — see the note above.
+  const from = bouncedFrom && bouncedFrom !== '/' && bouncedFrom !== '/login' ? bouncedFrom : undefined;
 
   return React.useCallback(
     (landingRoute: string | undefined) => {
