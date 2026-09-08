@@ -50,4 +50,30 @@ public interface ObClientRepository extends JpaRepository<ObClient, Long> {
      * when the caller's own scope can already see that client.
      */
     Optional<ObClient> findByPanBlindIndex(byte[] panBlindIndex);
+
+    /**
+     * B-125 · the per-client lock {@code ob_prereq_history}'s chain needs
+     * before an append — {@code ObJourneyRepository#findByIdForUpdate}'s own
+     * precedent, and {@code TicketRepository#findByIdForUpdate}'s before it.
+     * {@code SELECT … FOR UPDATE} on the parent client row before reading the
+     * chain tail, so two concurrent transitions cannot both read the same tail
+     * and fork it.
+     *
+     * <p>The client rather than the task, because the gate evaluation reads
+     * every task the client has and moves the header row in the same
+     * transaction: a per-task lock would mean holding N of them in an order
+     * nothing guarantees. Per client is the parent every append already
+     * touches.
+     *
+     * <p>A plain JPQL lock, not a native query: unlike {@link ObPrereqHistory},
+     * {@link ObClient} is an ordinary mutable entity, so Hibernate's lock-mode
+     * upgrade on the loaded instance has nothing to conflict with.
+     *
+     * <p>Like {@link #findById}, this is a load-for-mutation that follows a
+     * scoped read which has already answered 404 — never a way to fetch a
+     * client by id.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select c from ObClient c where c.id = :id")
+    Optional<ObClient> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") Long id);
 }

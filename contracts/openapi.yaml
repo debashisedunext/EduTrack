@@ -19119,8 +19119,14 @@ components:
             the gate condition was met, and it is not a second opinion about
             `gateStatus` — the two move in the same transaction.
         clearedAt: { type: [string, 'null'], format: date-time }
+        # B-125 · was `allOf: [$ref]` with a sibling description, which is the
+        # only gateStatus in this file wrapped that way — the other three are
+        # plain refs. The wrapper makes an introspecting reader see an object
+        # where the server serves the enum string, which is what
+        # ContractConformanceTest caught. OpenAPI 3.1 allows a description
+        # beside a $ref, so the note is kept and the wrapper is not.
         gateStatus:
-          allOf: [{ $ref: '#/components/schemas/ObGateStatus' }]
+          $ref: '#/components/schemas/ObGateStatus'
           description: |
             The same value every journey on this client carries. Repeated here
             so the OB-05 strip can render without reading a journey — derived

@@ -259,7 +259,23 @@ class SchemaIntegrationIT {
                         // precisely why these two are easy to read as
                         // premature and delete. They are what makes the record
                         // worth having by the time something does.
-                        "trg_ob_consent_no_update", "trg_ob_consent_no_delete");
+                        "trg_ob_consent_no_update", "trg_ob_consent_no_delete",
+                        // B-125 · the prerequisite record, both halves.
+                        //
+                        // `ob_prereq_history` is hash-chained per client, so an
+                        // UPDATE does not merely lose a fact — it breaks every
+                        // link after it, and the verifier can no longer tell a
+                        // tampered row from a bug of ours. That is the pair
+                        // most worth noticing if it ever goes missing.
+                        //
+                        // `ob_prereq_comments` is not chained, and its pair is
+                        // here for the reason the comms pair above is: the
+                        // thread is half the record of what a client was asked
+                        // for and what they said back, and a deletable comment
+                        // is a conversation either side can rewrite once a
+                        // dispute starts.
+                        "trg_ob_prereq_history_no_update", "trg_ob_prereq_history_no_delete",
+                        "trg_ob_prereq_comments_no_update", "trg_ob_prereq_comments_no_delete");
             }
         }
     }
