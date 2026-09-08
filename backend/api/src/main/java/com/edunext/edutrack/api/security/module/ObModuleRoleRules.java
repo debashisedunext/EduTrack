@@ -98,6 +98,23 @@ public class ObModuleRoleRules {
 
     private static List<Rule> rules() {
         List<Rule> m = new ArrayList<>();
+        // A-124 · the product catalogue. §3 gives OB Admin the catalogue
+        // outright, on the same line that gives it journey templates: a product
+        // is what a template binds to, and a role that may create one and not
+        // the other can publish a template for a product it cannot name. So
+        // both writes are Admin's alone.
+        //
+        // The reads are every role's, and Sales is the reason worth stating
+        // rather than deriving. §3 gives Sales the OB-04 wizard, whose purchase
+        // step is a multi-select over exactly this catalogue — a Sales user who
+        // cannot list products cannot board a client at all. Viewer reads
+        // everything, and a Step Owner needs the product's name to know which
+        // journey their step belongs to.
+        put(m, "GET", "/api/v1/onboarding/products", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/products/{obProductId}", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/products", ADMIN_ONLY);
+        put(m, "PATCH", "/api/v1/onboarding/products/{obProductId}", ADMIN_ONLY);
+
         put(m, "GET", "/api/v1/onboarding/journey-templates/{templateId}", EVERY_ROLE);
         put(m, "POST", "/api/v1/onboarding/journey-templates", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions", ADMIN_ONLY);
