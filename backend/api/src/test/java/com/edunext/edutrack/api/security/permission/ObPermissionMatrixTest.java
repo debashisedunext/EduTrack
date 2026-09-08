@@ -119,35 +119,31 @@ class ObPermissionMatrixTest {
     }
 
     @Test
-    @DisplayName("four routes enforce their rule today, and the gap is 34")
-    void theEnforcementGapIsExact() {
-        // THE RATCHET, and the reason this file is not just a coverage check.
+    @DisplayName("every declared rule is enforced — the gap is zero")
+    void theEnforcementGapIsClosed() {
+        // A-114 shipped this asserting 26 declared and 25 unenforced, and by the
+        // time A-117 and C-112 had landed it read 38 and 34 — the exact number
+        // pinned each time so it could not grow quietly. A-122 is the task that
+        // empties it: ObModuleRoleFilter now applies every rule in
+        // ObModuleRoleRules on every request.
         //
-        // The matrix declares 38 rules and the application applies four: skip,
-        // through NotAnOnboardingModeratorException, and A-117's three
-        // module-access routes, through NotAnOnboardingAdminException.
-        // Recording that as an exact number rather than a vague known-gap
-        // comment is what makes A-122's job measurable and stops the set
-        // growing quietly — a new onboarding route with no module-role check
-        // fails `everyRouteIsCovered` first and then this, so it cannot arrive
-        // without somebody deciding.
-        //
-        // WHEN THIS FAILS BECAUSE THE GAP WENT DOWN, that is A-122 working.
-        // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(38);
+        // The set stays, and stays asserted. Deleting it on reaching zero would
+        // remove the thing that notices the next rule arriving without an
+        // enforcement point — which is exactly how the first thirty-four
+        // accumulated.
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
-                .hasSize(34);
+                .isEmpty();
+    }
 
-        // Named rather than counted: the count alone would let a route slip out
-        // of NOT_YET_ENFORCED while another slipped in, and the whole point is
-        // to know which rules are real.
-        Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
-        enforced.removeAll(ObPermissionMatrix.NOT_YET_ENFORCED);
-        assertThat(enforced).containsExactly(
-                "GET /api/v1/onboarding/module-access",
-                "POST /api/v1/onboarding/journey-steps/{stepId}/skip",
-                "POST /api/v1/onboarding/module-access",
-                "POST /api/v1/onboarding/module-access/{grantId}/revoke");
+    @Test
+    @DisplayName("the matrix is the shipped rules, not a second opinion about them")
+    void theMatrixIsTheShippedRules() {
+        // The property that makes every other assertion in this file mean
+        // something. While the table lived here, a test could agree with itself
+        // about rules the application had never heard of — which is what it did
+        // for thirty-four of thirty-eight routes.
+        assertThat(ObPermissionMatrix.ENTRIES)
+                .isEqualTo(new com.edunext.edutrack.api.security.module.ObModuleRoleRules().asRouteKeys());
     }
 }

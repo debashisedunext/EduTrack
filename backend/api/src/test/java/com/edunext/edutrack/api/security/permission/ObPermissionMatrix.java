@@ -1,12 +1,12 @@
 package com.edunext.edutrack.api.security.permission;
 
-import java.util.LinkedHashMap;
-import java.util.List;
+import com.edunext.edutrack.api.security.module.ObModuleRoleRules;
+
 import java.util.Map;
 import java.util.Set;
 
 /**
- * A-114 · the onboarding module's five staff roles against every onboarding
+ * A-114, completed by A-122 · the onboarding module's five staff roles against every onboarding
  * route, taken from Onboarding-Module-Plan.md §3.
  *
  * <h2>A second matrix, not more rows in the first one</h2>
@@ -28,229 +28,61 @@ import java.util.Set;
  *
  * <h2>What is declared here is the plan, not the code</h2>
  *
- * <p>This matters more than usual, so it is stated rather than discovered:
- * <b>today the application enforces exactly one of these rules.</b>
- * {@code POST /journey-steps/{stepId}/skip} checks the module role through
- * {@code CallerIdentityAccess.onboardingModuleRole} and refuses with
- * {@code NotAnOnboardingModeratorException}; the dashboard and report routes
- * read the module role to <em>scope</em> what they return, which is a different
- * thing; and the remaining routes do not consult it at all.
+ * <p>This is what A-114 had to state rather than let somebody discover:
+ * <b>of the thirty-eight rules declared here, the application applied four.</b>
+ * {@code POST /journey-steps/{stepId}/skip} checked the module role through
+ * {@code CallerIdentityAccess.onboardingModuleRole} and refused with
+ * {@code NotAnOnboardingModeratorException}, A-117's three module-access routes
+ * checked it in their own controller, the dashboard and report routes read it
+ * to <em>scope</em> what they return — a different thing — and the remaining
+ * thirty-four did not consult it at all.
  *
- * <p>So {@link #NOT_YET_ENFORCED} enumerates that gap explicitly, and
- * {@code ObPermissionMatrixTest} pins its size. A matrix that declared
- * twenty-six rules while the code applied one, with nothing recording the
- * difference, would be the same failure this module already produced once —
- * {@code ModuleAccessGuard} shipped written, unit-tested and uncalled for three
- * weeks. Declared-but-unenforced is a legitimate state; declared-but-unenforced
- * <em>and unrecorded</em> is not. A-122 is the task that empties the set.
+ * <p><b>A-122 emptied that set, and this class stopped holding the rules.</b>
+ * They live in {@code ObModuleRoleRules}, in main, where
+ * {@code ObModuleRoleFilter} applies them on every request. A rule set that
+ * only tests could see described the application rather than constraining it —
+ * the shape {@code ModuleAccessGuard} was in for three weeks before A-111's
+ * second half, and the reason A-114 counted the gap rather than leaving it
+ * unremarked.
+ *
+ * <p>What is left here is the delegation. The test that reads it is no longer a
+ * second opinion about what the rules are; it checks that the shipped ones
+ * cover every route and match §3.
  */
 final class ObPermissionMatrix {
 
-    static final String OB_ADMIN = "OB_ADMIN";
-    static final String OB_MANAGER = "OB_MANAGER";
-    static final String OB_SALES = "OB_SALES";
-    static final String OB_STEP_OWNER = "OB_STEP_OWNER";
-    static final String OB_VIEWER = "OB_VIEWER";
+    private static final ObModuleRoleRules SHIPPED = new ObModuleRoleRules();
 
-    /** The five staff roles, as {@code ck_user_module_access_module_role} spells them. */
-    static final Set<String> ALL_ROLES =
-            Set.of(OB_ADMIN, OB_MANAGER, OB_SALES, OB_STEP_OWNER, OB_VIEWER);
+    static final String OB_ADMIN = ObModuleRoleRules.OB_ADMIN;
+    static final String OB_MANAGER = ObModuleRoleRules.OB_MANAGER;
+    static final String OB_SALES = ObModuleRoleRules.OB_SALES;
+    static final String OB_STEP_OWNER = ObModuleRoleRules.OB_STEP_OWNER;
+    static final String OB_VIEWER = ObModuleRoleRules.OB_VIEWER;
 
-    /** Read-only reach: §3 gives Viewer "everything, read-only". */
-    private static final Set<String> EVERY_ROLE = ALL_ROLES;
-    /** §3's OB Admin column owns the template catalogue outright. */
-    private static final Set<String> ADMIN_ONLY = Set.of(OB_ADMIN);
-    /** §3's Manager column: reassign, escalate, override. Admin sees everything. */
-    private static final Set<String> ADMIN_AND_MANAGER = Set.of(OB_ADMIN, OB_MANAGER);
-    /** A step's own owner acts on it; a moderator overrides it. */
-    private static final Set<String> STEP_ACTORS = Set.of(OB_ADMIN, OB_MANAGER, OB_STEP_OWNER);
+    /** The five staff roles, as the CHECK constraint spells them. */
+    static final Set<String> ALL_ROLES = ObModuleRoleRules.ALL_ROLES;
+
     /**
-     * §3's Sales row is the only one carrying "board clients, capture sale
-     * details". Manager's column is reassign, escalate, verify/skip, override
-     * and client logins — it does not include the client record itself.
+     * The rules the application actually applies, keyed as
+     * {@code RouteInventory#routeKeys} spells a route.
      */
-    private static final Set<String> ADMIN_AND_SALES = Set.of(OB_ADMIN, OB_SALES);
+    static final Map<String, Set<String>> ENTRIES = SHIPPED.asRouteKeys();
+
+    /**
+     * <b>Empty, as of A-122.</b>
+     *
+     * <p>It held thirty-four routes: rules §3 stated and the code did not
+     * apply. {@code ObModuleRoleFilter} now applies all of them, so the honest
+     * value is no routes at all.
+     *
+     * <p>Kept rather than deleted, and kept asserted. The set exists to make
+     * "declared but not enforced" a number somebody has to change deliberately;
+     * deleting it once it reached zero would remove the thing that notices the
+     * next rule to arrive without an enforcement point, which is exactly how
+     * the first thirty-four accumulated.
+     */
+    static final Set<String> NOT_YET_ENFORCED = Set.of();
 
     private ObPermissionMatrix() {
     }
-
-    /**
-     * Route key to the module roles §3 permits, keyed exactly as
-     * {@link RouteInventory#routeKeys} spells it.
-     */
-    static final Map<String, Set<String>> ENTRIES = entries();
-
-    private static Map<String, Set<String>> entries() {
-        Map<String, Set<String>> m = new LinkedHashMap<>();
-
-        // --- the journey-template catalogue ---------------------------------
-        //
-        // §3 gives OB Admin "journey templates (create per product, version,
-        // publish)" and gives no other role a verb over them. Every write below
-        // is therefore Admin's alone. The read is not: Viewer sees "everything,
-        // read-only", and a Step Owner who cannot read the template cannot see
-        // what their own step is supposed to produce.
-        m.put("GET /api/v1/onboarding/journey-templates/{templateId}", EVERY_ROLE);
-        m.put("POST /api/v1/onboarding/journey-templates", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/journey-templates/{templateId}/revisions", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/journey-templates/{templateId}/publish", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/journey-templates/{templateId}/steps", ADMIN_ONLY);
-        m.put("PUT /api/v1/onboarding/journey-templates/{templateId}/steps/order", ADMIN_ONLY);
-        m.put("DELETE /api/v1/onboarding/journey-template-steps/{stepId}", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/journey-template-steps/{stepId}/docs", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/journey-template-steps/{stepId}/items", ADMIN_ONLY);
-        m.put("DELETE /api/v1/onboarding/journey-template-step-docs/{docId}", ADMIN_ONLY);
-        m.put("DELETE /api/v1/onboarding/journey-template-step-items/{itemId}", ADMIN_ONLY);
-
-        // --- the live journey's steps ---------------------------------------
-        //
-        // §3: Step Owner may "update only their own steps"; Manager may
-        // "override steps with logged reason". Both reach these routes and the
-        // *row* rule that separates them is OnboardingScopeResolver's (A-112),
-        // not this matrix's — a Step Owner passing here still sees only
-        // journeys containing their own steps. Sales and Viewer hold no verb
-        // over a running step: Sales "views progress", Viewer is read-only.
-        // C-111 · OB-06's step panel, added by PR #405 six minutes before the
-        // matrix itself merged — so develop was briefly red on
-        // everyRouteIsCovered, which is the ratchet doing exactly its job.
-        //
-        // The read is EVERY_ROLE for the reason the template read is: Viewer
-        // sees everything read-only, and a Step Owner who cannot open their own
-        // step's panel cannot do the one thing §3 gives them.
-        m.put("GET /api/v1/onboarding/journey-steps/{stepId}", EVERY_ROLE);
-        // Ticking a checklist entry is working the step, so it is the step
-        // actors' — Sales views progress and Viewer is read-only, and neither
-        // holds a verb over a running step.
-        m.put("PATCH /api/v1/onboarding/journey-step-items/{itemId}", STEP_ACTORS);
-
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/start", STEP_ACTORS);
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/complete", STEP_ACTORS);
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/block", STEP_ACTORS);
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/resume", STEP_ACTORS);
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/waiting-on-client", STEP_ACTORS);
-        // Skip is the exception and the only rule the code already applies:
-        // it is a moderator action, refused for a Step Owner acting on their
-        // own step. ObJourneyStepLifecycleService#skip checks it and answers
-        // 404 rather than 403, on the guard's own not-found reasoning.
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/skip", ADMIN_AND_MANAGER);
-
-        // --- escalations -----------------------------------------------------
-        //
-        // §3 gives Manager "escalate" and Admin the escalation matrix. The list
-        // is readable by Viewer too — it is a dashboard-shaped read and §3's
-        // Viewer sees everything read-only — but acknowledging and resolving
-        // are the Manager's verbs.
-        // B-102 · the client master. Reads are every role's — Viewer sees
-        // everything read-only, and Sales seeing only their own clients is
-        // OnboardingScopeResolver's narrowing rather than this table's.
-        m.put("GET /api/v1/onboarding/clients", EVERY_ROLE);
-        m.put("GET /api/v1/onboarding/clients/{obClientId}", EVERY_ROLE);
-        m.put("POST /api/v1/onboarding/clients", ADMIN_AND_SALES);
-        m.put("PATCH /api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
-
-        // The communication log. Reading is everybody's; recording one is the
-        // work of whoever is running the step or the account — §3 gives Sales
-        // "view progress" and Viewer read-only, neither of which is a verb.
-        m.put("GET /api/v1/onboarding/clients/{obClientId}/communications", EVERY_ROLE);
-        m.put("GET /api/v1/onboarding/journey-steps/{stepId}/communications", EVERY_ROLE);
-        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/communications", STEP_ACTORS);
-
-        m.put("GET /api/v1/onboarding/escalations", EVERY_ROLE);
-        m.put("POST /api/v1/onboarding/escalations/{escalationId}/acknowledge", ADMIN_AND_MANAGER);
-        m.put("POST /api/v1/onboarding/escalations/{escalationId}/resolve", ADMIN_AND_MANAGER);
-
-        // --- dashboard and reports -------------------------------------------
-        //
-        // §3 names dashboards and reports for Manager and Viewer explicitly,
-        // Admin sees everything, and Sales "views progress" for their own
-        // clients. So every role reaches them and ObDashboardScope narrows what
-        // each one is shown — reach here, scope there, and the distinction is
-        // why these are EVERY_ROLE rather than a shorter set.
-        m.put("GET /api/v1/onboarding/dashboard/summary", EVERY_ROLE);
-        m.put("GET /api/v1/onboarding/reports", EVERY_ROLE);
-        m.put("GET /api/v1/onboarding/reports/{reportKey}", EVERY_ROLE);
-
-        // --- the notification centre ------------------------------------------
-        //
-        // A caller's own bell. Every role has one, and the rows are already
-        // filtered to the recipient, so there is no role rule to make here
-        // beyond holding the module at all.
-        m.put("GET /api/v1/onboarding/notifications", EVERY_ROLE);
-        m.put("PATCH /api/v1/onboarding/notifications/read-all", EVERY_ROLE);
-        m.put("PATCH /api/v1/onboarding/notifications/{notificationId}/read", EVERY_ROLE);
-
-        // --- module access (OB-08) --------------------------------------------
-        //
-        // A-117, and the first three routes in this matrix that ENFORCE the
-        // rule beside them rather than declare it — so they are absent from
-        // NOT_YET_ENFORCED below, which is the direction that set is only ever
-        // meant to move.
-        //
-        // Admin alone, reads included, and the read is the one worth pausing
-        // on: §3 makes Viewer "everything, read-only", and this is the single
-        // place that does not follow. Who can reach a module is not onboarding
-        // data, it is the access-control table for the module itself, and a
-        // Viewer able to enumerate every administrator has been handed the list
-        // of accounts worth attacking. The contract says Admin-only on all
-        // three in as many words.
-        //
-        // The refusal is a 403 rather than the module's usual 404, for the
-        // reason ObModuleAccessController's javadoc sets out: CLAUDE.md's
-        // no-existence-leak rule is about rows, and there is no row here whose
-        // existence a 404 would be protecting.
-        m.put("GET /api/v1/onboarding/module-access", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/module-access", ADMIN_ONLY);
-        m.put("POST /api/v1/onboarding/module-access/{grantId}/revoke", ADMIN_ONLY);
-
-        return Map.copyOf(m);
-    }
-
-    /**
-     * The routes whose rule above the application does <b>not</b> yet apply.
-     *
-     * <p>Every entry here is a declaration waiting for an enforcement point.
-     * The list is exact rather than approximate on purpose: {@code
-     * ObPermissionMatrixTest} asserts that these and only these are unenforced,
-     * so a new onboarding route arriving without a module-role check has to be
-     * added here deliberately, in a diff somebody reviews, rather than joining
-     * a vague backlog nobody counts.
-     *
-     * <p><b>A-122 is the task that empties this set.</b> It shrinks; it must
-     * never grow silently.
-     */
-    static final Set<String> NOT_YET_ENFORCED = Set.copyOf(List.of(
-            "GET /api/v1/onboarding/journey-templates/{templateId}",
-            "POST /api/v1/onboarding/journey-templates",
-            "POST /api/v1/onboarding/journey-templates/{templateId}/revisions",
-            "POST /api/v1/onboarding/journey-templates/{templateId}/publish",
-            "POST /api/v1/onboarding/journey-templates/{templateId}/steps",
-            "PUT /api/v1/onboarding/journey-templates/{templateId}/steps/order",
-            "DELETE /api/v1/onboarding/journey-template-steps/{stepId}",
-            "POST /api/v1/onboarding/journey-template-steps/{stepId}/docs",
-            "POST /api/v1/onboarding/journey-template-steps/{stepId}/items",
-            "DELETE /api/v1/onboarding/journey-template-step-docs/{docId}",
-            "DELETE /api/v1/onboarding/journey-template-step-items/{itemId}",
-            "GET /api/v1/onboarding/journey-steps/{stepId}",
-            "PATCH /api/v1/onboarding/journey-step-items/{itemId}",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/start",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/complete",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/block",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/resume",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/waiting-on-client",
-            "GET /api/v1/onboarding/clients",
-            "GET /api/v1/onboarding/clients/{obClientId}",
-            "POST /api/v1/onboarding/clients",
-            "PATCH /api/v1/onboarding/clients/{obClientId}",
-            "GET /api/v1/onboarding/clients/{obClientId}/communications",
-            "GET /api/v1/onboarding/journey-steps/{stepId}/communications",
-            "POST /api/v1/onboarding/journey-steps/{stepId}/communications",
-            "GET /api/v1/onboarding/escalations",
-            "POST /api/v1/onboarding/escalations/{escalationId}/acknowledge",
-            "POST /api/v1/onboarding/escalations/{escalationId}/resolve",
-            "GET /api/v1/onboarding/dashboard/summary",
-            "GET /api/v1/onboarding/reports",
-            "GET /api/v1/onboarding/reports/{reportKey}",
-            "GET /api/v1/onboarding/notifications",
-            "PATCH /api/v1/onboarding/notifications/read-all",
-            "PATCH /api/v1/onboarding/notifications/{notificationId}/read"));
 }
