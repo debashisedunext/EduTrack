@@ -6,8 +6,8 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
 import com.edunext.edutrack.common.pagination.Cursor;
 import com.edunext.edutrack.common.pagination.PageMeta;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -94,7 +94,20 @@ class ObModuleAccessService {
         this.clock = clock;
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * <h2>Not {@code @Transactional}, and that is load-bearing</h2>
+     *
+     * <p>All three methods here refuse a non-Admin as their first act, and a
+     * transactional boundary would open a connection <em>before</em> that
+     * refusal. In an environment with no reachable database — which is what
+     * {@code PermissionMatrixTest} is — the 403 would arrive as a 500 from
+     * {@code CannotCreateTransactionException}, so the guard would look broken
+     * in exactly the suite written to prove it is not. An authorisation check
+     * that needs a database to say no is the wrong shape.
+     *
+     * <p>Nothing is given up. This is one {@code JdbcClient} query; the write
+     * paths below explain why they do not need a transaction either.
+     */
     ObModuleAccessDtos.GrantListResponse list(CallerIdentity caller,
                                               String module,
                                               Long userId,
@@ -123,14 +136,18 @@ class ObModuleAccessService {
     /**
      * OB-08's grant.
      *
-     * <p>Transactional and not read-only: the duplicate check and the insert
-     * must be one statement pair, or two admins granting the same person at
-     * once both pass the check. That race is <b>not</b> what the check is for —
-     * {@code uq_user_module_access_live} settles it either way, and the loser
-     * gets a constraint violation. The check is for the message, and the
-     * transaction is so the ordinary case never sees the constraint's.
+     * <p>The duplicate check and the insert are not wrapped in a transaction,
+     * because a transaction would not have made them atomic against a
+     * concurrent grant anyway — at READ COMMITTED both callers pass the check
+     * and one loses at the index. {@code uq_user_module_access_live} is the
+     * guarantee; the check exists for the <em>message</em>, so the ordinary
+     * case never sees a MySQL constraint name.
+     *
+     * <p>So the loser of that race is caught below and given the same 409 the
+     * check gives, rather than the 500 a bare
+     * {@code DuplicateKeyException} would become. That is the outcome a
+     * transaction was supposed to buy and did not.
      */
-    @Transactional
     ObModuleAccessDtos.Grant grant(CallerIdentity caller, ObModuleAccessDtos.GrantRequest request) {
         requireAdmin(caller);
 
@@ -149,7 +166,15 @@ class ObModuleAccessService {
         }
 
         Instant now = clock.instant();
-        long id = repository.insert(userId, module, moduleRole, caller.userId(), now);
+        long id;
+        try {
+            id = repository.insert(userId, module, moduleRole, caller.userId(), now);
+        } catch (DuplicateKeyException lostTheRace) {
+            // uq_user_module_access_live refused a second live grant. The check
+            // above passed, so somebody granted the same pair in between — the
+            // answer is the one they would have got a moment earlier.
+            throw new DuplicateGrantException(module);
+        }
 
         return repository.findById(id)
                 .map(this::toDto)
@@ -161,11 +186,16 @@ class ObModuleAccessService {
      *
      * <p>Order matters and is asserted in the tests: <b>the last-admin check
      * runs before the update</b>. Reversed, the module would be left without an
-     * administrator for the width of the transaction and the refusal would have
-     * to undo a write — and a compensating write is exactly what this table's
-     * design refuses to rely on.
+     * administrator and the refusal would have to undo a write — and a
+     * compensating write is exactly what this table's design refuses to rely
+     * on. That is also why the ordering is asserted on the call sequence rather
+     * than on the final state: with no transaction here there is no rollback to
+     * make "check afterwards" nearly equivalent.
+     *
+     * <p>The update itself is atomic without one. {@code WHERE revoked_at IS
+     * NULL} makes it a compare-and-set, so a concurrent revoke changes no rows
+     * and answers the same 422 the sequential case gets.
      */
-    @Transactional
     ObModuleAccessDtos.Grant revoke(CallerIdentity caller, long grantId) {
         requireAdmin(caller);
 
