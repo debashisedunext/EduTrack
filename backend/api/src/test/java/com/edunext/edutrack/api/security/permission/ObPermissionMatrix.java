@@ -184,6 +184,25 @@ final class ObPermissionMatrix {
         m.put("PATCH /api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
                 CLIENT_WRITERS);
 
+        // --- C-112/C-116's communications timeline ---------------------------
+        //
+        // ALSO NOT THIS BRANCH'S ROUTES. They are already on develop (PR #409)
+        // and, like B-102's four above and C-111's two before them, they merged
+        // without a matrix entry — so develop fails everyRouteIsCovered on them
+        // on its own. Third time in the same window; see the PR body, because
+        // the pattern is the finding rather than these three lines.
+        //
+        // The reads are EVERY_ROLE: Viewer is "everything, read-only", and a
+        // Step Owner who cannot read what was said to the client about their own
+        // step is missing the context the step is worked from. Posting one is a
+        // step action and takes STEP_ACTORS, exactly as start/complete/block do
+        // — Sales "views progress" (§3) and holds no verb here.
+        //
+        // Stream C owns both calls. Flagged for their confirmation.
+        m.put("GET /api/v1/onboarding/clients/{obClientId}/communications", EVERY_ROLE);
+        m.put("GET /api/v1/onboarding/journey-steps/{stepId}/communications", EVERY_ROLE);
+        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/communications", STEP_ACTORS);
+
         // --- escalations -----------------------------------------------------
         //
         // §3 gives Manager "escalate" and Admin the escalation matrix. The list
@@ -266,5 +285,12 @@ final class ObPermissionMatrix {
             // .deniesEverything answers the `1 = 0` predicate — which is a row
             // rule (A-112) rather than the module-role reach this set counts.
             "GET /api/v1/onboarding/clients",
-            "GET /api/v1/onboarding/clients/{obClientId}"));
+            "GET /api/v1/onboarding/clients/{obClientId}",
+
+            // C-112/C-116 · not this branch's routes either. All three carry
+            // `@PreAuthorize("isAuthenticated()")` and nothing else, so no
+            // module-role rule is applied to any of them today.
+            "GET /api/v1/onboarding/clients/{obClientId}/communications",
+            "GET /api/v1/onboarding/journey-steps/{stepId}/communications",
+            "POST /api/v1/onboarding/journey-steps/{stepId}/communications"));
 }

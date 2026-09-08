@@ -119,7 +119,7 @@ class ObPermissionMatrixTest {
     }
 
     @Test
-    @DisplayName("eight routes enforce their rule today, and the gap is 29")
+    @DisplayName("eight routes enforce their rule today, and the gap is 32")
     void theEnforcementGapIsExact() {
         // THE RATCHET, and the reason this file is not just a coverage check.
         //
@@ -132,10 +132,10 @@ class ObPermissionMatrixTest {
         //
         // WHEN THIS FAILS BECAUSE THE NUMBER WENT DOWN, that is A-122 working.
         // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(37);
+        assertThat(ObPermissionMatrix.ENTRIES).hasSize(40);
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
-                .hasSize(29);
+                .hasSize(32);
 
         // THE FIGURES WENT UP, AND THAT IS NOT THE RATCHET SLIPPING. Eleven
         // routes arrived that A-114 could not have known about — nine from the
@@ -143,7 +143,7 @@ class ObPermissionMatrixTest {
         // the declared set grew by eleven and the gap by four. The ratio moved
         // the right way: seven of the eleven enforce their rule on arrival.
         //
-        // A-122's job is unchanged and is still measured here: 29 is what it
+        // A-122's job is unchanged and is still measured here: 32 is what it
         // has to drive to zero.
         Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
         enforced.removeAll(ObPermissionMatrix.NOT_YET_ENFORCED);
