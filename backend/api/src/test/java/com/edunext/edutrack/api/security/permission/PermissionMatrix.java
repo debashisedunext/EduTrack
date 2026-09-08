@@ -721,6 +721,25 @@ final class PermissionMatrix {
     private static final String REORDER_JOURNEY_TEMPLATE_STEPS = """
             {"stepIds":[1]}""";
 
+    /**
+     * A-121 · {@code ObSignoffTokenRequest}: {@code token} is {@code @NotBlank}.
+     * The value names no real sign-off, which is the point — this route answers
+     * 202 for a token that does not exist, so an allowed role reaches the
+     * handler and gets the same answer a real link would produce.
+     */
+    private static final String SIGNOFF_OTP_REQUEST = """
+            {"token":"matrix-fixture-token"}""";
+
+    /**
+     * A-121 · {@code ObSignoffOtpVerifyRequest}: {@code token} is
+     * {@code @NotBlank} and {@code otp} must be six digits. Unlike the request
+     * above this one refuses with 401, which is a refusal only a caller who got
+     * past authorisation can receive — this file's standing rule that a fixture
+     * has to reach authorisation rather than succeed past it.
+     */
+    private static final String SIGNOFF_OTP_VERIFY = """
+            {"token":"matrix-fixture-token","otp":"000000"}""";
+
     /** C-102 · {@code AddStepItemRequest}: {@code label} is {@code @NotBlank}. */
     private static final String ADD_JOURNEY_TEMPLATE_STEP_ITEM = """
             {"label":"Matrix Fixture Item","mandatory":true}""";
@@ -819,6 +838,21 @@ final class PermissionMatrix {
             // Authenticated, no capability: a role that could not end its own
             // session would be a role that cannot sign out.
             everyRole("POST", "/api/v1/auth/logout"),
+
+            // ── A-121 · the public sign-off OTP pair ─────────────────────────
+            //
+            // permitAll, like the four auth routes above, so every signed-in
+            // role reaches them too. The unauthenticated question — that these
+            // and only these are public — is RouteAuthorizationTest's, against
+            // the contract's own `security: []`.
+            //
+            // No capability and no role restriction, because there is no
+            // principal to restrict: the caller this surface exists for is a
+            // customer holding an emailed link and no account. What stands in
+            // for authentication is the token in the body, and it is checked by
+            // PublicSignoffAccess rather than by anything this matrix speaks.
+            everyRole("POST", "/api/v1/public/onboarding/signoff/otp", SIGNOFF_OTP_REQUEST),
+            everyRole("POST", "/api/v1/public/onboarding/signoff/otp/verify", SIGNOFF_OTP_VERIFY),
 
             // ── me · every operation is about the caller's own account ───────
             // §2 grants no capability for these and must not: gating a password

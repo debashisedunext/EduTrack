@@ -2,8 +2,11 @@ package com.edunext.edutrack;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableAsync;
 
+import java.time.Clock;
 import java.util.TimeZone;
 
 /**
@@ -73,5 +76,34 @@ public class EduTrackApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(EduTrackApplication.class, args);
+    }
+
+    /**
+     * A-121 · UTC, and the reason it is here rather than in a feature package.
+     *
+     * <p>{@code WorkerApplication} has declared this since D-010 and
+     * {@code api} never did, so {@code ObOutboxEnqueuer} — whose own javadoc
+     * says "{@code api} enqueues from inside business transactions" — could
+     * not actually be injected into anything in this module. It is
+     * {@code @Lazy}, so nothing noticed: the bean was never created, and the
+     * first constructor to ask for it failed the whole context with
+     * "No qualifying bean of type java.time.Clock".
+     *
+     * <p><b>This changes no existing behaviour.</b> Every class in {@code api}
+     * that takes a {@code Clock} does so on a secondary test-seam constructor
+     * and marks the no-arg one {@code @Autowired}, which is explicit and wins
+     * over any bean; they all keep the {@code Clock.systemUTC()} they build
+     * themselves. What changes is that a {@code Clock} can now be resolved
+     * where a class has no such fallback, which is the case for every JDBC
+     * bean {@code domain} shares with the worker.
+     *
+     * <p>{@code @ConditionalOnMissingBean} for {@code WorkerApplication}'s
+     * reason: a test that wants a fixed clock swaps one in rather than working
+     * around this one.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public Clock clock() {
+        return Clock.systemUTC();
     }
 }
