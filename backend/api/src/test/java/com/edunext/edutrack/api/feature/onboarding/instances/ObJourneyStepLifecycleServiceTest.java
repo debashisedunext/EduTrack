@@ -39,6 +39,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -97,6 +98,16 @@ class ObJourneyStepLifecycleServiceTest {
     void wireFakes() {
         when(journeySteps.findById(any())).thenAnswer(inv ->
                 Optional.ofNullable(stepRows.get(inv.<Long>getArgument(0))));
+        // C-119 · activateEligibleSteps' own read, backed by the same map so
+        // a step it flips to IN_PROGRESS is visible to the next call exactly
+        // as it would be through a real repository within one transaction.
+        when(journeySteps.findByJourneyIdOrderBySequenceAsc(any())).thenAnswer(inv -> {
+            Long journeyId = inv.getArgument(0);
+            return stepRows.values().stream()
+                    .filter(s -> s.getJourneyId().equals(journeyId))
+                    .sorted(Comparator.comparingInt(ObJourneyStep::getSequence))
+                    .toList();
+        });
         when(journeys.findById(any())).thenAnswer(inv ->
                 Optional.ofNullable(journeyRows.get(inv.<Long>getArgument(0))));
         when(journeys.findByIdForUpdate(any())).thenAnswer(inv ->
@@ -224,6 +235,60 @@ class ObJourneyStepLifecycleServiceTest {
     void startFailsCleanlyForAnUnknownStep() {
         assertThatThrownBy(() -> service.start(404L, OWNER))
                 .isInstanceOf(JourneyStepNotFoundException.class);
+    }
+
+    // ── start · dependency graph (C-119) ─────────────────────────────────
+
+    @Test
+    void startRefusesWhileItsDependencyHasNotFinished() {
+        ObJourneyStep blocker = pendingStep();
+        blocker.setId(701L);
+        blocker.setSequence(0);
+        blocker.setName("Earlier service");
+        blocker.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        stepRows.put(701L, blocker);
+        stepRows.get(STEP).setDependsOnStepId(701L);
+
+        assertThatThrownBy(() -> service.start(STEP, OWNER))
+                .isInstanceOf(StepDependencyNotSatisfiedException.class)
+                .hasMessageContaining("701")
+                .hasMessageContaining("Earlier service");
+    }
+
+    @Test
+    void startAllowsAStepWhoseDependencyIsDone() {
+        ObJourneyStep blocker = pendingStep();
+        blocker.setId(701L);
+        blocker.setStatus(ObJourneyStepStatus.DONE);
+        stepRows.put(701L, blocker);
+        stepRows.get(STEP).setDependsOnStepId(701L);
+
+        ObJourneyStep started = service.start(STEP, OWNER);
+
+        assertThat(started.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void startAllowsAStepWhoseDependencyWasSkipped() {
+        ObJourneyStep blocker = pendingStep();
+        blocker.setId(701L);
+        blocker.setStatus(ObJourneyStepStatus.SKIPPED);
+        stepRows.put(701L, blocker);
+        stepRows.get(STEP).setDependsOnStepId(701L);
+
+        ObJourneyStep started = service.start(STEP, OWNER);
+
+        assertThat(started.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void startTreatsADanglingDependencyAsAnInvariantViolation() {
+        // The composite FK guarantees this cannot happen for real — see
+        // requireDependencySatisfied's own javadoc.
+        stepRows.get(STEP).setDependsOnStepId(999L);
+
+        assertThatThrownBy(() -> service.start(STEP, OWNER))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     // ── complete ──────────────────────────────────────────────────────────
@@ -774,6 +839,134 @@ class ObJourneyStepLifecycleServiceTest {
         ObStepHistory entry = historyRows.get(1);
         assertThat(entry.getPrevHash()).isEqualTo("a".repeat(64));
         assertThat(entry.getRowHash()).isNotEqualTo(entry.getPrevHash());
+    }
+
+    // ── C-119 · activateEligibleSteps ────────────────────────────────────
+
+    @Test
+    void activateEligibleStepsMovesEveryDependencyFreePendingStepToInProgress() {
+        ObJourneyStep parallelA = pendingStep();
+        parallelA.setId(704L);
+        parallelA.setSequence(2);
+        stepRows.put(704L, parallelA);
+        ObJourneyStep parallelB = pendingStep();
+        parallelB.setId(705L);
+        parallelB.setSequence(3);
+        stepRows.put(705L, parallelB);
+
+        service.activateEligibleSteps(JOURNEY);
+
+        assertThat(stepRows.get(704L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+        assertThat(stepRows.get(705L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+        assertThat(stepRows.get(704L).getStartedAt()).isNotNull();
+        assertThat(stepRows.get(704L).getDueAt()).isNotNull();
+    }
+
+    @Test
+    void activateEligibleStepsLeavesAStepPendingWhileItsDependencyIsStillOpen() {
+        ObJourneyStep blocker = pendingStep();
+        blocker.setId(701L);
+        blocker.setSequence(2);
+        blocker.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        stepRows.put(701L, blocker);
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(3);
+        dependent.setDependsOnStepId(701L);
+        stepRows.put(702L, dependent);
+
+        service.activateEligibleSteps(JOURNEY);
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.PENDING);
+    }
+
+    @Test
+    void activateEligibleStepsActivatesAStepWhoseDependencyWasSkipped() {
+        ObJourneyStep blocker = pendingStep();
+        blocker.setId(701L);
+        blocker.setSequence(2);
+        blocker.setStatus(ObJourneyStepStatus.SKIPPED);
+        stepRows.put(701L, blocker);
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(3);
+        dependent.setDependsOnStepId(701L);
+        stepRows.put(702L, dependent);
+
+        service.activateEligibleSteps(JOURNEY);
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void activateEligibleStepsIsANoOpWhileTheJourneyIsLocked() {
+        journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
+        ObJourneyStep parallelA = pendingStep();
+        parallelA.setId(704L);
+        parallelA.setSequence(2);
+        stepRows.put(704L, parallelA);
+
+        service.activateEligibleSteps(JOURNEY);
+
+        assertThat(stepRows.get(704L).getStatus()).isEqualTo(ObJourneyStepStatus.PENDING);
+    }
+
+    @Test
+    void activateEligibleStepsIsANoOpWhileTheJourneyIsHeldByAnother() {
+        journeyRows.get(JOURNEY).setHeldByJourneyId(999L);
+        ObJourneyStep parallelA = pendingStep();
+        parallelA.setId(704L);
+        parallelA.setSequence(2);
+        stepRows.put(704L, parallelA);
+
+        service.activateEligibleSteps(JOURNEY);
+
+        assertThat(stepRows.get(704L).getStatus()).isEqualTo(ObJourneyStepStatus.PENDING);
+    }
+
+    @Test
+    void completeTriggersActivationOfANewlyEligibleSibling() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(2);
+        dependent.setDependsOnStepId(STEP);
+        stepRows.put(702L, dependent);
+
+        service.complete(STEP, OWNER);
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void skipTriggersActivationOfANewlyEligibleSibling() {
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(2);
+        dependent.setDependsOnStepId(STEP);
+        stepRows.put(702L, dependent);
+
+        service.skip(STEP, OWNER, MANAGER_ROLE, "no longer needed");
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void skipTriggersNoActivationWhileTheJourneyIsLocked() {
+        // skip() itself does not require the journey be open (see
+        // skipDoesNotRequireTheJourneyGateToBeOpen above) — activation must
+        // still refuse while LOCKED, exactly as it would for any other
+        // trigger, rather than trusting skip()'s own relaxed gate.
+        journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(2);
+        dependent.setDependsOnStepId(STEP);
+        stepRows.put(702L, dependent);
+
+        service.skip(STEP, OWNER, MANAGER_ROLE, "no longer needed");
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.PENDING);
     }
 
     // ── C-111 · the read side, and the checkbox ───────────────────────────

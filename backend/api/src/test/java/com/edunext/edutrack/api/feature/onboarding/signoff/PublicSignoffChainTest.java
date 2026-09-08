@@ -7,8 +7,13 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,12 +51,37 @@ class PublicSignoffChainTest {
     @Test
     @DisplayName("the public sign-off tree is not refused by the chain")
     void publicTreeIsOpen() throws Exception {
-        // Not asserting 200: A-121 builds the handler and there is none yet, so
-        // this answers 404 or 405 today. What must NOT happen is 401 — that is
-        // the chain refusing the caller the surface exists for, and it is what
-        // an un-permitted prefix produces.
-        mvc.perform(post(PUBLIC_OTP).contentType("application/json").content("{\"token\":\"x\"}"))
-                .andExpect(status().is(org.hamcrest.Matchers.not(401)));
+        // Not asserting 200: A-121's handler is real now, and reaching it means
+        // this test has left security's territory for the handler body's, which
+        // needs a datasource this context does not have. What must NOT happen is
+        // 401 — that is the chain refusing the caller the surface exists for —
+        // and that is the only claim this test is entitled to make.
+        //
+        // Same shape as RouteAuthorizationTest#aRoleThatHoldsThePermissionIsNotRefused,
+        // and for the identical reason: a permitted request that dies past
+        // authorisation can surface as a status or as an exception escaping
+        // perform(), depending on whether the environment's datasource refuses
+        // the connection outright (locally) or accepts it and then fails to open
+        // a transaction (CI, where a MySQL service runs but not under this app's
+        // credentials). Pinning either shape would swap one environment-dependent
+        // failure for another; asserting NOT REFUSED covers both honestly.
+        AtomicInteger status = new AtomicInteger(-1);
+
+        Throwable thrown = catchThrowable(() ->
+                status.set(mvc.perform(post(PUBLIC_OTP)
+                                .contentType("application/json").content("{\"token\":\"x\"}"))
+                        .andReturn().getResponse().getStatus()));
+
+        if (thrown == null) {
+            assertThat(status.get())
+                    .as("the public OTP prefix must not be refused by the security chain")
+                    .isNotEqualTo(401);
+        } else {
+            assertThat(thrown)
+                    .as("the request failed in the handler body, which means the chain let it through")
+                    .rootCause()
+                    .isNotInstanceOf(AuthenticationException.class);
+        }
     }
 
     @Test

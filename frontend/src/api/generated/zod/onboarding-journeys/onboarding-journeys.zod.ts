@@ -340,8 +340,8 @@ export const removeObJourneyTemplateStepDocParams = zod.object({
  * `PENDING` → `IN_PROGRESS`. `422` if the journey's gate is still
 `LOCKED` or the journey is held by another; `422` if the caller is
 neither the step's owner nor its backup owner; `422` if the step is
-not `PENDING`. No dependency-graph check yet — that refusal, "naming
-the blocker", is C-119's.
+not `PENDING`; `422` (C-119) if `dependsOnStepId` has not finished —
+the problem body's `blockingStepId`/`blockingStepName` name it.
 
  * @summary Start a step (C-104)
  */

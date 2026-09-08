@@ -344,6 +344,29 @@ class ObJourneyTemplateServiceTest {
         }
 
         @Test
+        @DisplayName("C-119 · a dependsOnStepId naming an unknown step is refused")
+        void addStepRefusesAnUnknownDependsOnStepId() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+
+            assertThatThrownBy(() ->
+                    service.addStep(draft.getId(), "Migration", null, 1, null, null, null, false, 404L))
+                    .isInstanceOf(StepNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("C-119 · a dependsOnStepId naming a step of a different template is refused")
+        void addStepRefusesADependsOnStepIdFromAnotherTemplate() {
+            ObJourneyTemplate draftOne = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplate draftTwo = service.createTemplate(PRODUCT + 1, "Payroll Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep foreign =
+                    service.addStep(draftTwo.getId(), "Kickoff", null, 1, null, null, null, false, null);
+
+            assertThatThrownBy(() ->
+                    service.addStep(draftOne.getId(), "Migration", null, 1, null, null, null, false, foreign.getId()))
+                    .isInstanceOf(StepNotFoundException.class);
+        }
+
+        @Test
         @DisplayName("deleting a step other steps depend on is refused, naming the dependents")
         void deletingADependedOnStepRefused() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
