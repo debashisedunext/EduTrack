@@ -64,6 +64,12 @@ final class ObPermissionMatrix {
     private static final Set<String> ADMIN_AND_MANAGER = Set.of(OB_ADMIN, OB_MANAGER);
     /** A step's own owner acts on it; a moderator overrides it. */
     private static final Set<String> STEP_ACTORS = Set.of(OB_ADMIN, OB_MANAGER, OB_STEP_OWNER);
+    /**
+     * §3's Sales row is the only one carrying "board clients, capture sale
+     * details". Manager's column is reassign, escalate, verify/skip, override
+     * and client logins — it does not include the client record itself.
+     */
+    private static final Set<String> ADMIN_AND_SALES = Set.of(OB_ADMIN, OB_SALES);
 
     private ObPermissionMatrix() {
     }
@@ -134,6 +140,21 @@ final class ObPermissionMatrix {
         // is readable by Viewer too — it is a dashboard-shaped read and §3's
         // Viewer sees everything read-only — but acknowledging and resolving
         // are the Manager's verbs.
+        // B-102 · the client master. Reads are every role's — Viewer sees
+        // everything read-only, and Sales seeing only their own clients is
+        // OnboardingScopeResolver's narrowing rather than this table's.
+        m.put("GET /api/v1/onboarding/clients", EVERY_ROLE);
+        m.put("GET /api/v1/onboarding/clients/{obClientId}", EVERY_ROLE);
+        m.put("POST /api/v1/onboarding/clients", ADMIN_AND_SALES);
+        m.put("PATCH /api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
+
+        // The communication log. Reading is everybody's; recording one is the
+        // work of whoever is running the step or the account — §3 gives Sales
+        // "view progress" and Viewer read-only, neither of which is a verb.
+        m.put("GET /api/v1/onboarding/clients/{obClientId}/communications", EVERY_ROLE);
+        m.put("GET /api/v1/onboarding/journey-steps/{stepId}/communications", EVERY_ROLE);
+        m.put("POST /api/v1/onboarding/journey-steps/{stepId}/communications", STEP_ACTORS);
+
         m.put("GET /api/v1/onboarding/escalations", EVERY_ROLE);
         m.put("POST /api/v1/onboarding/escalations/{escalationId}/acknowledge", ADMIN_AND_MANAGER);
         m.put("POST /api/v1/onboarding/escalations/{escalationId}/resolve", ADMIN_AND_MANAGER);
@@ -157,6 +178,29 @@ final class ObPermissionMatrix {
         m.put("GET /api/v1/onboarding/notifications", EVERY_ROLE);
         m.put("PATCH /api/v1/onboarding/notifications/read-all", EVERY_ROLE);
         m.put("PATCH /api/v1/onboarding/notifications/{notificationId}/read", EVERY_ROLE);
+
+        // --- module access (OB-08) --------------------------------------------
+        //
+        // A-117, and the first three routes in this matrix that ENFORCE the
+        // rule beside them rather than declare it — so they are absent from
+        // NOT_YET_ENFORCED below, which is the direction that set is only ever
+        // meant to move.
+        //
+        // Admin alone, reads included, and the read is the one worth pausing
+        // on: §3 makes Viewer "everything, read-only", and this is the single
+        // place that does not follow. Who can reach a module is not onboarding
+        // data, it is the access-control table for the module itself, and a
+        // Viewer able to enumerate every administrator has been handed the list
+        // of accounts worth attacking. The contract says Admin-only on all
+        // three in as many words.
+        //
+        // The refusal is a 403 rather than the module's usual 404, for the
+        // reason ObModuleAccessController's javadoc sets out: CLAUDE.md's
+        // no-existence-leak rule is about rows, and there is no row here whose
+        // existence a 404 would be protecting.
+        m.put("GET /api/v1/onboarding/module-access", ADMIN_ONLY);
+        m.put("POST /api/v1/onboarding/module-access", ADMIN_ONLY);
+        m.put("POST /api/v1/onboarding/module-access/{grantId}/revoke", ADMIN_ONLY);
 
         return Map.copyOf(m);
     }
@@ -193,6 +237,13 @@ final class ObPermissionMatrix {
             "POST /api/v1/onboarding/journey-steps/{stepId}/block",
             "POST /api/v1/onboarding/journey-steps/{stepId}/resume",
             "POST /api/v1/onboarding/journey-steps/{stepId}/waiting-on-client",
+            "GET /api/v1/onboarding/clients",
+            "GET /api/v1/onboarding/clients/{obClientId}",
+            "POST /api/v1/onboarding/clients",
+            "PATCH /api/v1/onboarding/clients/{obClientId}",
+            "GET /api/v1/onboarding/clients/{obClientId}/communications",
+            "GET /api/v1/onboarding/journey-steps/{stepId}/communications",
+            "POST /api/v1/onboarding/journey-steps/{stepId}/communications",
             "GET /api/v1/onboarding/escalations",
             "POST /api/v1/onboarding/escalations/{escalationId}/acknowledge",
             "POST /api/v1/onboarding/escalations/{escalationId}/resolve",

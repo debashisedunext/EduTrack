@@ -798,6 +798,13 @@ final class PermissionMatrix {
      * method-security advice runs, which is the hole this file's own javadoc
      * documents at length.
      */
+    /**
+     * A-117 · the three required fields of {@code ObModuleAccessGrantRequest},
+     * so the request reaches authorisation rather than stopping at a 400.
+     */
+    private static final String GRANT_OB_MODULE_ACCESS =
+            "{\"userId\":1,\"module\":\"ONBOARDING\",\"moduleRole\":\"OB_VIEWER\"}";
+
     private static final String UPDATE_OB_CLIENT = """
             {"name":"Matrix Fixture Client"}""";
 
@@ -2196,6 +2203,36 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/clients/{obClientId}"),
             everyRole("POST", "/api/v1/onboarding/clients", CREATE_OB_CLIENT),
             everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}", UPDATE_OB_CLIENT),
+
+            // ── A-117 · OB-08, module access ──────────────────────────────────
+            //
+            // "everyRole", like every onboarding block above, and it is worth
+            // saying why -- because these three are the module's only routes
+            // that refuse with a 403, and the obvious row to write here is a
+            // denial for all six.
+            //
+            // That row would be wrong, and it fails: none of the six fixtures
+            // below holds an ONBOARDING entitlement, so ModuleAccessFilter
+            // (A-111, wired by #398) answers 404 before the controller is
+            // reached. 404 is not 403, so this file cannot see the 403 at all.
+            //
+            // The 403 is reachable only by a caller who HAS onboarding access
+            // and is not OB_ADMIN -- an onboarding-role question, which lives
+            // in the moduleRoles claim that JwtAuthoritiesConverter never turns
+            // into a Spring authority. ObPermissionMatrix is where it is
+            // asserted, and ObModuleAccessServiceTest.listIsAdminOnly is where
+            // each refused module role is named.
+            //
+            // So what these rows assert is the half this file can: the gate
+            // above the feature refuses a caller with no module grant, and it
+            // does not do it with a 403.
+            //
+            // The POST keeps a fixture body regardless. @Valid is resolved
+            // during argument resolution, and a body that stopped at a 400
+            // would make the row prove nothing if the gate ever changed shape.
+            everyRole("GET", "/api/v1/onboarding/module-access"),
+            everyRole("POST", "/api/v1/onboarding/module-access", GRANT_OB_MODULE_ACCESS),
+            everyRole("POST", "/api/v1/onboarding/module-access/{grantId}/revoke"),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //
