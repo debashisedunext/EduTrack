@@ -1879,6 +1879,20 @@ const OB_PRODUCTS: ObProduct[] = [
   { id: 1, code: 'ERP', name: 'ERP Suite', isActive: true, hasActiveTemplate: true, totalTatDays: 24 },
   { id: 2, code: 'BIOMETRIC', name: 'Biometric Attendance', isActive: true, hasActiveTemplate: false, totalTatDays: null },
   { id: 3, code: 'LMS', name: 'Learning Management', isActive: false, hasActiveTemplate: true, totalTatDays: 12 },
+  // B-104 · the fourth product exists so that "a client buys another product"
+  // is reachable at all. The other three cover a client's *first* purchases and
+  // the two ways one can be refused, but between them no client could make a
+  // legitimate new purchase: Northwind already holds both sellable products,
+  // BIOMETRIC has no template and LMS is retired. So the one case B-104 is for
+  // — a purchase made after boarding, instantiating a journey into a client
+  // whose gate has already opened — could not be exercised without inventing
+  // this row, which is the same reason the fixture carries a locked client and
+  // a live one rather than three of the same shape.
+  //
+  // `HRMS` and not `PAYROLL`: A-118's product-create test posts that code to
+  // prove a new product is born without a template, and a fixture holding it
+  // would turn that 201 into a duplicate-code 409.
+  { id: 4, code: 'HRMS', name: 'HR & Payroll', isActive: true, hasActiveTemplate: true, totalTatDays: 16 },
 ];
 
 /**

@@ -41,9 +41,19 @@ interface ContactRow {
   isActive: boolean
 }
 
+interface ApplicationRow {
+  id: number
+  product: { id: number; code: string; name: string }
+  licenseType: string | null
+  units: number | null
+  licenseStart: string | null
+  licenseEnd: string | null
+}
+
 interface ClientDetail extends ClientRow {
   pan: string | null
   contacts: ContactRow[]
+  applications: ApplicationRow[]
   journeys: { id: number; rag: Rag; gateStatus: string; totalTatDays: number; utilizedHours: number;
     heldByJourneyId: number | null; percentComplete: number
     steps: { id: number; rag: Rag; status: string }[] }[]
@@ -529,5 +539,235 @@ describe('B-103 · every SPOC write answers the whole client document', () => {
     expect(data.id).toBe(NORTHWIND)
     expect(data.journeys.length).toBeGreaterThan(0)
     expect(data.contacts.some((c) => c.email === 'new.spoc@northwind.example')).toBe(true)
+  })
+})
+
+
+// ── B-104 · the purchases panel ───────────────────────────────
+
+const addApplication = (clientId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/applications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+const patchApplication = (clientId: number, applicationId: number, body: unknown) =>
+  fetch(`/api/v1/onboarding/clients/${clientId}/applications/${applicationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** A product this client has not bought, that is on sale and has a template. */
+const unboughtSellableProduct = (clientId: number) => {
+  const db = getDb()
+  const client = db.obClients.find((c) => c.id === clientId)!
+  const owned = new Set(client.applications.map((a) => a.productId))
+  return db.obProducts.find((p) => p.isActive && p.hasActiveTemplate && !owned.has(p.id))!
+}
+
+describe('B-104 · a purchase brings its journey with it', () => {
+  it('instantiates one journey for the product just bought', async () => {
+    const before = await getClient(NORTHWIND)
+    const product = unboughtSellableProduct(NORTHWIND)
+
+    const res = await addApplication(NORTHWIND, {
+      productId: product.id,
+      licenseType: 'Subscription',
+      units: 50,
+      licenseStart: '2026-10-01',
+      licenseEnd: '2027-09-30',
+    })
+    expect(res.status).toBe(201)
+
+    // The point of the whole task. A purchase is what a journey is instantiated
+    // from, so a purchase without one leaves the client holding a product they
+    // are not being onboarded through and nothing that reports it.
+    const after = (await json<{ data: ClientDetail }>(res)).data
+    expect(after.applications).toHaveLength(before.applications.length + 1)
+    expect(after.journeys).toHaveLength(before.journeys.length + 1)
+
+    const bought = after.applications.find((a) => a.product.id === product.id)!
+    expect(bought.licenseEnd).toBe('2027-09-30')
+  })
+
+  it('opens the gate on a product bought after this client cleared theirs', async () => {
+    // Plan §5.3 item 3. Northwind is past its gate, so the journey this
+    // purchase creates is born OPEN — the client is not re-gated on
+    // prerequisites they already satisfied. This is precisely the case the route
+    // creates and the wizard never could, which is why the mock models it rather
+    // than defaulting every new journey to LOCKED.
+    const before = await getClient(NORTHWIND)
+    expect(before.journeys.some((j) => j.gateStatus === 'OPEN')).toBe(true)
+
+    const product = unboughtSellableProduct(NORTHWIND)
+    const res = await addApplication(NORTHWIND, { productId: product.id })
+    const after = (await json<{ data: ClientDetail }>(res)).data
+
+    const fresh = after.journeys.filter((j) => !before.journeys.some((b) => b.id === j.id))
+    expect(fresh).toHaveLength(1)
+    expect(fresh[0].gateStatus).toBe('OPEN')
+  })
+
+  it('answers the whole client document, not the purchase it wrote', async () => {
+    // getObClient's ETag covers applications AND journeys, so this write moves
+    // it twice over. A purchase-shaped response would leave every other card on
+    // OB-05 editing against a tag that is already stale.
+    const product = unboughtSellableProduct(NORTHWIND)
+    const res = await addApplication(NORTHWIND, { productId: product.id })
+
+    const data = (await json<{ data: ClientDetail }>(res)).data
+    expect(data.id).toBe(NORTHWIND)
+    expect(data.contacts.length).toBeGreaterThan(0)
+    expect(data.journeys.length).toBeGreaterThan(0)
+  })
+
+  it('refuses a product the client already bought, and says which row to edit', async () => {
+    const client = await getClient(NORTHWIND)
+    const owned = client.applications[0]
+
+    const res = await addApplication(NORTHWIND, { productId: owned.product.id, units: 500 })
+
+    // uq_ob_client_applications is on (ob_client_id, product_id): more seats is
+    // an edit, and a second row would mean a second journey for one product.
+    expect(res.status).toBe(409)
+    const body = await json<{ type: string; existingApplicationId: number }>(res)
+    expect(body.type).toContain('ob-application-duplicate-product')
+    // Not a dead end — the panel is told which purchase to open.
+    expect(body.existingApplicationId).toBe(owned.id)
+  })
+
+  it('refuses a product with no published journey template', async () => {
+    const db = getDb()
+    const client = db.obClients.find((c) => c.id === NORTHWIND)!
+    const owned = new Set(client.applications.map((a) => a.productId))
+    const templateless = db.obProducts.find((p) => p.isActive && !p.hasActiveTemplate && !owned.has(p.id))
+
+    if (!templateless) return
+
+    const res = await addApplication(NORTHWIND, { productId: templateless.id })
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type).toContain('ob-product-no-template')
+  })
+
+  it('refuses a product that is no longer on sale', async () => {
+    const db = getDb()
+    const retired = db.obProducts.find((p) => !p.isActive)
+    if (!retired) return
+
+    // A retired product is out of the picker by definition — buying one today
+    // would instantiate a journey from a template nobody maintains.
+    const res = await addApplication(NORTHWIND, { productId: retired.id })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('B-104 · the licence window is the renewal anchor', () => {
+  it('moves the end date forward, which is what a renewal is', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseType: purchase.licenseType,
+      units: purchase.units,
+      licenseStart: purchase.licenseStart,
+      licenseEnd: '2028-07-31',
+    })
+    expect(res.status).toBe(200)
+
+    const renewed = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(renewed.licenseEnd).toBe('2028-07-31')
+    // Nothing else moved: this is an edit to one row, not a replace of the set.
+    expect(renewed.product.id).toBe(purchase.product.id)
+  })
+
+  it('refuses a licence that ends before it starts', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseStart: '2027-01-01',
+      licenseEnd: '2026-12-31',
+    })
+    expect(res.status).toBe(400)
+    // Keyed to licenseEnd, because that is the field a renewal moves — a message
+    // on the start date would point at the half nobody touched.
+    expect((await json<{ errors: Record<string, string[]> }>(res)).errors)
+      .toHaveProperty('licenseEnd')
+  })
+
+  it('allows an open-ended perpetual licence', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      licenseType: 'Perpetual',
+      licenseStart: '2026-08-01',
+      licenseEnd: null,
+    })
+    expect(res.status).toBe(200)
+
+    const saved = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(saved.licenseEnd).toBeNull()
+  })
+
+  it('clears an absent field rather than leaving it, because this is not a sparse patch', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications.find((a) => a.units != null)!
+
+    const res = await patchApplication(NORTHWIND, purchase.id, { productId: purchase.product.id })
+    expect(res.status).toBe(200)
+
+    const saved = (await json<{ data: ClientDetail }>(res)).data
+      .applications.find((a) => a.id === purchase.id)!
+    expect(saved.units).toBeNull()
+    expect(saved.licenseType).toBeNull()
+  })
+})
+
+describe('B-104 · the product identifies a purchase and is not a field on it', () => {
+  it('refuses a PATCH naming a different product rather than ignoring it', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+    const other = unboughtSellableProduct(NORTHWIND)
+
+    const res = await patchApplication(NORTHWIND, purchase.id, { productId: other.id })
+
+    // Refused, not ignored. ob_journeys keys straight to (ob_client_id,
+    // product_id) and the journey's template is pinned to the product actually
+    // bought — succeeding would onboard the client through the old product's
+    // steps under the new product's name.
+    expect(res.status).toBe(409)
+    expect((await json<{ type: string }>(res)).type)
+      .toContain('ob-application-product-immutable')
+  })
+
+  it('accepts the same product echoed back, which is the normal case', async () => {
+    const client = await getClient(NORTHWIND)
+    const purchase = client.applications[0]
+
+    const res = await patchApplication(NORTHWIND, purchase.id, {
+      productId: purchase.product.id,
+      units: 300,
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('404s a purchase id belonging to another client', async () => {
+    const db = getDb()
+    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.applications.length > 0)!
+    const theirs = other.applications[0]
+
+    // The nested route resolves by BOTH ids, so a real purchase under somebody
+    // else answers exactly as an invented one does — which is what stops it
+    // enumerating which organisations bought which products.
+    const res = await patchApplication(NORTHWIND, theirs.id, { productId: theirs.productId })
+    expect(res.status).toBe(404)
   })
 })

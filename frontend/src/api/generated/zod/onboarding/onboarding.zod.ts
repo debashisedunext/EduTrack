@@ -221,12 +221,12 @@ export const createObClientBody = zod.object({
   "isPrimary": zod.boolean()
 }).describe('The wizard\'s contact rows. `addObClientContact` takes\n`ObContactUpsertRequest` instead — same fields plus `isActive`, which a\ncreate has no use for.\n')).min(1).describe('At least one, and \*\*exactly one `isPrimary`\*\*. The primary SPOC is\nwhere the kickoff mail, the portal password and every sign-off\nrequest go; a client without one cannot be onboarded, only stored.\n'),
   "applications": zod.array(zod.object({
-  "productId": zod.number(),
+  "productId": zod.number().describe('B-104 · required on the `PATCH` as well as the `POST`, because the\nbody is the whole representation and the panel echoes back what it\nread. On the `PATCH` it may not \*change\*: a body naming a different\nproduct is `409` `ob-application-product-immutable`, refused rather\nthan ignored. The product is what identifies a purchase — `ob_journeys`\nkeys straight to `(ob_client_id, product_id)` — not a field on it.\n'),
   "licenseType": zod.string().max(createObClientBodyApplicationsItemLicenseTypeMax).nullish(),
-  "units": zod.number().min(1).nullish(),
+  "units": zod.number().min(1).nullish().describe('Seats. `ck_ob_client_applications_units` says the same thing.'),
   "licenseStart": zod.string().date().nullish(),
-  "licenseEnd": zod.string().date().nullish()
-})).min(1).describe('The wizard\'s product multi-select. \*\*Each one instantiates a locked\njourney\*\* from that product\'s active template, so an empty list\nwould board a client with nothing to onboard them through.\n'),
+  "licenseEnd": zod.string().date().nullish().describe('Must not precede `licenseStart` — `400`, keyed on this field because\nit is the one a renewal moves. Either alone may be null: an\nopen-ended perpetual licence has no end, and a start recorded before\nthe end has been negotiated is an ordinary state of a real purchase.\n')
+}).describe('The wizard\'s product multi-select, and since B-104 the body of both\npurchases-panel operations too.\n\n\*\*One schema for all three uses, rather than an upsert twin.\*\* B-103\nneeded `ObContactUpsertRequest` beside `ObContactWriteRequest` because\nthe panel\'s shape genuinely differs from the wizard\'s — it carries\n`isActive`, which a create has no use for. Nothing differs here: a\npurchase is the same five fields whether it is made at boarding or six\nmonths later, and a second schema identical to this one would be a shape\nthat can drift from its twin for no benefit.\n')).min(1).describe('The wizard\'s product multi-select. \*\*Each one instantiates a locked\njourney\*\* from that product\'s active template, so an empty list\nwould board a client with nothing to onboard them through.\n'),
   "requirements": zod.array(zod.string()).optional(),
   "createPortalLogin": zod.boolean().optional().describe('The wizard\'s \"Create client portal login now\" checkbox. Creates a\n`client_accounts` row with a generated username and a one-time\npassword emailed to the primary SPOC.\n\n\*\*Defaults to false and is never implied.\*\* Every other field here\ndescribes a client; this one hands somebody outside the\norganisation a credential, and the plan is explicit that it happens\nonly when staff ask for it (§2.3). It is also not a one-way door —\nthe OB-05 portal access panel creates one later just as well.\n'),
   "acknowledgeSimilarNames": zod.boolean().optional().describe('Set after a `409 ob-client-name-similar` to proceed anyway. Only\nthe name check is forceable; a duplicate PAN never is.\n')
@@ -342,7 +342,7 @@ export const getObClientResponse = zod.object({
   "licenseType": zod.string().max(getObClientResponseDataApplicationsItemLicenseTypeMax).nullish(),
   "units": zod.number().min(1).nullish(),
   "licenseStart": zod.string().date().nullish(),
-  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+  "licenseEnd": zod.string().date().nullish().describe('Captured so the renewals module, when it arrives, finds its data\nwaiting rather than needing a backfill nobody can source (plan §1.1\nitem 11). Nothing in this module \*reads\* it — but since B-104 it can\nbe moved, which is the half that makes it an anchor rather than a\nboarding-day snapshot. A licence renewed every year and only ever\nwritable at boarding would tell that module every client lapsed.\n')
 }).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
   "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
   "journeys": zod.array(zod.object({
@@ -514,7 +514,7 @@ export const updateObClientResponse = zod.object({
   "licenseType": zod.string().max(updateObClientResponseDataApplicationsItemLicenseTypeMax).nullish(),
   "units": zod.number().min(1).nullish(),
   "licenseStart": zod.string().date().nullish(),
-  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+  "licenseEnd": zod.string().date().nullish().describe('Captured so the renewals module, when it arrives, finds its data\nwaiting rather than needing a backfill nobody can source (plan §1.1\nitem 11). Nothing in this module \*reads\* it — but since B-104 it can\nbe moved, which is the half that makes it an anchor rather than a\nboarding-day snapshot. A licence renewed every year and only ever\nwritable at boarding would tell that module every client lapsed.\n')
 }).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
   "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
   "journeys": zod.array(zod.object({
@@ -751,7 +751,7 @@ export const updateObClientContactResponse = zod.object({
   "licenseType": zod.string().max(updateObClientContactResponseDataApplicationsItemLicenseTypeMax).nullish(),
   "units": zod.number().min(1).nullish(),
   "licenseStart": zod.string().date().nullish(),
-  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+  "licenseEnd": zod.string().date().nullish().describe('Captured so the renewals module, when it arrives, finds its data\nwaiting rather than needing a backfill nobody can source (plan §1.1\nitem 11). Nothing in this module \*reads\* it — but since B-104 it can\nbe moved, which is the half that makes it an anchor rather than a\nboarding-day snapshot. A licence renewed every year and only ever\nwritable at boarding would tell that module every client lapsed.\n')
 }).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
   "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
   "journeys": zod.array(zod.object({
@@ -909,7 +909,7 @@ export const removeObClientContactResponse = zod.object({
   "licenseType": zod.string().max(removeObClientContactResponseDataApplicationsItemLicenseTypeMax).nullish(),
   "units": zod.number().min(1).nullish(),
   "licenseStart": zod.string().date().nullish(),
-  "licenseEnd": zod.string().date().nullish().describe('Captured now so the renewals module, when it arrives, finds its\ndata waiting rather than needing a backfill nobody can source\n(plan §1.1 item 11). Nothing in this module reads it.\n')
+  "licenseEnd": zod.string().date().nullish().describe('Captured so the renewals module, when it arrives, finds its data\nwaiting rather than needing a backfill nobody can source (plan §1.1\nitem 11). Nothing in this module \*reads\* it — but since B-104 it can\nbe moved, which is the half that makes it an anchor rather than a\nboarding-day snapshot. A licence renewed every year and only ever\nwritable at boarding would tell that module every client lapsed.\n')
 }).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
   "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
   "journeys": zod.array(zod.object({
@@ -922,6 +922,251 @@ export const removeObClientContactResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(removeObClientContactResponseDataJourneysItemPercentCompleteMin).max(removeObClientContactResponseDataJourneysItemPercentCompleteMax),
+  "heldByJourneyId": zod.number().nullish().describe('Set when this journey is instantiated but held on a \*\*service-level\ndependency\*\* — another journey of the same client that has to\ncomplete first (plan §5.5). Distinct from `gateStatus`, which is\nabout the client\'s prerequisites: a journey can be past the gate\nand still held behind a sibling. Null when nothing holds it.\n'),
+  "totalTatDays": zod.number().optional().describe('Σ of this journey\'s service TATs from its \*\*pinned\*\* template version.'),
+  "utilizedHours": zod.number().optional().describe('Working hours consumed: completed services at their recorded\nconsumption, the active one at its running clock, waiting-on-client\ntime excluded. \*\*Derived from `ob_step_clock_events` at read time\*\*\nfor this one client — never a stored aggregate, which could\ndisagree with the parts it claims to sum.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n')).describe('Every service, in template order — the RAG dots on the collapsed\nstrip. Not paginated and not pageable: this is one journey\'s\nservices, bounded by what the ribbon can render, and the strip\nneeds all of them to draw any of them.\n')
+}).describe('One accordion strip on OB-05. \*\*Deliberately not the ribbon\*\* — the\nexpanded view and the step panel are their own reads, so a client with\nsix journeys does not pay for six ribbons on first paint.\n')).optional().describe('One per purchased product, in the admin-ordered service\nsequence. Not paginated — a client\'s purchases are a handful,\nand the accordion needs the set to render the page.\n'),
+  "createdBy": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "createdAt": zod.string().datetime({}).optional()
+})).describe('The OB-05 page in one document.')
+})
+
+/**
+ * B-104 · OB-05's purchases panel, adding — the client bought another
+product.
+
+**This instantiates a journey**, in the same transaction, exactly as
+`createObClient` does for the wizard's products. A purchase is what a
+journey is instantiated from, so a purchase without one leaves the client
+with a product they are not being onboarded through and nothing that
+reports it. The response carries the new journey strip for the same
+reason it carries the new purchase.
+
+**A product bought after this client's gate has already opened
+instantiates `OPEN`, not `LOCKED`** (plan §5.3 item 3). The client is not
+re-gated on prerequisites they have already satisfied — which is
+precisely the case this route creates and the wizard never could.
+
+**Buying a product this client already has is `409`
+`ob-application-duplicate-product`.** More seats, a different licence type
+or a renewal is an edit to the existing purchase, and the problem document
+carries `existingApplicationId` so the panel can open it.
+`uq_ob_client_applications` is on `(ob_client_id, product_id)`, and a
+second row would mean a second journey for one product.
+
+**The product must be on sale and must have a published journey
+template** — a retired product is out of the picker by definition, and one
+with no template has nothing to instantiate from (`409`
+`ob-product-no-template`, as on the wizard).
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Record a purchase (OB-05)
+ */
+export const addObClientApplicationParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n')
+})
+
+export const addObClientApplicationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addObClientApplicationBodyLicenseTypeMax = 64;
+
+
+
+
+export const addObClientApplicationBody = zod.object({
+  "productId": zod.number().describe('B-104 · required on the `PATCH` as well as the `POST`, because the\nbody is the whole representation and the panel echoes back what it\nread. On the `PATCH` it may not \*change\*: a body naming a different\nproduct is `409` `ob-application-product-immutable`, refused rather\nthan ignored. The product is what identifies a purchase — `ob_journeys`\nkeys straight to `(ob_client_id, product_id)` — not a field on it.\n'),
+  "licenseType": zod.string().max(addObClientApplicationBodyLicenseTypeMax).nullish(),
+  "units": zod.number().min(1).nullish().describe('Seats. `ck_ob_client_applications_units` says the same thing.'),
+  "licenseStart": zod.string().date().nullish(),
+  "licenseEnd": zod.string().date().nullish().describe('Must not precede `licenseStart` — `400`, keyed on this field because\nit is the one a renewal moves. Either alone may be null: an\nopen-ended perpetual licence has no end, and a start recorded before\nthe end has been negotiated is an ordinary state of a real purchase.\n')
+}).describe('The wizard\'s product multi-select, and since B-104 the body of both\npurchases-panel operations too.\n\n\*\*One schema for all three uses, rather than an upsert twin.\*\* B-103\nneeded `ObContactUpsertRequest` beside `ObContactWriteRequest` because\nthe panel\'s shape genuinely differs from the wizard\'s — it carries\n`isActive`, which a create has no use for. Nothing differs here: a\npurchase is the same five fields whether it is made at boarding or six\nmonths later, and a second schema identical to this one would be a shape\nthat can drift from its twin for no benefit.\n')
+
+/**
+ * B-104 · the seat count, the licence type, and the licence window — which
+is to say, **this is what a renewal is**. `licenseEnd` moving forward a
+year had no representation in the API before this operation existed.
+
+**The body is the whole representation, not a sparse patch** — an absent
+`licenseEnd` is a cleared one. `ObContactUpsertRequest`'s call, one panel
+over, for the same reason: the row editor sends every field on every save.
+
+**`productId` is echoed back and may not change.** A body naming a
+different product is `409` `ob-application-product-immutable`, refused
+rather than ignored. `ob_journeys` carries a composite foreign key
+straight to `(ob_client_id, product_id)`, so MySQL would refuse the
+repoint anyway — and succeeding would be worse: the journey's
+`template_id` is pinned to the template of the product that was actually
+bought, so the client would be onboarded through the old product's steps
+under the new product's name. Add the other product as its own purchase
+instead.
+
+**The product is not re-checked for sale or for a template.** Whether a
+product may be *bought* and whether an existing purchase may be
+*corrected* are different questions with opposite answers: a product
+retired last quarter still has clients onboarding through it, and refusing
+to renew their licence would make a retirement retroactively strand
+everyone who already bought it.
+
+**A licence cannot end before it starts** — `400`, keyed on `licenseEnd`
+because that is the field a renewal moves. Either date alone may be null:
+an open-ended perpetual licence has no end.
+
+**There is no `DELETE` on this path, deliberately.**
+`fk_ob_journeys_application` is `RESTRICT` and every purchase carries a
+journey from the moment it is made, so the operation could only be a route
+that always fails or one that reaches into `ob_journeys` and destroys the
+record of work that was done. Archiving does not help — `archived_at`
+leaves the row in place and `RESTRICT` still refuses. Unpicking an
+instantiated journey belongs beside C-103's instantiation, not here.
+
+The `If-Match` comes from `getObClient`, as the SPOC patch's does. Two
+people renewing the same licence to different end dates is a lost update
+nothing else in the system would surface, because nothing downstream reads
+`licenseEnd` yet to notice it went the wrong way.
+
+ * @summary Edit a purchase (OB-05)
+ */
+export const updateObClientApplicationParams = zod.object({
+  "obClientId": zod.number().describe('A-118 · an `ob_clients` id, \*\*not\*\* a ticketing `clients` id. The two\nmasters are disjoint tables and the ids do not correspond; a client\npresent in both is joined at the identity layer by an explicit audited\nlink, never by a shared key.\n'),
+  "applicationId": zod.number().describe('B-104 · an `ob_client_applications` id — one purchase. Nested under the\nclient on purpose: a purchase belonging to a \*different\* `ob_clients` row\nis `404`, not `403`. `ObContactId`\'s reasoning, and it matters slightly\nmore here — enumerating this table would enumerate which organisations\nbought which products, a fact about other clients\' commercial\nrelationships rather than about the caller\'s own work.\n')
+})
+
+export const updateObClientApplicationHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObClientApplicationBodyLicenseTypeMax = 64;
+
+
+
+
+export const updateObClientApplicationBody = zod.object({
+  "productId": zod.number().describe('B-104 · required on the `PATCH` as well as the `POST`, because the\nbody is the whole representation and the panel echoes back what it\nread. On the `PATCH` it may not \*change\*: a body naming a different\nproduct is `409` `ob-application-product-immutable`, refused rather\nthan ignored. The product is what identifies a purchase — `ob_journeys`\nkeys straight to `(ob_client_id, product_id)` — not a field on it.\n'),
+  "licenseType": zod.string().max(updateObClientApplicationBodyLicenseTypeMax).nullish(),
+  "units": zod.number().min(1).nullish().describe('Seats. `ck_ob_client_applications_units` says the same thing.'),
+  "licenseStart": zod.string().date().nullish(),
+  "licenseEnd": zod.string().date().nullish().describe('Must not precede `licenseStart` — `400`, keyed on this field because\nit is the one a renewal moves. Either alone may be null: an\nopen-ended perpetual licence has no end, and a start recorded before\nthe end has been negotiated is an ordinary state of a real purchase.\n')
+}).describe('The wizard\'s product multi-select, and since B-104 the body of both\npurchases-panel operations too.\n\n\*\*One schema for all three uses, rather than an upsert twin.\*\* B-103\nneeded `ObContactUpsertRequest` beside `ObContactWriteRequest` because\nthe panel\'s shape genuinely differs from the wizard\'s — it carries\n`isActive`, which a create has no use for. Nothing differs here: a\npurchase is the same five fields whether it is made at boarding or six\nmonths later, and a second schema identical to this one would be a shape\nthat can drift from its twin for no benefit.\n')
+
+export const updateObClientApplicationResponseDataNameMax = 200;
+
+export const updateObClientApplicationResponseDataPrimaryContactNameMax = 160;
+
+export const updateObClientApplicationResponseDataPrimaryContactDesignationMax = 120;
+
+export const updateObClientApplicationResponseDataPrimaryContactPhoneMax = 32;
+
+export const updateObClientApplicationResponseDataLicenseTypeMax = 64;
+
+export const updateObClientApplicationResponseDataContactsItemNameMax = 160;
+
+export const updateObClientApplicationResponseDataContactsItemDesignationMax = 120;
+
+export const updateObClientApplicationResponseDataContactsItemPhoneMax = 32;
+
+export const updateObClientApplicationResponseDataApplicationsItemLicenseTypeMax = 64;
+
+
+export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMin = 0;
+export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMax = 100;
+
+
+
+export const updateObClientApplicationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientApplicationResponseDataNameMax),
+  "onboardingDate": zod.string().date(),
+  "status": zod.enum(['ONBOARDING', 'LIVE', 'ON_HOLD', 'DROPPED']).describe('`ob_clients.overall_status`. \*\*`LIVE` is earned, never set\*\* — it is\nthe go-live flip that fires when every journey is complete with its\nsign-offs, and `PATCH \/onboarding\/clients\/{obClientId}` answers `422`\nto a request for it. The other three are judgements a person records.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Worst across the client\'s \*\*open\*\* journeys. Null while every\njourney is locked — OB-03 renders that as \"Prerequisites pending\",\nwhich is a gate state and not a colour.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "journeyCount": zod.number().describe('One per purchased product.'),
+  "journeysComplete": zod.number().optional(),
+  "products": zod.array(zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n')).optional(),
+  "salesPerson": zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}).optional(),
+  "primaryContact": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientApplicationResponseDataPrimaryContactNameMax),
+  "designation": zod.string().max(updateObClientApplicationResponseDataPrimaryContactDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(updateObClientApplicationResponseDataPrimaryContactPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).optional().describe('`ob_client_contacts` — the SPOCs.'),
+  "liveAt": zod.string().datetime({}).nullish(),
+  "hasPortalLogin": zod.boolean().optional().describe('Whether a `client_accounts` row exists for this client. \*\*Not\nwhether one should\*\* — creation is always an explicit staff action\n(plan §2.3), so `false` is the ordinary state of a boarded client\nand not an error to reconcile.\n')
+}).describe('The OB-03 list row. No PAN and no address: identity data belongs to the\ndetail read, where the masking rule and its audit apply, and a list is\nthe wrong place to leak it a page at a time.\n').and(zod.object({
+  "description": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "licenseType": zod.string().max(updateObClientApplicationResponseDataLicenseTypeMax).nullish(),
+  "pan": zod.string().nullish().describe('\*\*Masked for every role except OB Admin and Onboarding\nManager\*\* — `ABCDE\*\*\*\*F` — and masked on the client portal too,\nwhere the client\'s own PAN is still identity data the page has\nno reason to carry.\n\nEncrypted at rest. The unmasked value is not a field anyone can\nwiden a query to reach: it comes from its own reveal operation,\nwhich writes an audit row per call, and that operation lands\nwith A-113. Until then this is masked for everyone, which is\nthe safe direction to be wrong in.\n'),
+  "statusReason": zod.string().nullish().describe('Why the client was put `ON_HOLD` or `DROPPED`.\n`updateObClientRequest` has always taken it and there was\nnowhere to read it back — \*\*B-102 raised the gap and B-103\ncloses it\*\*, an added optional field, which CONVENTIONS.md §1\nsays is not breaking.\n'),
+  "contacts": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObClientApplicationResponseDataContactsItemNameMax),
+  "designation": zod.string().max(updateObClientApplicationResponseDataContactsItemDesignationMax).nullish(),
+  "email": zod.string().email(),
+  "phone": zod.string().max(updateObClientApplicationResponseDataContactsItemPhoneMax).nullish(),
+  "whatsappOptIn": zod.boolean().optional().describe('Consent, held per contact rather than per client. WhatsApp\nnotification templates need prior opt-in, and a client\'s SPOCs do\nnot all give it.\n'),
+  "whatsappOptInAt": zod.string().datetime({}).nullish().describe('B-103 · when the consent above was recorded. Null whenever\n`whatsappOptIn` is false — the two move together, and a withdrawal\nclears this rather than leaving a stamp beside a `false`. The\nhistory of both is in `ob_contact_consent_events`.\n'),
+  "whatsappOptInSource": zod.union([zod.enum(['VERBAL', 'EMAIL', 'WRITTEN', 'CONTRACT', 'CLIENT_PORTAL', 'UNRECORDED']).describe('B-103 · the basis on which a SPOC gave messaging consent.\n\nA closed vocabulary rather than free text, because this is the field a\nchallenged consent is defended with and \"yes I think they said ok\" is\nnot a defence. It describes \*\*how the client gave consent\*\*, not which\nform was open when a colleague typed it in — a source naming the screen\nwould read the same on every staff-entered row and carry no information.\nWho recorded it and when are separate columns.\n\n`UNRECORDED` is \*\*write-refused on every operation\*\*. It exists for the\nrows that predate this capture, whose basis genuinely is not known, and\nit stays visible so those SPOCs get re-approached instead of being\nquietly assumed to have consented.\n'),zod.null()]).optional().describe('B-103 · \*\*how\*\* the client gave it, never which screen recorded it.\nNull whenever `whatsappOptIn` is false.\n\n`UNRECORDED` appears only on rows written before consent capture\nexisted and cannot be sent by any caller. It is the honest answer\nfor a SPOC who has to be re-approached before a message can go out.\n'),
+  "isPrimary": zod.boolean().describe('Exactly one per client. The primary SPOC receives the kickoff mail,\nthe one-time portal password, and every sign-off request — so a\nclient with none is a client nothing can be sent to, and\n`createObClient` requires one.\n\n\*\*False while the contact is inactive\*\*, whatever the stored flag\nsays: `ob_client_contacts.is_primary_key` — the generated column the\nunique index is on — is 1 only while a contact is \*also\* active, so\ndeactivating a primary releases the slot. Reading the enforced fact\nrather than a second one that could drift from it.\n'),
+  "isActive": zod.boolean().describe('B-103 · false for a contact who has left. `removeObClientContact`\ndeactivates and never deletes, so OB-05\'s SPOC panel can still show\nthem, still show what they signed off, and reactivate one who comes\nback.\n')
+}).describe('`ob_client_contacts` — the SPOCs.')).optional().describe('Active and inactive both, primary first. OB-05 administers this\nlist, and a panel that could not see a departed SPOC could not\nreactivate one — nor explain whose name is on a past sign-off.\n'),
+  "applications": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "licenseType": zod.string().max(updateObClientApplicationResponseDataApplicationsItemLicenseTypeMax).nullish(),
+  "units": zod.number().min(1).nullish(),
+  "licenseStart": zod.string().date().nullish(),
+  "licenseEnd": zod.string().date().nullish().describe('Captured so the renewals module, when it arrives, finds its data\nwaiting rather than needing a backfill nobody can source (plan §1.1\nitem 11). Nothing in this module \*reads\* it — but since B-104 it can\nbe moved, which is the half that makes it an anchor rather than a\nboarding-day snapshot. A licence renewed every year and only ever\nwritable at boarding would tell that module every client lapsed.\n')
+}).describe('`ob_client_applications` — one purchased product. \*\*A purchase fact,\nnot a commercial one:\*\* there is no amount, no invoice and no payment\nstatus anywhere in this module by explicit product decision (plan\n§1.2). Commercials live in the sales system.\n')).optional(),
+  "requirements": zod.array(zod.string()).optional().describe('Free-text capture from the wizard\'s requirements step.'),
+  "journeys": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
+  "percentComplete": zod.number().min(updateObClientApplicationResponseDataJourneysItemPercentCompleteMin).max(updateObClientApplicationResponseDataJourneysItemPercentCompleteMax),
   "heldByJourneyId": zod.number().nullish().describe('Set when this journey is instantiated but held on a \*\*service-level\ndependency\*\* — another journey of the same client that has to\ncomplete first (plan §5.5). Distinct from `gateStatus`, which is\nabout the client\'s prerequisites: a journey can be past the gate\nand still held behind a sibling. Null when nothing holds it.\n'),
   "totalTatDays": zod.number().optional().describe('Σ of this journey\'s service TATs from its \*\*pinned\*\* template version.'),
   "utilizedHours": zod.number().optional().describe('Working hours consumed: completed services at their recorded\nconsumption, the active one at its running clock, waiting-on-client\ntime excluded. \*\*Derived from `ob_step_clock_events` at read time\*\*\nfor this one client — never a stored aggregate, which could\ndisagree with the parts it claims to sum.\n'),

@@ -1,7 +1,7 @@
-# `feature/onboarding/clients` — B-102, B-103
+# `feature/onboarding/clients` — B-102, B-103, B-104
 
 The onboarding client master: OB-03's list, OB-04's create, OB-05's read and
-edit, and OB-05's SPOC panel. Seven routes under
+edit, OB-05's SPOC panel and OB-05's purchases panel. Nine routes under
 `/api/v1/onboarding/clients`.
 
 **This is not `feature/clients`.** That package is the *ticketing* client master
@@ -17,13 +17,16 @@ another company's tickets (onboarding plan §2.3).
 |---|---|
 | `ObClientController` | The client's four routes |
 | `ObContactController` | B-103 · the SPOC panel's three |
+| `ObApplicationController` | B-104 · the purchases panel's two |
 | `ObClientETag` | The one tag both controllers derive and check |
 | `ObClientService` | Reads — the OB-03 page, the OB-05 document |
 | `ObClientWriteService` | The create, the edit, and both duplicate guards |
 | `ObContactService` | B-103 · add, edit, promote, deactivate, and consent |
+| `ObApplicationService` | B-104 · buy a product, and renew the licence |
 | `ObClientReadRepository` | Every scoped read, as SQL through `JdbcClient` |
 | `ObClientChildWriteRepository` | Contacts, purchases and requirements on create |
 | `ObContactWriteRepository` | B-103 · SPOC writes and the consent journal |
+| `ObApplicationWriteRepository` | B-104 · the purchase insert and update |
 | `ObClientScope` | A-112's row-scope rule, as a SQL predicate |
 | `SimilarClientNames` | The near-duplicate name detector |
 | `ObConsentSource` | B-103 · the closed vocabulary consent is defended with |
@@ -88,6 +91,87 @@ for `author_contact_id`. Nothing in the product deletes a contact — they are
 deactivated — but a test that tears its rows down cannot, so `ObContactsIT`
 builds a fresh client per test and removes nothing.
 
+## Purchases, and the two things that were unrepresentable until B-104
+
+OB-04 captured a client's purchases at boarding, and that was the only moment
+they could ever be captured. Two ordinary things therefore had no representation
+in the API at all once the wizard closed.
+
+- **A client buying a second product.** The purchase is what a journey is
+  instantiated from, so with no way to add one, a client who bought a module six
+  months in had nothing to be onboarded through — and no way to get one short of
+  somebody writing the row by hand and remembering to call C-103's service
+  afterwards.
+- **A renewal.** `license_end` is what the backlog calls "the renewal anchor",
+  and it is why `ix_ob_client_applications_license_end` exists — the migration's
+  own words, "renewals will read this without a client in hand". A column
+  writable once at boarding and never moved forward is not an anchor: by the time
+  a renewals module reads it, every row past its first year says the licence
+  lapsed.
+
+**Adding a purchase instantiates its journey, in the same transaction.** Not a
+follow-up call the caller has to remember. `ObClientWriteService` does exactly
+this for the wizard's products, and a client with a purchase and no journey is
+one of the two states `ObClientChildWriteRepository` names as having to be
+noticed and repaired by hand. C-103's own rule then applies from the other side:
+a product bought **after** this client's gate has opened instantiates directly
+`OPEN` rather than `LOCKED` (plan §5.3 item 3), so the client is not re-gated on
+prerequisites they have already satisfied — precisely the case this route creates
+and the wizard never could.
+
+**The product identifies a purchase; it is not a field on it.** `ob_journeys`
+carries a composite foreign key straight to `(ob_client_id, product_id)` rather
+than an `application_id`, so a `PATCH` naming a different product is refused with
+`ob-application-product-immutable` rather than ignored. MySQL would refuse the
+repoint anyway, and succeeding would be worse: the journey's `template_id` is
+pinned to the template of the product that was actually bought, so the client
+would be onboarded through the old product's steps under the new product's name.
+
+**The add re-checks the product; the edit does not.** Whether a product may be
+*bought* and whether an existing purchase may be *corrected* are different
+questions with opposite answers. A product retired last quarter is out of OB-04's
+picker and its clients are still onboarding through it — refusing to renew their
+licence would make a retirement retroactively strand everybody who already bought
+it, which is the opposite of what `ob_products` retires rather than deletes for.
+
+## There is no `DELETE` on a purchase, and the absence is the design
+
+`fk_ob_journeys_application` has no `ON DELETE` clause, so it is `RESTRICT` — and
+every purchase acquires a journey the moment it is made. A delete route could
+therefore only be one of two things:
+
+1. Issue the `DELETE` and let MySQL refuse it. A 500 dressed as a feature: it
+   would fail for every purchase that has ever existed, which is all of them.
+2. Delete the journey first — reaching into `ob_journeys`, `ob_journey_steps` and
+   everything hanging off them (clock events, sign-off requests, escalations)
+   from a package that owns none of it, to destroy the record of work that was
+   done. Archiving does not help: `archived_at` leaves the row in place and
+   `RESTRICT` still refuses.
+
+So it is not offered rather than offered broken. `ObApplicationsIT` exercises
+both halves of that claim rather than asserting them in prose, because the
+argument stops being true the day somebody adds a cascade to that key.
+
+## One defect B-104 found on its way past
+
+`ObClientReadRepository.localDate` was `rs.getDate(..).toLocalDate()`, which
+renders an instant through the **JVM default zone** — so a date stored in a UTC
+database and read on an IST machine came back a day early. That is **A-067's
+defect**, already fixed with a comment at the call site in
+`TicketReportRepository`, `ReportScheduleRepository` and `WidgetRepository`; this
+repository was the last one carrying it.
+
+It was latent because nothing had ever compared a date written through this
+package against the same date read back out of it. `licenseEnd` was the first
+field where doing so was the whole point of the test — but the mapper is shared,
+so it was wrong for **`onboardingDate`** as well, on every OB-03 row and every
+OB-05 header. A client boarded on the 7th displayed as the 6th.
+
+The fix is `getObject(.., LocalDate.class)`, and the rule behind it is worth
+carrying forward: **a `DATE` has no instant and must not be given one.**
+`ObContactWriteRepository.Consent.atTimestamp` is the write-side counterpart of
+the same family, on a `DATETIME(6)` that genuinely does carry an instant.
+
 ## The primary SPOC is stricter here than in the ticketing master
 
 `updateClientContact` (B-027) lets a client end up with no primary and explains
@@ -102,7 +186,7 @@ and demotes the incumbent in the same transaction.
 
 | Left | Owner |
 |---|---|
-| Purchases as their own sub-resource | B-104 |
+| Removing a purchase, and unpicking the journey behind it | beside C-103's instantiation |
 | Requirements as structured rows with rich text | B-106 |
 | Client attachments | B-107 |
 | OB-03 and OB-04 screens, and the SPOC panel's UI | B-108, B-109 |
@@ -131,3 +215,10 @@ SQL with an IT pinning that they agree.
 For the SPOC half: `ObContactController` → `ObContactService` (the three rules
 above, in `consentFor` and `refuseStrandingTheClient`) → `ObContactWriteRepository`
 (and its `Consent.atTimestamp`, which is where a real timezone bug was caught).
+
+For the purchases half: `ObApplicationService`'s class javadoc first — it carries
+the whole argument, including why there are two routes and not three — then
+`ObApplicationController`, then `ObApplicationWriteRepository` (whose `update`
+leaves `product_id` out of the `SET` list on purpose). `ObApplicationsIT` is
+worth reading beside it: the two `RESTRICT` tests are what keep the no-`DELETE`
+decision honest.

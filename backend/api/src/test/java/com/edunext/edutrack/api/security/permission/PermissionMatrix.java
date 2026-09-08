@@ -868,6 +868,19 @@ final class PermissionMatrix {
             {"tatDays":5}""";
 
     /**
+     * B-104 · {@code ObApplicationWriteRequest} — the body of both purchases
+     * routes, because one shape serves the {@code POST} and the {@code PATCH}.
+     *
+     * <p>{@code productId} only. The licence window is optional on the wire and
+     * every rule that would reject this body — the product being on sale, having
+     * a template, or already bought — is evaluated <em>after</em> the guard this
+     * file is testing, so a fuller fixture would prove nothing extra and would
+     * couple the matrix to whichever product ids the seed happens to carry.
+     */
+    private static final String UPSERT_OB_APPLICATION = """
+            {"productId":1}""";
+
+    /**
      * One row per routed handler.
      *
      * <p>Grouped by controller, in route order, so this file can be read
@@ -2356,6 +2369,26 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/module-access"),
             everyRole("POST", "/api/v1/onboarding/module-access", GRANT_OB_MODULE_ACCESS),
             everyRole("POST", "/api/v1/onboarding/module-access/{grantId}/revoke"),
+
+            // ── B-104 · OB-05's purchases panel ───────────────────────────────
+            //
+            // Every role, and for the SPOC block's reason unchanged: who may
+            // record a purchase is an *onboarding* role question, and none of
+            // the six ticketing-role fixtures here carries onboarding standing
+            // at all. Each gets 404 — the scoped client read runs before
+            // anything else in ObApplicationService and finds nothing.
+            //
+            // Two rows and not three. There is no DELETE on a purchase:
+            // fk_ob_journeys_application is RESTRICT and every purchase carries
+            // a journey from the moment it is made, so the route would either
+            // always fail or would have to destroy another stream's work.
+            // ObApplicationService's class javadoc has the argument;
+            // ObApplicationsIT exercises the two facts it rests on.
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/applications",
+                    UPSERT_OB_APPLICATION),
+            everyRole("PATCH",
+                    "/api/v1/onboarding/clients/{obClientId}/applications/{applicationId}",
+                    UPSERT_OB_APPLICATION),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //

@@ -8193,6 +8193,140 @@ paths:
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  # ── B-104 · the purchases panel ────────────────────────────────
+  # OB-04 captures purchases at boarding and, until B-104, that was the only
+  # moment they could ever be captured. Two ordinary things were therefore
+  # unrepresentable once the wizard closed: a client buying a second product,
+  # and a renewal. `licenseEnd` is what the backlog calls "the renewal anchor",
+  # and a column writable once and never moved forward is not an anchor.
+
+  /onboarding/clients/{obClientId}/applications:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    post:
+      tags: [onboarding]
+      operationId: addObClientApplication
+      summary: Record a purchase (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        B-104 · OB-05's purchases panel, adding — the client bought another
+        product.
+
+        **This instantiates a journey**, in the same transaction, exactly as
+        `createObClient` does for the wizard's products. A purchase is what a
+        journey is instantiated from, so a purchase without one leaves the client
+        with a product they are not being onboarded through and nothing that
+        reports it. The response carries the new journey strip for the same
+        reason it carries the new purchase.
+
+        **A product bought after this client's gate has already opened
+        instantiates `OPEN`, not `LOCKED`** (plan §5.3 item 3). The client is not
+        re-gated on prerequisites they have already satisfied — which is
+        precisely the case this route creates and the wizard never could.
+
+        **Buying a product this client already has is `409`
+        `ob-application-duplicate-product`.** More seats, a different licence type
+        or a renewal is an edit to the existing purchase, and the problem document
+        carries `existingApplicationId` so the panel can open it.
+        `uq_ob_client_applications` is on `(ob_client_id, product_id)`, and a
+        second row would mean a second journey for one product.
+
+        **The product must be on sale and must have a published journey
+        template** — a retired product is out of the picker by definition, and one
+        with no template has nothing to instantiate from (`409`
+        `ob-product-no-template`, as on the wizard).
+
+        Writes are OB Admin, Onboarding Manager, or Sales for a client they
+        created — `updateObClient`'s rule, on the same record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObApplicationWriteRequest' }
+      responses:
+        '201':
+          description: |
+            Recorded, and its journey instantiated. The body is the whole client
+            document — purchases, journey strips and all — with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /onboarding/clients/{obClientId}/applications/{applicationId}:
+    parameters:
+      - { $ref: '#/components/parameters/ObClientId' }
+      - { $ref: '#/components/parameters/ObApplicationId' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObClientApplication
+      summary: Edit a purchase (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        B-104 · the seat count, the licence type, and the licence window — which
+        is to say, **this is what a renewal is**. `licenseEnd` moving forward a
+        year had no representation in the API before this operation existed.
+
+        **The body is the whole representation, not a sparse patch** — an absent
+        `licenseEnd` is a cleared one. `ObContactUpsertRequest`'s call, one panel
+        over, for the same reason: the row editor sends every field on every save.
+
+        **`productId` is echoed back and may not change.** A body naming a
+        different product is `409` `ob-application-product-immutable`, refused
+        rather than ignored. `ob_journeys` carries a composite foreign key
+        straight to `(ob_client_id, product_id)`, so MySQL would refuse the
+        repoint anyway — and succeeding would be worse: the journey's
+        `template_id` is pinned to the template of the product that was actually
+        bought, so the client would be onboarded through the old product's steps
+        under the new product's name. Add the other product as its own purchase
+        instead.
+
+        **The product is not re-checked for sale or for a template.** Whether a
+        product may be *bought* and whether an existing purchase may be
+        *corrected* are different questions with opposite answers: a product
+        retired last quarter still has clients onboarding through it, and refusing
+        to renew their licence would make a retirement retroactively strand
+        everyone who already bought it.
+
+        **A licence cannot end before it starts** — `400`, keyed on `licenseEnd`
+        because that is the field a renewal moves. Either date alone may be null:
+        an open-ended perpetual licence has no end.
+
+        **There is no `DELETE` on this path, deliberately.**
+        `fk_ob_journeys_application` is `RESTRICT` and every purchase carries a
+        journey from the moment it is made, so the operation could only be a route
+        that always fails or one that reaches into `ob_journeys` and destroys the
+        record of work that was done. Archiving does not help — `archived_at`
+        leaves the row in place and `RESTRICT` still refuses. Unpicking an
+        instantiated journey belongs beside C-103's instantiation, not here.
+
+        The `If-Match` comes from `getObClient`, as the SPOC patch's does. Two
+        people renewing the same licence to different end dates is a lost update
+        nothing else in the system would surface, because nothing downstream reads
+        `licenseEnd` yet to notice it went the wrong way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObApplicationWriteRequest' }
+      responses:
+        '200':
+          description: Saved. The whole client document, with its new `ETag`.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
   # ── A-118 · journey instances and the step panel ───────────────────────────
   # The template side (OB-07) is above; this is what a template becomes once a
   # client buys the product. `ObJourneyStrip` deliberately stops at the
@@ -11083,6 +11217,18 @@ components:
         Nested under the client on purpose: a contact belonging to a *different*
         `ob_clients` row is `404`, not `403` — the id is a row this caller has
         no business knowing exists under that client.
+    ObApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        B-104 · an `ob_client_applications` id — one purchase. Nested under the
+        client on purpose: a purchase belonging to a *different* `ob_clients` row
+        is `404`, not `403`. `ObContactId`'s reasoning, and it matters slightly
+        more here — enumerating this table would enumerate which organisations
+        bought which products, a fact about other clients' commercial
+        relationships rather than about the caller's own work.
     ObJourneyId:
       name: journeyId
       in: path
@@ -17219,9 +17365,12 @@ components:
           type: [string, 'null']
           format: date
           description: |
-            Captured now so the renewals module, when it arrives, finds its
-            data waiting rather than needing a backfill nobody can source
-            (plan §1.1 item 11). Nothing in this module reads it.
+            Captured so the renewals module, when it arrives, finds its data
+            waiting rather than needing a backfill nobody can source (plan §1.1
+            item 11). Nothing in this module *reads* it — but since B-104 it can
+            be moved, which is the half that makes it an anchor rather than a
+            boarding-day snapshot. A licence renewed every year and only ever
+            writable at boarding would tell that module every client lapsed.
       description: |
         `ob_client_applications` — one purchased product. **A purchase fact,
         not a commercial one:** there is no amount, no invoice and no payment
@@ -17231,11 +17380,41 @@ components:
       type: object
       required: [productId]
       properties:
-        productId: { type: integer, format: int64 }
+        productId:
+          type: integer
+          format: int64
+          description: |
+            B-104 · required on the `PATCH` as well as the `POST`, because the
+            body is the whole representation and the panel echoes back what it
+            read. On the `PATCH` it may not *change*: a body naming a different
+            product is `409` `ob-application-product-immutable`, refused rather
+            than ignored. The product is what identifies a purchase — `ob_journeys`
+            keys straight to `(ob_client_id, product_id)` — not a field on it.
         licenseType: { type: [string, 'null'], maxLength: 64 }
-        units: { type: [integer, 'null'], minimum: 1 }
+        units:
+          type: [integer, 'null']
+          minimum: 1
+          description: Seats. `ck_ob_client_applications_units` says the same thing.
         licenseStart: { type: [string, 'null'], format: date }
-        licenseEnd: { type: [string, 'null'], format: date }
+        licenseEnd:
+          type: [string, 'null']
+          format: date
+          description: |
+            Must not precede `licenseStart` — `400`, keyed on this field because
+            it is the one a renewal moves. Either alone may be null: an
+            open-ended perpetual licence has no end, and a start recorded before
+            the end has been negotiated is an ordinary state of a real purchase.
+      description: |
+        The wizard's product multi-select, and since B-104 the body of both
+        purchases-panel operations too.
+
+        **One schema for all three uses, rather than an upsert twin.** B-103
+        needed `ObContactUpsertRequest` beside `ObContactWriteRequest` because
+        the panel's shape genuinely differs from the wizard's — it carries
+        `isActive`, which a create has no use for. Nothing differs here: a
+        purchase is the same five fields whether it is made at boarding or six
+        months later, and a second schema identical to this one would be a shape
+        that can drift from its twin for no benefit.
     ObJourneyStrip:
       type: object
       required: [id, product, gateStatus, percentComplete, steps]

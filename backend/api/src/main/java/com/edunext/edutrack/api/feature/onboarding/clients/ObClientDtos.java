@@ -167,13 +167,47 @@ final class ObClientDtos {
         }
     }
 
-    /** {@code ObApplicationWriteRequest} — the wizard's product multi-select. */
+    /**
+     * {@code ObApplicationWriteRequest} — the wizard's product multi-select, and
+     * since B-104 the body of both purchases-panel operations too.
+     *
+     * <p><b>One record for three uses, rather than an upsert twin.</b> B-103
+     * needed {@code ObContactUpsertRequest} beside {@code ObContactWriteRequest}
+     * because the panel's shape genuinely differs from the wizard's — it carries
+     * {@code isActive}, which a create has no use for. Nothing differs here: a
+     * purchase is the same five fields whether it is made at boarding or six
+     * months later. A second record identical to this one would be a shape that
+     * can drift from its twin for no benefit, and the contract reuses the schema
+     * for the same reason.
+     *
+     * <p>It is <b>the whole representation, not a sparse patch</b> — an absent
+     * licence end is a cleared one, on {@code ObContactUpsertRequest}'s call.
+     * {@code productId} stays {@code @NotNull} on the {@code PATCH} as well, so
+     * the panel echoes back the product it read; {@code ObApplicationService}
+     * refuses an echo that names a <em>different</em> product rather than
+     * ignoring it, because on this record the product is the identity and not a
+     * field.
+     */
     record ObApplicationWriteRequest(
             @NotNull Long productId,
             @Size(max = 64) String licenseType,
             @Min(1) Integer units,
             LocalDate licenseStart,
             LocalDate licenseEnd) {
+
+        /**
+         * A licence that ends before it starts — {@code
+         * ck_ob_client_applications_licence_window} in Java, so the refusal is a
+         * sentence rather than a constraint name.
+         *
+         * <p>Either date alone is fine and stays fine: an open-ended perpetual
+         * licence has no end, and a start recorded before the end has been
+         * negotiated is an ordinary state of a real purchase. Only the pair, and
+         * only in the wrong order.
+         */
+        boolean hasInvertedWindow() {
+            return licenseStart != null && licenseEnd != null && licenseEnd.isBefore(licenseStart);
+        }
     }
 
     /**

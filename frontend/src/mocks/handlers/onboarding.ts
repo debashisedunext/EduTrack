@@ -332,6 +332,74 @@ const duplicateEmail = (holder: ObContact) =>
     },
   });
 
+/**
+ * `409` — this client already bought this product.
+ *
+ * `uq_ob_client_applications` is on `(ob_client_id, product_id)`: more seats, a
+ * different licence type or a renewal is an **edit** to the row already there,
+ * and a second row would mean a second journey for one product. Not a dead end,
+ * which is why `existingApplicationId` is carried — a 409 that says "already
+ * bought" without saying which of five rows to open leaves the panel with
+ * nothing to do but refuse.
+ */
+const duplicateProduct = (existing: ObApplication, productName: string) =>
+  problem(409, 'ob-application-duplicate-product',
+    'This client has already bought that product', {
+      forceable: false,
+      existingApplicationId: existing.id,
+      errors: {
+        productId: [
+          `${productName} is already purchased by this client. Buying more seats, changing the `
+          + 'licence type or renewing the licence window is an edit to that purchase.',
+        ],
+      },
+    });
+
+/**
+ * `409` — a purchase cannot be repointed at a different product.
+ *
+ * The product is what identifies a purchase rather than a field on it:
+ * `ob_journeys` keys straight to `(ob_client_id, product_id)`, and the journey's
+ * pinned `templateId` belongs to the product that was actually bought. Refused
+ * rather than ignored — a body naming a different product is a form that has
+ * come apart, and silently keeping the old one is how somebody concludes the
+ * change landed.
+ */
+const productImmutable = (currentProductName: string) =>
+  problem(409, 'ob-application-product-immutable', 'A purchase cannot change product', {
+    forceable: false,
+    errors: {
+      productId: [
+        `This purchase is for ${currentProductName} and cannot be repointed at another product. `
+        + 'Add the other product as its own purchase instead.',
+      ],
+    },
+  });
+
+/** The one rule Bean Validation cannot state: a window is a relationship between two fields. */
+const applicationErrors = (body: ApplicationWrite): Record<string, string[]> | null => {
+  const errors: Record<string, string[]> = {};
+  if (body.productId == null) errors.productId = ['A product is required'];
+  if (body.units != null && body.units < 1) errors.units = ['Seats must be at least 1'];
+  if (body.licenseStart && body.licenseEnd && body.licenseEnd < body.licenseStart) {
+    // Keyed to licenseEnd rather than to the pair, because the end date is the
+    // one a renewal moves — a message on the start date points at the half
+    // nobody touched.
+    errors.licenseEnd = [
+      `A licence cannot end before it starts — ${body.licenseEnd} is earlier than ${body.licenseStart}.`,
+    ];
+  }
+  return Object.keys(errors).length ? errors : null;
+};
+
+interface ApplicationWrite {
+  productId?: number;
+  licenseType?: string | null;
+  units?: number | null;
+  licenseStart?: string | null;
+  licenseEnd?: string | null;
+}
+
 export const onboardingHandlers = [
   // ── products ──────────────────────────────────────────────────────────────
   http.get(url('/onboarding/products'), ({ request }) => {
@@ -683,4 +751,119 @@ export const onboardingHandlers = [
     contact.isActive = false;
     return ok(obClientDetailDto(c, db));
   }),
+
+  // ── B-104 · the purchases panel ──────────────────────────────────
+  //
+  // Both answer the whole client document, on the SPOC panel's reasoning above.
+  // It matters more here: the POST also adds a journey strip, so a caller that
+  // did not re-read would be looking at an accordion missing what they just
+  // created.
+  //
+  // There is no DELETE, and its absence is the design rather than an omission
+  // this mock has not caught up with — `fk_ob_journeys_application` is RESTRICT
+  // and every purchase carries a journey from the moment it is made.
+
+  http.post(url('/onboarding/clients/:obClientId/applications'), async ({ params, request }) => {
+    const db = getDb();
+    const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+    if (!c) return notFound('Client');
+
+    const body = (await request.json()) as ApplicationWrite;
+    const invalid = applicationErrors(body);
+    if (invalid) return validationFailed(invalid);
+
+    const existing = c.applications.find((a) => a.productId === body.productId);
+    if (existing) {
+      const name = db.obProducts.find((x) => x.id === existing.productId)?.name ?? 'That product';
+      return duplicateProduct(existing, name);
+    }
+
+    // On sale, and with something to instantiate from. Both are the wizard's
+    // own guards; a mock that waved them through would let a picker ship that
+    // offers products the server refuses.
+    const product = db.obProducts.find((x) => x.id === body.productId);
+    if (!product || !product.isActive) {
+      return validationFailed({
+        productId: [`No product on sale with id ${body.productId}. A retired product is out of the picker by definition.`],
+      });
+    }
+    if (!product.hasActiveTemplate) {
+      return problem(409, 'ob-product-no-template',
+        `${product.name} has no active journey template`, {
+          forceable: false,
+          productIds: [product.id],
+          errors: { applications: ['A purchase with no template to instantiate would board this client into nothing.'] },
+        });
+    }
+
+    c.applications.push({
+      id: Math.max(0, ...db.obClients.flatMap((x) => x.applications.map((a) => a.id))) + 1,
+      productId: product.id,
+      licenseType: body.licenseType ?? null,
+      units: body.units ?? null,
+      licenseStart: body.licenseStart ?? null,
+      licenseEnd: body.licenseEnd ?? null,
+    });
+
+    // The journey, in the same breath — a purchase is what one is instantiated
+    // from, and a purchase without one leaves the client with a product they
+    // are not being onboarded through.
+    //
+    // OPEN rather than LOCKED when this client's gate has already opened (plan
+    // §5.3 item 3). A client is not re-gated on prerequisites they have already
+    // satisfied, which is exactly the case this route creates and the wizard
+    // never could.
+    let journeyId = Math.max(0, ...db.obClients.flatMap((x) => x.journeys.map((j) => j.id)));
+    let stepId = Math.max(0, ...db.obClients.flatMap((x) => x.journeys.flatMap((j) => j.steps.map((t) => t.id))));
+    const specimen = db.obClients.flatMap((x) => x.journeys).find((j) => j.productId === product.id);
+    c.journeys.push({
+      id: ++journeyId,
+      productId: product.id,
+      gateStatus: c.journeys.some((j) => j.gateStatus === 'OPEN') ? 'OPEN' : 'LOCKED',
+      heldByJourneyId: null,
+      steps: (specimen?.steps ?? []).map((t) => ({
+        id: ++stepId,
+        sequence: t.sequence,
+        name: t.name,
+        status: 'PENDING' as const,
+        tatDays: t.tatDays,
+        usedHours: 0,
+        dependsOnStepId: null,
+      })),
+    });
+
+    return ok(obClientDetailDto(c, db), undefined, { status: 201 });
+  }),
+
+  http.patch(
+    url('/onboarding/clients/:obClientId/applications/:applicationId'),
+    async ({ params, request }) => {
+      const db = getDb();
+      const c = db.obClients.find((x) => x.id === Number(params.obClientId));
+      if (!c) return notFound('Client');
+      // Resolved by BOTH ids: a real purchase under another client is 404, so
+      // the nested route cannot enumerate who bought what.
+      const application = c.applications.find((a) => a.id === Number(params.applicationId));
+      if (!application) return notFound('Application');
+
+      const body = (await request.json()) as ApplicationWrite;
+
+      if (body.productId != null && body.productId !== application.productId) {
+        const name = db.obProducts.find((x) => x.id === application.productId)?.name ?? 'this product';
+        return productImmutable(name);
+      }
+
+      const invalid = applicationErrors(body);
+      if (invalid) return validationFailed(invalid);
+
+      // The whole representation, not a sparse patch — an absent licence end is
+      // a cleared one. The product is untouched by construction: it is not in
+      // the SET list on the server either.
+      application.licenseType = body.licenseType ?? null;
+      application.units = body.units ?? null;
+      application.licenseStart = body.licenseStart ?? null;
+      application.licenseEnd = body.licenseEnd ?? null;
+      return ok(obClientDetailDto(c, db));
+    },
+  ),
 ];

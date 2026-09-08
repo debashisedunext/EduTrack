@@ -78,6 +78,7 @@ import type {
   ListObPrereqCommentsParams,
   ListObPrereqHistoryParams,
   ListObSignoffsParams,
+  ObApplicationWriteRequest,
   ObClientCreateRequest,
   ObClientDetailResponse,
   ObClientEscalationListResponse,
@@ -807,6 +808,208 @@ export const useRemoveObClientContact = <TError = ForbiddenResponse | ObModuleGa
       > => {
 
       const mutationOptions = getRemoveObClientContactMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-104 · OB-05's purchases panel, adding — the client bought another
+product.
+
+**This instantiates a journey**, in the same transaction, exactly as
+`createObClient` does for the wizard's products. A purchase is what a
+journey is instantiated from, so a purchase without one leaves the client
+with a product they are not being onboarded through and nothing that
+reports it. The response carries the new journey strip for the same
+reason it carries the new purchase.
+
+**A product bought after this client's gate has already opened
+instantiates `OPEN`, not `LOCKED`** (plan §5.3 item 3). The client is not
+re-gated on prerequisites they have already satisfied — which is
+precisely the case this route creates and the wizard never could.
+
+**Buying a product this client already has is `409`
+`ob-application-duplicate-product`.** More seats, a different licence type
+or a renewal is an edit to the existing purchase, and the problem document
+carries `existingApplicationId` so the panel can open it.
+`uq_ob_client_applications` is on `(ob_client_id, product_id)`, and a
+second row would mean a second journey for one product.
+
+**The product must be on sale and must have a published journey
+template** — a retired product is out of the picker by definition, and one
+with no template has nothing to instantiate from (`409`
+`ob-product-no-template`, as on the wizard).
+
+Writes are OB Admin, Onboarding Manager, or Sales for a client they
+created — `updateObClient`'s rule, on the same record.
+
+ * @summary Record a purchase (OB-05)
+ */
+export const addObClientApplication = (
+    obClientId: number,
+    obApplicationWriteRequest: ObApplicationWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/applications`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obApplicationWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddObClientApplicationMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext> => {
+
+const mutationKey = ['addObClientApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObClientApplication>>, {obClientId: number;data: ObApplicationWriteRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  addObClientApplication(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddObClientApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof addObClientApplication>>>
+    export type AddObClientApplicationMutationBody = ObApplicationWriteRequest
+    export type AddObClientApplicationMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse
+
+    /**
+ * @summary Record a purchase (OB-05)
+ */
+export const useAddObClientApplication = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObClientApplication>>, TError,{obClientId: number;data: ObApplicationWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addObClientApplication>>,
+        TError,
+        {obClientId: number;data: ObApplicationWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddObClientApplicationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-104 · the seat count, the licence type, and the licence window — which
+is to say, **this is what a renewal is**. `licenseEnd` moving forward a
+year had no representation in the API before this operation existed.
+
+**The body is the whole representation, not a sparse patch** — an absent
+`licenseEnd` is a cleared one. `ObContactUpsertRequest`'s call, one panel
+over, for the same reason: the row editor sends every field on every save.
+
+**`productId` is echoed back and may not change.** A body naming a
+different product is `409` `ob-application-product-immutable`, refused
+rather than ignored. `ob_journeys` carries a composite foreign key
+straight to `(ob_client_id, product_id)`, so MySQL would refuse the
+repoint anyway — and succeeding would be worse: the journey's
+`template_id` is pinned to the template of the product that was actually
+bought, so the client would be onboarded through the old product's steps
+under the new product's name. Add the other product as its own purchase
+instead.
+
+**The product is not re-checked for sale or for a template.** Whether a
+product may be *bought* and whether an existing purchase may be
+*corrected* are different questions with opposite answers: a product
+retired last quarter still has clients onboarding through it, and refusing
+to renew their licence would make a retirement retroactively strand
+everyone who already bought it.
+
+**A licence cannot end before it starts** — `400`, keyed on `licenseEnd`
+because that is the field a renewal moves. Either date alone may be null:
+an open-ended perpetual licence has no end.
+
+**There is no `DELETE` on this path, deliberately.**
+`fk_ob_journeys_application` is `RESTRICT` and every purchase carries a
+journey from the moment it is made, so the operation could only be a route
+that always fails or one that reaches into `ob_journeys` and destroys the
+record of work that was done. Archiving does not help — `archived_at`
+leaves the row in place and `RESTRICT` still refuses. Unpicking an
+instantiated journey belongs beside C-103's instantiation, not here.
+
+The `If-Match` comes from `getObClient`, as the SPOC patch's does. Two
+people renewing the same licence to different end dates is a lost update
+nothing else in the system would surface, because nothing downstream reads
+`licenseEnd` yet to notice it went the wrong way.
+
+ * @summary Edit a purchase (OB-05)
+ */
+export const updateObClientApplication = (
+    obClientId: number,
+    applicationId: number,
+    obApplicationWriteRequest: ObApplicationWriteRequest,
+ ) => {
+      
+      
+      return http<ObClientDetailResponse>(
+      {url: `/onboarding/clients/${obClientId}/applications/${applicationId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obApplicationWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObClientApplicationMutationOptions = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext> => {
+
+const mutationKey = ['updateObClientApplication'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObClientApplication>>, {obClientId: number;applicationId: number;data: ObApplicationWriteRequest}> = (props) => {
+          const {obClientId,applicationId,data} = props ?? {};
+
+          return  updateObClientApplication(obClientId,applicationId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObClientApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof updateObClientApplication>>>
+    export type UpdateObClientApplicationMutationBody = ObApplicationWriteRequest
+    export type UpdateObClientApplicationMutationError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a purchase (OB-05)
+ */
+export const useUpdateObClientApplication = <TError = ValidationFailedResponse | ForbiddenResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObClientApplication>>, TError,{obClientId: number;applicationId: number;data: ObApplicationWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObClientApplication>>,
+        TError,
+        {obClientId: number;applicationId: number;data: ObApplicationWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObClientApplicationMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
