@@ -2001,13 +2001,22 @@ final class PermissionMatrix {
             // V20260903_1915's user_module_access) that is not blueprint §2's six
             // and is not what this matrix or RolePermissions speaks; the guard
             // that would gate these routes by ONBOARDING module + module_role is
-            // A-111's ModuleAccessGuard, whose own javadoc says plainly that
-            // nothing calls it yet — wiring it into SecurityConfig is a
-            // separate, later task. Encoding a §2 platform-role restriction
-            // here would assert a rule nobody has decided — every one of the
-            // six platform roles can reach these routes today, which is the
-            // true and complete answer until that wiring lands and the module
-            // gate becomes the real guard.
+            // A-111's ModuleAccessGuard, and ModuleAccessFilter now calls it:
+            // an authenticated caller without the ONBOARDING grant gets 404
+            // on this whole tree before any handler runs.
+            //
+            // THAT DOES NOT CHANGE A LINE BELOW, and the reason is worth
+            // stating rather than re-deriving. The gate asks one question --
+            // may this caller reach the module at all -- and it is orthogonal
+            // to the six platform roles this matrix speaks. Every one of the
+            // six can still reach these routes; each simply needs the module
+            // first, so encoding a platform-role restriction here would still
+            // assert a rule nobody has decided. What the gate replaced is the
+            // sentence that used to stand here -- "wiring it into
+            // SecurityConfig is a separate, later task" -- and
+            // ModuleAccessFilterTest is where that wiring is proved, through
+            // the real chain, because the guard's own unit tests passed
+            // throughout the three weeks nothing called it.
             everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}"),
             everyRole("POST", "/api/v1/onboarding/journey-templates", CREATE_JOURNEY_TEMPLATE),
             everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions"),

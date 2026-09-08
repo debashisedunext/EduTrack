@@ -4,10 +4,14 @@ import com.edunext.edutrack.api.security.jwt.JwtAuthoritiesConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.edunext.edutrack.api.security.module.ModuleAccessFilter;
+import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter;
@@ -199,7 +203,9 @@ public class SecurityConfig {
                                          ContentSecurityPolicy csp,
                                          CsrfTokenRepository csrfTokens,
                                          CsrfTokenRequestHandler csrfTokenRequests,
-                                         RequestMatcher cookieAuthenticatedRoutes) throws Exception {
+                                         RequestMatcher cookieAuthenticatedRoutes,
+                                         ModuleAccessGuard moduleGuard,
+                                         ObjectMapper objectMapper) throws Exception {
         return http
                 // A-074. Enabled for the two cookie-authenticated routes and no
                 // others — CookieRouteCsrf explains both halves of that.
@@ -289,6 +295,16 @@ public class SecurityConfig {
                             // The SPA shell and its client-side routes.
                             .anyRequest().permitAll();
                 })
+
+                // A-111's module gate, finally called. AFTER AuthorizationFilter
+                // and not before, because ModuleAccessGuard treats an absent
+                // caller as blocked — correct for a gate, wrong as a status.
+                // Running it earlier would answer 404 to somebody who simply has
+                // not signed in, where the line above already has a considered
+                // 401. Authorization refuses the unauthenticated; this refuses
+                // the unentitled. Method security still runs later, so this is
+                // before RolesGuard in the sense the guard's javadoc means.
+                .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper), AuthorizationFilter.class)
 
                 // Consumes the single JwtDecoder bean, which carries the signature,
                 // issuer, expiry and A-025 revocation checks together.
