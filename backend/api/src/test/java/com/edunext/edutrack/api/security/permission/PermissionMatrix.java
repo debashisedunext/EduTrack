@@ -821,6 +821,8 @@ final class PermissionMatrix {
      */
     private static final String UPSERT_OB_CONTACT = """
             {"name":"Matrix Fixture SPOC","email":"matrix.spoc@example.com","isPrimary":false}""";
+
+    /**
      * C-108 · {@code ObJourneyStepLifecycleDtos.ObJourneyStepUpdateRequest}:
      * every field optional, so this fixture is a valid body rather than a
      * strictly necessary one — kept non-empty on {@code BLOCK_JOURNEY_STEP}'s
@@ -2144,18 +2146,19 @@ final class PermissionMatrix {
             // 403, so this is still "everyRole", not a restricted set.
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/skip", SKIP_JOURNEY_STEP),
 
-            // ── C-108 · backup owner — the OB-06 panel read and its PATCH ─────
+            // ── C-108 · backup owner — the OB-06 panel's PATCH ────────
             //
-            // GET carries no capability check at all — it is the plain read
-            // every one of the six transitions above already needs to draw its
-            // own `If-Match` from, so restricting it would make those routes
-            // uncallable for whichever role it excluded. PATCH is gated the
-            // same way `skip` is (`requireModerator`, not row-scope), so it
-            // reads the same here: 404 for every one of these six ticketing
-            // fixtures, none of which carries onboarding standing, which is
-            // still "everyRole" and not a restricted set — skip's own entry
-            // above makes the identical argument.
-            everyRole("GET", "/api/v1/onboarding/journey-steps/{stepId}"),
+            // C-108's own GET is not here, and its absence is deliberate:
+            // C-111 landed the same route with a strictly richer body and the
+            // row twelve lines above is that read. Two entries for one route
+            // is what noRouteAppearsTwice refuses, and it is right to — a
+            // matrix with two opinions about a route has no opinion about it.
+            //
+            // PATCH is gated the same way `skip` is (`requireModerator`, not
+            // row-scope), so it reads the same here: 404 for every one of
+            // these six ticketing fixtures, none of which carries onboarding
+            // standing, which is still "everyRole" and not a restricted set —
+            // skip's own entry above makes the identical argument.
             everyRole("PATCH", "/api/v1/onboarding/journey-steps/{stepId}", UPDATE_JOURNEY_STEP),
 
             // ── B-112 · OB-13, the onboarding notification centre ─────────────
