@@ -7,6 +7,7 @@ import { SegmentState } from '@/api/generated/model/segmentState'
 import { formatDuration, formatEffortHrs } from '@/lib/duration'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import type { SegmentPosition } from './segmentState'
 import { ownerLabel, segmentAriaLabel, segmentTooltipDetails, treatmentFor } from './segmentState'
 import { useElapsedMins } from './useElapsedMins'
 
@@ -97,6 +98,13 @@ export interface RibbonSegmentProps {
   tabIndex?: number
   /** Moves the strip's tab stop here when this tile is focused by any means. */
   onFocus?: () => void
+  /**
+   * `C-116` · where this stage sits in the whole journey, said out loud in the
+   * accessible name. Optional, and a tile with none simply omits it — a
+   * standalone tile (Storybook, S-30's designer preview of a single stage) has
+   * no strip to be third of.
+   */
+  position?: SegmentPosition
   className?: string
 }
 
@@ -110,7 +118,7 @@ function initials(name: string): string {
 }
 
 export const RibbonSegment = React.forwardRef<HTMLElement, RibbonSegmentProps>(function RibbonSegment(
-  { segment, isLast = false, onSelect, isSelected = false, actionSlot, tabIndex, onFocus, className },
+  { segment, isLast = false, onSelect, isSelected = false, actionSlot, tabIndex, onFocus, position, className },
   ref,
 ) {
   const treatment = treatmentFor(segment.state)
@@ -228,7 +236,7 @@ export const RibbonSegment = React.forwardRef<HTMLElement, RibbonSegmentProps>(f
       onClick={() => onSelect(segment)}
       onFocus={onFocus}
       tabIndex={tabIndex}
-      aria-label={segmentAriaLabel(segment, elapsedMins)}
+      aria-label={segmentAriaLabel(segment, elapsedMins, position)}
       aria-current={isCurrent ? 'step' : undefined}
       aria-pressed={isSelected}
       data-state={segment.state}
@@ -246,7 +254,7 @@ export const RibbonSegment = React.forwardRef<HTMLElement, RibbonSegmentProps>(f
       role="group"
       onFocus={onFocus}
       tabIndex={tabIndex}
-      aria-label={segmentAriaLabel(segment, elapsedMins)}
+      aria-label={segmentAriaLabel(segment, elapsedMins, position)}
       aria-current={isCurrent ? 'step' : undefined}
       data-state={segment.state}
     >

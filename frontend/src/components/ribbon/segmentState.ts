@@ -142,6 +142,13 @@ export function ownerLabel(segment: RibbonSegment): string {
   return 'Unassigned'
 }
 
+/** Where a segment sits in the whole journey, 1-based. `C-116`. */
+export interface SegmentPosition {
+  /** 1-based, counted over `ribbon.segments` — never over the strip's rows. */
+  index: number
+  total: number
+}
+
 /**
  * §4A.3: "each segment has an ARIA label reading the stage, owner, state and
  * effort". Those four in that order, plus the loop count when there is one — a
@@ -155,17 +162,48 @@ export function ownerLabel(segment: RibbonSegment): string {
  *
  * B-052 owns keyboard navigation across the strip. This is the per-segment
  * accessible name, which belongs to the segment.
+ *
+ * ## C-116 · two things this said wrongly, and one it did not say at all
+ *
+ * **`position` — "stage 3 of 8".** B-052 made the strip a composite widget:
+ * one tab stop, arrows inside it. That is the right shape and it costs the
+ * one thing `role="list"` was providing for free — a reader who tabs *into*
+ * the strip is placed directly on the current tile and hears "list, 8 items"
+ * once, if at all, and thereafter arrows between tiles with nothing saying
+ * where in the eight they are. A sighted reader has the whole strip in
+ * peripheral vision and never has to ask. So the position is said out loud,
+ * which is what §4A.3's "fully keyboard-navigable" needs to mean for someone
+ * who cannot see the strip. It is **1-based over `ribbon.segments`**, so a
+ * collapsed `…` group does not renumber the stages behind it — the ribbon
+ * has eight stages whether or not three of them are folded, and a reader who
+ * expands a group must not find that stage 7 has become stage 5.
+ *
+ * **`elapsed` is not `in stage`.** This function printed the live clock under
+ * the words "in stage", which is the one thing `useElapsedMins` and this
+ * directory's README both say never to do: the sealed figure is *working*
+ * minutes off the calendar and the running one is wall clock, and a ticket
+ * handed over at 18:00 on Friday reads `62h` on Monday against the ~8h that
+ * gets recorded. The tile has always drawn the distinction; the accessible
+ * name flattened it, so a screen-reader user was told the ticket had spent
+ * two and a half working days in a stage it had spent one. Fixed rather than
+ * documented — the two units now carry the two words they carry on screen.
  */
-export function segmentAriaLabel(segment: RibbonSegment, elapsedMins?: number | null): string {
+export function segmentAriaLabel(
+  segment: RibbonSegment,
+  elapsedMins?: number | null,
+  position?: SegmentPosition,
+): string {
   const treatment = treatmentFor(segment.state)
   const stage = segment.displayName ?? segment.stageCode ?? 'Stage'
-  const duration = elapsedMins != null ? formatDuration(elapsedMins) : formatDuration(segment.durationMins)
+  const isLive = elapsedMins != null
+  const duration = isLive ? formatDuration(elapsedMins) : formatDuration(segment.durationMins)
 
   const parts = [
     stage,
+    ...(position ? [`stage ${position.index} of ${position.total}`] : []),
     ownerLabel(segment),
     segment.state === SegmentState.CURRENT ? 'current stage' : treatment.label.toLowerCase(),
-    `${duration} in stage`,
+    `${duration} ${isLive ? 'elapsed' : 'in stage'}`,
     `${formatEffortHrs(segment.effortHrs)} effort`,
   ]
 
