@@ -7,8 +7,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * A-124 · the product catalogue's rules.
@@ -44,12 +46,12 @@ public class ObProductService {
         List<ObProduct> rows = isActive == null
                 ? products.findAllByOrderByNameAsc()
                 : products.findAllByIsActiveOrderByNameAsc(isActive);
-        return withTemplateFlag(rows);
+        return project(rows);
     }
 
     @Transactional(readOnly = true)
     public Optional<ObProductDtos.Product> find(long id) {
-        return products.findById(id).map(row -> withTemplateFlag(List.of(row)).get(0));
+        return products.findById(id).map(row -> project(List.of(row)).get(0));
     }
 
     @Transactional
@@ -61,7 +63,7 @@ public class ObProductService {
 
         ObProduct saved = products.save(
                 new ObProduct(code, request.name().trim(), request.activeOrDefault(), createdBy));
-        return withTemplateFlag(List.of(saved)).get(0);
+        return project(List.of(saved)).get(0);
     }
 
     /**
@@ -79,29 +81,53 @@ public class ObProductService {
             }
             row.setName(request.name().trim());
             row.setActive(request.activeOrDefault());
-            return withTemplateFlag(List.of(products.save(row))).get(0);
+            return project(List.of(products.save(row))).get(0);
         });
     }
 
     /**
-     * One query for the whole page rather than one per row — the difference
-     * between a catalogue screen and one that gets slower as the catalogue
-     * grows.
+     * The three derived fields, in three queries for the whole page rather than
+     * three per row — the difference between a catalogue screen and one that
+     * gets slower as the catalogue grows.
+     *
+     * <p><b>{@code totalTatDays} is null only when there is no active
+     * template.</b> An active template with no steps yet sums nothing and comes
+     * back from {@link ObProductRepository#sumActiveTemplateTatDays} as no row
+     * at all, which is indistinguishable there from having no template — so the
+     * distinction is made here, against the set that already answers
+     * {@code hasActiveTemplate}. The two facts read the same on the OB-07 card
+     * if they are collapsed, and they are not the same: one product cannot be
+     * bought, the other can and costs nothing yet.
      */
-    private List<ObProductDtos.Product> withTemplateFlag(List<ObProduct> rows) {
+    private List<ObProductDtos.Product> project(List<ObProduct> rows) {
         if (rows.isEmpty()) {
             return List.of();
         }
         List<Long> ids = rows.stream().map(ObProduct::getId).toList();
         Set<Long> withTemplate = Set.copyOf(products.findProductIdsWithAnActiveTemplate(ids));
+        Map<Long, Long> tatDays = tally(products.sumActiveTemplateTatDays(ids));
+        Map<Long, Long> journeys = tally(products.countJourneysByProduct(ids));
+
         return rows.stream()
-                .map(row -> new ObProductDtos.Product(
-                        row.getId(),
-                        row.getCode(),
-                        row.getName(),
-                        row.isActive(),
-                        withTemplate.contains(row.getId())))
+                .map(row -> {
+                    boolean hasTemplate = withTemplate.contains(row.getId());
+                    return new ObProductDtos.Product(
+                            row.getId(),
+                            row.getCode(),
+                            row.getName(),
+                            row.isActive(),
+                            hasTemplate,
+                            hasTemplate ? Math.toIntExact(tatDays.getOrDefault(row.getId(), 0L)) : null,
+                            Math.toIntExact(journeys.getOrDefault(row.getId(), 0L)));
+                })
                 .toList();
+    }
+
+    private static Map<Long, Long> tally(List<ObProductRepository.Tally> rows) {
+        return rows.stream().collect(Collectors.toMap(
+                ObProductRepository.Tally::getProductId,
+                ObProductRepository.Tally::getTally,
+                (a, b) -> a));
     }
 
     /**

@@ -53,7 +53,23 @@ final class ObProductDtos {
             @Schema(description = "Whether an active journey template binds to this product. "
                     + "The OB-04 picker's gate: a product with none cannot be bought, because "
                     + "a purchase with no template to instantiate boards a client into nothing.")
-            boolean hasActiveTemplate
+            boolean hasActiveTemplate,
+
+            /**
+             * Null when there is no active template, and {@code 0} when there is
+             * one with no steps yet — two different facts, and collapsing them
+             * would have the OB-07 card claim a product costs nothing when what
+             * is true is that nobody has said yet.
+             */
+            @Schema(nullable = true,
+                    description = "Sum of the active template's step TATs, in working days — what a "
+                            + "journey for this product costs, shown on the OB-07 card. Null when "
+                            + "there is no active template.")
+            Integer totalTatDays,
+
+            @Schema(description = "Journeys instantiated from this product, across all clients. "
+                    + "Part of the ETag, because it is what a retire decision is made against.")
+            int journeyCount
     ) {
     }
 

@@ -154,6 +154,11 @@ class ObProductController {
      * costs this form a reload: it is the field that decides whether the
      * product can be bought, and a save made against a stale answer to that is
      * exactly the state worth refusing.
+     *
+     * <p>{@code journeyCount} is in the record and therefore in the tag too,
+     * which the contract asks for in as many words: a client boarded against
+     * this product while the edit dialog is open costs a reload, and that is
+     * correct, because the count is what a retire decision is made against.
      */
     private static String etagOf(ObProductDtos.Product product) {
         return Integer.toHexString(product.hashCode());

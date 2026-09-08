@@ -2,11 +2,13 @@ package com.edunext.edutrack.api.feature.onboarding.products;
 
 import com.edunext.edutrack.domain.onboarding.ObProduct;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository;
+import com.edunext.edutrack.domain.onboarding.ObProductRepository.Tally;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -30,6 +32,8 @@ class ObProductServiceTest {
         private final List<ObProduct> rows = new ArrayList<>();
         private final AtomicLong ids = new AtomicLong();
         private List<Long> withActiveTemplate = List.of();
+        private final Map<Long, Long> tatDaysByProduct = new java.util.HashMap<>();
+        private final Map<Long, Long> journeysByProduct = new java.util.HashMap<>();
 
         @Override
         public ObProduct save(ObProduct product) {
@@ -63,6 +67,41 @@ class ObProductServiceTest {
         @Override
         public List<Long> findProductIdsWithAnActiveTemplate(List<Long> productIds) {
             return withActiveTemplate.stream().filter(productIds::contains).toList();
+        }
+
+        /**
+         * Absent products produce no row, the way {@code group by} does — which
+         * is the behaviour the null-versus-zero rule rests on.
+         */
+        @Override
+        public List<Tally> sumActiveTemplateTatDays(List<Long> productIds) {
+            return tallies(tatDaysByProduct, productIds);
+        }
+
+        @Override
+        public List<Tally> countJourneysByProduct(List<Long> productIds) {
+            return tallies(journeysByProduct, productIds);
+        }
+
+        private static List<Tally> tallies(Map<Long, Long> source, List<Long> productIds) {
+            return productIds.stream()
+                    .filter(source::containsKey)
+                    .<Tally>map(id -> tally(id, source.get(id)))
+                    .toList();
+        }
+
+        private static Tally tally(Long productId, long value) {
+            return new Tally() {
+                @Override
+                public Long getProductId() {
+                    return productId;
+                }
+
+                @Override
+                public long getTally() {
+                    return value;
+                }
+            };
         }
 
         private static void setId(ObProduct product, long id) {
@@ -179,16 +218,81 @@ class ObProductServiceTest {
     }
 
     @Test
-    @DisplayName("the whole page costs one template query, not one per row")
-    void templateFlagIsOneQueryForThePage() {
+    @DisplayName("totalTatDays is null without an active template — no answer, not a zero one")
+    void totalTatDaysIsNullWithoutATemplate() {
+        // The OB-07 card reads this as what a journey for the product costs. A
+        // product nobody has drawn a template for has no such figure, and
+        // rendering "0 days" would state a cost that was never decided.
+        assertThat(service.create(write("LMS", "Learning", null), null).totalTatDays()).isNull();
+    }
+
+    @Test
+    @DisplayName("totalTatDays is 0 for an active template with no steps — a different fact")
+    void totalTatDaysIsZeroForAnEmptyTemplate() {
+        // The grouped sum returns no row for this product either, exactly as it
+        // does for the case above, so the two are told apart by hasActiveTemplate
+        // and not by the sum. Collapsing them is the bug this asserts against.
+        long id = service.create(write("LMS", "Learning", null), null).id();
+        repository.withActiveTemplate = List.of(id);
+
+        assertThat(service.list(null)).singleElement()
+                .satisfies(p -> assertThat(p.totalTatDays()).isZero());
+    }
+
+    @Test
+    @DisplayName("totalTatDays sums the active template's step TATs")
+    void totalTatDaysSumsTheActiveTemplate() {
+        long id = service.create(write("LMS", "Learning", null), null).id();
+        repository.withActiveTemplate = List.of(id);
+        repository.tatDaysByProduct.put(id, 12L);
+
+        assertThat(service.list(null)).singleElement()
+                .satisfies(p -> assertThat(p.totalTatDays()).isEqualTo(12));
+    }
+
+    @Test
+    @DisplayName("journeyCount is 0 for a product nobody was boarded against")
+    void journeyCountDefaultsToZero() {
+        assertThat(service.create(write("LMS", "Learning", null), null).journeyCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("journeyCount counts every journey instantiated from the product")
+    void journeyCountReflectsTheTally() {
+        // Across all clients, and completed journeys included: the count is what
+        // a retire decision is made against, and a finished journey is as much
+        // evidence the product was sold as a running one.
+        long id = service.create(write("LMS", "Learning", null), null).id();
+        repository.journeysByProduct.put(id, 4L);
+
+        assertThat(service.list(null)).singleElement()
+                .satisfies(p -> assertThat(p.journeyCount()).isEqualTo(4));
+    }
+
+    @Test
+    @DisplayName("the whole page costs three derived-field queries, not three per row")
+    void derivedFieldsAreOneQueryEachForThePage() {
         // The difference between a catalogue screen and one that gets slower as
         // the catalogue grows. Asserted by counting the calls rather than by
         // reading the code, because the per-row version passes every other test
-        // in this file.
+        // in this file — and it now covers all three, since totalTatDays and
+        // journeyCount are exactly the shape an N+1 arrives in.
         var calls = new java.util.concurrent.atomic.AtomicInteger();
         ObProductRepository counting = new FakeRepository() {
             @Override
             public List<Long> findProductIdsWithAnActiveTemplate(List<Long> productIds) {
+                calls.incrementAndGet();
+                return List.of();
+            }
+
+            @Override
+            public List<Tally> sumActiveTemplateTatDays(List<Long> productIds) {
+                calls.incrementAndGet();
+                return List.of();
+            }
+
+            @Override
+            public List<Tally> countJourneysByProduct(List<Long> productIds) {
                 calls.incrementAndGet();
                 return List.of();
             }
@@ -201,7 +305,7 @@ class ObProductServiceTest {
 
         counted.list(null);
 
-        assertThat(calls.get()).isEqualTo(1);
+        assertThat(calls.get()).isEqualTo(3);
     }
 
     @Test

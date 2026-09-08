@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -35,9 +36,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * already had to be rescued from once.
  *
  * <p>So the portal assertions discriminate on the <b>body</b>: the gate's own
- * detail string against Spring's "No static resource …". The staff-route
- * direction can assert on status, because those routes do exist and answer
- * something other than 404 for a legitimate caller.
+ * detail string against Spring's "No static resource …".
+ *
+ * <p>The staff-route direction asserts on status instead — but on <b>405</b>
+ * from an unmapped method, not on "not 404" from a real GET. A GET reaches the
+ * handler, which opens a transaction; 405 comes from the handler mapping, behind
+ * the whole filter chain and in front of every controller, and needs no
+ * datasource. See {@code Staff#reachesStaffRoutes} for what that cost the first
+ * time.
  */
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=none",
@@ -147,15 +153,37 @@ class PortalRouteFilterTest {
         void reachesStaffRoutes() throws Exception {
             // The counterweight. A filter that refused everybody would satisfy
             // every assertion above and be entirely broken.
-            mvc.perform(get(STAFF).with(authentication(staff())))
-                    .andExpect(status().is(org.hamcrest.Matchers.not(404)));
+            //
+            // DELETE, and the method is the whole care of these two tests —
+            // the correction ModuleAccessFilterTest's own counterweight took one
+            // commit earlier, for the same reason and on the same route. Only
+            // GET is mapped on the onboarding dashboard summary, so DELETE is
+            // answered 405 by the handler mapping, which sits behind the entire
+            // filter chain and in front of every controller. That is the
+            // narrowest place a response can prove this filter passed the
+            // request on: a 405 is unreachable if the gate refused, and it is
+            // produced without invoking a handler, so it asks no service and
+            // opens no transaction.
+            //
+            // This asserted `get(STAFF)` first and it cost a red build. The
+            // summary is isAuthenticated(), which this caller is, so the request
+            // ran the real handler, which opened a transaction and asked for a
+            // connection: green on a developer's machine with the compose stack
+            // up, and CannotGetJdbcConnectionException in CI, where MySQL exists
+            // for the integration tests and does not carry the application's
+            // credentials. A test that passes or fails on whether a database
+            // happens to be reachable is testing the machine, not the filter.
+            mvc.perform(delete(STAFF).with(authentication(staff())))
+                    .andExpect(status().isMethodNotAllowed());
         }
 
         @Test
         @DisplayName("still reaches the ticketing tree")
         void reachesTicketing() throws Exception {
-            mvc.perform(get(TICKETS).with(authentication(staff())))
-                    .andExpect(status().is(org.hamcrest.Matchers.not(404)));
+            // Only GET and POST are mapped on /api/v1/tickets — same reasoning
+            // as the test above.
+            mvc.perform(delete(TICKETS).with(authentication(staff())))
+                    .andExpect(status().isMethodNotAllowed());
         }
     }
 }
