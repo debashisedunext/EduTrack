@@ -128,7 +128,7 @@ export function ObReportFilterBar({ filters }: { filters: ObReportFilterKind[] }
 
       {wantsOwner && (
         <FilterDropdown
-          label="Owner"
+          label="Implementor"
           options={userList}
           value={userList.find((u) => String(u.id) === params.get('ownerUserId')) ?? null}
           onChange={(u) => set('ownerUserId', u ? String(u.id) : undefined)}
