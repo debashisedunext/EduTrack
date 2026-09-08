@@ -119,27 +119,35 @@ class ObPermissionMatrixTest {
     }
 
     @Test
-    @DisplayName("exactly one route enforces its rule today, and the gap is 25")
+    @DisplayName("four routes enforce their rule today, and the gap is 34")
     void theEnforcementGapIsExact() {
         // THE RATCHET, and the reason this file is not just a coverage check.
         //
-        // The matrix declares 26 rules; the application applies one — skip,
-        // through NotAnOnboardingModeratorException. Recording that as an exact
-        // number rather than a vague known-gap comment is what makes A-122's
-        // job measurable and stops the set growing quietly: a new onboarding
-        // route with no module-role check fails `everyRouteIsCovered` first,
-        // and then this, so it cannot be added without somebody deciding.
+        // The matrix declares 38 rules and the application applies four: skip,
+        // through NotAnOnboardingModeratorException, and A-117's three
+        // module-access routes, through NotAnOnboardingAdminException.
+        // Recording that as an exact number rather than a vague known-gap
+        // comment is what makes A-122's job measurable and stops the set
+        // growing quietly — a new onboarding route with no module-role check
+        // fails `everyRouteIsCovered` first and then this, so it cannot arrive
+        // without somebody deciding.
         //
-        // WHEN THIS FAILS BECAUSE THE NUMBER WENT DOWN, that is A-122 working.
+        // WHEN THIS FAILS BECAUSE THE GAP WENT DOWN, that is A-122 working.
         // Remove the route from NOT_YET_ENFORCED and lower the figure here.
-        assertThat(ObPermissionMatrix.ENTRIES).hasSize(28);
+        assertThat(ObPermissionMatrix.ENTRIES).hasSize(38);
         assertThat(ObPermissionMatrix.NOT_YET_ENFORCED)
                 .as("routes declaring a module-role rule the code does not apply")
-                .hasSize(27);
+                .hasSize(34);
 
+        // Named rather than counted: the count alone would let a route slip out
+        // of NOT_YET_ENFORCED while another slipped in, and the whole point is
+        // to know which rules are real.
         Set<String> enforced = new TreeSet<>(ObPermissionMatrix.ENTRIES.keySet());
         enforced.removeAll(ObPermissionMatrix.NOT_YET_ENFORCED);
-        assertThat(enforced)
-                .containsExactly("POST /api/v1/onboarding/journey-steps/{stepId}/skip");
+        assertThat(enforced).containsExactly(
+                "GET /api/v1/onboarding/module-access",
+                "POST /api/v1/onboarding/journey-steps/{stepId}/skip",
+                "POST /api/v1/onboarding/module-access",
+                "POST /api/v1/onboarding/module-access/{grantId}/revoke");
     }
 }

@@ -798,6 +798,13 @@ final class PermissionMatrix {
      * method-security advice runs, which is the hole this file's own javadoc
      * documents at length.
      */
+    /**
+     * A-117 · the three required fields of {@code ObModuleAccessGrantRequest},
+     * so the request reaches authorisation rather than stopping at a 400.
+     */
+    private static final String GRANT_OB_MODULE_ACCESS =
+            "{\"userId\":1,\"module\":\"ONBOARDING\",\"moduleRole\":\"OB_VIEWER\"}";
+
     private static final String UPDATE_OB_CLIENT = """
             {"name":"Matrix Fixture Client"}""";
 
@@ -814,6 +821,15 @@ final class PermissionMatrix {
      */
     private static final String UPSERT_OB_CONTACT = """
             {"name":"Matrix Fixture SPOC","email":"matrix.spoc@example.com","isPrimary":false}""";
+     * C-108 · {@code ObJourneyStepLifecycleDtos.ObJourneyStepUpdateRequest}:
+     * every field optional, so this fixture is a valid body rather than a
+     * strictly necessary one — kept non-empty on {@code BLOCK_JOURNEY_STEP}'s
+     * own standing rule anyway, so a future {@code @NotBlank}/{@code @Min}
+     * this record gains does not silently start failing every role's
+     * argument resolution before {@code @PreAuthorize} is even reached.
+     */
+    private static final String UPDATE_JOURNEY_STEP = """
+            {"tatDays":5}""";
 
     /**
      * One row per routed handler.
@@ -2128,6 +2144,20 @@ final class PermissionMatrix {
             // 403, so this is still "everyRole", not a restricted set.
             everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/skip", SKIP_JOURNEY_STEP),
 
+            // ── C-108 · backup owner — the OB-06 panel read and its PATCH ─────
+            //
+            // GET carries no capability check at all — it is the plain read
+            // every one of the six transitions above already needs to draw its
+            // own `If-Match` from, so restricting it would make those routes
+            // uncallable for whichever role it excluded. PATCH is gated the
+            // same way `skip` is (`requireModerator`, not row-scope), so it
+            // reads the same here: 404 for every one of these six ticketing
+            // fixtures, none of which carries onboarding standing, which is
+            // still "everyRole" and not a restricted set — skip's own entry
+            // above makes the identical argument.
+            everyRole("GET", "/api/v1/onboarding/journey-steps/{stepId}"),
+            everyRole("PATCH", "/api/v1/onboarding/journey-steps/{stepId}", UPDATE_JOURNEY_STEP),
+
             // ── B-112 · OB-13, the onboarding notification centre ─────────────
             //
             // Every role, and here that is the permanent answer rather than the
@@ -2225,6 +2255,35 @@ final class PermissionMatrix {
             everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
                     UPSERT_OB_CONTACT),
             everyRole("DELETE", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}"),
+            // ── A-117 · OB-08, module access ──────────────────────────────────
+            //
+            // "everyRole", like every onboarding block above, and it is worth
+            // saying why -- because these three are the module's only routes
+            // that refuse with a 403, and the obvious row to write here is a
+            // denial for all six.
+            //
+            // That row would be wrong, and it fails: none of the six fixtures
+            // below holds an ONBOARDING entitlement, so ModuleAccessFilter
+            // (A-111, wired by #398) answers 404 before the controller is
+            // reached. 404 is not 403, so this file cannot see the 403 at all.
+            //
+            // The 403 is reachable only by a caller who HAS onboarding access
+            // and is not OB_ADMIN -- an onboarding-role question, which lives
+            // in the moduleRoles claim that JwtAuthoritiesConverter never turns
+            // into a Spring authority. ObPermissionMatrix is where it is
+            // asserted, and ObModuleAccessServiceTest.listIsAdminOnly is where
+            // each refused module role is named.
+            //
+            // So what these rows assert is the half this file can: the gate
+            // above the feature refuses a caller with no module grant, and it
+            // does not do it with a 403.
+            //
+            // The POST keeps a fixture body regardless. @Valid is resolved
+            // during argument resolution, and a body that stopped at a 400
+            // would make the row prove nothing if the gate ever changed shape.
+            everyRole("GET", "/api/v1/onboarding/module-access"),
+            everyRole("POST", "/api/v1/onboarding/module-access", GRANT_OB_MODULE_ACCESS),
+            everyRole("POST", "/api/v1/onboarding/module-access/{grantId}/revoke"),
 
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //
