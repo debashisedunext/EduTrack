@@ -46,14 +46,14 @@ class ObClientService {
     @Transactional(readOnly = true)
     ObClientDtos.ObClientListResponse list(ObClientScope scope, String q, String status, String rag,
                                            String gateStatus, Long productId, Long salesPersonId,
-                                           String cursor, Integer limit) {
+                                           Long ownerId, String cursor, Integer limit) {
         if (scope.deniesEverything()) {
             return new ObClientDtos.ObClientListResponse(List.of(), PageMeta.last());
         }
 
         int clamped = PageLimit.clamp(limit);
         List<ObClientReadRepository.ListRow> rows = reads.list(
-                scope, q, status, rag, gateStatus, productId, salesPersonId,
+                scope, q, status, rag, gateStatus, productId, salesPersonId, ownerId,
                 cursor, PageLimit.fetchSize(clamped));
 
         CursorPage<ObClientReadRepository.ListRow> page = CursorPage.of(rows, clamped,

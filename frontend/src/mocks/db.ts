@@ -2115,7 +2115,13 @@ const OB_CLIENTS: ObClient[] = [
         steps: [
           { id: 13, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 17, dependsOnStepId: null },
           { id: 14, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 22, dependsOnStepId: 13 },
-          { id: 15, sequence: 3, name: 'Data Migration', status: 'DONE', tatDays: 8, usedHours: 54, dependsOnStepId: 14 },
+          // B-108 · the only backup owner in the corpus, and the reason it is
+          // here: OB-03's `ownerId` filter counts backups, and a fixture where
+          // every owned step names its owner in the same column cannot tell a
+          // filter that reads both columns from one that reads only the first.
+          // User 4 owns nothing else anywhere, so `ownerId=4` returning exactly
+          // this client is the whole assertion.
+          { id: 15, sequence: 3, name: 'Data Migration', status: 'DONE', tatDays: 8, usedHours: 54, dependsOnStepId: 14, backupOwnerUserId: 4 },
           { id: 16, sequence: 4, name: 'User Training', status: 'DONE', tatDays: 5, usedHours: 31, dependsOnStepId: null },
           { id: 17, sequence: 5, name: 'Go-live Readiness', status: 'DONE', tatDays: 4, usedHours: 25, dependsOnStepId: 15 },
         ],

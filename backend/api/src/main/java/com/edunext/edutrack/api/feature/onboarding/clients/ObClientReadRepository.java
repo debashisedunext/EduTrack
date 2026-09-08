@@ -135,6 +135,16 @@ class ObClientReadRepository {
      * is atomic over the purchase and its journey — but the journey is what the
      * screen is about, and a purchase whose journey was archived is not a row
      * OB-03 should offer under a product filter.
+     *
+     * <p>B-108 · {@code ownerId} is the same shape as the step-owner arm of
+     * {@link ObClientScope#predicate} and is deliberately a second expression
+     * of it rather than a call into it: the scope predicate binds the
+     * <b>caller's</b> id under {@code scopeUserId} and this binds an
+     * <b>asked-for</b> id under its own name, so an OB Manager filtering to one
+     * implementor and a step owner reading their own list are two different
+     * questions that have to be answerable in the same statement. Backup owners
+     * match here for the reason they match there — see the contract's own note
+     * on the parameter.
      */
     private static final String LIST_FILTERS = """
              WHERE %s
@@ -146,6 +156,13 @@ class ObClientReadRepository {
                       WHERE pj.ob_client_id = c.id
                         AND pj.product_id = :productId
                         AND pj.archived_at IS NULL))
+               AND (:ownerId IS NULL OR EXISTS (
+                     SELECT 1 FROM ob_journeys oj
+                      JOIN ob_journey_steps os ON os.journey_id = oj.id
+                      WHERE oj.ob_client_id = c.id
+                        AND oj.archived_at IS NULL
+                        AND (os.owner_user_id = :ownerId
+                             OR os.backup_owner_user_id = :ownerId)))
                AND (:gateStatus IS NULL OR %s = :gateStatus)
                AND (:cursorDate IS NULL
                     OR c.onboarding_date < :cursorDate
@@ -214,7 +231,8 @@ class ObClientReadRepository {
     // ------------------------------------------------------------------
 
     List<ListRow> list(ObClientScope scope, String q, String status, String rag, String gateStatus,
-                       Long productId, Long salesPersonId, String cursor, int fetchSize) {
+                       Long productId, Long salesPersonId, Long ownerId, String cursor,
+                       int fetchSize) {
 
         String sql = LIST_COLUMNS + LIST_FILTERS.formatted(scope.predicate("c"), GATE_EXPRESSION.trim())
                 // Only when asked for: see the class javadoc on what appending
@@ -229,6 +247,7 @@ class ObClientReadRepository {
                 .param("gateStatus", blankToNull(gateStatus))
                 .param("productId", productId)
                 .param("salesPersonId", salesPersonId)
+                .param("ownerId", ownerId)
                 // B-104 · the LocalDate itself, not Date.valueOf(..). The
                 // keyset cursor is compared against c.onboarding_date, which is
                 // the same DATE column localDate() reads — and java.sql.Date

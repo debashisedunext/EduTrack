@@ -613,6 +613,22 @@ export const onboardingHandlers = [
     }
     const salesPersonId = q.searchParams.get('salesPersonId');
     if (salesPersonId) rows = rows.filter((c) => c.salesPersonId === Number(salesPersonId));
+    const ownerId = q.searchParams.get('ownerId');
+    // B-108 · "my clients". Backup owners count, exactly as the server's
+    // predicate and A-112's scope rule both have them count: the stand-in
+    // covering a step is precisely the person who needs the client to appear.
+    // Archived journeys do not count — the server's `EXISTS` excludes them, and
+    // an implementor's list should not carry work that was called off.
+    if (ownerId) {
+      const owner = Number(ownerId);
+      rows = rows.filter((c) =>
+        c.journeys.some(
+          (j) =>
+            j.archivedAt == null &&
+            j.steps.some((s) => s.ownerUserId === owner || s.backupOwnerUserId === owner),
+        ),
+      );
+    }
 
     const { page, meta } = paginate(rows, q);
     return ok(page.map((c) => obClientDto(c, db)), meta);

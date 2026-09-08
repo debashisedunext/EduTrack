@@ -84,4 +84,25 @@ gateStatus?: ObGateStatus;
  */
 productId?: number;
 salesPersonId?: number;
+/**
+ * B-108 · clients this user is implementing — i.e. who own or back up
+a step on one of the client's journeys.
+
+**Not a column on the row, and deliberately not added as one.** A
+journey has no owner of its own (`ObJourneySummary.owner` is the
+owner of `currentStep`), so a client with four products has as many
+owners as it has running services and a single `owner` field on
+`ObClient` would have to pick one of them. What OB-03 needs is the
+question rather than the field — "show me my clients" — and that is
+answerable without widening the row.
+
+Backup owners match, on `OnboardingScopeResolver.hasStepOwnedBy`'s
+reasoning: the backup exists to cover the step when the owner
+cannot, and a filter that hid those clients would hide exactly the
+ones a stand-in has been asked to pick up. Both columns are
+nullable and equality never matches NULL, so an unowned step
+attributes the client to nobody.
+
+ */
+ownerId?: number;
 };

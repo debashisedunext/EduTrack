@@ -150,6 +150,52 @@ describe('A-118 · RAG carries health and nothing else', () => {
   })
 })
 
+/**
+ * B-108 · OB-03's owner filter.
+ *
+ * The only filter on this list that is not a field on the row, so a handler
+ * that dropped it would return the whole corpus and read as working. The
+ * fixture is arranged so both arms are narrowings: user 3 owns steps on clients
+ * 1 and 2 and none on 3, and user 4 owns nothing anywhere while backing up one
+ * step on client 3.
+ */
+describe('B-108 · the ownerId filter', () => {
+  it('returns only the clients whose journeys hold that person’s steps', async () => {
+    const res = await fetch('/api/v1/onboarding/clients?ownerId=3')
+    const { data } = await json<{ data: ClientRow[] }>(res)
+
+    expect(data.map((c) => c.id).sort()).toEqual([1, 2])
+  })
+
+  /**
+   * `OnboardingScopeResolver.hasStepOwnedBy`'s rule, and the one a handler
+   * reading a single column would fail: the backup exists to cover the step
+   * when the owner cannot, so hiding those clients hides exactly the ones a
+   * stand-in has been asked to pick up.
+   */
+  it('counts a backup owner as an owner', async () => {
+    const res = await fetch('/api/v1/onboarding/clients?ownerId=4')
+    const { data } = await json<{ data: ClientRow[] }>(res)
+
+    expect(data.map((c) => c.id)).toEqual([3])
+  })
+
+  it('gives a user who owns nothing an empty list rather than everything', async () => {
+    const res = await fetch('/api/v1/onboarding/clients?ownerId=7')
+    const { data } = await json<{ data: ClientRow[] }>(res)
+
+    expect(data).toHaveLength(0)
+  })
+
+  it('narrows alongside another filter rather than replacing it', async () => {
+    const res = await fetch('/api/v1/onboarding/clients?ownerId=3&gateStatus=LOCKED')
+    const { data } = await json<{ data: ClientRow[] }>(res)
+
+    // Of user 3's two clients, only Acme is behind its gate.
+    expect(data.map((c) => c.id)).toEqual([2])
+  })
+})
+
 describe('A-118 · LIVE is earned, never set', () => {
   it('refuses a direct move to LIVE with 422', async () => {
     const res = await patchClient(1, { status: 'LIVE' })

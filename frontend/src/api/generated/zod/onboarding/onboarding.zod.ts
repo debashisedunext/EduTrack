@@ -81,7 +81,8 @@ export const listObClientsQueryParams = zod.object({
   "rag": zod.enum(['GREEN', 'AMBER', 'RED']).optional().describe('Filters on the health colour only. A client whose journeys are all\nstill `LOCKED` has \*\*no\*\* RAG (`rag: null`, the \"Prerequisites\npending\" state) and is returned by none of the three colours — ask\nfor it with `gateStatus=LOCKED` instead.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).optional().describe('OB-03\'s \"Prerequisites pending\" filter.'),
   "productId": zod.number().optional().describe('Clients who bought this product — i.e. who have a journey for it.'),
-  "salesPersonId": zod.number().optional()
+  "salesPersonId": zod.number().optional(),
+  "ownerId": zod.number().optional().describe('B-108 · clients this user is implementing — i.e. who own or back up\na step on one of the client\'s journeys.\n\n\*\*Not a column on the row, and deliberately not added as one.\*\* A\njourney has no owner of its own (`ObJourneySummary.owner` is the\nowner of `currentStep`), so a client with four products has as many\nowners as it has running services and a single `owner` field on\n`ObClient` would have to pick one of them. What OB-03 needs is the\nquestion rather than the field — \"show me my clients\" — and that is\nanswerable without widening the row.\n\nBackup owners match, on `OnboardingScopeResolver.hasStepOwnedBy`\'s\nreasoning: the backup exists to cover the step when the owner\ncannot, and a filter that hid those clients would hide exactly the\nones a stand-in has been asked to pick up. Both columns are\nnullable and equality never matches NULL, so an unowned step\nattributes the client to nobody.\n')
 })
 
 export const listObClientsResponseDataItemNameMax = 200;

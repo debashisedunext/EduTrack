@@ -73,6 +73,11 @@ class ObClientController {
      * <p>No {@code ETag}: a keyset page has no single version to tag, and
      * CONVENTIONS.md §5 puts tags on detail reads plus the three that are
      * polled or expensive. This is none of those.
+     *
+     * <p>B-108 · {@code ownerId} is the screen's "my clients" filter and is the
+     * only parameter here that is not a column on the row it filters. See the
+     * contract's note on it, and {@code ObClientReadRepository.LIST_FILTERS}
+     * for why it is written out rather than delegated to {@link ObClientScope}.
      */
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "listObClients", summary = "Onboarding client list (OB-03)")
@@ -84,11 +89,12 @@ class ObClientController {
             @RequestParam(required = false) String gateStatus,
             @RequestParam(required = false) Long productId,
             @RequestParam(required = false) Long salesPersonId,
+            @RequestParam(required = false) Long ownerId,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) Integer limit) {
 
         return service.list(scopeOf(caller), q, status, rag, gateStatus, productId, salesPersonId,
-                cursor, limit);
+                ownerId, cursor, limit);
     }
 
     /**
