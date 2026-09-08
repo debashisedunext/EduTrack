@@ -66,13 +66,31 @@ public class ObJourneyStepRagService {
         return ObRagCalculator.forStep(percent, status, amberThresholdPercent);
     }
 
+    /**
+     * C-120 · the same working-hours figure {@code tatConsumedPercent} turns
+     * into a percentage, handed back as hours instead — the input the OB-05
+     * accordion strip's {@code utilizedHours} sums across a journey's steps.
+     *
+     * <p>{@code PENDING} and {@code SKIPPED} are zero rather than refused, on
+     * a different rule than {@link #ragFor}'s: a colour has no honest "zero"
+     * to fall back to, but a step that has not started, or was bypassed, has
+     * consumed exactly no time — which a roll-up can say without guessing.
+     */
+    public BigDecimal hoursConsumed(ObJourneyStep step) {
+        ObJourneyStepStatus status = step.getStatus();
+        if (status == ObJourneyStepStatus.PENDING || status == ObJourneyStepStatus.SKIPPED) {
+            return BigDecimal.ZERO;
+        }
+        return hoursConsumed(step, referenceTimeFor(step, status));
+    }
+
     private Instant referenceTimeFor(ObJourneyStep step, ObJourneyStepStatus status) {
         return switch (status) {
             case WAITING_ON_CLIENT -> lastPauseOccurredAt(step.getId());
             case DONE -> step.getFinishedAt();
             case IN_PROGRESS, BLOCKED -> Instant.now();
             case PENDING, SKIPPED -> throw new IllegalStateException(
-                    "unreachable — ragFor already returns null for " + status);
+                    "unreachable — both public methods return early for " + status);
         };
     }
 
@@ -95,10 +113,15 @@ public class ObJourneyStepRagService {
      */
     private double tatConsumedPercent(ObJourneyStep step, Instant referenceTime) {
         BigDecimal budget = ObStepTatBudget.hours(workingCalendars, step.getTatDays());
-        BigDecimal hoursRemaining = workingHours.workingHoursBetween(referenceTime, step.getDueAt());
-        BigDecimal hoursConsumed = budget.subtract(hoursRemaining);
+        BigDecimal hoursConsumed = hoursConsumed(step, referenceTime);
         return hoursConsumed.divide(budget, 6, RoundingMode.HALF_UP)
                 .multiply(ONE_HUNDRED)
                 .doubleValue();
+    }
+
+    private BigDecimal hoursConsumed(ObJourneyStep step, Instant referenceTime) {
+        BigDecimal budget = ObStepTatBudget.hours(workingCalendars, step.getTatDays());
+        BigDecimal hoursRemaining = workingHours.workingHoursBetween(referenceTime, step.getDueAt());
+        return budget.subtract(hoursRemaining);
     }
 }

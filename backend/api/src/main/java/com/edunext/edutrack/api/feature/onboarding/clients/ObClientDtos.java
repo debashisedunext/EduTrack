@@ -114,11 +114,11 @@ final class ObClientDtos {
     /**
      * {@code ObJourneyStrip} — one accordion strip on OB-05.
      *
-     * <p>{@code utilizedHours} is <b>absent rather than zero</b>. It is a
-     * roll-up over {@code ob_step_clock_events} that C-120 owns and has not
-     * built; reporting {@code 0.0} would be a figure on screen that says every
-     * client has consumed no time at all, which reads as data rather than as an
-     * unbuilt feature. Null renders as an em dash.
+     * <p>{@code utilizedHours} (C-120) is the sum of {@code
+     * ObJourneyStepRagService#hoursConsumed} across the journey's steps —
+     * genuinely {@code 0.0} for a journey nothing has started, never null.
+     * The type stays {@code Double} rather than {@code double} on the
+     * contract's own optionality, not because this service still omits it.
      */
     record ObJourneyStrip(long id, ObProductRef product, String gateStatus, String rag,
                           int percentComplete, Long heldByJourneyId,

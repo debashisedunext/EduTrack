@@ -169,6 +169,8 @@ class ObClientsIT {
                 .allSatisfy(step -> assertThat(step.status()).isEqualTo("PENDING"));
         assertThat(created.journeys().getFirst().percentComplete()).isZero();
         assertThat(created.journeys().getFirst().totalTatDays()).isEqualTo(5);
+        // C-120: a dead clock has consumed nothing — genuinely 0.0, not null.
+        assertThat(created.journeys().getFirst().utilizedHours()).isEqualTo(0.0);
     }
 
     /**

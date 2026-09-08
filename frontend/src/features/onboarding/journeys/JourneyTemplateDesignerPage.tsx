@@ -24,6 +24,7 @@ import {
   useRemoveJourneyTemplateStepItem,
   useReorderJourneyTemplateSteps,
 } from './journeyTemplateQueries'
+import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTemplateTat'
 
 /**
  * C-102 · OB-07's journey template designer.
@@ -139,6 +140,9 @@ function Designer({
   const state = editable ? 'Draft' : detail.isActive ? 'Active' : 'Retired'
   const steps = ordered ?? detail.steps
   const dirty = editable && orderChanged(steps, detail.steps)
+  // C-120 · Σ tatDays, not netted for parallel groups — the work the
+  // template carries, read the same way `totalTatDays` reads a journey.
+  const totalTatDays = templateTotalTatDays(steps)
 
   const move = (from: number, to: number) => {
     const next = moveItem(steps, from, to)
@@ -217,6 +221,9 @@ function Designer({
           <p className="text-body-sm text-content-muted">Version {detail.version}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Chip>{state}</Chip>
+            {steps.length > 0 && (
+              <Chip variant="neutral">Total TAT: {formatTemplateTotalTatDays(totalTatDays)}</Chip>
+            )}
           </div>
         </div>
 
@@ -252,9 +259,16 @@ function Designer({
         className="flex flex-col gap-4 rounded-card border border-line p-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="designer-steps-heading" className="text-h4 text-content">
-            Steps ({steps.length})
-          </h2>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h2 id="designer-steps-heading" className="text-h4 text-content">
+              Steps ({steps.length})
+            </h2>
+            {steps.length > 0 && (
+              <span className="text-caption text-content-muted">
+                {formatTemplateTotalTatDays(totalTatDays)} total
+              </span>
+            )}
+          </div>
           {editable && !addingStep && (
             <Button type="button" size="sm" onClick={() => setAddingStep(true)}>
               Add step
