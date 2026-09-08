@@ -198,16 +198,25 @@ class ModuleAccessFilterTest {
         }
 
         @Test
-        @DisplayName("gets the absent handler's 404 on the portal tree, not the gate's")
-        void passesOnPortalIntoAnEmptyTree() throws Exception {
-            // The pair to `isRefusedOnPortal`. Both callers see 404 because no
-            // handler exists yet, so status cannot tell them apart — but only
-            // the unentitled one is refused BY THE GATE, and only that one
-            // carries its detail. Same status, different origin, and together
-            // they prove the filter ran rather than that the path is empty.
+        @DisplayName("is refused the portal tree anyway, now that A-126 owns it")
+        void isStillRefusedThePortalTree() throws Exception {
+            // REWRITTEN BY A-126, and the behaviour it asserted really did
+            // change rather than the test being wrong.
+            //
+            // It used to pair with `isRefusedOnPortal`: both callers saw 404
+            // because the tree was empty, and only the unentitled one carried
+            // the gate's detail — which is what proved this filter ran. A-126
+            // then made the portal tree clients-only, so an entitled staff
+            // caller is refused there too. The pairing that discriminated is
+            // gone because the two callers now get the same answer.
+            //
+            // The proof that THIS filter runs has not been lost: the two
+            // onboarding-tree cases above still carry it, and PortalRouteFilterTest
+            // owns the portal half. Kept rather than deleted so the change of
+            // rule is visible at the place that used to assert the old one.
             mvc.perform(get(PORTAL).with(authentication(caller(List.of("ONBOARDING")))))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(GATE_DETAIL)));
+                    .andExpect(jsonPath("$.detail").value(GATE_DETAIL));
         }
     }
 }

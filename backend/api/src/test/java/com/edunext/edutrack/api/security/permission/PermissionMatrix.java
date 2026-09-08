@@ -740,6 +740,21 @@ final class PermissionMatrix {
     private static final String SIGNOFF_OTP_VERIFY = """
             {"token":"matrix-fixture-token","otp":"000000"}""";
 
+    /**
+     * A-124 · {@code ObProductDtos.WriteRequest}: {@code code} is
+     * {@code @NotBlank} and must match {@code ^[A-Z0-9_-]+$}, {@code name} is
+     * {@code @NotBlank}. Serves both the POST and the PATCH — the contract
+     * declares one write shape for the two.
+     *
+     * <p>The PATCH also needs {@code If-Match}, which this fixture does not
+     * carry, so an allowed role reaches the controller's precondition check and
+     * is refused there with 428. That is this file's standing rule: a fixture
+     * has to reach authorisation, not succeed past it, and 428 is a refusal only
+     * a caller who got through authorisation can receive.
+     */
+    private static final String WRITE_OB_PRODUCT = """
+            {"code":"MATRIX_FIXTURE","name":"Matrix Fixture Product"}""";
+
     /** C-102 · {@code AddStepItemRequest}: {@code label} is {@code @NotBlank}. */
     private static final String ADD_JOURNEY_TEMPLATE_STEP_ITEM = """
             {"label":"Matrix Fixture Item","mandatory":true}""";
@@ -2104,6 +2119,26 @@ final class PermissionMatrix {
             // harmless and is not the property that protects these routes.
             everyRole("POST", "/api/v1/webhooks/email/bounce", RAW_BYTES),
             everyRole("POST", "/api/v1/webhooks/email/inbound", RAW_BYTES),
+
+            // ── A-124 · OB-07 product catalogue ───────────────────────────────
+            //
+            // isAuthenticated() on all four, and for the same reason the C-102
+            // block below spells out rather than a new one. The contract says
+            // "OB Admin" for the two writes, and OB Admin is a *module* role
+            // (user_module_access.module_role, V20260903_1915) — not one of
+            // blueprint §2's six, which is the only vocabulary this matrix and
+            // RolePermissions speak. A-111's ModuleAccessFilter already answers
+            // 404 to any caller without the ONBOARDING grant, before a handler
+            // runs; A-122 is the task that makes the module *role* bite.
+            //
+            // So every one of the six platform roles reaches these routes, each
+            // needing the module first. Encoding a platform-role restriction
+            // here would assert a rule nobody has decided, and would be a second
+            // enforcement point beside the one A-122 is going to build.
+            everyRole("GET", "/api/v1/onboarding/products"),
+            everyRole("GET", "/api/v1/onboarding/products/{obProductId}"),
+            everyRole("POST", "/api/v1/onboarding/products", WRITE_OB_PRODUCT),
+            everyRole("PATCH", "/api/v1/onboarding/products/{obProductId}", WRITE_OB_PRODUCT),
 
             // ── C-102 · OB-07 journey template designer ───────────────────────
             //
