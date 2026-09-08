@@ -31,7 +31,14 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  * unowned step gives nobody visibility — the direction the resolver already
  * chose, restated here because this is the second place it has to be true.
  */
-record ObClientScope(String moduleRole, long userId) {
+// B-125 · widened from package-private to public, and only as far as it had
+// to be. The prerequisites feature (`feature/onboarding/prereqs/`) scopes its
+// own reads by composing `predicate` into its SQL, which is what keeps one
+// spelling of §3's client rule rather than a second that drifts — CLAUDE.md's
+// "do not write your own filtering" applied to a sibling package rather than
+// to a frontend. Same stream, so no sign-off needed; recorded because a
+// visibility widening is a decision rather than a typo.
+public record ObClientScope(String moduleRole, long userId) {
 
     /** Plan §3's five module roles. Mirrors {@code OnboardingScopeResolver}'s own constants. */
     static final String OB_ADMIN = "OB_ADMIN";
@@ -40,20 +47,20 @@ record ObClientScope(String moduleRole, long userId) {
     static final String OB_SALES = "OB_SALES";
     static final String OB_STEP_OWNER = "OB_STEP_OWNER";
 
-    static final String USER_PARAM = "scopeUserId";
+    public static final String USER_PARAM = "scopeUserId";
 
-    static ObClientScope of(CallerIdentity caller) {
+    public static ObClientScope of(CallerIdentity caller) {
         return new ObClientScope(
                 caller.moduleRole(ModuleAccessGuard.ONBOARDING).orElse(""), caller.userId());
     }
 
     /** §3's three roles that see every journey, and therefore every client. */
-    boolean unrestricted() {
+    public boolean unrestricted() {
         return OB_ADMIN.equals(moduleRole) || OB_MANAGER.equals(moduleRole) || OB_VIEWER.equals(moduleRole);
     }
 
     /** True for no grant, an unknown role, and {@code TICKETING_MEMBER} — deny by default. */
-    boolean deniesEverything() {
+    public boolean deniesEverything() {
         return !unrestricted() && !OB_SALES.equals(moduleRole) && !OB_STEP_OWNER.equals(moduleRole);
     }
 
@@ -69,8 +76,27 @@ record ObClientScope(String moduleRole, long userId) {
      * already reduced their visible set to clients they created — the two rules
      * meet rather than overlap.
      */
-    boolean mayWrite() {
+    public boolean mayWrite() {
         return OB_ADMIN.equals(moduleRole) || OB_MANAGER.equals(moduleRole) || OB_SALES.equals(moduleRole);
+    }
+
+    /**
+     * The two roles §3 trusts with an override: OB Admin and Onboarding
+     * Manager.
+     *
+     * <p>B-125's waiver is the first caller — plan §5.3's only valve on a
+     * gate a client cannot clear — and {@code skipObJourneyStep} already
+     * draws the same line one feature over. Kept here rather than as two
+     * constant comparisons at the call site, so the vocabulary stays in the
+     * record that owns it and a later change to §3's override set is one
+     * edit.
+     *
+     * <p>Distinct from {@link #mayWrite()}, which admits Sales: a Sales user
+     * boards clients and edits their details, and waiving a prerequisite is
+     * not that.
+     */
+    public boolean isModerator() {
+        return OB_ADMIN.equals(moduleRole) || OB_MANAGER.equals(moduleRole);
     }
 
     /**
@@ -99,7 +125,7 @@ record ObClientScope(String moduleRole, long userId) {
     }
 
     /** The scope as a SQL predicate over the query's own {@code ob_clients} alias. */
-    String predicate(String alias) {
+    public String predicate(String alias) {
         if (unrestricted()) {
             return "1 = 1";
         }

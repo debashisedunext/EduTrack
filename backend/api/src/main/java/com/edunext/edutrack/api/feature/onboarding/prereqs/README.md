@@ -1,13 +1,18 @@
-# `feature/onboarding/prereqs` — B-124
+# `feature/onboarding/prereqs` — B-124 and B-125
 
 The **prerequisites master** (OB-14): the org-wide, versioned set of tasks a
 client owes before any of their journeys can start. Nine routes, built to the
 `/onboarding/prereq-template*` operations A-118 had already published.
 
-**This is the master only.** The per-client snapshot of it — instances, ad-hoc
-tasks, `PENDING → SUBMITTED → VERIFIED`, the comment threads and
-`ob_prereq_history` — is **B-125**, and the gate that reads those instances is
-**C-118**. Nothing here evaluates a gate or knows a client exists.
+**B-125** adds the per-client half in the same package: the snapshot, ad-hoc
+tasks, the `PENDING → SUBMITTED → VERIFIED` lifecycle with its return loop and
+its one valve, the comment thread and the hash-chained history. Eleven more
+routes.
+
+**The gate itself is still C-118's.** `ObPrereqGate` is the seam; deciding
+*whether* the gate is satisfied is arithmetic over the task rows and lives
+here, and the four consequences — flipping journeys `OPEN`, activating
+dependency-free steps, starting clocks, firing the kickoff — are Stream C's.
 
 ## What is here
 
@@ -87,15 +92,80 @@ version after the first.
 - **That arm is the one owner FK that `CASCADE`s** where the other three
   `RESTRICT`. The reasoning is in `V20260908_1100` §4; the cost is an orphaned
   MinIO object, which no service-side tombstone can close.
-- **Nine rules added to `ObModuleRoleRules`** (`api/security/module/`), where
+- **Twenty rules added to `ObModuleRoleRules`** (`api/security/module/`), where
   A-122 moved them from the test-only matrix. `ObModuleRoleFilter` applies them
   on every request, so these routes are enforced rather than merely declared and
   `NOT_YET_ENFORCED` stays empty.
+- **B-125 adds the fifth `ob_attachments` owner arm** (`prereq_task_id`) — the
+  one `V20260903_2045` actually meant. `RESTRICT`, where the master arm
+  cascades: a client's submission is the evidence A-102's tombstone rule
+  protects.
+- **`ObPrereqJournal` in `domain/journal/`**, on C-107's precedent. There is no
+  other legal home — `AppendOnlyRulesTest` names that package.
+- **One line of `contracts/openapi.yaml`**: `ObClientPrereqs.gateStatus` was the
+  only `gateStatus` in the file wrapped in `allOf`, which made an introspecting
+  reader see an object where the server serves the enum string.
+  `ContractConformanceTest` caught it; the other three are plain `$ref`s and
+  this now matches. The regenerated client changes by one `describe()` line.
+
+## B-125 · the instance side
+
+| Class | Does |
+|---|---|
+| `ObClientPrereqController` | `/clients/{id}/prereqs` and the ad-hoc create |
+| `ObPrereqTaskController` | The task page, four transitions, thread, history |
+| `ObClientPrereqService` | Snapshotting at boarding, and the strip's arithmetic |
+| `ObPrereqTaskService` | The four transitions, each with its own refusals |
+| `ObPrereqGate` / `…ReadOnly` | The C-118 seam, and the fallback that ships today |
+| `ObJourneyGateReader` | Reads the gate the client's journeys already carry |
+| `ObPrereqClientVisibility` | A-112's row scope, composed from `ObClientScope` |
+| `ObPrereqThreadRepository` | The comment thread (read+append) and the chain (read) |
+
+`ObPrereqJournal` lives in `domain/journal/` — Stream A's package, flagged —
+because `AppendOnlyRulesTest` names that package specifically.
+
+### The snapshot is a copy, not a reference
+
+`title`, `description`, `tatDays` and `isMandatory` are copied onto the
+client's own rows. Reading them through `templateTaskId` would make an OB-14
+edit rewrite what a client is being asked for — the corruption the master's
+versioning exists to prevent, reintroduced one join later.
+
+Reference *documents* are the exception, and read through: the wording is what
+the client agreed to and must be frozen, while a specimen form the admin
+replaces with a clearer one is a convenience the client benefits from.
+
+### The valve is the whole design
+
+Plan §5.3 leaves one way to move a gate a client cannot clear, and it is
+non-mandatory tasks only. A mandatory task answers **422, not 403** — 403 would
+say "not you" and invite the caller to find somebody with a bigger role, and
+there is no such person. `ck_ob_client_prereq_tasks_mandatory_not_skipped` says
+the same at the column, so a caller that bypassed the service meets it again.
+
+### Two tables, two different guarantees
+
+`ob_prereq_history` is append-only **and hash-chained**, per client — so
+`ObPrereqJournal` is its only door and even a read goes around the repository
+in SQL. `ob_prereq_comments` is append-only and deliberately not chained, which
+is the line `ob_step_communications` and `ob_step_history` already draw: the
+state changes must be provably untampered, the conversation is append-only
+because it is a conversation. A return's mandatory comment is written to both.
+
+**This is chained where B-101 and B-103 decided not to be**, and their reason
+has since been answered: both deferred because the onboarding chain payload was
+unwritten, and C-107 then wrote it.
 
 ## Not done here
 
-- **The OB-14 admin screen.** No `frontend/src/features/onboarding/prereqs`
-  exists yet; the generated client and the MSW handlers for these nine
-  operations already do (A-118).
+- **The OB-14 admin screen and CP-03/CP-04.** No
+  `frontend/src/features/onboarding/prereqs` exists; the generated client and
+  the MSW handlers for all twenty operations already do (A-118). The portal
+  screens are C-121's in any case.
+- **The gate's four consequences** — C-118. `ObPrereqGateReadOnly` reports
+  honestly and flips nothing, and says so.
+- **The client principal's own routes.** `submit` takes a contact id so the
+  portal path is one caller away, but `/api/v1/portal/**` is C-121's.
 - **The `prereq-aging` report** stays declared-unavailable in
-  `onboardingAdmin.ts`. It reads `ob_client_prereq_tasks`, which is B-125's.
+  `onboardingAdmin.ts`. Its tables now exist, so enabling it is a small
+  follow-up rather than a blocked one — flagged for whoever owns OB-10.

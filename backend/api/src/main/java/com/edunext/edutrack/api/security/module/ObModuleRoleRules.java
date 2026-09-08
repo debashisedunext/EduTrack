@@ -150,6 +150,38 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/prereq-template-tasks/{templateTaskId}/docs", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/prereq-template-task-docs/{docId}", ADMIN_ONLY);
 
+        // B-125 · the per-client instances. Where the master above is Admin's
+        // alone, these are worked by several roles, and §3 names each:
+        //
+        //   read      — every role. Sales needs it for OB-04, a Step Owner to
+        //               see why their journey has not started, Viewer because
+        //               Viewer reads everything.
+        //   submit    — "verify prerequisite submissions routed to them" gives
+        //               Step Owner a verb here, and the staff submit path
+        //               exists because a SPOC emails documents; STEP_ACTORS is
+        //               the same set the step lifecycle uses.
+        //   verify /
+        //   return    — Manager's "verify/skip prerequisites", plus the Step
+        //               Owner §3 routes submissions to. Sales does not verify
+        //               what they sold.
+        //   skip      — ADMIN_AND_MANAGER, and only them. Plan §5.3's only
+        //               valve; the service refuses a *mandatory* task to
+        //               everyone including these two.
+        //   ad-hoc
+        //   add/edit  — ADMIN_AND_MANAGER. Adding a mandatory task re-locks a
+        //               gate, which is the same weight as waiving one.
+        put(m, "GET", "/api/v1/onboarding/clients/{obClientId}/prereqs", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/prereq-tasks", ADMIN_AND_MANAGER);
+        put(m, "GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}", EVERY_ROLE);
+        put(m, "PATCH", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}", ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/submit", STEP_ACTORS);
+        put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/verify", STEP_ACTORS);
+        put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/return", STEP_ACTORS);
+        put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/skip", ADMIN_AND_MANAGER);
+        put(m, "GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/comments", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/comments", STEP_ACTORS);
+        put(m, "GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/history", EVERY_ROLE);
+
         put(m, "GET", "/api/v1/onboarding/journey-steps/{stepId}", EVERY_ROLE);
         put(m, "PATCH", "/api/v1/onboarding/journey-step-items/{itemId}", STEP_ACTORS);
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/start", STEP_ACTORS);
