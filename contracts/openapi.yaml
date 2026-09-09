@@ -11948,6 +11948,40 @@ paths:
               schema: { $ref: '#/components/schemas/PortalOnboardingHomeResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /portal/onboarding/signoffs:
+    get:
+      tags: [portal]
+      operationId: listPortalSignoffs
+      summary: Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+      description: |
+        Every sign-off this client's onboarding has ever had raised, pending
+        and past together — the screen sorts. Plan §8: "the portal adds a
+        sign-off list (pending + past) deep-linking into the same flow; the
+        link+OTP path still works without a portal login and remains the
+        legal record."
+
+        **"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+        `sentToEmail`, not a link carrying a live token.**
+        `ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+        own reasoning: "our own database must not be able to yield a working
+        link"), so no read — this one included — can ever hand back the
+        plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+        the link went to, so a client who has mislaid the email knows where to
+        look. A self-service resend would produce a real deep link but needs
+        the mint-and-mail path `resendObSignoff` names in this contract and no
+        controller implements yet; out of scope for a list screen and flagged
+        rather than built ad hoc.
+
+        No token, hash, OTP state, IP or user agent on the wire — see
+        `PortalSignoff`'s own note.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSignoffListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /portal/onboarding/prereq-tasks/{prereqTaskId}:
     parameters:
       - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -21639,6 +21673,47 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/PortalOnboardingHome' }
+
+    PortalSignoff:
+      type: object
+      required: [id, kind, status, requestedAt, hasCertificate]
+      description: |
+        C-122 · one row of CP-05's list. `stepTitle` and `productName` are
+        both `null` exactly when `kind` is `GO_LIVE` — a go-live sign-off
+        names the journey, not one product's step.
+
+        **No `token`, `tokenHash`, OTP state, `signedIp` or
+        `signedUserAgent`.** `sentToEmail` is the one contact detail served,
+        and it is this client's own contact, not a colleague's — named so a
+        client who has mislaid the email knows which inbox to check.
+
+        `hasCertificate` is `false` for every row today: `pdfStorageKey` is
+        never written until the acceptance PDF (plan §8, B-116) is built.
+        That is the accurate answer rather than a placeholder, on
+        `ObSignoffAcceptResult.clientWentLive`'s own precedent for the same
+        situation one field over.
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        status: { $ref: '#/components/schemas/ObSignoffStatus' }
+        productName: { type: [string, 'null'] }
+        stepTitle: { type: [string, 'null'] }
+        requestedAt: { type: string, format: date-time }
+        tokenExpiresAt: { type: [string, 'null'], format: date-time }
+        sentToEmail: { type: [string, 'null'] }
+        signedAt: { type: [string, 'null'], format: date-time }
+        signedName: { type: [string, 'null'] }
+        acceptanceNote: { type: [string, 'null'] }
+        objectedAt: { type: [string, 'null'], format: date-time }
+        objectionNote: { type: [string, 'null'] }
+        hasCertificate: { type: boolean }
+    PortalSignoffListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PortalSignoff' }
 
     PortalPrereqSubmitRequest:
       type: object

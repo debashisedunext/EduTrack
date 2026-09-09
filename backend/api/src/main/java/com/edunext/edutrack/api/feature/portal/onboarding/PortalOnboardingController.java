@@ -33,6 +33,12 @@ import java.util.List;
  * above read-only journey accordions) and CP-04 (prerequisite task detail:
  * description, reference docs, comments, uploads, submit).
  *
+ * <p>C-122 adds {@link #signoffs} for CP-05 — the sign-off list — on this
+ * same controller rather than a second one, since one class per portal
+ * subtree is the pattern {@code PortalTicketController} sets for {@code
+ * /portal/tickets/**} and there is no reason for {@code /portal/onboarding/**}
+ * to fork into two.
+ *
  * <h2>No {@code obClientId} path segment, anywhere on this controller</h2>
  *
  * <p>A staff onboarding route takes an id and then checks scope against it.
@@ -73,6 +79,7 @@ public class PortalOnboardingController {
     private final PortalPrereqAttachmentService attachments;
     private final PortalPrimaryContactReader clients;
     private final PortalPasswordChangeGate passwordChangeGate;
+    private final PortalSignoffReader signoffs;
 
     PortalOnboardingController(ObClientPrereqService prereqs,
                                ObPrereqTaskService tasks,
@@ -82,7 +89,8 @@ public class PortalOnboardingController {
                                PortalReferenceDocReader referenceDocs,
                                PortalPrereqAttachmentService attachments,
                                PortalPrimaryContactReader clients,
-                               PortalPasswordChangeGate passwordChangeGate) {
+                               PortalPasswordChangeGate passwordChangeGate,
+                               PortalSignoffReader signoffs) {
         this.prereqs = prereqs;
         this.tasks = tasks;
         this.assembler = assembler;
@@ -92,6 +100,7 @@ public class PortalOnboardingController {
         this.attachments = attachments;
         this.clients = clients;
         this.passwordChangeGate = passwordChangeGate;
+        this.signoffs = signoffs;
     }
 
     @GetMapping(path = "/home", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -118,6 +127,30 @@ public class PortalOnboardingController {
         String clientName = clients.clientNameOf(obClientId).orElse(null);
         return ResponseEntity.ok(new PortalOnboardingDtos.PortalOnboardingHomeResponse(
                 new PortalOnboardingDtos.PortalOnboardingHome(obClientId, clientName, prereqView, strips)));
+    }
+
+    /**
+     * CP-05 · pending and past sign-offs, deep-linking into the §8 flow
+     * (Onboarding-Module-Plan.md §8/§9).
+     *
+     * <p>"Deep-linking" here means routing the client at {@code /signoff}
+     * (OB-09, unchanged) and telling them which inbox to check — not a link
+     * carrying a live token. {@code ob_signoffs.token_hash} cannot be turned
+     * back into the plaintext a PENDING row's email holds ({@code
+     * ObSignoffTokens}'s whole point), so no read anywhere in this
+     * application can mint that link; only sending a fresh one can, and
+     * {@code resendObSignoff} is contract-only today — no controller calls
+     * it yet. Building a portal-scoped mint-and-mail path to close that gap
+     * was judged out of scope for a list screen and is flagged in this
+     * task's backlog entry rather than built ad hoc.
+     */
+    @GetMapping(path = "/signoffs", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listPortalSignoffs",
+            summary = "Pending and past sign-offs, deep-linking into the §8 flow (CP-05)")
+    ResponseEntity<PortalOnboardingDtos.PortalSignoffListResponse> signoffs(Authentication caller) {
+        passwordChangeGate.require(caller);
+        long obClientId = obClientId(caller);
+        return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffListResponse(signoffs.listFor(obClientId)));
     }
 
     @GetMapping(path = "/prereq-tasks/{prereqTaskId}", produces = MediaType.APPLICATION_JSON_VALUE)

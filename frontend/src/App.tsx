@@ -123,6 +123,21 @@ const PortalPrereqTaskDetailPage = lazy(() =>
     default: m.PortalPrereqTaskDetailPage,
   })),
 )
+const PortalSignoffListPage = lazy(() =>
+  import('./features/portal/onboarding/PortalSignoffListPage').then((m) => ({
+    default: m.PortalSignoffListPage,
+  })),
+)
+const PortalTicketListPage = lazy(() =>
+  import('./features/portal/tickets/PortalTicketListPage').then((m) => ({
+    default: m.PortalTicketListPage,
+  })),
+)
+const PortalTicketDetailPage = lazy(() =>
+  import('./features/portal/tickets/PortalTicketDetailPage').then((m) => ({
+    default: m.PortalTicketDetailPage,
+  })),
+)
 const ProjectDashboardPage = lazy(() =>
   import('./features/projects/ProjectDashboardPage').then((m) => ({ default: m.ProjectDashboardPage })),
 )
@@ -297,15 +312,21 @@ export default function App() {
             <Route path="choose" element={withSuspense(<PortalModuleChooserPage />)} />
 
             <Route element={withSuspense(<PortalShell />)}>
-              {/* CP-03. CP-06/07 (My tickets) are C-122's, running after
-                  this task on the same branch — no `/portal/tickets` route
-                  is registered yet, so the chooser's Ticketing card links to
-                  a path this router does not resolve until that task lands. */}
+              {/* CP-03/CP-04. */}
               <Route path="onboarding" element={withSuspense(<PortalOnboardingHomePage />)} />
               <Route
                 path="onboarding/prereq-tasks/:prereqTaskId"
                 element={withSuspense(<PortalPrereqTaskDetailPage />)}
               />
+              {/* CP-05 — C-122. Reads `/portal/onboarding/signoffs`, on the
+                  same tree as CP-03/CP-04 since `ClientPrincipal.obClientId`
+                  scopes it the same way. */}
+              <Route path="onboarding/signoffs" element={withSuspense(<PortalSignoffListPage />)} />
+
+              {/* CP-06/CP-07 — C-122. The chooser's Ticketing card has linked
+                  here since C-121; this is the task that resolves it. */}
+              <Route path="tickets" element={withSuspense(<PortalTicketListPage />)} />
+              <Route path="tickets/:ticketId" element={withSuspense(<PortalTicketDetailPage />)} />
             </Route>
           </Route>
 

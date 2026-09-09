@@ -6,6 +6,8 @@ import com.edunext.edutrack.domain.onboarding.ObGateStatus;
 import com.edunext.edutrack.domain.onboarding.ObPrereqActorType;
 import com.edunext.edutrack.domain.onboarding.ObPrereqSubmittedVia;
 import com.edunext.edutrack.domain.onboarding.ObPrereqTaskStatus;
+import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
+import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -184,5 +186,63 @@ public final class PortalOnboardingDtos {
     }
 
     public record PortalAttachmentResponse(PortalSubmissionFile data) {
+    }
+
+    // ── CP-05 · the sign-off list ───────────────────────────────────────────
+
+    /**
+     * One row of CP-05's list — pending or past, the screen sorts.
+     *
+     * <p>{@code stepTitle} is {@code null} exactly when {@code kind} is
+     * {@code GO_LIVE} ({@link ObSignoffKind}'s own note); {@code productName}
+     * follows the same {@code null}-for-{@code GO_LIVE} shape one join further
+     * out, since a go-live sign-off names the journey rather than one product's
+     * step.
+     *
+     * <p>No token, no hash, no OTP state, no IP or user agent — see
+     * {@link PortalSignoffReader}'s class note on why. {@code sentToEmail} is
+     * the address the link went to, served so a client who has mislaid the
+     * email knows which inbox to search; it is this client's own contact, not
+     * a colleague's.
+     *
+     * <p>{@code hasCertificate} mirrors {@code PortalTicketDtos}'s pattern of
+     * deriving a boolean from a storage key rather than exposing the key
+     * itself. It reads {@code false} for every row today — {@code
+     * pdf_storage_key} is never written until B-116 (the acceptance PDF) is
+     * built — which is the accurate answer rather than a placeholder, on
+     * {@code ObSignoffAcceptService.wentLive}'s own precedent for the same
+     * situation one field over.
+     *
+     * <h2>Why there is no deep-link URL on this row</h2>
+     *
+     * <p>{@code ob_signoffs.token_hash} is a one-way hash — {@code
+     * ObSignoffTokens}'s whole point is that "our own database must not be
+     * able to yield a working link". So no read, here or anywhere, can ever
+     * hand back the plaintext a PENDING row's email carries, and this DTO does
+     * not pretend otherwise with a link that would 401. Plan §8's "deep-linking
+     * into the same flow" is served by routing the client to {@code /signoff}
+     * (OB-09, unchanged) and by naming the inbox to check — see
+     * {@code PortalSignoffListPage}'s own note for the frontend half of this
+     * decision, and this task's STREAM-C-TICKETS.md entry for why a
+     * self-service resend was not built to close the gap instead.
+     */
+    public record PortalSignoff(
+            long id,
+            ObSignoffKind kind,
+            ObSignoffStatus status,
+            String productName,
+            String stepTitle,
+            Instant requestedAt,
+            Instant tokenExpiresAt,
+            String sentToEmail,
+            Instant signedAt,
+            String signedName,
+            String acceptanceNote,
+            Instant objectedAt,
+            String objectionNote,
+            boolean hasCertificate) {
+    }
+
+    public record PortalSignoffListResponse(List<PortalSignoff> data) {
     }
 }

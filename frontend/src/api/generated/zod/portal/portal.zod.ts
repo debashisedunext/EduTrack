@@ -453,6 +453,49 @@ export const getPortalOnboardingHomeResponse = zod.object({
 })
 
 /**
+ * Every sign-off this client's onboarding has ever had raised, pending
+and past together — the screen sorts. Plan §8: "the portal adds a
+sign-off list (pending + past) deep-linking into the same flow; the
+link+OTP path still works without a portal login and remains the
+legal record."
+
+**"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+`sentToEmail`, not a link carrying a live token.**
+`ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+own reasoning: "our own database must not be able to yield a working
+link"), so no read — this one included — can ever hand back the
+plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+the link went to, so a client who has mislaid the email knows where to
+look. A self-service resend would produce a real deep link but needs
+the mint-and-mail path `resendObSignoff` names in this contract and no
+controller implements yet; out of scope for a list screen and flagged
+rather than built ad hoc.
+
+No token, hash, OTP state, IP or user agent on the wire — see
+`PortalSignoff`'s own note.
+
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+export const listPortalSignoffsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "productName": zod.string().nullish(),
+  "stepTitle": zod.string().nullish(),
+  "requestedAt": zod.string().datetime({}),
+  "tokenExpiresAt": zod.string().datetime({}).nullish(),
+  "sentToEmail": zod.string().nullish(),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "signedName": zod.string().nullish(),
+  "acceptanceNote": zod.string().nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "objectionNote": zod.string().nullish(),
+  "hasCertificate": zod.boolean()
+}).describe('C-122 · one row of CP-05\'s list. `stepTitle` and `productName` are\nboth `null` exactly when `kind` is `GO_LIVE` — a go-live sign-off\nnames the journey, not one product\'s step.\n\n\*\*No `token`, `tokenHash`, OTP state, `signedIp` or\n`signedUserAgent`.\*\* `sentToEmail` is the one contact detail served,\nand it is this client\'s own contact, not a colleague\'s — named so a\nclient who has mislaid the email knows which inbox to check.\n\n`hasCertificate` is `false` for every row today: `pdfStorageKey` is\nnever written until the acceptance PDF (plan §8, B-116) is built.\nThat is the accurate answer rather than a placeholder, on\n`ObSignoffAcceptResult.clientWentLive`\'s own precedent for the same\nsituation one field over.\n'))
+})
+
+/**
  * `ObClientPrereqTaskDetail`, unchanged — "one schema for both
 principals". 404 for a task on another client, the same 404 for one
 that does not exist, and the same 404 again when this account's token

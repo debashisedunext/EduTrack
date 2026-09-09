@@ -12,13 +12,10 @@ import { usePortalSignOut } from './auth/usePortalSignOut'
  * {@link ClientPrincipal}'s own doc says at least one of `hasTicketing`/
  * `hasOnboarding` is always true, never both guaranteed.
  *
- * The Ticketing card links to `/portal/tickets`, which is not registered in
- * this router yet — CP-06/07 are C-122's, running after this task on the
- * same branch. Left as a real link rather than withheld, on `ObClientDetailPage`'s
- * own precedent for a destination "reached by direct link until the next
- * task builds one": a client entitled to ticketing sees the true state of
- * their entitlement now, and the link starts working the day C-122 lands
- * with no change needed here.
+ * The Ticketing card links to `/portal/tickets` — CP-06/07, C-122's
+ * `PortalTicketListPage`/`PortalTicketDetailPage`, registered on the same
+ * branch with no change needed here, exactly as this comment anticipated
+ * while that route did not yet exist.
  */
 export function PortalModuleChooserPage() {
   const user = usePortalAuthStore((state) => state.user)

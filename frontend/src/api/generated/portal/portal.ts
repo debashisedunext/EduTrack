@@ -85,6 +85,7 @@ import type {
   PortalRedeemRequest,
   PortalSessionResponse,
   PortalSetPasswordRequest,
+  PortalSignoffListResponse,
   PortalTicketListResponse,
   PortalTicketResponse,
   Problem,
@@ -967,6 +968,119 @@ export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof get
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetPortalOnboardingHomeQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Every sign-off this client's onboarding has ever had raised, pending
+and past together — the screen sorts. Plan §8: "the portal adds a
+sign-off list (pending + past) deep-linking into the same flow; the
+link+OTP path still works without a portal login and remains the
+legal record."
+
+**"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+`sentToEmail`, not a link carrying a live token.**
+`ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+own reasoning: "our own database must not be able to yield a working
+link"), so no read — this one included — can ever hand back the
+plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+the link went to, so a client who has mislaid the email knows where to
+look. A self-service resend would produce a real deep link but needs
+the mint-and-mail path `resendObSignoff` names in this contract and no
+controller implements yet; out of scope for a list screen and flagged
+rather than built ad hoc.
+
+No token, hash, OTP state, IP or user agent on the wire — see
+`PortalSignoff`'s own note.
+
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+export const listPortalSignoffs = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalSignoffListResponse>(
+      {url: `/portal/onboarding/signoffs`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListPortalSignoffsQueryKey = () => {
+    return [
+    `/portal/onboarding/signoffs`
+    ] as const;
+    }
+
+    
+export const getListPortalSignoffsQueryOptions = <TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPortalSignoffsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPortalSignoffs>>> = ({ signal }) => listPortalSignoffs(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPortalSignoffsQueryResult = NonNullable<Awaited<ReturnType<typeof listPortalSignoffs>>>
+export type ListPortalSignoffsQueryError = UnauthorizedResponse
+
+
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPortalSignoffsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

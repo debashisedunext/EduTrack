@@ -49,13 +49,24 @@ export function PortalOnboardingHomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-h2 text-content">
-          {home.clientName ? `${home.clientName}'s onboarding` : 'Your onboarding'}
-        </h1>
-        <p className="mt-1 text-sm text-content-muted">
-          Complete the tasks below to get your journeys started.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-h2 text-content">
+            {home.clientName ? `${home.clientName}'s onboarding` : 'Your onboarding'}
+          </h1>
+          <p className="mt-1 text-sm text-content-muted">
+            Complete the tasks below to get your journeys started.
+          </p>
+        </div>
+        {/* CP-05 — C-122. Onboarding home is where a client already lands
+            inside this module, so it is the entry point into the sign-off
+            list rather than a nav bar added to the shared `PortalShell`. */}
+        <Link
+          to="/portal/onboarding/signoffs"
+          className="text-sm text-primary hover:underline"
+        >
+          View sign-offs →
+        </Link>
       </div>
 
       <PrereqsCard prereqs={home.prereqs} />
