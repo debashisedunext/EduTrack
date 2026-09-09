@@ -61,11 +61,12 @@ class ObReportCatalogueTest {
     }
 
     @Test
-    @DisplayName("the six this task builds are available and the six it does not are not")
+    @DisplayName("the seven runners that exist are available and the five that do not are not")
     void theBuiltSetIsExactlyTheRunnersThatExist() {
         assertThat(available()).containsExactlyInAnyOrder(
                 JourneyFunnelRunner.KEY, TatComplianceRunner.KEY, StuckAndAgingRunner.KEY,
-                TimeToLiveRunner.KEY, SalesPipelineRunner.KEY, SignoffPendingRunner.KEY);
+                TimeToLiveRunner.KEY, SalesPipelineRunner.KEY, SignoffPendingRunner.KEY,
+                CsatSummaryRunner.KEY);
     }
 
     /**
@@ -88,7 +89,7 @@ class ObReportCatalogueTest {
     }
 
     @Test
-    void theFiveHeldAsOb4bAllSayWhichDecisionTheyAreWaitingOn() {
+    void theFourHeldAsOb4bAllSayWhichDecisionTheyAreWaitingOn() {
         List<String> held = ObReportCatalogue.declared().stream()
                 .filter(d -> !d.available())
                 .filter(d -> !"prereq-aging".equals(d.key()))
@@ -96,10 +97,22 @@ class ObReportCatalogueTest {
                 .toList();
 
         assertThat(held).containsExactlyInAnyOrder(
-                "breach-log", "escalation-log", "owner-workload",
-                "communication-audit", "csat-summary");
+                "breach-log", "escalation-log", "owner-workload", "communication-audit");
         held.forEach(key -> assertThat(ObReportCatalogue.find(key).unavailableReason())
                 .contains("OB4b", "§11.6"));
+    }
+
+    /**
+     * B-119 · CSAT summary moved out of the OB4b group into the built set —
+     * see {@code CsatSummaryRunner}'s own javadoc for why this one card and
+     * not its four siblings.
+     */
+    @Test
+    void csatSummaryIsBuiltNotHeld() {
+        ObReportDtos.ObReportDescriptor descriptor = ObReportCatalogue.find("csat-summary");
+
+        assertThat(descriptor.available()).isTrue();
+        assertThat(descriptor.unavailableReason()).isNull();
     }
 
     /**

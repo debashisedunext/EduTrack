@@ -3506,6 +3506,17 @@ const OB_SIGNOFFS: ObSignoffRow[] = [
     pdfStorageKey: 'ob-signoffs/2/certificate.pdf',
     csatScore: null, csatComment: null,
   },
+  // B-119 · Cambridge's go-live sign-off, out and unanswered — what OB-09
+  // needs to exercise the CSAT prompt: a GO_LIVE row nobody has surveyed yet.
+  {
+    id: 3, obClientId: 6, journeyId: 61, stepId: null, kind: 'GO_LIVE', status: 'PENDING',
+    token: 'ob-signoff-demo-token-3', tokenExpiresAt: '2026-09-30T12:00:00.000Z',
+    otp: null, otpAttempts: 0,
+    requestedById: 2, requestedAt: '2026-08-19T11:00:00.000Z', sentToContactId: 9,
+    signedByContactId: null, signedAt: null, signedIp: null, signedUserAgent: null,
+    objectedAt: null, objectionNote: null, pdfStorageKey: null,
+    csatScore: null, csatComment: null,
+  },
 ];
 
 const OB_ESCALATIONS: ObEscalationRow[] = [

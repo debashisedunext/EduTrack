@@ -295,6 +295,23 @@ class ObSignoffOtpServiceTest {
             assertThat(service.verify(TOKEN, "123456", null).csatOffered()).isFalse();
         }
 
+        @Test
+        @DisplayName("csatOffered is false once the client has already been surveyed (B-119)")
+        void csatIsNotOfferedTwice() {
+            // The client-level guard, not the row's own: this exact GO_LIVE
+            // signoff has never itself carried a csat_submitted_at, but the
+            // repository says the client already answered through a sibling
+            // journey, and that is enough to stop offering the question again.
+            ObSignoff goLive = signoff(ObSignoffKind.GO_LIVE);
+            goLive.setOtpHash(ObSignoffOtpCodes.hash("123456"));
+            goLive.setOtpExpiresAt(NOW.plusSeconds(60));
+            when(access.require(anyString(), any())).thenReturn(goLive);
+            when(signoffs.existsByObClientIdAndKindAndCsatSubmittedAtIsNotNull(7L, ObSignoffKind.GO_LIVE))
+                    .thenReturn(true);
+
+            assertThat(service.verify(TOKEN, "123456", null).csatOffered()).isFalse();
+        }
+
         private static Class<?> catchType(Runnable call) {
             try {
                 call.run();

@@ -203,4 +203,54 @@ describe('OB-09 public sign-off page', () => {
       expect(screen.queryByRole('button', { name: /submit objection/i })).not.toBeInTheDocument()
     })
   })
+
+  // ── B-119 · the go-live survey ──────────────────────────────────────────
+
+  describe('the CSAT survey after a go-live acceptance', () => {
+    const GO_LIVE_TOKEN = 'ob-signoff-demo-token-3'
+
+    it('does not offer a survey after an ordinary step acceptance', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${TOKEN}`)
+      await identify(user)
+      await user.type(await screen.findByLabelText(/your full name/i), 'Sana Qureshi')
+      await user.click(screen.getByRole('button', { name: /^accept$/i }))
+
+      await screen.findByRole('heading', { name: /your acceptance is recorded/i })
+      expect(screen.queryByRole('heading', { name: /onboarding experience/i })).not.toBeInTheDocument()
+    })
+
+    it('offers the one-question survey after a go-live acceptance, on the same session', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${GO_LIVE_TOKEN}`)
+      await identify(user)
+      await user.type(await screen.findByLabelText(/your full name/i), 'Sana Qureshi')
+      await user.click(screen.getByRole('button', { name: /^accept$/i }))
+
+      await screen.findByRole('heading', { name: /your acceptance is recorded/i })
+      expect(
+        await screen.findByRole('heading', { name: /onboarding experience/i }),
+      ).toBeInTheDocument()
+
+      await user.click(screen.getByRole('radio', { name: '4' }))
+      await user.click(screen.getByRole('button', { name: /send feedback/i }))
+
+      expect(await screen.findByText(/thanks for letting us know/i)).toBeInTheDocument()
+    })
+
+    it('is skippable without sending anything', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${GO_LIVE_TOKEN}`)
+      await identify(user)
+      await user.type(await screen.findByLabelText(/your full name/i), 'Sana Qureshi')
+      await user.click(screen.getByRole('button', { name: /^accept$/i }))
+
+      await screen.findByRole('heading', { name: /onboarding experience/i })
+      await user.click(screen.getByRole('button', { name: /^skip$/i }))
+
+      // The acceptance message stays — going live does not depend on this.
+      expect(screen.getByRole('heading', { name: /your acceptance is recorded/i })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: /onboarding experience/i })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -4,6 +4,7 @@ import {
   acceptObSignoff,
   objectObSignoff,
   requestObSignoffOtp,
+  submitObCsat,
   verifyObSignoffOtp,
 } from '@/api/generated/onboarding/onboarding';
 import type {
@@ -67,6 +68,20 @@ import { Input } from '@/components/ui/input';
  * different words and the contract is explicit that objecting is "not the
  * same event, rendered differently" — there is no un-object, so this page
  * never offers a way to change an objection back into an acceptance.
+ *
+ * ## A fifth, optional half-state, for B-119's survey
+ *
+ * `acceptObSignoff`'s own session is deliberately still alive after this
+ * page reads `outcome.kind === 'accepted'` — `ObSignoffAcceptService` no
+ * longer spends a `GO_LIVE` session at that moment, precisely so
+ * `submitObCsat` can still use it. So `AcceptedPanel` renders the one-question
+ * survey inline, beneath the "thank you" it always shows, when `session.kind`
+ * is `GO_LIVE` and `session.csatOffered` says nobody has answered it for this
+ * client yet. It is additive, never gating: the acceptance message above it
+ * is already final by the time the survey renders, and a Skip action (not
+ * only a submit) is right beside it — "a client who closes the tab has still
+ * gone live" is the design's own line, and closing the tab is exactly as
+ * final as clicking Skip.
  */
 export function PublicSignoffPage() {
   const [token] = React.useState(readTokenFromUrl);
@@ -92,7 +107,7 @@ export function PublicSignoffPage() {
   if (outcome?.kind === 'accepted') {
     return (
       <SignoffShell>
-        <AcceptedPanel result={outcome.result} />
+        <AcceptedPanel result={outcome.result} session={session} />
       </SignoffShell>
     );
   }
@@ -491,8 +506,21 @@ function ObjectForm({
  * recorded; we are finishing our side", and `gateFailures` is deliberately not
  * rendered: those codes tell the owner what to attach, and mean nothing to the
  * person reading this.
+ *
+ * B-119 · beneath the message, a `CsatBlock` for a `GO_LIVE` acceptance the
+ * session says has not been surveyed yet. `session` (not `outcome`) is what
+ * decides this, because it is the thing that carries `kind` and
+ * `csatOffered` — see the module doc's fifth state.
  */
-function AcceptedPanel({ result }: { result: ObSignoffAcceptResult }) {
+function AcceptedPanel({
+  result,
+  session,
+}: {
+  result: ObSignoffAcceptResult;
+  session: ObSignoffSession | null;
+}) {
+  const offerCsat = session != null && session.kind === 'GO_LIVE' && session.csatOffered;
+
   return (
     <section aria-labelledby="signoff-done" role="status">
       <h1 id="signoff-done" className="text-xl font-semibold text-slate-900">
@@ -508,7 +536,112 @@ function AcceptedPanel({ result }: { result: ObSignoffAcceptResult }) {
           Recorded {new Date(result.signoff.signedAt).toLocaleString()}.
         </p>
       ) : null}
+
+      {offerCsat ? <CsatBlock sessionToken={session.sessionToken} /> : null}
     </section>
+  );
+}
+
+/**
+ * B-119 · the one-question go-live survey — score 1-5, an optional comment,
+ * Submit or Skip.
+ *
+ * `Skip` is not a network call. There is nothing to record for "declined to
+ * answer" — the contract's guard is `csat_submitted_at IS NULL`, which is
+ * already this row's state, and a client who never opens this block at all
+ * (closes the tab) leaves the exact same row behind. Skip only has to change
+ * what this browser shows.
+ */
+function CsatBlock({ sessionToken }: { sessionToken: string }) {
+  const [state, setState] = React.useState<'offered' | 'skipped' | 'submitted'>('offered');
+  const [score, setScore] = React.useState<number | null>(null);
+  const [comment, setComment] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  if (state === 'skipped') {
+    return null;
+  }
+
+  if (state === 'submitted') {
+    return (
+      <p className="mt-6 border-t border-slate-100 pt-4 text-sm text-slate-600">
+        Thanks for letting us know.
+      </p>
+    );
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (score == null) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await submitObCsat({ sessionToken, score, comment: comment.trim() || null });
+      setState('submitted');
+    } catch (caught) {
+      setError(messageFor(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} aria-labelledby="signoff-csat" className="mt-6 border-t border-slate-100 pt-4">
+      <h2 id="signoff-csat" className="text-sm font-medium text-slate-700">
+        How was your onboarding experience?
+      </h2>
+
+      {error ? <Alert>{error}</Alert> : null}
+
+      <div className="mt-3 flex gap-2" role="radiogroup" aria-label="Score, 1 to 5">
+        {[1, 2, 3, 4, 5].map((value) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={score === value}
+            onClick={() => setScore(value)}
+            className={
+              'flex h-10 w-10 items-center justify-center rounded-md border text-sm font-medium '
+              + (score === value
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-300 text-slate-700 hover:bg-slate-50')
+            }
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+
+      <label htmlFor="signoff-csat-comment" className="mt-4 block text-sm font-medium text-slate-700">
+        Anything to add <span className="font-normal text-slate-500">(optional)</span>
+      </label>
+      <textarea
+        id="signoff-csat-comment"
+        className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+        rows={2}
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        maxLength={2000}
+      />
+
+      <div className="mt-4 flex gap-3">
+        <Button type="submit" disabled={busy || score == null}>
+          {busy ? 'Sending…' : 'Send feedback'}
+        </Button>
+        <button
+          type="button"
+          onClick={() => setState('skipped')}
+          disabled={busy}
+          className="text-sm text-slate-500 underline underline-offset-2 disabled:opacity-50"
+        >
+          Skip
+        </button>
+      </div>
+    </form>
   );
 }
 

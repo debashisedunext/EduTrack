@@ -46,7 +46,9 @@ class ObReportServiceTest {
     @Test
     @DisplayName("a report the catalogue declares unavailable is a 404, not an empty report")
     void anUnavailableKeyIsNotFound() {
-        assertThat(run("csat-summary")).isEmpty();
+        // csat-summary is available as of B-119 — breach-log is still one of
+        // the OB4b group this assertion actually needs.
+        assertThat(run("breach-log")).isEmpty();
         assertThat(run("prereq-aging")).isEmpty();
     }
 

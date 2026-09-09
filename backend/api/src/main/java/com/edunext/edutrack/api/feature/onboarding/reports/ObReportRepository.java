@@ -424,6 +424,68 @@ class ObReportRepository {
                           String contactEmail, Instant requestedAt, Instant expiresAt) {
     }
 
+    // ── csat-summary ────────────────────────────────────────────────────────
+
+    /**
+     * B-119 · one row per product, over {@code GO_LIVE} sign-offs answered in
+     * the window.
+     *
+     * <p><b>Grain is the sign-off, scoped by journey, on {@code pendingSignoffs}'
+     * own pattern one section up.</b> CSAT lives on {@code ob_signoffs} and is
+     * 1:1 with the row a client answered through — see the B-119 migration —
+     * so this joins the same way that one does and carries the same
+     * {@link ObReportScope#journeyPredicate}.
+     *
+     * <p><b>Raw sums travel; the runner divides.</b> {@code TatComplianceRunner}
+     * makes the identical call for its own percentage, one file over: a MySQL
+     * {@code AVG()} would need its own rounding decided in SQL, and a runner
+     * that receives the total and the count instead can round once, the same
+     * way every other report here does its arithmetic in Java.
+     *
+     * <p>The five {@code score*} columns are a count each, not a formula —
+     * plan §10's "CSAT summary" wants a distribution beside the average, and a
+     * {@code CASE WHEN} per possible score is the plain way to get one without
+     * a second query.
+     */
+    List<CsatRow> csatSummary(ObReportScope scope, LocalDate from, LocalDate to, Long productId) {
+        String sql = """
+                SELECT p.name AS product,
+                       COUNT(*) AS responses,
+                       SUM(so.csat_score) AS score_total,
+                       SUM(CASE WHEN so.csat_score = 1 THEN 1 ELSE 0 END) AS score1,
+                       SUM(CASE WHEN so.csat_score = 2 THEN 1 ELSE 0 END) AS score2,
+                       SUM(CASE WHEN so.csat_score = 3 THEN 1 ELSE 0 END) AS score3,
+                       SUM(CASE WHEN so.csat_score = 4 THEN 1 ELSE 0 END) AS score4,
+                       SUM(CASE WHEN so.csat_score = 5 THEN 1 ELSE 0 END) AS score5
+                  FROM ob_signoffs so
+                  JOIN ob_journeys j ON j.id = so.journey_id
+                  JOIN ob_products p ON p.id = j.product_id
+                 WHERE j.archived_at IS NULL
+                   AND so.kind = 'GO_LIVE'
+                   AND so.csat_submitted_at IS NOT NULL
+                   AND DATE(so.csat_submitted_at) BETWEEN :from AND :to
+                   AND (:productId IS NULL OR j.product_id = :productId)
+                   AND %s
+                 GROUP BY p.name
+                 ORDER BY p.name
+                """.formatted(scope.journeyPredicate("j"));
+
+        return jdbc.sql(sql)
+                .param("from", from)
+                .param("to", to)
+                .param("productId", productId)
+                .param(ObReportScope.USER_PARAM, scope.userId())
+                .query((rs, n) -> new CsatRow(
+                        rs.getString("product"), rs.getLong("responses"), rs.getLong("score_total"),
+                        rs.getLong("score1"), rs.getLong("score2"), rs.getLong("score3"),
+                        rs.getLong("score4"), rs.getLong("score5")))
+                .list();
+    }
+
+    record CsatRow(String product, long responses, long scoreTotal,
+                   long score1, long score2, long score3, long score4, long score5) {
+    }
+
     private static Instant instantOrNull(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant();
     }

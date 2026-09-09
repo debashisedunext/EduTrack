@@ -159,6 +159,36 @@ describe('A-118 · the public sign-off surface', () => {
     const { status } = await post('/public/onboarding/signoff/csat', { sessionToken, score: 5 });
     expect(status).toBe(422);
   });
+
+  // B-119 · fixture row 3 — Cambridge's go-live sign-off, unanswered.
+  const GO_LIVE_TOKEN = 'ob-signoff-demo-token-3';
+
+  it('offers CSAT on a go-live sign-off, and the same accepted session can still answer it', async () => {
+    await post('/public/onboarding/signoff/otp', { token: GO_LIVE_TOKEN });
+    const verified = await post('/public/onboarding/signoff/otp/verify', { token: GO_LIVE_TOKEN, otp: '123456' });
+    expect(verified.data.data.csatOffered).toBe(true);
+
+    const sessionToken = verified.data.data.sessionToken as string;
+    await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Sana Qureshi' });
+
+    // The accepted session is used already — this is the fact B-119 turns on.
+    const csat = await post('/public/onboarding/signoff/csat', { sessionToken, score: 4, comment: 'Smooth.' });
+    expect(csat.status).toBe(200);
+
+    const db = getDb();
+    const signoff = db.obSignoffs.find((s) => s.token === GO_LIVE_TOKEN);
+    expect(signoff?.csatScore).toBe(4);
+    expect(signoff?.csatComment).toBe('Smooth.');
+  });
+
+  it('refuses a second survey on the same go-live', async () => {
+    const sessionToken = await verifiedSession(GO_LIVE_TOKEN);
+    await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Sana Qureshi' });
+    await post('/public/onboarding/signoff/csat', { sessionToken, score: 5 });
+
+    const again = await post('/public/onboarding/signoff/csat', { sessionToken, score: 1 });
+    expect(again.status).toBe(422);
+  });
 });
 
 describe('A-118 · sign-off, staff side', () => {
@@ -442,13 +472,10 @@ describe('A-118 · the OB-02 board and OB-10 hub', () => {
   it('lists unbuilt reports with a reason rather than hiding them', async () => {
     const { data } = await get('/onboarding/reports');
     expect(data.data.reports).toHaveLength(12);
-    // B-122 · six, not five. A-118 wrote five — the OB4b group PHASE-2-BUILD-PLAN
-    // §3 #8 holds — before the build order settled `prereq-aging`, which reads
-    // `ob_client_prereq_tasks` and cannot run until B-124/B-125 create it. The
-    // real server declares it unavailable, so a mock claiming otherwise would
-    // have the frontend exercising a state no deployment can produce.
+    // B-122 wrote six held. B-119 moved csat-summary out of that group and
+    // into the built set — see its own comment on OB_REPORTS — leaving five.
     const held = data.data.reports.filter((r: { available: boolean }) => !r.available);
-    expect(held).toHaveLength(6);
+    expect(held).toHaveLength(5);
     expect(held.every((r: { unavailableReason: string }) => r.unavailableReason?.length > 0)).toBe(true);
   });
 
@@ -466,7 +493,12 @@ describe('A-118 · the OB-02 board and OB-10 hub', () => {
   it('404s a report that is declared but not built', async () => {
     expect((await get('/onboarding/reports/journey-funnel')).status).toBe(200);
     // By the time somebody is running it there are no rows to describe.
-    expect((await get('/onboarding/reports/csat-summary')).status).toBe(404);
+    // csat-summary is available as of B-119 — breach-log is still held.
+    expect((await get('/onboarding/reports/breach-log')).status).toBe(404);
     expect((await get('/onboarding/reports/invented')).status).toBe(404);
+  });
+
+  it('runs the go-live survey summary now that B-119 has built it', async () => {
+    expect((await get('/onboarding/reports/csat-summary')).status).toBe(200);
   });
 });

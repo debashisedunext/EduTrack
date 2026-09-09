@@ -112,6 +112,12 @@ class RouteAuthorizationTest {
             // the same session — "there is no un-object" (the contract's own
             // line), so this spends the session exactly as accept does.
             "POST /api/v1/public/onboarding/signoff/object",
+            // B-119 · the fifth and last route on the same surface. Unlike
+            // accept and object, this one's session is deliberately still
+            // alive when the caller reaches it — accept no longer spends a
+            // GO_LIVE session, precisely so this route has something to
+            // authenticate with.
+            "POST /api/v1/public/onboarding/signoff/csat",
             // A-130 · the client portal's way in, and the same argument as the
             // three above: the caller holds no account, so a 401 from the chain
             // would refuse the only caller these exist for. What authenticates
