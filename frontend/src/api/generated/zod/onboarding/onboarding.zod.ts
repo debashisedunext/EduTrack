@@ -2265,6 +2265,8 @@ export const getObClientPrereqsResponseDataTasksItemTitleMax = 200;
 
 export const getObClientPrereqsResponseDataTasksItemDescriptionMax = 4000;
 
+export const getObClientPrereqsResponseDataTasksItemTatDaysMax = 365;
+
 export const getObClientPrereqsResponseDataTasksItemSkipReasonMax = 2000;
 
 
@@ -2286,6 +2288,7 @@ export const getObClientPrereqsResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(getObClientPrereqsResponseDataTasksItemTitleMax),
   "description": zod.string().max(getObClientPrereqsResponseDataTasksItemDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(getObClientPrereqsResponseDataTasksItemTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2385,6 +2388,8 @@ export const getObClientPrereqTaskResponseDataTitleMax = 200;
 
 export const getObClientPrereqTaskResponseDataDescriptionMax = 4000;
 
+export const getObClientPrereqTaskResponseDataTatDaysMax = 365;
+
 export const getObClientPrereqTaskResponseDataSkipReasonMax = 2000;
 
 export const getObClientPrereqTaskResponseDataReferenceDocsItemLabelMax = 200;
@@ -2399,6 +2404,7 @@ export const getObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(getObClientPrereqTaskResponseDataTitleMax),
   "description": zod.string().max(getObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(getObClientPrereqTaskResponseDataTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2496,6 +2502,8 @@ export const updateObClientPrereqTaskResponseDataTitleMax = 200;
 
 export const updateObClientPrereqTaskResponseDataDescriptionMax = 4000;
 
+export const updateObClientPrereqTaskResponseDataTatDaysMax = 365;
+
 export const updateObClientPrereqTaskResponseDataSkipReasonMax = 2000;
 
 
@@ -2508,6 +2516,7 @@ export const updateObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(updateObClientPrereqTaskResponseDataTitleMax),
   "description": zod.string().max(updateObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(updateObClientPrereqTaskResponseDataTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2575,6 +2584,8 @@ export const submitObClientPrereqTaskResponseDataTitleMax = 200;
 
 export const submitObClientPrereqTaskResponseDataDescriptionMax = 4000;
 
+export const submitObClientPrereqTaskResponseDataTatDaysMax = 365;
+
 export const submitObClientPrereqTaskResponseDataSkipReasonMax = 2000;
 
 
@@ -2587,6 +2598,7 @@ export const submitObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(submitObClientPrereqTaskResponseDataTitleMax),
   "description": zod.string().max(submitObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(submitObClientPrereqTaskResponseDataTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2664,6 +2676,8 @@ export const verifyObClientPrereqTaskResponseDataTaskTitleMax = 200;
 
 export const verifyObClientPrereqTaskResponseDataTaskDescriptionMax = 4000;
 
+export const verifyObClientPrereqTaskResponseDataTaskTatDaysMax = 365;
+
 export const verifyObClientPrereqTaskResponseDataTaskSkipReasonMax = 2000;
 
 
@@ -2677,6 +2691,7 @@ export const verifyObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(verifyObClientPrereqTaskResponseDataTaskTitleMax),
   "description": zod.string().max(verifyObClientPrereqTaskResponseDataTaskDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(verifyObClientPrereqTaskResponseDataTaskTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2748,6 +2763,8 @@ export const returnObClientPrereqTaskResponseDataTitleMax = 200;
 
 export const returnObClientPrereqTaskResponseDataDescriptionMax = 4000;
 
+export const returnObClientPrereqTaskResponseDataTatDaysMax = 365;
+
 export const returnObClientPrereqTaskResponseDataSkipReasonMax = 2000;
 
 
@@ -2760,6 +2777,7 @@ export const returnObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(returnObClientPrereqTaskResponseDataTitleMax),
   "description": zod.string().max(returnObClientPrereqTaskResponseDataDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(returnObClientPrereqTaskResponseDataTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
@@ -2833,6 +2851,8 @@ export const skipObClientPrereqTaskResponseDataTaskTitleMax = 200;
 
 export const skipObClientPrereqTaskResponseDataTaskDescriptionMax = 4000;
 
+export const skipObClientPrereqTaskResponseDataTaskTatDaysMax = 365;
+
 export const skipObClientPrereqTaskResponseDataTaskSkipReasonMax = 2000;
 
 
@@ -2846,6 +2866,7 @@ export const skipObClientPrereqTaskResponse = zod.object({
   "sequence": zod.number(),
   "title": zod.string().max(skipObClientPrereqTaskResponseDataTaskTitleMax),
   "description": zod.string().max(skipObClientPrereqTaskResponseDataTaskDescriptionMax).nullish(),
+  "tatDays": zod.number().min(1).max(skipObClientPrereqTaskResponseDataTaskTatDaysMax).optional().describe('The working-day budget snapshotted from the master when this\nclient was boarded, which is what `dueAt` was derived from.\n\nBoth, rather than the date alone: OB-05 and CP-03 print \"TAT 6d ·\ndue 18 Aug\", and the pair is the only way a reader can tell a task\nthat is nearly out of time from one that was given a week and has\nsix days left. Deriving the budget back out of `dueAt` is not\navailable to a client — it would need the working calendar, the\norg holidays and the boarding moment.\n'),
   "isMandatory": zod.boolean(),
   "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
   "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),

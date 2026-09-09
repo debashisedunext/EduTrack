@@ -855,7 +855,7 @@ export const onboardingHandlers = [
       db.obClientPrereqTasks.push({
         id: ++prereqTaskId, obClientId: clientId, templateTaskId: source.id,
         sequence: source.sequence, title: source.title, description: source.description,
-        isMandatory: source.isMandatory, isAdHoc: false,
+        tatDays: source.tatDays, isMandatory: source.isMandatory, isAdHoc: false,
         status: 'PENDING', dueAt: boardedAt,
         submittedAt: null, submittedVia: null,
         verifiedAt: null, verifiedById: null,

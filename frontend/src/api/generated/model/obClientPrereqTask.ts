@@ -73,6 +73,21 @@ against the wording that was actually in force.
   title: string;
   /** @maxLength 4000 */
   description?: ObClientPrereqTaskDescription;
+  /**
+   * The working-day budget snapshotted from the master when this
+client was boarded, which is what `dueAt` was derived from.
+
+Both, rather than the date alone: OB-05 and CP-03 print "TAT 6d ·
+due 18 Aug", and the pair is the only way a reader can tell a task
+that is nearly out of time from one that was given a week and has
+six days left. Deriving the budget back out of `dueAt` is not
+available to a client — it would need the working calendar, the
+org holidays and the boarding moment.
+
+   * @minimum 1
+   * @maximum 365
+   */
+  tatDays?: number;
   isMandatory: boolean;
   /** Added for this client rather than snapshotted (plan §4). Worth a
 field of its own rather than leaving the screen to infer it from

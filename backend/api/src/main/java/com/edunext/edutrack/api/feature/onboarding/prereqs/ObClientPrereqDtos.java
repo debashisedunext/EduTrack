@@ -85,7 +85,7 @@ final class ObClientPrereqDtos {
 
     record ObClientPrereqTaskDto(
             Long id, Long obClientId, Long templateTaskId, int sequence,
-            String title, String description, boolean isMandatory, boolean isAdHoc,
+            String title, String description, int tatDays, boolean isMandatory, boolean isAdHoc,
             ObPrereqTaskStatus status, Instant dueAt, boolean isOverdue,
             Instant submittedAt, ObPrereqSubmittedVia submittedVia,
             Instant verifiedAt, UserRef verifiedBy,
@@ -98,7 +98,7 @@ final class ObClientPrereqDtos {
 
             return new ObClientPrereqTaskDto(
                     t.getId(), t.getObClientId(), t.getTemplateTaskId(), t.getSequence(),
-                    t.getTitle(), t.getDescription(), t.isMandatory(), t.isAdHoc(),
+                    t.getTitle(), t.getDescription(), t.getTatDays(), t.isMandatory(), t.isAdHoc(),
                     t.getStatus(), t.getDueAt(), t.isOverdue(now),
                     t.getSubmittedAt(), t.getSubmittedVia(),
                     t.getVerifiedAt(), verifiedBy,
@@ -117,7 +117,7 @@ final class ObClientPrereqDtos {
 
     record ObClientPrereqTaskDetail(
             Long id, Long obClientId, Long templateTaskId, int sequence,
-            String title, String description, boolean isMandatory, boolean isAdHoc,
+            String title, String description, int tatDays, boolean isMandatory, boolean isAdHoc,
             ObPrereqTaskStatus status, Instant dueAt, boolean isOverdue,
             Instant submittedAt, ObPrereqSubmittedVia submittedVia,
             Instant verifiedAt, UserRef verifiedBy,
@@ -133,7 +133,7 @@ final class ObClientPrereqDtos {
 
             return new ObClientPrereqTaskDetail(
                     base.id(), base.obClientId(), base.templateTaskId(), base.sequence(),
-                    base.title(), base.description(), base.isMandatory(), base.isAdHoc(),
+                    base.title(), base.description(), base.tatDays(), base.isMandatory(), base.isAdHoc(),
                     base.status(), base.dueAt(), base.isOverdue(),
                     base.submittedAt(), base.submittedVia(),
                     base.verifiedAt(), base.verifiedBy(),

@@ -3254,6 +3254,7 @@ export type ObPrereqStatus = 'PENDING' | 'SUBMITTED' | 'VERIFIED' | 'SKIPPED';
 export interface ObClientPrereqTaskRow {
   id: number; obClientId: number; templateTaskId: number | null;
   sequence: number; title: string; description: string | null;
+  tatDays: number;
   isMandatory: boolean; isAdHoc: boolean;
   status: ObPrereqStatus; dueAt: string;
   submittedAt: string | null; submittedVia: 'PORTAL' | 'STAFF' | null;
@@ -3445,7 +3446,7 @@ function prereqInstancesFor(
     const settled = status === 'VERIFIED';
     return {
       id: idBase + i, obClientId, templateTaskId: t.id, sequence: t.sequence,
-      title: t.title, description: t.description,
+      title: t.title, description: t.description, tatDays: t.tatDays,
       isMandatory: t.isMandatory, isAdHoc: false,
       status,
       dueAt,

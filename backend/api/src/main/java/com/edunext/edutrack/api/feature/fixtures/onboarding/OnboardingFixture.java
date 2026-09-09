@@ -136,6 +136,125 @@ public class OnboardingFixture {
         return count != null && count > 0;
     }
 
+    /**
+     * Clients the corpus wrote that have no prerequisites checklist behind
+     * them — the state every database seeded before the fix is in.
+     *
+     * <p>{@link #alreadyLoaded} is deliberately coarse: it asks whether the
+     * ERP product exists and nothing else, so a database seeded by an earlier
+     * build is "loaded" and the whole of {@link #load} is skipped. That is the
+     * right default — reloading eight clients on top of themselves would
+     * duplicate the corpus — but it also means a piece the corpus never used
+     * to write can never arrive without wiping the volume, and
+     * {@code getObClientPrereqs} answers 404 for every one of those clients
+     * until it does. A developer should not have to throw away their database
+     * to get a screen that loads.
+     */
+    @Transactional(readOnly = true)
+    public int clientsMissingPrereqs() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                  FROM ob_clients c
+                 WHERE NOT EXISTS (SELECT 1 FROM ob_client_prereqs p WHERE p.ob_client_id = c.id)
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Seed the checklist for the clients {@link #clientsMissingPrereqs}
+     * counted, and nothing else.
+     *
+     * <p>A top-up rather than a reload: it writes only the rows that are
+     * absent, so running it against a complete database is a no-op and running
+     * it twice is the same as running it once. Each client is matched back to
+     * its {@link ClientSpec} by name — the corpus's names are unique and are
+     * what the spec is keyed on for the eye — and clients the corpus did not
+     * write (a developer's own, created through the wizard) are skipped
+     * entirely, because {@code ObClientWriteService} already gave those one.
+     */
+    @Transactional
+    public void loadMissingPrereqs() {
+        PrereqMasterRefs master = existingPrereqMaster();
+        if (master == null) {
+            return;
+        }
+        ZoneId zone = calendars.getCalendar().zone();
+        Map<String, Long> userIds = userIdsByKey();
+
+        for (ClientSpec spec : OnboardingFixtureData.CLIENTS) {
+            Long clientId = clientIdByName(spec.name());
+            if (clientId == null || hasPrereqs(clientId)) {
+                continue;
+            }
+            createClientPrereqs(spec, clientId, userIds, contactIdsOf(clientId), master,
+                    onboardingDateOf(clientId), zone);
+        }
+    }
+
+    /**
+     * The active master already in the database, positional task ids and all.
+     *
+     * <p>Null when there is no active version, or when its task count does not
+     * match {@link OnboardingFixtureData#PREREQ_MASTER} — the snapshot below
+     * pairs spec and row by index, and a master somebody has since edited
+     * would silently pair the wrong wording with the wrong id. Doing nothing
+     * is the right answer there: the corpus is not the authority on a master
+     * an admin has taken over.
+     */
+    private PrereqMasterRefs existingPrereqMaster() {
+        List<Long> versions = jdbc.queryForList(
+                "SELECT id FROM ob_prereq_template_versions WHERE is_active = 1", Long.class);
+        if (versions.isEmpty()) {
+            return null;
+        }
+        List<Long> taskIds = jdbc.queryForList("""
+                SELECT id FROM ob_prereq_template_tasks
+                 WHERE version_id = ? AND is_active = 1
+                 ORDER BY sequence, id
+                """, Long.class, versions.get(0));
+        return taskIds.size() == OnboardingFixtureData.PREREQ_MASTER.size()
+                ? new PrereqMasterRefs(versions.get(0), taskIds)
+                : null;
+    }
+
+    private Long clientIdByName(String name) {
+        List<Long> ids = jdbc.queryForList("SELECT id FROM ob_clients WHERE name = ?", Long.class, name);
+        return ids.size() == 1 ? ids.get(0) : null;
+    }
+
+    private boolean hasPrereqs(long clientId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ob_client_prereqs WHERE ob_client_id = ?", Integer.class, clientId);
+        return count != null && count > 0;
+    }
+
+    private Map<String, Long> userIdsByKey() {
+        Map<String, Long> byKey = new LinkedHashMap<>();
+        for (UserSpec spec : OnboardingFixtureData.USERS) {
+            List<Long> ids = jdbc.queryForList(
+                    "SELECT id FROM users WHERE username = ?", Long.class, spec.username());
+            if (ids.size() == 1) {
+                byKey.put(spec.key(), ids.get(0));
+            }
+        }
+        return byKey;
+    }
+
+    private Map<String, Long> contactIdsOf(long clientId) {
+        Map<String, Long> byName = new LinkedHashMap<>();
+        jdbc.query("SELECT id, name FROM ob_client_contacts WHERE ob_client_id = ?",
+                rs -> {
+                    byName.put(rs.getString("name"), rs.getLong("id"));
+                }, clientId);
+        return byName;
+    }
+
+    private LocalDate onboardingDateOf(long clientId) {
+        List<LocalDate> dates = jdbc.queryForList(
+                "SELECT onboarding_date FROM ob_clients WHERE id = ?", LocalDate.class, clientId);
+        return dates.isEmpty() ? LocalDate.now() : dates.get(0);
+    }
+
     /** Write the whole corpus. One transaction — a half-loaded corpus is worse than none. */
     @Transactional
     public void load() {
