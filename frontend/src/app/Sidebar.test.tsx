@@ -183,8 +183,15 @@ describe('Sidebar · onboarding module', () => {
   it('offers no row for a screen that is not built yet', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Prerequisites master', 'Roles & module access', 'Module Service']) {
+    for (const label of ['Prerequisites master', 'Module Service']) {
       expect(within(obNav()).queryByRole('link', { name: label })).not.toBeInTheDocument()
     }
+  })
+
+  // A-117 landed its screen, so the row it was waiting on is now real.
+  it('offers Roles & module access now that A-117 has a screen', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    expect(within(obNav()).getByRole('link', { name: 'Roles & module access' })).toBeInTheDocument()
   })
 })

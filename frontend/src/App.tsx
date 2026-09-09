@@ -79,6 +79,11 @@ const ObReportsHubPage = lazy(() =>
 const ObTemplatesPage = lazy(() =>
   import('./features/onboarding/settings/ObTemplatesPage').then((m) => ({ default: m.ObTemplatesPage })),
 )
+const ObModuleAccessPage = lazy(() =>
+  import('./features/onboarding/access/ObModuleAccessPage').then((m) => ({
+    default: m.ObModuleAccessPage,
+  })),
+)
 const ObSettingsPage = lazy(() =>
   import('./features/onboarding/settings/ObSettingsPage').then((m) => ({ default: m.ObSettingsPage })),
 )
@@ -446,6 +451,14 @@ export default function App() {
             {/* OB-11 — B-113. OB Admin only; the server answers 403 and the page
                 renders that rather than a blank form. */}
             <Route path="/onboarding/settings" element={withSuspense(<ObSettingsPage />)} />
+            {/*
+              A-117 · OB-08. Its own route rather than a tab on `/onboarding/settings`:
+              that screen configures the module's behaviour (thresholds, the escalation
+              ladder), this one decides who may open it at all. They are refused to
+              different people for different reasons and belong in the Administration
+              list as two entries, which is where the design puts them.
+            */}
+            <Route path="/onboarding/module-access" element={withSuspense(<ObModuleAccessPage />)} />
             {/* OB-12 — B-113. OB Admin only, same as OB-11. */}
             <Route path="/onboarding/templates" element={withSuspense(<ObTemplatesPage />)} />
             {/*
