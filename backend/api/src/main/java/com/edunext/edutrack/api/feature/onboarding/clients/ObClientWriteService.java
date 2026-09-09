@@ -124,10 +124,6 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
-                         PanService pan,
-                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
-        this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
-                portalAccounts, Clock.systemUTC());
                          ObClientPrereqService prereqs,
                          PanService pan,
                          com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
