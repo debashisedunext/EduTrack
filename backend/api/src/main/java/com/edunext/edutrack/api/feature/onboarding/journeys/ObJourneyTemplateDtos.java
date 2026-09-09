@@ -105,6 +105,29 @@ final class ObJourneyTemplateDtos {
         }
     }
 
+    /**
+     * Every service a product sells, not only the active one.
+     *
+     * <p>The OB-07 catalogue draws a card per <em>service</em> — the design's
+     * own has "Standard SaaS Onboarding" and "Enterprise (with data migration
+     * audit)" side by side under one product. Until this list existed the page
+     * could only see `ObProduct.activeTemplateId`, so it drew one card per
+     * product and a second service was invisible even once the database held
+     * it.
+     *
+     * <p>{@code stepCount} and {@code totalTatDays} are on the row because the
+     * card shows both and neither is derivable from the summary — the
+     * alternative is the page fetching the full detail of every service on the
+     * catalogue to render a chip.
+     */
+    record TemplateSummary(
+            Long id, Long productId, String name, int version, boolean isActive, int sequence,
+            Long dependsOnTemplateId, Instant publishedAt, int stepCount, int totalTatDays) {
+    }
+
+    record TemplateListResponse(List<TemplateSummary> data) {
+    }
+
     record StepItem(Long id, int sequence, String label, boolean mandatory) {
         static StepItem of(ObJourneyTemplateStepItem i) {
             return new StepItem(i.getId(), i.getSequence(), i.getLabel(), i.isMandatory());

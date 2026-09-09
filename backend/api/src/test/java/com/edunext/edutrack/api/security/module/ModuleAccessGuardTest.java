@@ -54,6 +54,29 @@ class ModuleAccessGuardTest {
         }
 
         @Test
+        void leavesThePortalsOwnWayInAlone() {
+            // A-130's credential routes are public and are reached by a caller
+            // holding no session, so a gate that blocks an absent caller must
+            // not have an opinion about them — it 404s the login endpoint
+            // otherwise, and the portal has no door at all.
+            assertThat(guard.guards("/api/v1/portal/auth/login")).isFalse();
+            assertThat(guard.guards("/api/v1/portal/auth/credential/abc123")).isFalse();
+        }
+
+        @Test
+        void exemptsTheAuthRoutesAndNothingElseUnderThePortal() {
+            // The hole is the size of the public list and no larger. Widening
+            // it to `/api/v1/portal/` would hand the whole client tree to an
+            // unauthenticated caller, which is the one mistake this exemption
+            // could make.
+            assertThat(guard.guards("/api/v1/portal/onboarding/home")).isTrue();
+            assertThat(guard.guards("/api/v1/portal/clients/7/prerequisites")).isTrue();
+            // `/portal/authority` is not `/portal/auth/` — the exempt prefix
+            // ends in a slash for the same reason the guarded ones do.
+            assertThat(guard.guards("/api/v1/portal/authority")).isTrue();
+        }
+
+        @Test
         void doesNotConfuseAPrefixWithASegment() {
             // `/api/v1/onboardingx` is not the onboarding tree. The guarded
             // prefixes end in a slash precisely so this cannot be read as one.
@@ -107,6 +130,13 @@ class ModuleAccessGuardTest {
         void refusesTheClientPortalTreeJustTheSame() {
             assertThat(guard.blocks(caller("TICKETING"), "/api/v1/portal/onboarding/home"))
                     .isTrue();
+        }
+
+        @Test
+        void letsAnAnonymousCallerReachThePortalLogin() {
+            // The whole point of the exemption, stated as the behaviour rather
+            // than as the path list: nobody signing in is identifiable yet.
+            assertThat(guard.blocks(Optional.empty(), "/api/v1/portal/auth/login")).isFalse();
         }
 
         @Test

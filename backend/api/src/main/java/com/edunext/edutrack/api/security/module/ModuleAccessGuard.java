@@ -95,6 +95,33 @@ public class ModuleAccessGuard {
     };
 
     /**
+     * Carved back out of {@code /api/v1/portal/}: the portal's own way in.
+     *
+     * <p>A-130's three credential routes are in
+     * {@code SecurityConfig.PUBLIC_API_PATHS} and are reached by a caller
+     * holding no session at all — that is what they are for. This gate treats
+     * an absent caller as blocked (see {@link #blocks}), so without the
+     * exemption it 404s every client off the login route before the controller
+     * is reached, and the portal has no door.
+     *
+     * <p><b>It discloses nothing.</b> The question here is "does this caller
+     * hold the ONBOARDING grant", and a caller signing in holds no grants by
+     * definition — there is no entitlement to check yet. What stands in for
+     * authentication is the credential token on two of these routes and the
+     * password on the third, which is A-130's own argument unchanged.
+     * {@code PortalRouteFilter} still polices the tree, so a <em>staff</em>
+     * token is refused here exactly as before.
+     *
+     * <p>As narrow as the public list itself: {@code /portal/auth/} only,
+     * never {@code /portal/}. {@code ModuleAccessGuardTest} asserts that the
+     * rest of the portal tree is still guarded, so widening this by accident
+     * fails a test rather than opening the module.
+     */
+    private static final String[] UNGUARDED_PREFIXES = {
+            "/api/v1/portal/auth/",
+    };
+
+    /**
      * Whether {@code requestPath} is one this gate has an opinion about.
      *
      * <p>Prefix matching here, where {@code PasswordChangeGate} matches
@@ -106,10 +133,19 @@ public class ModuleAccessGuard {
      * allowed — {@code /api/v1/onboarding/../tickets} is guarded when it need
      * not be, which costs a 404 to a caller who could have had a 200 and
      * discloses nothing.
+     *
+     * <p>{@link #UNGUARDED_PREFIXES} is checked first and wins, because it is
+     * a hole cut in a tree this list already claims — read the other way round
+     * the exemption could never be reached.
      */
     public boolean guards(String requestPath) {
         if (requestPath == null) {
             return false;
+        }
+        for (String prefix : UNGUARDED_PREFIXES) {
+            if (requestPath.startsWith(prefix)) {
+                return false;
+            }
         }
         for (String prefix : GUARDED_PREFIXES) {
             if (requestPath.startsWith(prefix)) {

@@ -44,15 +44,21 @@ class ObJourneyTemplateExceptionHandler {
     }
 
     /**
-     * The four ways this service refuses to write over a row's own state:
-     * a second template for a product that already has one, publishing
-     * twice, editing anything that has ever been published, and revising a
-     * version that is not currently active. All four are "the row exists,
-     * but not in a state this call accepts" — {@code 409}, on
+     * The three ways this service refuses to write over a row's own state:
+     * publishing twice, editing anything that has ever been published, and
+     * revising a version that is not currently active. All three are "the row
+     * exists, but not in a state this call accepts" — {@code 409}, on
      * {@code CONVENTIONS.md} §3's line for it.
+     *
+     * <p>There were four. {@code TemplateAlreadyExistsException} refused a
+     * second service on a product that already had one, and it is deleted
+     * rather than retained: a product sells several named services by design,
+     * and the refusal was forced by an index keyed on
+     * {@code (product_id, version)} rather than by any rule anybody wanted.
+     * {@code V20260909_1900} re-keys that index and the exception has nothing
+     * left to describe.
      */
     @ExceptionHandler({
-            TemplateAlreadyExistsException.class,
             TemplateAlreadyPublishedException.class,
             TemplateNotEditableException.class,
             TemplateNotActiveException.class

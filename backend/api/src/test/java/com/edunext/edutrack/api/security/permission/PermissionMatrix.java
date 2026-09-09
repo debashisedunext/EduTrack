@@ -2279,6 +2279,7 @@ final class PermissionMatrix {
             // ModuleAccessFilterTest is where that wiring is proved, through
             // the real chain, because the guard's own unit tests passed
             // throughout the three weeks nothing called it.
+            everyRole("GET", "/api/v1/onboarding/journey-templates"),
             everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}"),
             everyRole("POST", "/api/v1/onboarding/journey-templates", CREATE_JOURNEY_TEMPLATE),
             everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions"),

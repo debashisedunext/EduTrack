@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -70,6 +71,39 @@ class ObJourneyTemplateController {
 
     ObJourneyTemplateController(ObJourneyTemplateService service) {
         this.service = service;
+    }
+
+    /**
+     * The OB-07 catalogue's rows — a card per <em>service</em>, not per product.
+     *
+     * <p>The page could previously see only {@code ObProduct.activeTemplateId},
+     * so it drew one card per product and a product's second service was
+     * invisible even once the database held it. The design's own catalogue puts
+     * "Standard SaaS Onboarding" and "Enterprise (with data migration audit)"
+     * side by side under one product, with a "Show services for" filter — which
+     * is what {@code productId} here is.
+     *
+     * <p>No {@code ETag}: this is a list, and {@code CONVENTIONS.md} §5 puts
+     * tags on detail reads. The per-template tag the reorder writes need still
+     * comes from {@code getObJourneyTemplate}.
+     */
+    @GetMapping(value = "/journey-templates", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listObJourneyTemplates",
+            summary = "Every Module Service, or one product's (OB-07)",
+            description = """
+                    Every version of every service, newest first within each — the \
+                    catalogue draws the head of each chain and an admin reviewing \
+                    history wants the retired rows too, so this filters neither.""")
+    ObJourneyTemplateDtos.TemplateListResponse list(
+            @RequestParam(name = "productId", required = false) Long productId) {
+
+        List<ObJourneyTemplateDtos.TemplateSummary> rows = service.listTemplates(productId).stream()
+                .map(t -> new ObJourneyTemplateDtos.TemplateSummary(
+                        t.getId(), t.getProductId(), t.getName(), t.getVersion(), t.isActive(),
+                        t.getSequence(), t.getDependsOnTemplateId(), t.getPublishedAt(),
+                        service.stepCount(t.getId()), service.totalTatDays(t.getId())))
+                .toList();
+        return new ObJourneyTemplateDtos.TemplateListResponse(rows);
     }
 
     @GetMapping(value = "/journey-templates/{templateId}", produces = MediaType.APPLICATION_JSON_VALUE)

@@ -39,20 +39,22 @@ const SLOW = { timeout: 5000 }
 async function openCatalogue() {
   renderCatalogue()
   await screen.findByRole('heading', { name: 'Module Service' }, SLOW)
-  // Wait for the card grid itself, not just the header — the ERP card's own
-  // heading, which only renders once the product list has arrived.
-  await screen.findByRole('heading', { name: 'EduTrack ERP' }, SLOW)
+  // Wait for the card grid itself, not just the header — the ERP service's
+  // own heading, which renders once both the product and template lists have
+  // arrived. The card's subject is the service, not the product.
+  await screen.findByRole('heading', { name: 'ERP Suite onboarding' }, SLOW)
 }
 
-const productCard = (name: string) =>
+const serviceCard = (name: string) =>
   screen.getAllByRole('listitem').find((li) => within(li).queryByRole('heading', { name }))!
 
-describe('the catalogue lists every product', () => {
+describe('the catalogue lists every service', () => {
   it('shows an active service with its total TAT, active chip and edit link', async () => {
     await openCatalogue()
 
-    const card = productCard('EduTrack ERP')
-    expect(within(card).getByText('ERP')).toBeInTheDocument()
+    const card = serviceCard('ERP Suite onboarding')
+    // The product is context on the service's card, not the card's subject.
+    expect(within(card).getByText('EduTrack ERP')).toBeInTheDocument()
     expect(within(card).getByText(/d total TAT/)).toBeInTheDocument()
     expect(within(card).getByText('Active for product')).toBeInTheDocument()
     // The version chip and the edit label both come off the template detail.
@@ -62,17 +64,39 @@ describe('the catalogue lists every product', () => {
   it('lists the services with TAT, owner and dependency markers', async () => {
     await openCatalogue()
 
-    const card = productCard('EduTrack ERP')
+    const card = serviceCard('ERP Suite onboarding')
     // The active ERP template's first step, drawn as the mockup's step line.
     await within(card).findByText(/∥ parallel|↳ after step \d+/, undefined, SLOW)
   })
 
-  it('shows a product with no active service as a dead end, not a broken card', async () => {
+  /**
+   * A draft is a service too, and it gets a card. What it does not get is the
+   * depends-on picker or a position in the order — `sequence` runs over the
+   * active services, which is what instantiation follows.
+   */
+  it('draws an unpublished service as a draft, without the depends-on picker', async () => {
     await openCatalogue()
 
-    const card = productCard('Biometric Attendance')
-    expect(within(card).getByText('No active Module Service yet')).toBeInTheDocument()
+    const card = serviceCard('Biometric Attendance onboarding')
+    expect(within(card).getByText('Draft — not published')).toBeInTheDocument()
     expect(within(card).queryByLabelText('Service depends on')).not.toBeInTheDocument()
+    expect(within(card).queryByText('Active for product')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The whole point of the change: one product, several named services. The
+   * fixture's product 1 gets a second service here so the grid has to draw
+   * two cards for it rather than one.
+   */
+  it('draws a card per service when one product sells several', async () => {
+    getDb().obJourneyTemplates.push({
+      id: 99, productId: 1, name: 'ERP Enterprise onboarding', version: 1, isActive: false,
+      sequence: 9, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
+    })
+    await openCatalogue()
+
+    expect(await screen.findByRole('heading', { name: 'ERP Suite onboarding' }, SLOW)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ERP Enterprise onboarding' })).toBeInTheDocument()
   })
 
   it('the "Show services for" filter narrows the grid to one card', async () => {
@@ -83,9 +107,11 @@ describe('the catalogue lists every product', () => {
     // Card headings, not bare text — the create and filter selects still
     // offer every product as an <option>, which is not a card.
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Biometric Attendance' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('heading', { name: 'Biometric Attendance onboarding' }),
+      ).not.toBeInTheDocument()
     })
-    expect(screen.getByRole('heading', { name: 'EduTrack ERP' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ERP Suite onboarding' })).toBeInTheDocument()
   })
 })
 
@@ -118,8 +144,8 @@ describe('reordering the catalogue', () => {
   it('moves a service down and persists the new sequence', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('EduTrack ERP')
-    fireEvent.click(within(erpCard).getByRole('button', { name: 'Move EduTrack ERP down' }))
+    const erpCard = serviceCard('ERP Suite onboarding')
+    fireEvent.click(within(erpCard).getByRole('button', { name: 'Move ERP Suite onboarding down' }))
 
     await waitFor(() => {
       const templates = getDb().obJourneyTemplates
@@ -131,10 +157,10 @@ describe('reordering the catalogue', () => {
   it('the topmost service cannot move up, the bottommost cannot move down', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('EduTrack ERP')
-    const lmsCard = productCard('Learning Management')
-    expect(within(erpCard).getByRole('button', { name: 'Move EduTrack ERP up' })).toBeDisabled()
-    expect(within(lmsCard).getByRole('button', { name: 'Move Learning Management down' })).toBeDisabled()
+    const erpCard = serviceCard('ERP Suite onboarding')
+    const lmsCard = serviceCard('LMS onboarding')
+    expect(within(erpCard).getByRole('button', { name: 'Move ERP Suite onboarding up' })).toBeDisabled()
+    expect(within(lmsCard).getByRole('button', { name: 'Move LMS onboarding down' })).toBeDisabled()
   })
 
   it('reorder still acts on the whole catalogue order while a filter narrows the view', async () => {
@@ -145,11 +171,13 @@ describe('reordering the catalogue', () => {
 
     fireEvent.change(screen.getByLabelText('Show services for'), { target: { value: '1' } })
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Biometric Attendance' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('heading', { name: 'Biometric Attendance onboarding' }),
+      ).not.toBeInTheDocument()
     })
 
-    expect(screen.getByRole('button', { name: 'Move EduTrack ERP up' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Move EduTrack ERP down' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Move ERP Suite onboarding up' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move ERP Suite onboarding down' })).toBeEnabled()
   })
 })
 
@@ -157,7 +185,7 @@ describe('the depends-on picker', () => {
   it('shows the current dependency, pre-selected', async () => {
     await openCatalogue()
 
-    const lmsCard = productCard('Learning Management')
+    const lmsCard = serviceCard('LMS onboarding')
     const select = within(lmsCard).getByLabelText('Service depends on') as HTMLSelectElement
     await waitFor(() => expect(select).not.toBeDisabled(), SLOW)
     expect(select.value).toBe('1')
@@ -166,7 +194,7 @@ describe('the depends-on picker', () => {
   it('does not offer the service depending on it, or itself', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('EduTrack ERP')
+    const erpCard = serviceCard('ERP Suite onboarding')
     const select = within(erpCard).getByLabelText('Service depends on') as HTMLSelectElement
     await waitFor(() => expect(select).not.toBeDisabled(), SLOW)
 
@@ -178,7 +206,7 @@ describe('the depends-on picker', () => {
   it('clearing the dependency sends null and persists it', async () => {
     await openCatalogue()
 
-    const lmsCard = productCard('Learning Management')
+    const lmsCard = serviceCard('LMS onboarding')
     const select = within(lmsCard).getByLabelText('Service depends on') as HTMLSelectElement
     await waitFor(() => expect(select).not.toBeDisabled(), SLOW)
 

@@ -183,13 +183,39 @@ class ObJourneyTemplateServiceTest {
             assertThat(created.getProductId()).isEqualTo(PRODUCT);
         }
 
+        /**
+         * The rule this replaces refused every second service on a product,
+         * which the design never asked for — its own catalogue puts "Standard
+         * SaaS Onboarding" and "Enterprise (with data migration audit)" side
+         * by side under one product. The refusal existed because
+         * {@code uq_ob_journey_templates_version} was keyed on
+         * {@code (product_id, version)} and every new service starts at v1;
+         * {@code V20260909_1900} re-keys it to include the name.
+         */
         @Test
-        @DisplayName("a second call for the same product is refused")
-        void secondCallRefused() {
-            service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+        @DisplayName("a product may sell several named services, each starting at v1")
+        void secondServiceIsAllowed() {
+            ObJourneyTemplate first = service.createTemplate(PRODUCT, "Standard SaaS Onboarding", 1, null, ADMIN);
+            ObJourneyTemplate second = service.createTemplate(
+                    PRODUCT, "Enterprise (with data migration audit)", 2, null, ADMIN);
 
-            assertThatThrownBy(() -> service.createTemplate(PRODUCT, "ERP Rollout v2", 1, null, ADMIN))
-                    .isInstanceOf(TemplateAlreadyExistsException.class);
+            assertThat(first.getVersion()).isEqualTo(1);
+            assertThat(second.getVersion()).isEqualTo(1);
+            assertThat(second.getProductId()).isEqualTo(PRODUCT);
+            assertThat(second.getId()).isNotEqualTo(first.getId());
+        }
+
+        /**
+         * Neither is active on creation, so the "one active per product" rule
+         * the index still holds is never in question until somebody publishes.
+         */
+        @Test
+        @DisplayName("neither service is active until one is published")
+        void neitherIsActiveOnCreate() {
+            service.createTemplate(PRODUCT, "Standard SaaS Onboarding", 1, null, ADMIN);
+            ObJourneyTemplate second = service.createTemplate(PRODUCT, "Enterprise", 2, null, ADMIN);
+
+            assertThat(second.isActive()).isFalse();
         }
     }
 

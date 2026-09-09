@@ -8,6 +8,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepRepository;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,18 +75,33 @@ public class ObJourneyTemplateService {
     }
 
     /**
-     * "+ Create journey template" (OB-07) — the way a new journey is born.
-     * Refused once the product already has a template row, draft or
-     * published: from that point on, editing goes through
-     * {@link #beginRevision}.
+     * "+ Create module service" (OB-07) — the way a new service is born.
+     *
+     * <p><b>A product may sell several named services</b>, one of them active:
+     * the design's own catalogue has "Standard SaaS Onboarding" and
+     * "Enterprise (with data migration audit)" side by side under one product.
+     * This used to refuse the second of them — {@code TemplateAlreadyExistsException},
+     * on any existing row — and the refusal was never the rule anybody wanted.
+     * It was forced by {@code uq_ob_journey_templates_version (product_id,
+     * version)}: every new service starts at v1, and the first service's own
+     * v1 is still on the table because retired versions are kept. That index is
+     * re-keyed to {@code (product_id, name, version)} by
+     * {@code V20260909_1900}, so a second service starting at v1 is now a row
+     * the database accepts.
+     *
+     * <p>What is <em>not</em> relaxed: one <b>active</b> service per product,
+     * which {@code uq_ob_journey_templates_active} still enforces and which the
+     * design agrees with. A new service is created inactive, as it always was;
+     * publishing it is what retires whichever service was active before.
+     *
+     * <p>A duplicate name within one product is refused by the index rather
+     * than by a check here — two services a picker cannot tell apart is the
+     * collision worth having the database hold, and it is the same name that
+     * now identifies a version chain.
      */
     @Transactional
     public ObJourneyTemplate createTemplate(long productId, String name, int sequence,
                                              Long dependsOnTemplateId, long createdBy) {
-        if (templates.existsByProductId(productId)) {
-            throw new TemplateAlreadyExistsException(productId);
-        }
-
         ObJourneyTemplate template = new ObJourneyTemplate();
         template.setProductId(productId);
         template.setName(name);
@@ -112,7 +128,19 @@ public class ObJourneyTemplateService {
             throw new TemplateNotActiveException(templateId);
         }
 
-        int nextVersion = templates.findTopByProductIdOrderByVersionDesc(active.getProductId())
+        /*
+          Numbered within this service, not across the product.
+
+          It used to read MAX(version) for the whole product, which was the
+          only safe answer while `uq_..._version` was keyed on
+          (product_id, version) — but it means revising "Enterprise" while
+          "Standard SaaS Onboarding" sits at v4 produces "Enterprise v5", a
+          version number counting somebody else's edits. V20260909_1900 re-keys
+          the index to (product_id, name, version), so the chain this revision
+          belongs to is the one sharing its name.
+        */
+        int nextVersion = templates
+                .findTopByProductIdAndNameOrderByVersionDesc(active.getProductId(), active.getName())
                 .map(ObJourneyTemplate::getVersion)
                 .orElse(active.getVersion())
                 + 1;
@@ -486,6 +514,40 @@ public class ObJourneyTemplateService {
     @Transactional(readOnly = true)
     public List<ObJourneyTemplateStep> getSteps(long templateId) {
         return steps.findByTemplateIdOrderBySequenceAsc(templateId);
+    }
+
+    /**
+     * The OB-07 catalogue's rows — every service, or every service one product
+     * sells, newest version of each first.
+     *
+     * <p><b>All versions, not only the active one.</b> The caller decides what
+     * to draw: the catalogue shows the head of each service's chain, while an
+     * admin looking at history wants the retired rows too. Filtering here would
+     * make the second question unanswerable without a second endpoint.
+     *
+     * <p>Ordered by name then version so a service's own chain is contiguous
+     * and its newest version leads — the grouping the page renders, done in SQL
+     * rather than re-derived in three places.
+     */
+    @Transactional(readOnly = true)
+    public List<ObJourneyTemplate> listTemplates(Long productId) {
+        return productId == null
+                ? templates.findAll(Sort.by("productId").and(Sort.by("name")).and(Sort.by(Sort.Direction.DESC, "version")))
+                : templates.findByProductIdOrderByNameAscVersionDesc(productId);
+    }
+
+    /** Σ of a service's step TATs — what a journey for it costs, on the card. */
+    @Transactional(readOnly = true)
+    public int totalTatDays(long templateId) {
+        return steps.findByTemplateIdOrderBySequenceAsc(templateId).stream()
+                .mapToInt(ObJourneyTemplateStep::getTatDays)
+                .sum();
+    }
+
+    /** How many services this step count belongs to — the card's "N services". */
+    @Transactional(readOnly = true)
+    public int stepCount(long templateId) {
+        return (int) steps.countByTemplateId(templateId);
     }
 
     @Transactional(readOnly = true)

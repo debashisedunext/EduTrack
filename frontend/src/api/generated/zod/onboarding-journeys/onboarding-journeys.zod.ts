@@ -50,11 +50,61 @@ import * as zod from 'zod';
 
 
 /**
- * Refused with `409` once the product already has a template row,
-draft or published — from that point on, editing goes through
-`POST /onboarding/journey-templates/{templateId}/revisions`.
+ * The OB-07 catalogue's rows — a card per *service*, not per product.
 
- * @summary A product's first draft (OB-07) — "+ Create journey template"
+A product sells several named services, one of them active: the
+design's catalogue puts "Standard SaaS Onboarding" and "Enterprise
+(with data migration audit)" side by side under one product. Before
+this operation the page could see only `ObProduct.activeTemplateId`,
+so it drew one card per product and a second service was invisible
+even once the database held it.
+
+Returns **every version of every service**, newest first within each.
+The catalogue draws the head of each chain; an admin reviewing history
+wants the retired rows too, so this filters neither.
+
+ * @summary Every Module Service, or one product's (OB-07)
+ */
+export const listObJourneyTemplatesQueryParams = zod.object({
+  "productId": zod.number().optional().describe('The \"Show services for\" filter. Omitted means every product.')
+})
+
+export const listObJourneyTemplatesResponseDataItemNameMax = 160;
+
+
+
+export const listObJourneyTemplatesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "name": zod.string().max(listObJourneyTemplatesResponseDataItemNameMax),
+  "version": zod.number().describe('Counts the edits to \*\*this service\*\*, not to the product. Two\nservices under one product each have their own chain, so both can\nsit at v1 — `uq_ob_journey_templates_version` is keyed on\n`(product_id, name, version)`.\n'),
+  "isActive": zod.boolean().describe('True for at most one service per product, across all of them.'),
+  "sequence": zod.number(),
+  "dependsOnTemplateId": zod.number().nullish(),
+  "publishedAt": zod.string().datetime({}).nullish(),
+  "stepCount": zod.number().describe('How many services this journey has — the card\'s step list length.'),
+  "totalTatDays": zod.number().describe('Σ of the step TATs in working days — what a journey for this\nservice costs. On the row because the card shows it and it is not\nderivable from the other fields; the alternative is the page\nfetching every service\'s full detail to render one chip.\n')
+}).describe('One Module Service as the OB-07 catalogue lists it.'))
+})
+
+/**
+ * Creates a new named service, inactive, at version 1.
+
+**A product may sell several services.** This used to be refused with
+`409` once the product held any template row at all — a restriction
+forced by `uq_ob_journey_templates_version (product_id, version)`
+rather than by any rule the design asks for: every service starts at
+v1, and the first service's own v1 is still on the table because
+retired versions are kept. `V20260909_1900` re-keys that index to
+`(product_id, name, version)` and the refusal is gone.
+
+What is not relaxed is **one active service per product**. A new
+service is created inactive; publishing it retires whichever service
+was active before. A duplicate *name* within one product is still
+refused with `409` — two services a picker cannot tell apart.
+
+ * @summary A new Module Service for a product (OB-07) — "+ Create module service"
  */
 export const createObJourneyTemplateHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
