@@ -41,9 +41,11 @@ import java.util.Set;
  *       instances. Every journey is still created {@code LOCKED}, which is the
  *       state the gate exists to hold; what is missing is the checklist that
  *       opens it, not the hold.</li>
- *   <li><b>No portal login.</b> {@code createPortalLogin: true} is refused
- *       rather than ignored — see {@link PortalLoginUnavailableException} for
- *       why refusing is the safer of the two.</li>
+ *   <li><b>Portal login: built.</b> {@code createPortalLogin: true} was refused
+ *       rather than ignored until B-126; it is now honoured, through
+ *       {@code ClientAccountAdminService} rather than a second implementation
+ *       here. {@code PortalLoginUnavailableException} and its handler branch are
+ *       deleted, as that exception's own javadoc said they would be.</li>
  * </ul>
  *
  * <h2>The two guards are deliberately unlike each other</h2>
@@ -78,6 +80,18 @@ class ObClientWriteService {
     private final ObJourneyInstantiationService journeys;
     private final PanService pan;
 
+    /**
+     * B-126 · the client-account panel's service, called for the OB-04 wizard's
+     * "create client login" checkbox.
+     *
+     * <p>Reached across features rather than reimplemented here: username
+     * generation, the placeholder password, the single-use link and the
+     * credential mail are one path, and a second copy of it in the wizard is a
+     * second set of rules to keep in step. The class is {@code public} for
+     * exactly this call.
+     */
+    private final com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
+
     /** B-103 · one instant per create, stamped onto every contact's consent. */
     private final Clock clock;
 
@@ -94,9 +108,10 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
-                         PanService pan) {
+                         PanService pan,
+                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
         this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
-                Clock.systemUTC());
+                portalAccounts, Clock.systemUTC());
     }
 
     ObClientWriteService(ObClientRepository clients,
@@ -107,6 +122,7 @@ class ObClientWriteService {
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
                          PanService pan,
+                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts,
                          Clock clock) { // test seam
         this.clients = clients;
         this.reads = reads;
@@ -116,6 +132,7 @@ class ObClientWriteService {
         this.details = details;
         this.journeys = journeys;
         this.pan = pan;
+        this.portalAccounts = portalAccounts;
         this.clock = clock;
     }
 
@@ -127,9 +144,6 @@ class ObClientWriteService {
     ObClientDtos.ObClientDetail create(ObClientScope scope, long callerId,
                                        ObClientDtos.ObClientCreateRequest request) {
         requireWriter(scope);
-        if (request.wantsPortalLogin()) {
-            throw new PortalLoginUnavailableException();
-        }
 
         validateForCreate(request);
         // Sealed once. seal() produces the ciphertext and the blind index
@@ -173,6 +187,16 @@ class ObClientWriteService {
         // is why the purchases are written first.
         for (ObClientDtos.ObApplicationWriteRequest application : request.applications()) {
             journeys.instantiate(clientId, application.productId());
+        }
+
+        // B-126 · the wizard's "create client login" checkbox, honoured rather
+        // than refused. Last, and deliberately so: the account is minted from
+        // the client's name and its primary SPOC, so both rows have to exist,
+        // and the credential mail is queued through B-110's outbox inside this
+        // same transaction — a login created against a client that then rolls
+        // back would be a credential for nothing.
+        if (request.wantsPortalLogin()) {
+            portalAccounts.create(scope, clientId, callerId);
         }
 
         return details.findDetail(scope, clientId)

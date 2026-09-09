@@ -39,8 +39,6 @@ class ObClientExceptionHandler {
     private static final URI NAME_SIMILAR = URI.create("https://edutrack/errors/ob-client-name-similar");
     private static final URI NO_TEMPLATE = URI.create("https://edutrack/errors/ob-product-no-template");
     private static final URI LIVE_NOT_EARNED = URI.create("https://edutrack/errors/ob-client-live-not-earned");
-    private static final URI PORTAL_LOGIN_UNAVAILABLE =
-            URI.create("https://edutrack/errors/ob-client-portal-login-unavailable");
     private static final URI CONTACT_EMAIL_DUPLICATE =
             URI.create("https://edutrack/errors/ob-contact-email-duplicate");
     private static final URI CONTACT_PRIMARY_REQUIRED =
@@ -175,26 +173,6 @@ class ObClientExceptionHandler {
         problem.setProperty("forceable", false);
         problem.setProperty("productIds", e.productIds());
         problem.setProperty("errors", Map.of("applications", new String[]{e.getMessage()}));
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
-    }
-
-    /**
-     * 409 — {@code createPortalLogin} arrived before B-126 exists.
-     *
-     * <p>A status the contract already declares for this operation, with a
-     * {@code type} it does not yet name; the alternative was an undeclared 501.
-     * <b>Deleted by B-126</b>, along with the exception and the branch that
-     * throws it.
-     */
-    @ExceptionHandler(PortalLoginUnavailableException.class)
-    ResponseEntity<ProblemDetail> handlePortalLogin(PortalLoginUnavailableException e) {
-        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
-        problem.setType(PORTAL_LOGIN_UNAVAILABLE);
-        problem.setTitle("Client portal logins are not available yet");
-        problem.setDetail(e.getMessage());
-        problem.setProperty("forceable", false);
-        problem.setProperty("errors",
-                Map.of("createPortalLogin", new String[]{e.getMessage()}));
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
