@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.signoff;
 
+import com.edunext.edutrack.api.feature.onboarding.clients.ObClientGoLiveService;
 import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyStepLifecycleService;
 import com.edunext.edutrack.domain.onboarding.ObSignoff;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
@@ -49,6 +50,8 @@ class ObSignoffAcceptServiceTest {
     private ObSignoffContactReader contacts;
     private ObJourneyStepLifecycleService stepLifecycle;
     private ObSignoffCertificateService certificates;
+    private ObClientGoLiveService clientGoLive;
+    private ObGoLiveHandoverService handover;
     private ObSignoffAcceptService service;
 
     @BeforeEach
@@ -58,8 +61,10 @@ class ObSignoffAcceptServiceTest {
         contacts = mock(ObSignoffContactReader.class);
         stepLifecycle = mock(ObJourneyStepLifecycleService.class);
         certificates = mock(ObSignoffCertificateService.class);
+        clientGoLive = mock(ObClientGoLiveService.class);
+        handover = mock(ObGoLiveHandoverService.class);
         service = new ObSignoffAcceptService(signoffs, sessions, contacts, stepLifecycle, certificates,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                clientGoLive, handover, Clock.fixed(NOW, ZoneOffset.UTC));
 
         when(sessions.resolve(SESSION)).thenReturn(OptionalLong.of(SIGNOFF_ID));
         when(contacts.find(CONTACT_ID)).thenReturn(new PublicSignoffAcceptDtos.Contact(
@@ -221,20 +226,94 @@ class ObSignoffAcceptServiceTest {
             assertThat(result.gateFailures()).isEmpty();
         }
 
+    }
+
+    @Nested
+    @DisplayName("the go-live flip (B-118)")
+    class GoLiveFlip {
+
         @Test
-        @DisplayName("clientWentLive is false until B-118 builds the flip")
-        void goLiveFlipIsNotThisTask() {
-            ObSignoff signoff = given(pendingStepSignoff());
-            signoff.setKind(ObSignoffKind.GO_LIVE);
-            signoff.setStepId(null);
+        @DisplayName("a STEP acceptance never asks ObClientGoLiveService anything")
+        void stepAcceptanceNeverTouchesTheFlip() {
+            given(pendingStepSignoff());
+            when(stepLifecycle.completeOnClientAcceptance(STEP_ID)).thenReturn(List.of());
 
             PublicSignoffAcceptDtos.AcceptResult result =
                     service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
 
-            // Not a placeholder: nothing in the application flips a client to
-            // Live-Green today, so no acceptance can have been the one that did.
-            // This assertion is expected to change when B-118 lands.
+            verify(clientGoLive, never()).flipIfEarned(anyLong(), anyLong(), any());
+            verify(handover, never()).generate(anyLong());
             assertThat(result.clientWentLive()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a GO_LIVE acceptance asks for this client and this journey, at the signed instant")
+        void asksTheFlipForThisClientAndJourney() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+            when(clientGoLive.flipIfEarned(9L, 31L, NOW)).thenReturn(false);
+
+            service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            verify(clientGoLive).flipIfEarned(9L, 31L, NOW);
+        }
+
+        @Test
+        @DisplayName("clientWentLive mirrors the flip exactly — true when it fires")
+        void clientWentLiveIsTrueWhenTheFlipFires() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+            when(clientGoLive.flipIfEarned(9L, 31L, NOW)).thenReturn(true);
+
+            PublicSignoffAcceptDtos.AcceptResult result =
+                    service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            assertThat(result.clientWentLive()).isTrue();
+        }
+
+        @Test
+        @DisplayName("clientWentLive is false when a sibling journey is not yet earned — never a placeholder")
+        void clientWentLiveIsFalseWhenNotEarned() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+            when(clientGoLive.flipIfEarned(9L, 31L, NOW)).thenReturn(false);
+
+            PublicSignoffAcceptDtos.AcceptResult result =
+                    service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            assertThat(result.clientWentLive()).isFalse();
+            verify(handover, never()).generate(anyLong());
+        }
+
+        @Test
+        @DisplayName("the handover note is generated only once the flip actually fires")
+        void handoverGeneratedOnlyWhenFlipped() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+            when(clientGoLive.flipIfEarned(9L, 31L, NOW)).thenReturn(true);
+
+            service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            verify(handover).generate(9L);
+        }
+
+        @Test
+        @DisplayName("a failed handover note does not cost the go-live flip — same reasoning as the certificate")
+        void handoverFailureDoesNotUndoTheFlip() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+            when(clientGoLive.flipIfEarned(9L, 31L, NOW)).thenReturn(true);
+            when(handover.generate(9L)).thenThrow(new IllegalStateException("storage is down"));
+
+            PublicSignoffAcceptDtos.AcceptResult result =
+                    service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            assertThat(result.clientWentLive()).isTrue();
         }
     }
 
