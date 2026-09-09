@@ -280,7 +280,7 @@ export function ObPrereqMasterPage() {
 
   if (templateQuery.isPending) {
     return (
-      <div className="max-w-[900px] p-6">
+      <div className="mx-auto max-w-[900px] p-6">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="mt-4 h-64 w-full" />
       </div>
@@ -301,7 +301,7 @@ export function ObPrereqMasterPage() {
     templateQuery.error.status === 404
   ) {
     return (
-      <div className="max-w-[900px] p-6">
+      <div className="mx-auto max-w-[900px] p-6">
         <PageHeading />
         {error && <ErrorNote className="mt-4">{error}</ErrorNote>}
         <div className="mt-5 rounded-card border border-border bg-surface shadow-rest">
@@ -326,7 +326,7 @@ export function ObPrereqMasterPage() {
 
   if (templateQuery.isError || !template) {
     return (
-      <div className="max-w-[900px] p-6">
+      <div className="mx-auto max-w-[900px] p-6">
         <PageHeading />
         <ErrorNote className="mt-5">{messageFor(templateQuery.error)}</ErrorNote>
       </div>
@@ -337,7 +337,7 @@ export function ObPrereqMasterPage() {
   const mandatoryCount = template.mandatoryCount ?? tasks.filter((t) => t.isMandatory).length
 
   return (
-    <div className="max-w-[900px] p-6">
+    <div className="mx-auto max-w-[900px] p-6">
       <PageHeading />
 
       {/*
