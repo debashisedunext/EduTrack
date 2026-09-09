@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { FileText, ListChecks, Lock, X } from 'lucide-react'
+import { FileText, ListChecks, X } from 'lucide-react'
 
 import {
   getGetObPrereqTemplateQueryKey,
@@ -43,12 +43,18 @@ import { cn } from '@/lib/utils'
  * which swaps active versions in one transaction and touches no existing
  * client.
  *
- * The screen says so instead of hiding it. The design's mockup draws direct
- * editing; a checkbox that silently began a revision, mutated it and published
- * on every tick would fire three writes per click and leave the admin unaware
- * that half-finished edits were already live. So the mutation controls are
- * enabled only while a draft is open, the header names which version is being
- * looked at, and Publish carries the snapshot rule in its own words.
+ * The design draws direct editing and no revision controls, and this screen
+ * matches it: the table's checkboxes and delete buttons are live, and the first
+ * edit opens the draft itself (see {@link draftTasksFor}). What it will not do
+ * is publish on every tick — three writes per click, a new version per
+ * checkbox, and edits reaching boarded clients before anyone meant them to.
+ *
+ * So exactly one control is added to the design: a bar that appears once
+ * something is unpublished, carrying the snapshot rule and the Publish button.
+ * A draft nobody publishes is an admin's change that silently never reaches a
+ * client, which is a worse outcome than a button the mockup does not have. When
+ * there is nothing unpublished the bar is absent and the screen is the
+ * mockup's.
  *
  * <h2>A fresh organisation is not a broken screen</h2>
  *
@@ -176,6 +182,44 @@ export function ObPrereqMasterPage() {
       }
     }, beginFailureMessage)
 
+  /**
+   * The draft, opened on demand.
+   *
+   * <p>The design edits the checklist in place and has no "begin a revision"
+   * button, while the API refuses every write that is not against a draft — so
+   * the first edit opens one. Returns the draft's tasks, because opening a
+   * revision <b>re-identifies every task</b>: `cloneTasks` copies the active
+   * version's rows into new ones with new ids, so the id a row was drawn with
+   * belongs to the published version and writing to it is refused. `sequence`
+   * is carried across the clone deliberately, by both the server and the mock,
+   * which makes it the one key that survives the boundary.
+   */
+  const draftTasksFor = async (): Promise<ObPrereqTemplateTask[]> => {
+    if (template?.isDraft) return template.tasks
+    try {
+      const revision = await beginRevision.mutateAsync()
+      setDraftVersion(revision.data.version)
+      return revision.data.tasks
+    } catch (caught) {
+      /*
+        Somebody else already has the org's one draft open. Join it — but stop
+        here rather than applying this edit to it: a 409 carries no tasks, so
+        there is nothing to match `sequence` against, and guessing would write
+        to whichever id happened to be on screen. The screen loads their draft
+        and asks for the edit again, against rows that are really there.
+      */
+      if (caught instanceof ApiError && (caught.status === 409 || caught.is('ob-prereq-draft-exists'))) {
+        setDraftVersion((template?.version ?? 0) + 1)
+        throw new DraftJoined()
+      }
+      throw caught
+    }
+  }
+
+  /** The same task, on the draft — matched across the clone by `sequence`. */
+  const onDraft = (draftTasks: ObPrereqTemplateTask[], task: ObPrereqTemplateTask) =>
+    draftTasks.find((t) => t.sequence === task.sequence) ?? task
+
   const publish = () =>
     apply(async () => {
       const published = await publishTemplate.mutateAsync()
@@ -192,6 +236,7 @@ export function ObPrereqMasterPage() {
     event.preventDefault()
     if (!title.trim()) return
     void apply(async () => {
+      await draftTasksFor()
       await addTask.mutateAsync({
         data: {
           title: title.trim(),
@@ -213,21 +258,25 @@ export function ObPrereqMasterPage() {
     stale copy of those fields into a 412 instead of a silent overwrite.
   */
   const toggleMandatory = (task: ObPrereqTemplateTask) =>
-    apply(() =>
-      updateTask.mutateAsync({
-        templateTaskId: task.id,
+    apply(async () => {
+      const target = onDraft(await draftTasksFor(), task)
+      await updateTask.mutateAsync({
+        templateTaskId: target.id,
         data: {
-          title: task.title,
-          description: task.description ?? undefined,
-          tatDays: task.tatDays,
+          title: target.title,
+          description: target.description ?? undefined,
+          tatDays: target.tatDays,
           isMandatory: !task.isMandatory,
-          isActive: task.isActive,
+          isActive: target.isActive,
         },
-      }),
-    )
+      })
+    })
 
   const remove = (task: ObPrereqTemplateTask) =>
-    apply(() => removeTask.mutateAsync({ templateTaskId: task.id }))
+    apply(async () => {
+      const target = onDraft(await draftTasksFor(), task)
+      await removeTask.mutateAsync({ templateTaskId: target.id })
+    })
 
   if (templateQuery.isPending) {
     return (
@@ -289,52 +338,27 @@ export function ObPrereqMasterPage() {
 
   return (
     <div className="max-w-[900px] p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeading />
-        <div className="flex items-center gap-3">
-          {editing ? (
-            <>
-              <Chip variant="warning">Draft v{template.version} — unpublished</Chip>
-              <Button onClick={publish} disabled={busy}>
-                Publish version {template.version}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Chip variant="success">Version {template.version} · active</Chip>
-              <Button variant="secondary" onClick={begin} disabled={busy}>
-                Begin a revision
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* plan §14 names a long mandatory list as the way the gate stalls — the
-          count is stated where it is being changed, not discovered later. */}
-      <p className="mt-4 text-caption text-content-muted" role="status">
-        {mandatoryCount} mandatory {mandatoryCount === 1 ? 'task gates' : 'tasks gate'} every
-        journey.{' '}
-        {editing && 'Changes apply only when published, and only to clients boarded after that.'}
-      </p>
+      <PageHeading />
 
       {/*
-        Read-only is a guarantee this screen is keeping, not a permission it is
-        missing — so it is stated as one. Disabled controls with nothing beside
-        them read as a broken page, which is the same mistake the 404 empty
-        state above exists to undo.
+        The one thing on this screen the design does not draw, and the one that
+        cannot be dropped. Editing opens a draft, and a draft nobody publishes
+        is an admin's change that silently never reaches a client — worse than
+        the button. It appears only once there is something unpublished, so the
+        resting screen is the design's.
       */}
-      {!editing && (
-        <div className="mt-3 flex items-start gap-2 rounded-card border border-info bg-surface p-3 text-sm text-info-text">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <p>
-            <span className="font-medium">
-              Version {template.version} is published, so it is read-only.
-            </span>{' '}
-            Every client boarded against it keeps exactly this checklist. Begin a revision to
-            change it — that drafts a copy, leaves this version untouched, and applies to
-            clients boarded after you publish.
+      {editing && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-card border border-warning bg-surface p-3 shadow-rest">
+          <Chip variant="warning">Unpublished changes</Chip>
+          <p className="flex-1 text-caption text-content-muted">
+            Version {template.version} is a draft — {mandatoryCount} mandatory{' '}
+            {mandatoryCount === 1 ? 'task gates' : 'tasks gate'} every journey. Existing clients
+            keep the checklist they were boarded with; publishing applies this one to clients
+            boarded after it.
           </p>
+          <Button onClick={publish} disabled={busy}>
+            Publish version {template.version}
+          </Button>
         </div>
       )}
 
@@ -372,7 +396,7 @@ export function ObPrereqMasterPage() {
                   <input
                     type="checkbox"
                     checked={task.isMandatory}
-                    disabled={!editing || busy}
+                    disabled={busy}
                     aria-label={`Mandatory: ${task.title}`}
                     onChange={() => void toggleMandatory(task)}
                   />
@@ -395,7 +419,7 @@ export function ObPrereqMasterPage() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!editing || busy}
+                    disabled={busy}
                     aria-label={`Delete ${task.title}`}
                     onClick={() => void remove(task)}
                   >
@@ -409,11 +433,7 @@ export function ObPrereqMasterPage() {
         {tasks.length === 0 && (
           <EmptyState
             title="No tasks on this version"
-            description={
-              editing
-                ? 'Add the first task below.'
-                : 'Begin a revision to add the first task.'
-            }
+            description="Add the first task below."
           />
         )}
       </TableContainer>
@@ -429,11 +449,6 @@ export function ObPrereqMasterPage() {
         >
           Add a task
         </h2>
-        {!editing && (
-          <p className="mt-1 text-caption text-content-muted">
-            Adding needs a draft — begin a revision first.
-          </p>
-        )}
         <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="pm-title" className="block text-sm font-medium text-content">
@@ -445,7 +460,7 @@ export function ObPrereqMasterPage() {
               value={title}
               maxLength={200}
               placeholder="e.g. Share GST certificate"
-              disabled={!editing || busy}
+              disabled={busy}
               onChange={(e) => setTitle(e.target.value)}
               required
             />
@@ -461,7 +476,7 @@ export function ObPrereqMasterPage() {
               min={1}
               max={365}
               value={tat}
-              disabled={!editing || busy}
+              disabled={busy}
               onChange={(e) => setTat(e.target.value)}
             />
           </div>
@@ -475,7 +490,7 @@ export function ObPrereqMasterPage() {
               value={description}
               maxLength={4000}
               placeholder="What exactly do they need to do?"
-              disabled={!editing || busy}
+              disabled={busy}
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
@@ -500,12 +515,12 @@ export function ObPrereqMasterPage() {
               <input
                 type="checkbox"
                 checked={mandatory}
-                disabled={!editing || busy}
+                disabled={busy}
                 onChange={(e) => setMandatory(e.target.checked)}
               />
               Mandatory (gates the journeys)
             </label>
-            <Button type="submit" disabled={!editing || busy || !title.trim()}>
+            <Button type="submit" disabled={busy || !title.trim()}>
               + Add to master
             </Button>
           </div>
@@ -559,7 +574,17 @@ function beginFailureMessage(caught: unknown): string {
   return messageFor(caught)
 }
 
+/**
+ * Not a failure of the server's — the edit was stopped deliberately because
+ * this session joined a draft somebody else had open. See {@link
+ * ObPrereqMasterPage}'s `draftTasksFor`.
+ */
+class DraftJoined extends Error {}
+
 function messageFor(caught: unknown): string {
+  if (caught instanceof DraftJoined) {
+    return 'Somebody else already had a revision open, so you are now editing theirs. Your change was not applied — make it again.'
+  }
   if (caught instanceof ApiError) {
     if (caught.status === 403) {
       return 'The prerequisites master is OB Admin only.'

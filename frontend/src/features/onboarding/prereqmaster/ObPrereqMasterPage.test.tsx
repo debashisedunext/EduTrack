@@ -86,7 +86,8 @@ const active = (over: Partial<Record<string, unknown>> = {}) => ({
   ...over,
 })
 
-const draft = () => active({ version: 6, isDraft: true, isActive: false, publishedAt: null })
+const draft = (over: Partial<Record<string, unknown>> = {}) =>
+  active({ version: 6, isDraft: true, isActive: false, publishedAt: null, ...over })
 
 const result = (template: unknown) => ({
   data: { data: template },
@@ -116,7 +117,7 @@ beforeEach(() => {
 })
 
 describe('OB-14 · prerequisites master', () => {
-  it('shows the active version read-only, with a revision as the only way in', () => {
+  it('edits in place, with none of the revision chrome the design does not draw', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: 'Prerequisites master' })).toBeInTheDocument()
@@ -126,24 +127,45 @@ describe('OB-14 · prerequisites master', () => {
 
     const mandatory = screen.getByRole('checkbox', { name: 'Mandatory: Share GST certificate' })
     expect(mandatory).toBeChecked()
-    expect(mandatory).toBeDisabled()
+    expect(mandatory).toBeEnabled()
 
-    expect(screen.getByRole('button', { name: 'Delete Share GST certificate' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Delete Share GST certificate' })).toBeEnabled()
+    expect(screen.getByLabelText('Title *')).toBeEnabled()
+    // Add stays disabled until there is a title — that is the form's own rule,
+    // not the read-only one this screen used to have.
     expect(screen.getByRole('button', { name: '+ Add to master' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Begin a revision' })).toBeEnabled()
+
+    // The resting screen is the mockup's: no version chip, no revision button,
+    // and nothing unpublished to announce.
+    expect(screen.queryByRole('button', { name: 'Begin a revision' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Unpublished changes')).not.toBeInTheDocument()
   })
 
-  it('begins a revision and switches the screen onto the draft it returns', async () => {
+  /**
+   * The trap in editing a published version in place: `beginRevision` clones
+   * every task into new rows, so the id the row was drawn with belongs to the
+   * published version and writing to it is refused. `sequence` is what carries
+   * across, and this asserts the write lands on the clone.
+   */
+  it('opens a draft on the first edit and writes to the cloned task, not the published one', async () => {
+    const cloned = () =>
+      draft({ tasks: [{ ...GST, id: 101 }, { ...SPOC, id: 102 }] })
+    beginMutate.mockResolvedValue({ data: cloned() })
     getTemplate.mockImplementation((params?: { version?: number }) =>
-      params?.version === 6 ? result(draft()) : result(active()),
+      params?.version === 6 ? result(cloned()) : result(active()),
     )
     renderPage()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Begin a revision' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Mandatory: Share GST certificate' }))
 
-    expect(await screen.findByRole('button', { name: 'Publish version 6' })).toBeEnabled()
     expect(beginMutate).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('checkbox', { name: 'Mandatory: Share GST certificate' })).toBeEnabled()
+    expect(updateMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateTaskId: 101,
+        data: expect.objectContaining({ isMandatory: false }),
+      }),
+    )
+    expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
   })
 
   /**
@@ -152,17 +174,20 @@ describe('OB-14 · prerequisites master', () => {
    * joins it (versions are sequential, so it can only be active + 1) rather
    * than dead-ending on an error about state it could edit.
    */
-  it('adopts the existing draft when begin says one already exists', async () => {
+  it('joins the draft somebody else had open, and says the edit did not apply', async () => {
     beginMutate.mockRejectedValue(apiError(409, 'https://edutrack.example/problems/ob-prereq-draft-exists'))
     getTemplate.mockImplementation((params?: { version?: number }) =>
       params?.version === 6 ? result(draft()) : result(active()),
     )
     renderPage()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Begin a revision' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Share GST certificate' }))
 
-    expect(await screen.findByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
+    // The delete is deliberately not retried against ids the 409 never carried.
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/make it again/i)
   })
 
   /**
@@ -181,10 +206,11 @@ describe('OB-14 · prerequisites master', () => {
     )
     renderPage()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Begin a revision' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Share GST certificate' }))
 
-    expect(await screen.findByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
+    expect(removeMutate).not.toHaveBeenCalled()
   })
 
   it('adds a task to the draft with exactly what was typed', async () => {
