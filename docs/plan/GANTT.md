@@ -37,14 +37,14 @@ Each phase is counted on its own. A phase's *working days available* is the span
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 74 of 83 (89%) | 160.0 of 178.0 (90%) |
-| In flight | 0 | 0.0 |
+| In flight | 1 | 2.0 |
 | On the driving chain | 3 | 8.0 |
 | Zero float (no slack at all) | 3 | 8.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 29 | 29 | 58.0 | 12 | 483% ⚠️ | Wed 09 Sep |
-| **B** | Ayush | 27 | 23 | 52.0 | 12 | 433% ⚠️ | Wed 16 Sep |
+| **B** | Ayush | 27 | 23 | 52.0 | 12 | 433% ⚠️ | Tue 15 Sep |
 | **C** | Divyansh | 25 | 22 | 64.0 | 12 | 533% ⚠️ | Fri 18 Sep |
 | **D** | Debashis | 2 | 0 | 4.0 | 12 | 33% | Sat 12 Sep |
 
@@ -53,14 +53,14 @@ Each phase is counted on its own. A phase's *working days available* is the span
 | | Tasks | Effort (days) |
 |---|---:|---:|
 | Complete | 317 of 327 (97%) | 523.8 of 543.8 (96%) |
-| In flight | 0 | 0.0 |
+| In flight | 1 | 2.0 |
 | On the driving chain | 3 | 8.0 |
 | Zero float (no slack at all) | 4 | 10.0 |
 
 | Stream | Developer | Tasks | Done | Effort | Working days available | Load | Finishes |
 |---|---|---:|---:|---:|---:|---:|---|
 | **A** | Shivendra | 94 | 93 | 153.0 | 34 | 450% ⚠️ | Thu 10 Sep |
-| **B** | Ayush | 82 | 78 | 141.8 | 34 | 417% ⚠️ | Wed 16 Sep |
+| **B** | Ayush | 82 | 78 | 141.8 | 34 | 417% ⚠️ | Tue 15 Sep |
 | **C** | Divyansh | 84 | 81 | 154.0 | 34 | 453% ⚠️ | Fri 18 Sep |
 | **D** | Debashis | 67 | 65 | 95.0 | 34 | 279% ⚠️ | Sat 12 Sep |
 
@@ -149,7 +149,7 @@ gantt
     section Phase 2 — Client Onboarding
     OB1 — Client capture :done, b4, 2026-09-03, 5d
     OB3 — Notifications :done, b5, 2026-09-04, 4d
-    OB4 — Sign-off  dashboard  reports :active, b6, 2026-09-05, 8d
+    OB4 — Sign-off  dashboard  reports :active, b6, 2026-09-05, 7d
     OB5 — Hardening :done, b7, 2026-09-07, 1d
 ```
 
@@ -273,7 +273,7 @@ gantt
 |  | `A-104` | Journey instance tables | 2 | `A-101` `A-103` ᶦ | Thu 03 Sep | Thu 03 Sep | 0 | ✅ done |
 |  | `A-105` | ob_step_clock_events | 1 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 6 | ✅ done |
 | 🔴 | `A-106` | Append-only pair, hash-chained | 3 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 10 | ✅ done |
-|  | `A-107` | Sign-off, outbox and escalation tables | 2 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 1 | ✅ done |
+|  | `A-107` | Sign-off, outbox and escalation tables | 2 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 2 | ✅ done |
 |  | `A-108` | ob_dashboard_summary — pre-aggregated | 1 | `A-104` ᶦ | Thu 03 Sep | Thu 03 Sep | 0 | ✅ done |
 | 🔴 | `A-109` | user_module_access and the grants | 1 | `A-108` ᶦ | Thu 03 Sep | Thu 03 Sep | 0 | ✅ done |
 | 🔴 | `A-110` | modules JWT claim | 2 | `A-109` ᶦ | Fri 04 Sep | Fri 04 Sep | 0 | ✅ done |
@@ -287,7 +287,7 @@ gantt
 | 🔴 | `A-118` | OpenAPI contract for the whole module | 3 | — | Sat 05 Sep | Sat 05 Sep | 8 | ✅ done |
 | 🔴 | `A-119` | Wire-conformance ratchet for onboarding DTOs | 2 | `A-118` ᶦ | Sat 05 Sep | Sat 05 Sep | 9 | ✅ done |
 |  | `A-120` | Public sign-off surface | 3 | `A-107` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | ✅ done |
-|  | `A-121` | OTP issue and verify -- against the SPOC's registered email or… | 2 | `A-120` ᶦ | Tue 08 Sep | Tue 08 Sep | 0 | ✅ done |
+|  | `A-121` | OTP issue and verify -- against the SPOC's registered email or… | 2 | `A-120` ᶦ | Tue 08 Sep | Tue 08 Sep | 1 | ✅ done |
 |  | `A-122` | Permission-matrix completeness | 2 | `A-114` ᶦ | Tue 08 Sep | Tue 08 Sep | 8 | ✅ done |
 |  | `A-123` | Mutation tests on the append-only pair | 2 | `A-106` ᶦ | Thu 03 Sep | Thu 03 Sep | 11 | ✅ done |
 |  | `A-124` | ob_products master | 1 | `A-101` ᶦ | Tue 08 Sep | Tue 08 Sep | 8 | ✅ done |
@@ -372,11 +372,11 @@ gantt
 |  | `B-112` | OB-13 | 2 | `B-110` ᶦ | Fri 04 Sep | Fri 04 Sep | 9 | ✅ done |
 |  | `B-113` | OB-11 and OB-12 | 2 | `C-115` ᶦ | Wed 09 Sep | Wed 09 Sep | 7 | ✅ done |
 |  | `B-114` | Daily digest to managers | 1 | `B-112` ᶦ | Sat 05 Sep | Sat 05 Sep | 9 | ✅ done |
-|  | `B-115` | OB-09 | 2 | `A-121` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | ✅ done |
-|  | `B-116` | Acceptance PDF | 2 | `B-115` ᶦ | Thu 10 Sep | Fri 11 Sep | 1 | ▫️ to do |
-| 🔴 | `B-117` | The objection path | 1 | `B-115` ᶦ | Wed 09 Sep | Wed 09 Sep | 1 | ▫️ to do |
-|  | `B-118` | Go-live flip | 1 | `B-116` ᶦ | Sat 12 Sep | Sat 12 Sep | 1 | ▫️ to do |
-|  | `B-119` | CSAT — a public one-question page, storage, and a summary | 2 | `B-118` ᶦ | Tue 15 Sep | Wed 16 Sep | 1 | ▫️ to do |
+|  | `B-115` | OB-09 | 2 | `A-121` ᶦ | Wed 09 Sep | Wed 09 Sep | 1 | ✅ done |
+|  | `B-116` | Acceptance PDF | 2 | `B-115` ᶦ | Wed 09 Sep | Wed 09 Sep | 2 | 🟡 50% |
+| 🔴 | `B-117` | The objection path | 1 | `B-115` ᶦ | Thu 10 Sep | Thu 10 Sep | 2 | ▫️ to do |
+|  | `B-118` | Go-live flip | 1 | `B-116` ᶦ | Fri 11 Sep | Fri 11 Sep | 2 | ▫️ to do |
+|  | `B-119` | CSAT — a public one-question page, storage, and a summary | 2 | `B-118` ᶦ | Sat 12 Sep | Tue 15 Sep | 2 | ▫️ to do |
 |  | `B-120` | ob_dashboard_summary refresh job | 2 | `A-108` ᶦ | Sat 05 Sep | Sat 05 Sep | 7 | ✅ done |
 |  | `B-121` | OB-02 | 3 | `B-120` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
 |  | `B-122` | OB-10 | 3 | `B-120` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
