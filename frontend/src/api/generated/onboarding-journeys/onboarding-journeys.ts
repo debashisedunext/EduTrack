@@ -68,6 +68,7 @@ import type {
 import type {
   ConflictResponse,
   ListObClientCommunicationsParams,
+  ListObJourneyTemplatesParams,
   ListObJourneysParams,
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
@@ -86,6 +87,7 @@ import type {
   ObJourneyTemplateCreateRequest,
   ObJourneyTemplateDependsOnRequest,
   ObJourneyTemplateDetailResponse,
+  ObJourneyTemplateListResponse,
   ObJourneyTemplateResponse,
   ObJourneyTemplateStepDocResponse,
   ObJourneyTemplateStepDocWriteRequest,
@@ -113,11 +115,128 @@ import { http } from '../../http';
 
 
 /**
- * Refused with `409` once the product already has a template row,
-draft or published — from that point on, editing goes through
-`POST /onboarding/journey-templates/{templateId}/revisions`.
+ * The OB-07 catalogue's rows — a card per *service*, not per product.
 
- * @summary A product's first draft (OB-07) — "+ Create journey template"
+A product sells several named services, one of them active: the
+design's catalogue puts "Standard SaaS Onboarding" and "Enterprise
+(with data migration audit)" side by side under one product. Before
+this operation the page could see only `ObProduct.activeTemplateId`,
+so it drew one card per product and a second service was invisible
+even once the database held it.
+
+Returns **every version of every service**, newest first within each.
+The catalogue draws the head of each chain; an admin reviewing history
+wants the retired rows too, so this filters neither.
+
+ * @summary Every Module Service, or one product's (OB-07)
+ */
+export const listObJourneyTemplates = (
+    params?: ListObJourneyTemplatesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyTemplateListResponse>(
+      {url: `/onboarding/journey-templates`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObJourneyTemplatesQueryKey = (params?: ListObJourneyTemplatesParams,) => {
+    return [
+    `/onboarding/journey-templates`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObJourneyTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listObJourneyTemplates>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObJourneyTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObJourneyTemplatesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObJourneyTemplates>>> = ({ signal }) => listObJourneyTemplates(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObJourneyTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listObJourneyTemplates>>>
+export type ListObJourneyTemplatesQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObJourneyTemplates<TData = Awaited<ReturnType<typeof listObJourneyTemplates>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObJourneyTemplatesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObJourneyTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listObJourneyTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObJourneyTemplates<TData = Awaited<ReturnType<typeof listObJourneyTemplates>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneyTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObJourneyTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listObJourneyTemplates>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObJourneyTemplates<TData = Awaited<ReturnType<typeof listObJourneyTemplates>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneyTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Every Module Service, or one product's (OB-07)
+ */
+
+export function useListObJourneyTemplates<TData = Awaited<ReturnType<typeof listObJourneyTemplates>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObJourneyTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObJourneyTemplates>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObJourneyTemplatesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Creates a new named service, inactive, at version 1.
+
+**A product may sell several services.** This used to be refused with
+`409` once the product held any template row at all — a restriction
+forced by `uq_ob_journey_templates_version (product_id, version)`
+rather than by any rule the design asks for: every service starts at
+v1, and the first service's own v1 is still on the table because
+retired versions are kept. `V20260909_1900` re-keys that index to
+`(product_id, name, version)` and the refusal is gone.
+
+What is not relaxed is **one active service per product**. A new
+service is created inactive; publishing it retires whichever service
+was active before. A duplicate *name* within one product is still
+refused with `409` — two services a picker cannot tell apart.
+
+ * @summary A new Module Service for a product (OB-07) — "+ Create module service"
  */
 export const createObJourneyTemplate = (
     obJourneyTemplateCreateRequest: ObJourneyTemplateCreateRequest,
@@ -165,7 +284,7 @@ const {mutation: mutationOptions} = options ?
     export type CreateObJourneyTemplateMutationError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse
 
     /**
- * @summary A product's first draft (OB-07) — "+ Create journey template"
+ * @summary A new Module Service for a product (OB-07) — "+ Create module service"
  */
 export const useCreateObJourneyTemplate = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObJourneyTemplate>>, TError,{data: ObJourneyTemplateCreateRequest}, TContext>, }

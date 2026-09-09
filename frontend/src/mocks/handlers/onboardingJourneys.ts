@@ -171,6 +171,40 @@ function editabilityConflict(template: ObJourneyTemplateRow | undefined) {
 // ── handlers ────────────────────────────────────────────────────────────────
 
 export const onboardingJourneyHandlers = [
+  /*
+    `listObJourneyTemplates` — every version of every service, newest first
+    within each, optionally narrowed to one product. The catalogue groups the
+    rows into one card per service; it is deliberately not filtered here,
+    because an admin reviewing history wants the retired rows too.
+  */
+  http.get(url('/onboarding/journey-templates'), ({ request }) => {
+    const db = getDb();
+    const productId = new URL(request.url).searchParams.get('productId');
+    const rows = db.obJourneyTemplates
+      .filter((t) => productId == null || t.productId === Number(productId))
+      .slice()
+      .sort(
+        (a, b) =>
+          a.productId - b.productId || a.name.localeCompare(b.name) || b.version - a.version,
+      )
+      .map((t) => {
+        const steps = db.obJourneyTemplateSteps.filter((s) => s.templateId === t.id);
+        return {
+          id: t.id,
+          productId: t.productId,
+          name: t.name,
+          version: t.version,
+          isActive: t.isActive,
+          sequence: t.sequence,
+          dependsOnTemplateId: t.dependsOnTemplateId ?? null,
+          publishedAt: t.publishedAt ?? null,
+          stepCount: steps.length,
+          totalTatDays: steps.reduce((sum, s) => sum + (s.tatDays ?? 0), 0),
+        };
+      });
+    return ok(rows);
+  }),
+
   http.post(url('/onboarding/journey-templates'), async ({ request }) => {
     const db = getDb();
     const body = (await request.json()) as {
@@ -181,9 +215,16 @@ export const onboardingJourneyHandlers = [
     if (!body.name) errors.name = ['Name is required'];
     if (Object.keys(errors).length) return validationFailed(errors);
 
-    if (db.obJourneyTemplates.some((t) => t.productId === body.productId)) {
+    /*
+      A product sells several named services, so only a duplicate *name*
+      within one product collides — the server's rule since
+      `uq_ob_journey_templates_version` was re-keyed to
+      (product_id, name, version). This used to refuse any second service on
+      a product, which is the behaviour the real backend no longer has.
+    */
+    if (db.obJourneyTemplates.some((t) => t.productId === body.productId && t.name === body.name)) {
       return problem(409, 'conflict', 'Conflict', {
-        detail: `Product ${body.productId} already has a journey template — begin a revision instead.`,
+        detail: `Product ${body.productId} already has a service named "${body.name}" — begin a revision instead.`,
       });
     }
 
