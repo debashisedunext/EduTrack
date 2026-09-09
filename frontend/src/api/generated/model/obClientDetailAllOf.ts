@@ -56,6 +56,7 @@ import type { ObApplication } from './obApplication';
 import type { ObRequirement } from './obRequirement';
 import type { ObJourneyStrip } from './obJourneyStrip';
 import type { UserRef } from './userRef';
+import type { ObClientDetailAllOfCsatScore } from './obClientDetailAllOfCsatScore';
 
 export type ObClientDetailAllOf = {
   description?: ObClientDetailAllOfDescription;
@@ -106,4 +107,17 @@ and the accordion needs the set to render the page.
   journeys?: ObJourneyStrip[];
   createdBy?: UserRef;
   createdAt?: string;
+  /**
+   * B-119's go-live survey answer, from the most recently answered
+`GO_LIVE` sign-off — OB-05's LIVE banner prints it as
+"CSAT 5/5". Null until a client answers one, which is the
+ordinary state: the survey is optional by construction. Detail
+only — the OB-03 list has no banner and does not pay for the
+read. Added as an optional field — CONVENTIONS.md §1, not
+breaking.
+
+   * @minimum 1
+   * @maximum 5
+   */
+  csatScore?: ObClientDetailAllOfCsatScore;
 };

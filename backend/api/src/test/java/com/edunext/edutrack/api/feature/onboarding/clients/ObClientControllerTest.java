@@ -185,7 +185,7 @@ class ObClientControllerTest {
                 CLIENT, name, LocalDate.of(2026, 9, 7), "ONBOARDING", null, "LOCKED", 1, 0,
                 null, List.of(), null, null, null, false,
                 null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), null, null);
+                List.of(), List.of(), List.of(), List.of(), null, null, null);
     }
 
     private static ObClientDtos.ObClientDetail detailWithJourney(String name) {
@@ -202,7 +202,7 @@ class ObClientControllerTest {
                 base.salesPerson(), base.primaryContact(), base.liveAt(), base.hasPortalLogin(),
                 base.description(), base.address(), base.licenseType(), base.pan(),
                 base.statusReason(), base.contacts(), base.applications(), base.requirements(),
-                List.of(strip), base.createdBy(), base.createdAt());
+                List.of(strip), base.createdBy(), base.createdAt(), base.csatScore());
     }
 
     private static ObClientDtos.ObClientCreateRequest createRequest() {

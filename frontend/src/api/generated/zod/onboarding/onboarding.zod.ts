@@ -301,6 +301,8 @@ export const getObClientResponseDataRequirementsItemTitleMax = 200;
 export const getObClientResponseDataJourneysItemPercentCompleteMin = 0;
 export const getObClientResponseDataJourneysItemPercentCompleteMax = 100;
 
+export const getObClientResponseDataCsatScoreMax = 5;
+
 
 
 export const getObClientResponse = zod.object({
@@ -433,7 +435,8 @@ export const getObClientResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(getObClientResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -510,6 +513,8 @@ export const updateObClientResponseDataRequirementsItemTitleMax = 200;
 
 export const updateObClientResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientResponseDataJourneysItemPercentCompleteMax = 100;
+
+export const updateObClientResponseDataCsatScoreMax = 5;
 
 
 
@@ -643,7 +648,8 @@ export const updateObClientResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(updateObClientResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -786,6 +792,8 @@ export const updateObClientContactResponseDataRequirementsItemTitleMax = 200;
 export const updateObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
 
+export const updateObClientContactResponseDataCsatScoreMax = 5;
+
 
 
 export const updateObClientContactResponse = zod.object({
@@ -918,7 +926,8 @@ export const updateObClientContactResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(updateObClientContactResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -981,6 +990,8 @@ export const removeObClientContactResponseDataRequirementsItemTitleMax = 200;
 
 export const removeObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
 export const removeObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
+
+export const removeObClientContactResponseDataCsatScoreMax = 5;
 
 
 
@@ -1114,7 +1125,8 @@ export const removeObClientContactResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(removeObClientContactResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -1265,6 +1277,8 @@ export const updateObClientApplicationResponseDataRequirementsItemTitleMax = 200
 export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMax = 100;
 
+export const updateObClientApplicationResponseDataCsatScoreMax = 5;
+
 
 
 export const updateObClientApplicationResponse = zod.object({
@@ -1397,7 +1411,8 @@ export const updateObClientApplicationResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(updateObClientApplicationResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -1534,6 +1549,8 @@ export const updateObClientRequirementResponseDataRequirementsItemTitleMax = 200
 export const updateObClientRequirementResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientRequirementResponseDataJourneysItemPercentCompleteMax = 100;
 
+export const updateObClientRequirementResponseDataCsatScoreMax = 5;
+
 
 
 export const updateObClientRequirementResponse = zod.object({
@@ -1666,7 +1683,8 @@ export const updateObClientRequirementResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(updateObClientRequirementResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 
@@ -1735,6 +1753,8 @@ export const deleteObClientRequirementResponseDataRequirementsItemTitleMax = 200
 
 export const deleteObClientRequirementResponseDataJourneysItemPercentCompleteMin = 0;
 export const deleteObClientRequirementResponseDataJourneysItemPercentCompleteMax = 100;
+
+export const deleteObClientRequirementResponseDataCsatScoreMax = 5;
 
 
 
@@ -1868,7 +1888,8 @@ export const deleteObClientRequirementResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }).optional(),
-  "createdAt": zod.string().datetime({}).optional()
+  "createdAt": zod.string().datetime({}).optional(),
+  "csatScore": zod.number().min(1).max(deleteObClientRequirementResponseDataCsatScoreMax).nullish().describe('B-119\'s go-live survey answer, from the most recently answered\n`GO_LIVE` sign-off — OB-05\'s LIVE banner prints it as\n\"CSAT 5\/5\". Null until a client answers one, which is the\nordinary state: the survey is optional by construction. Detail\nonly — the OB-03 list has no banner and does not pay for the\nread. Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n')
 })).describe('The OB-05 page in one document.')
 })
 

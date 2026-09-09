@@ -167,6 +167,13 @@ final class ObClientDtos {
      *            The unmasked value is not a field anyone can widen a query to
      *            reach — it comes from A-113's own reveal operation, which
      *            writes an audit row per call.
+     * @param csatScore B-119's go-live survey answer, 1–5, from the most
+     *            recently answered {@code GO_LIVE} sign-off — OB-05's LIVE
+     *            banner prints it as "CSAT 5/5". Null until a client answers
+     *            one, which is the ordinary state: the survey is optional by
+     *            construction ("a client who closes the tab has still gone
+     *            live"). Detail only — OB-03's list has no banner and does not
+     *            pay for the subquery.
      */
     record ObClientDetail(long id, String name, LocalDate onboardingDate, String status,
                           String rag, String gateStatus, int journeyCount, int journeysComplete,
@@ -176,7 +183,7 @@ final class ObClientDtos {
                           String description, String address, String licenseType, String pan,
                           String statusReason, List<ObContact> contacts, List<ObApplication> applications,
                           List<ObRequirement> requirements, List<ObJourneyStrip> journeys,
-                          UserRef createdBy, Instant createdAt) {
+                          UserRef createdBy, Instant createdAt, Integer csatScore) {
     }
 
     record ObClientDetailResponse(ObClientDetail data) {
