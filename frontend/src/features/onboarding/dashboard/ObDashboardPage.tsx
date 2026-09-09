@@ -6,6 +6,23 @@ import { EmptyState } from '@/components/ui/empty-state'
 
 import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
 import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
+import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
+import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
+
+/**
+ * B-127/B-128 · what the S-06 slide-over is currently showing, or nothing.
+ *
+ * One shape for both readers of {@link ObDashboardDrillPanel} — a card tile,
+ * which only ever names its own `cardKey`, and {@link ObImplementorWorkloadGrid},
+ * which also narrows by `ownerUserId` and supplies its own `title`. A single
+ * piece of state and a single panel instance, rather than one panel per
+ * caller, is the reuse B-127 built the panel for in the first place.
+ */
+interface DrillTarget {
+  cardKey: ObDashboardCardKey
+  ownerUserId?: number
+  title?: string
+}
 
 /**
  * B-121 · OB-02, the onboarding dashboard — `/onboarding/dashboard`.
@@ -33,26 +50,28 @@ import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
  *
  * <h2>Every card opens the S-06 slide-over — B-127</h2>
  *
- * `openCard` is the whole handoff: a tile's `onOpen` sets it, and
+ * `drill` is the whole handoff: a tile's `onOpen` sets it, and
  * {@link ObDashboardDrillPanel} reads it to fetch and render
  * `listObDashboardCardItems`. Nothing about *which* card is decided twice —
  * the tile passes its own `card.key` straight through, so the panel opens
  * exactly the card that was clicked.
  *
- * <h2>What this screen is not, yet</h2>
+ * <h2>The two grids below the board — B-128</h2>
  *
- * The two grids below the board — Delayed Projects, and Implementor workload &
- * performance — are **B-128**.
+ * Delayed Projects and Implementor workload &amp; performance, in plan §9's
+ * own order. The workload grid's cells open the identical slide-over via the
+ * same `drill` state, narrowed by `ownerUserId` — {@link DrillTarget}'s own
+ * note on why this is one piece of state rather than two panels.
  */
 export function ObDashboardPage() {
   const { data, isPending, isError } = useGetObDashboardSummary()
-  const [openCard, setOpenCard] = useState<ObDashboardCardKey | null>(null)
+  const [drill, setDrill] = useState<DrillTarget | null>(null)
 
   const summary = data?.data
   const cards = summary?.cards ?? []
 
   function openDrill(card: ObDashboardCard) {
-    setOpenCard(card.key)
+    setDrill({ cardKey: card.key })
   }
 
   return (
@@ -92,7 +111,15 @@ export function ObDashboardPage() {
         </div>
       )}
 
-      <ObDashboardDrillPanel cardKey={openCard} onClose={() => setOpenCard(null)} />
+      <ObDelayedProjectsGrid />
+      <ObImplementorWorkloadGrid onDrill={setDrill} />
+
+      <ObDashboardDrillPanel
+        cardKey={drill?.cardKey ?? null}
+        onClose={() => setDrill(null)}
+        title={drill?.title}
+        ownerUserId={drill?.ownerUserId}
+      />
     </div>
   )
 }

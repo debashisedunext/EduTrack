@@ -84,14 +84,20 @@ describe('ObDashboardPage', () => {
    * rule is that a tile renders as a button only once it is given `onOpen`,
    * so this is the test that proves the wiring landed rather than merely
    * compiled.
+   *
+   * <p>Scoped to the card list itself, not the whole page: B-128 added two
+   * grids below the board whose own rows and cells are legitimately buttons
+   * too (a client name, a workload count), and this test is about the seven
+   * cards, not a count of every control on the screen.
    */
   it('every card is a real button now that the slide-over exists', async () => {
     renderBoard()
 
     await screen.findByText('Ongoing projects', undefined, SLOW)
 
-    expect(screen.getAllByRole('button')).toHaveLength(7)
-    expect(screen.queryAllByRole('group')).toHaveLength(0)
+    const cardList = screen.getByRole('list', { name: 'Onboarding summary' })
+    expect(within(cardList).getAllByRole('button')).toHaveLength(7)
+    expect(within(cardList).queryAllByRole('group')).toHaveLength(0)
   })
 
   /**

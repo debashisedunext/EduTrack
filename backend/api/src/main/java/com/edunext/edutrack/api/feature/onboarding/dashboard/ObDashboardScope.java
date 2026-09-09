@@ -250,4 +250,45 @@ record ObDashboardScope(boolean unrestricted, String moduleRole, long userId) {
         }
         return "1 = 0";
     }
+
+    /**
+     * B-128 · the scope over {@code ob_implementor_daily_stats}, one row per
+     * <em>person</em> rather than per journey or client — neither
+     * {@link #journeyPredicate} nor {@link #clientPredicate} answers a
+     * question this table's own grain does not carry.
+     *
+     * <h2>OB_STEP_OWNER narrows to exactly one row: their own</h2>
+     *
+     * <p>The table is keyed {@code (stat_date, user_id)}, so "which rows may
+     * this Step Owner see" has an exact answer for once — themselves — rather
+     * than the usual "journeys containing their steps" join. A colleague's
+     * workload and performance score are not this caller's to read.
+     *
+     * <h2>OB_SALES cannot be narrowed at all, and that is the same genuine
+     * gap {@link #unavailableReason()} names for the summary board</h2>
+     *
+     * <p>{@code ob_implementor_daily_stats} carries no client, and therefore no
+     * client-creator column — A-112's "clients you created" rule has nothing
+     * in this row to intersect against, the identical shape of gap this
+     * class's own header raises for {@code ob_dashboard_summary}. The two
+     * quiet alternatives are both wrong for the reasons given there: handing
+     * back every implementor's figures would disclose the size of the book to
+     * a role scoped out of most of it, and there is no per-row zero to fall
+     * back to that would not also be a false claim. So OB_SALES falls through
+     * to the same {@code 1 = 0} an unrecognised role gets — a route that
+     * answers with an empty list rather than a sentence, because this is a row
+     * list like {@link #journeyPredicate}'s callers, not a card with a place
+     * to hang {@code unavailableReason}.
+     *
+     * @param userAlias the query's alias for {@code ob_implementor_daily_stats}
+     */
+    String implementorPredicate(String userAlias) {
+        if (unrestricted) {
+            return "1 = 1";
+        }
+        if (OB_STEP_OWNER.equals(moduleRole)) {
+            return userAlias + ".user_id = :" + USER_PARAM;
+        }
+        return "1 = 0";
+    }
 }

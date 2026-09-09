@@ -176,4 +176,36 @@ class ObDashboardScopeTest {
         assertThat(denied.journeyPredicate("jr", "cl")).isEqualTo("1 = 0");
         assertThat(denied.clientPredicate("cl")).isEqualTo("1 = 0");
     }
+
+    // ── B-128 · the implementor-workload predicate ──────────────────────────
+
+    @Test
+    void an_unrestricted_implementor_predicate_is_a_tautology() {
+        assertThat(ObDashboardScope.of(caller("OB_MANAGER")).implementorPredicate("s"))
+                .isEqualTo("1 = 1");
+    }
+
+    @Test
+    void a_step_owner_implementor_predicate_narrows_to_their_own_row() {
+        assertThat(ObDashboardScope.of(caller("OB_STEP_OWNER")).implementorPredicate("s"))
+                .isEqualTo("s.user_id = :" + ObDashboardScope.USER_PARAM);
+    }
+
+    /**
+     * {@code ob_implementor_daily_stats} carries no client-creator column, so
+     * OB_SALES cannot be narrowed from it at all — the same genuine gap the
+     * summary table has, restated for this route. It falls to the same
+     * contradiction a misconfigured role gets, not to "everyone".
+     */
+    @Test
+    void a_sales_implementor_predicate_is_a_contradiction_not_everyone() {
+        assertThat(ObDashboardScope.of(caller("OB_SALES")).implementorPredicate("s"))
+                .isEqualTo("1 = 0");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TICKETING_MEMBER", "OB_SUPERUSER", ""})
+    void a_denied_role_implementor_predicate_is_a_contradiction(String role) {
+        assertThat(ObDashboardScope.of(caller(role)).implementorPredicate("s")).isEqualTo("1 = 0");
+    }
 }

@@ -97,8 +97,18 @@ class ObDashboardCardItemsRepository {
     private static final String OPEN_SERVICE =
             "s.status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT')";
 
-    /** {@code ObDashboardStatsRepository.OVERDUE}, restated. {@code WAITING_ON_CLIENT} is out: its clock is stopped. */
-    private static final String OVERDUE_SERVICE = """
+    /**
+     * {@code ObDashboardStatsRepository.OVERDUE}, restated. {@code WAITING_ON_CLIENT} is out: its clock is stopped.
+     *
+     * <p>Package-private rather than {@code private} since B-128:
+     * {@code ObDelayedProjectsRepository} needs the identical predicate over
+     * its own {@code s} alias, and a third copy of the same six-line
+     * expression within <em>one package</em> is not the cross-module
+     * necessity that justifies restating it from {@code worker} in the first
+     * place — see the class note above on why this file restates it once
+     * already rather than depending on the {@code worker} module.
+     */
+    static final String OVERDUE_SERVICE = """
             (s.status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')
              AND s.due_at IS NOT NULL AND s.due_at < :now)""";
 
@@ -111,8 +121,15 @@ class ObDashboardCardItemsRepository {
                      FLOOR(TIMESTAMPDIFF(MICROSECOND, s.started_at, s.due_at) * :amberShare),
                      s.started_at) <= :now)""";
 
-    /** A journey with no colour and nothing left open — A-108's four-bucket CASE, RUNNING only. */
-    private static final String JOURNEY_IS_RUNNING = """
+    /**
+     * A journey with no colour and nothing left open — A-108's four-bucket CASE, RUNNING only.
+     *
+     * <p>Package-private for the same reason {@link #OVERDUE_SERVICE} is:
+     * B-128's {@code ObDelayedProjectsRepository} needs the identical
+     * "past the gate, not held, not completed" test over its own journey
+     * alias.
+     */
+    static final String JOURNEY_IS_RUNNING = """
             jr.completed_at IS NULL AND jr.gate_status <> 'LOCKED'
              AND NOT (jr.held_by_journey_id IS NOT NULL AND jr.released_at IS NULL)""";
 

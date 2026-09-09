@@ -2,7 +2,9 @@ package com.edunext.edutrack.api.feature.onboarding.dashboard;
 
 import com.edunext.edutrack.common.pagination.PageMeta;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -162,5 +164,73 @@ final class ObDashboardDtos {
     }
 
     record ObDashboardItemListResponse(List<ObDashboardItem> data, ObDashboardItemListMeta meta) {
+    }
+
+    // ── B-128 · the Delayed Projects grid ───────────────────────────────────
+
+    /**
+     * {@code ObStepDot}, restated locally — {@link ObProductRef}'s own note on
+     * why a package keeps its own mirror rather than importing another
+     * package's DTO. {@code rag} is always {@code null} on this route: see
+     * {@code ObDelayedProjectsRepository}'s class note for why this grid does
+     * not compute it.
+     */
+    record ObDashboardStepDot(long id, int sequence, String name, String status,
+                              String rag, Long dependsOnStepId) {
+    }
+
+    /**
+     * One row of plan §9's Delayed Projects grid — mirrors {@code ObDelayedProject}.
+     *
+     * @param productsBought every product this client has bought, not only
+     *                       this journey's — the contract's own note, and a
+     *                       fact about the client rather than the journey.
+     * @param product        this row's own journey's product.
+     * @param currentStep    null on a journey whose every step is blocked or
+     *                       not yet activated — see
+     *                       {@code ObDelayedProjectsRepository}.
+     * @param responsible    the owner (falling back to the backup owner) of
+     *                       the step that put this journey on the grid — the
+     *                       earliest-due overdue step, which may or may not
+     *                       be {@code currentStep}.
+     * @param delayedByDays  working days, through {@code WorkingCalendar} —
+     *                       never a naive calendar-day subtraction.
+     */
+    record ObDelayedProject(long journeyId, long obClientId, String obClientName, Instant startedAt,
+                            List<ObProductRef> productsBought, ObProductRef product,
+                            ObDashboardStepDot currentStep, UserRef responsible,
+                            Instant expectedCompletionAt, int delayedByDays) {
+    }
+
+    record ObDelayedProjectListResponse(List<ObDelayedProject> data, PageMeta meta) {
+    }
+
+    // ── B-128 · the Implementor workload & performance grid ────────────────
+
+    /**
+     * One row of plan §9's Implementor workload & performance grid — mirrors
+     * {@code ObImplementorWorkload}. Sourced from B-120's
+     * {@code ob_implementor_daily_stats}, never a live aggregate.
+     *
+     * @param isActive         whether this implementor still holds a live
+     *                         {@code OB_STEP_OWNER} grant.
+     * @param clientsOpen      partitioned exactly by the six counters that
+     *                         follow — an arithmetic contract the schema
+     *                         states and nothing at runtime enforces; see
+     *                         {@code ObImplementorWorkloadServiceTest}'s sum
+     *                         assertion.
+     * @param performanceScore derived on read, 0–100, or null for an
+     *                         implementor with zero completions — see
+     *                         {@code ObImplementorWorkloadService#performanceScore}.
+     * @param statDate         which day's stats this row is.
+     */
+    record ObImplementorWorkload(UserRef user, boolean isActive, int clientsOpen,
+                                 int onTrack, int notStarted, int delayed, int atRisk,
+                                 int blockedWaiting, int aheadOfSchedule,
+                                 int completedOnTime, int completedEarly, int completedLate,
+                                 int blockedHours, BigDecimal performanceScore, LocalDate statDate) {
+    }
+
+    record ObImplementorWorkloadListResponse(List<ObImplementorWorkload> data, PageMeta meta) {
     }
 }
