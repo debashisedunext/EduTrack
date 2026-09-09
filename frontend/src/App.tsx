@@ -73,6 +73,15 @@ const ObReportViewerPage = lazy(() =>
 const ObReportsHubPage = lazy(() =>
   import('./features/onboarding/reports/ObReportsHubPage').then((m) => ({ default: m.ObReportsHubPage })),
 )
+const ObTemplatesPage = lazy(() =>
+  import('./features/onboarding/settings/ObTemplatesPage').then((m) => ({ default: m.ObTemplatesPage })),
+)
+const ObSettingsPage = lazy(() =>
+  import('./features/onboarding/settings/ObSettingsPage').then((m) => ({ default: m.ObSettingsPage })),
+)
+const PublicSignoffPage = lazy(() =>
+  import('./features/onboarding/signoff/PublicSignoffPage').then((m) => ({ default: m.PublicSignoffPage })),
+)
 const PriorityListPage = lazy(() =>
   import('./features/masters/priorities/PriorityListPage').then((m) => ({ default: m.PriorityListPage })),
 )
@@ -201,6 +210,16 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={withSuspense(<ForgotPasswordPage />)} />
         <Route path="/reset-password" element={withSuspense(<ResetPasswordPage />)} />
+
+        {/*
+          OB-09 — B-115. Outside `RequireAuth` and outside the shell, and one
+          level further out than the auth screens: those belong to somebody who
+          has an account and has simply not signed in, whereas the reader here
+          is a customer's SPOC who has none. The path carries no module prefix
+          for the same reason the page carries no chrome — "nothing that hints
+          at the rest of the application".
+        */}
+        <Route path="/signoff" element={withSuspense(<PublicSignoffPage />)} />
 
         <Route element={<RequireAuth />}>
           {/*
@@ -421,6 +440,11 @@ export default function App() {
               popover mounts on that shell when it lands.
             */}
             <Route path="/onboarding/notifications" element={withSuspense(<ObNotificationCentrePage />)} />
+            {/* OB-11 — B-113. OB Admin only; the server answers 403 and the page
+                renders that rather than a blank form. */}
+            <Route path="/onboarding/settings" element={withSuspense(<ObSettingsPage />)} />
+            {/* OB-12 — B-113. OB Admin only, same as OB-11. */}
+            <Route path="/onboarding/templates" element={withSuspense(<ObTemplatesPage />)} />
             {/*
               B-122 · OB-10's two routes, beside the notification centre and for
               the same reason the designer and that page are not under

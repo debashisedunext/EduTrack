@@ -9442,6 +9442,167 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  # ── the client's portal login (B-126) ─────────────────────────────────
+  #
+  # B-126 · **one account per client, addressed by the client.**
+  # `uq_client_accounts_ob_client` makes it one-per-client, so the client id
+  # *is* the address. A `/client-accounts/{id}` tree would make a second
+  # account per client expressible in the URL before it was expressible in the
+  # schema, and the point of the unique key is that there are never two
+  # credentials to revoke when somebody leaves.
+  #
+  # **No response on this tree ever carries a password, a hash, or a
+  # credential link.** The link goes to the client's own mailbox and nowhere
+  # else. A "here is the link, send it yourself" field would put a live
+  # credential on a staff screen, in a browser cache, and in whatever the
+  # reader pastes it into — and would make the audit answer to "who could have
+  # used this login" everyone who has ever opened the client.
+  /onboarding/clients/{obClientId}/account:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObClientAccount
+      summary: The client's portal login, if it has one (OB-05)
+      description: |
+        **404 for a client with no login and for a client outside this
+        caller's scope, indistinguishably.** The caller is staff who can
+        already see the client list, so this is not the existence-leak rule
+        A-112 enforces — it is simpler: both mean the panel has nothing to act
+        on, and its response to either is the same, which is to offer to
+        create one.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientAccountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [onboarding]
+      operationId: createObClientAccount
+      summary: Create the portal login and mail the primary SPOC a link (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Mints the username, creates the account, and queues a
+        `CLIENT_LOGIN_CREATED` mail to the client's **primary** SPOC carrying
+        a single-use link.
+
+        ## A link, never a password
+
+        B-111 ruled on this and this operation is where it is cashed in:
+        `CLIENT_LOGIN_CREATED` "declares no password variable — the payload is
+        JSON on a row that outlives the send, so a temporary password in it is
+        a live credential in the database indefinitely". The account is created
+        with a hash of random bytes that are never returned and never logged;
+        the link is the only way in.
+
+        ## Refused rather than ignored
+
+        B-102 already made this argument for `createPortalLogin` and it holds
+        here: a boarder who is told 201 tells their client credentials are
+        coming. So a client with no active primary SPOC is a `422` and not a
+        silent success — the mail would have nowhere to go, and nothing would
+        say so.
+      responses:
+        '201':
+          description: Created; the credential mail is queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientAccountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `ob-client-account-exists` — this client already has a login.
+            Refused rather than turned into a reset: somebody who pressed
+            "create" is not asking for a new link to be mailed against an
+            account that already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            `ob-client-no-primary-contact` — the client has no active primary
+            SPOC, so there is nobody to send credentials to. B-103: "the
+            kickoff mail, the one-time portal password and every sign-off
+            request address the primary SPOC, so with none they go to nobody
+            and nothing says so."
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    patch:
+      tags: [onboarding]
+      operationId: setObClientAccountStatus
+      summary: Enable or disable the portal login (OB-05, OB-08)
+      description: |
+        **Stated, not toggled** — the same call `setUserStatus` makes for
+        staff and for the same reason: a toggle makes the outcome depend on
+        what the caller believed the current state to be, which on a
+        two-person support desk is how a login gets switched back on by
+        somebody who did not know it had been switched off.
+
+        **Disabling retires every outstanding credential link.** Without that,
+        a mail sent yesterday would still be redeemable against an account
+        somebody has just switched off, while the operator believes they have
+        closed the door.
+
+        Nothing is mailed either way. A client does not need to be told the
+        moment their access is suspended by a mail they cannot act on, and
+        re-enabling restores the account that existed rather than issuing a
+        new one — A-125: "a deactivated login preserves what it signed".
+
+        No `If-Match`: setting a flag to a stated value has no lost update for
+        a tag to prevent, which is the exemption `setUserStatus` already
+        carries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObClientAccountStatusRequest' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientAccountResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /onboarding/clients/{obClientId}/account/reset:
+    parameters: [{ $ref: '#/components/parameters/ObClientId' }]
+    post:
+      tags: [onboarding]
+      operationId: resetObClientAccountPassword
+      summary: Issue a fresh credential link and retire the last one (OB-05)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Queues a `CLIENT_PASSWORD_RESET` mail to the primary SPOC and
+        **invalidates every link issued before it**. A reset that left the
+        previous link alive would mean an old mail in an inbox is a second way
+        in that nobody remembers exists, which is the opposite of what
+        somebody pressing "reset" is asking for.
+
+        Works on a disabled account, deliberately: resetting and re-enabling
+        are two decisions, and folding them together would mean a reset
+        silently switched a login back on.
+      responses:
+        '200':
+          description: A fresh link is queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientAccountResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            `ob-client-no-primary-contact` — no active primary SPOC to send
+            the link to.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   # ── the per-client instance (B-125) ───────────────────────────────────────
   /onboarding/clients/{obClientId}/prereqs:
     parameters: [{ $ref: '#/components/parameters/ObClientId' }]
@@ -17748,6 +17909,77 @@ components:
           description: Mandatory (plan's addition 5, "blocked-with-reason") — powers "where is it stuck".
         note: { type: [string, 'null'], maxLength: 500 }
 
+    ObClientAccount:
+      type: object
+      required: [id, username, displayName, email, isActive, mustChangePassword]
+      description: |
+        B-126 · a client's portal login as the OB-05 panel sees it.
+
+        **Nothing here is a credential.** No password, no hash, no token, no
+        link — `client_accounts.password_hash` and every row in
+        `client_credential_tokens` are absent by construction rather than
+        filtered. The one secret this feature produces goes to the client's own
+        mailbox.
+      properties:
+        id: { type: integer, format: int64 }
+        username:
+          type: string
+          maxLength: 50
+          description: |
+            Generated, never chosen — `CLIENTCODE.givenname`, with a counter
+            when that is taken. A-125's generator makes the namespace ours and
+            removes the impersonation question a client-chosen handle would
+            open. Enumerable by design: guessing the name is expected, getting
+            past the password is the part that has to be hard.
+        displayName:
+          type: string
+          maxLength: 160
+          description: |
+            The SPOC this login was issued to, denormalised onto the account
+            rather than joined from `ob_client_contacts`. A-125's reason:
+            contacts are deactivated and replaced, and a login whose identity
+            is a join to a row that can be deactivated is a login that stops
+            being able to describe itself.
+        email: { type: string, format: email }
+        isActive: { type: boolean }
+        mustChangePassword:
+          type: boolean
+          description: |
+            True until the client redeems a credential link and sets their own
+            password. A newly created account is always true — the column
+            defaults to it, so an account created by any path starts in the
+            state that forces the change.
+        lastLoginAt:
+          type: [string, 'null']
+          format: date-time
+          description: Null when the client has never signed in.
+        lockedUntil:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            A-021's lockout, same thresholds as staff. Present so support can
+            answer "are they locked out right now" without a second call.
+        credentialSentAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When the most recent credential link was **issued**, not delivered.
+            The outbox owns delivery, and a panel claiming a mail arrived would
+            be asserting something this feature cannot see.
+    ObClientAccountResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObClientAccount' }
+    ObClientAccountStatusRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive:
+          type: boolean
+          description: |
+            The state you want, not a toggle. See `setObClientAccountStatus`
+            for why, and `setUserStatus` for the same call on the staff side.
     ObContact:
       type: object
       required: [id, name, email, isPrimary, isActive]
