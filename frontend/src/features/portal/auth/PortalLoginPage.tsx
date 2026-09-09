@@ -1,0 +1,118 @@
+import * as React from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+
+import { portalLogin } from '@/api/generated/portal/portal'
+import { ApiError } from '@/api/http'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+
+import { PortalAuthAlert, PortalAuthCard, PortalAuthField } from './PortalAuthUi'
+import { usePortalAuthStore } from './portalAuthStore'
+import {
+  PORTAL_ACCOUNT_LOCKED,
+  PORTAL_INVALID_CREDENTIALS,
+  PORTAL_TOO_MANY_ATTEMPTS,
+} from './portalProblemTypes'
+
+/**
+ * CP-01 · portal login. `LoginPage`'s shape, one principal type over — the
+ * same generic-failure requirement applies with more force here: this
+ * screen is reachable by anyone on the internet who can guess a client's
+ * username, and a message that names which part was wrong would turn it
+ * into a directory of client organisations.
+ */
+interface Values {
+  username: string
+  password: string
+}
+
+export function PortalLoginPage() {
+  const signIn = usePortalAuthStore((state) => state.signIn)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [formError, setFormError] = React.useState<string | null>(null)
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<Values>({ defaultValues: { username: '', password: '' } })
+
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+
+  const onSubmit = handleSubmit(async (values) => {
+    setFormError(null)
+    try {
+      const response = await portalLogin(values)
+      signIn(response.data)
+      navigate(from ?? '/portal/choose', { replace: true })
+    } catch (error) {
+      setFormError(messageFor(error))
+    }
+  })
+
+  return (
+    <PortalAuthCard
+      title="Sign in"
+      footer={
+        <span className="text-content-muted">
+          Trouble signing in?{' '}
+          <Link to="/portal/set-password" className="text-primary underline-offset-2 hover:underline">
+            Use your one-time link
+          </Link>{' '}
+          or contact your account manager.
+        </span>
+      }
+    >
+      <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        {formError ? <PortalAuthAlert>{formError}</PortalAuthAlert> : null}
+
+        <PortalAuthField id="portal-username" label="Username" error={errors.username?.message}>
+          {(aria) => (
+            <Input
+              {...aria}
+              {...register('username', { required: 'Enter your username' })}
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+            />
+          )}
+        </PortalAuthField>
+
+        <PortalAuthField id="portal-password" label="Password" error={errors.password?.message}>
+          {(aria) => (
+            <Input
+              {...aria}
+              {...register('password', { required: 'Enter your password' })}
+              type="password"
+              autoComplete="current-password"
+            />
+          )}
+        </PortalAuthField>
+
+        <Button type="submit" size="lg" disabled={isSubmitting}>
+          {isSubmitting ? 'Signing in…' : 'Sign in'}
+        </Button>
+      </form>
+    </PortalAuthCard>
+  )
+}
+
+function messageFor(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return 'Could not reach the server. Check your connection and try again.'
+  }
+  if (error.is(PORTAL_ACCOUNT_LOCKED)) {
+    return 'This account is locked for 15 minutes after five failed attempts.'
+  }
+  if (error.is(PORTAL_INVALID_CREDENTIALS)) {
+    return 'Username or password is incorrect.'
+  }
+  if (error.is(PORTAL_TOO_MANY_ATTEMPTS) || error.status === 429) {
+    return 'Too many attempts. Wait a minute and try again.'
+  }
+  return 'Something went wrong signing you in. Try again.'
+}

@@ -61,6 +61,17 @@ public class ObAttachment {
     @Column(name = "prereq_template_task_id")
     private Long prereqTemplateTaskId;
 
+    /**
+     * C-121 · the fifth owner — a client's own prerequisite task instance,
+     * carrying what the client submitted (CP-04) plus whatever staff filed
+     * back against it. {@code V20260908_1600} added the column and the CHECK
+     * arm for B-125's read side ({@code ObClientPrereqAssembler#submissionsOf})
+     * but no write path ever set it until now — this field was the missing
+     * half.
+     */
+    @Column(name = "prereq_task_id")
+    private Long prereqTaskId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "kind", nullable = false, length = 12)
     private ObAttachmentKind kind = ObAttachmentKind.SUBMISSION;
@@ -152,6 +163,14 @@ public class ObAttachment {
 
     public void setPrereqTemplateTaskId(Long prereqTemplateTaskId) {
         this.prereqTemplateTaskId = prereqTemplateTaskId;
+    }
+
+    public Long getPrereqTaskId() {
+        return prereqTaskId;
+    }
+
+    public void setPrereqTaskId(Long prereqTaskId) {
+        this.prereqTaskId = prereqTaskId;
     }
 
     public ObAttachmentKind getKind() {

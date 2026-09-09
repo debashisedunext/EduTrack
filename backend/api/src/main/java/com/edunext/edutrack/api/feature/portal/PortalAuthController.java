@@ -1,126 +1,200 @@
 package com.edunext.edutrack.api.feature.portal;
 
+import com.edunext.edutrack.api.security.ClientAddress;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * A-130 · {@code /portal/auth} — how a client gets a session.
+ * C-121 · CP-01 — {@code /portal/auth/**}: login, the credential-link
+ * redemption that stands in for a first login, session refresh, logout and
+ * the forced password set.
  *
- * <h2>Three routes, all unauthenticated, and that is the point</h2>
+ * <h2>Not yet reachable — flagged for Stream A</h2>
  *
- * <p>Nobody holding a portal token needs any of these; everybody who needs them
- * holds no token. So they are in {@code SecurityConfig.PUBLIC_API_PATHS},
- * alongside {@code /auth/login} and A-120's public sign-off surface, and they
- * carry {@code @SecurityRequirements()} so the contract says so too.
+ * <p>{@code login}, {@code redeem} and {@code refresh} must be public routes
+ * — the caller holds no bearer token by definition, exactly {@code
+ * AuthController.login}'s own case. {@code SecurityConfig.PUBLIC_API_PATHS}
+ * is where that is declared, and this task was told not to edit anything
+ * under {@code api/security/}. So today these three routes 401 before they
+ * are ever reached: {@code SecurityConfig}'s {@code authorizeHttpRequests}
+ * rule requires authentication on {@code /api/**} ahead of {@code
+ * PortalRouteFilter} ever running. <b>Stream A needs to add</b>:
+ * <pre>
+ *   "/api/v1/portal/auth/login",
+ *   "/api/v1/portal/auth/refresh",
+ *   "/api/v1/portal/auth/redeem",
+ * </pre>
+ * to that array. {@code logout} and {@code password} are correctly
+ * authenticated already — a caller reaches them holding a CLIENT token.
  *
- * <p>They sit under {@code /api/v1/portal/} anyway, which
- * {@code PortalRouteGuard} polices. That is safe and deliberate:
- * {@code blocks} answers false for a caller who is neither staff nor client,
- * because "which kind of signed-in caller is this?" is not a question that
- * arises until there is one. A staff token on these routes still 404s, which is
- * correct — a staff member has no business redeeming a client's link.
+ * <h2>Prefix, and why {@code /portal/auth} rather than {@code
+ * /portal/onboarding/auth}</h2>
  *
- * <h2>What stands in for authentication</h2>
- *
- * <p>On the two credential routes, the token in the path: a 256-bit random
- * value whose SHA-256 is the only copy we hold, single-use, seven-day TTL.
- * A-120's public surface makes the same trade in the same words — opening the
- * path does not open the data.
- *
- * <p>On login, the password. There is no rate limiter on it yet, and that is
- * this task's most significant omission rather than an oversight: A-076's
- * {@code LoginRateLimiter} is keyed on a staff identifier and budgets against
- * {@code /auth/login}, so pointing it here needs a second budget rather than a
- * second caller. Until it lands, {@code client_accounts.failed_attempts} and
- * the fifteen-minute lock are what bound guessing against a <i>known</i>
- * username — they do nothing about one password sprayed across many. Named on
- * the task, and named here.
+ * <p>Login precedes knowing which module the client will choose — {@link
+ * com.edunext.edutrack.api.feature.portal.onboarding} would be the wrong
+ * home for a route that exists before either module is picked. Mirrors
+ * {@code AuthController}'s own {@code /auth/**} namespacing, one level under
+ * the portal's own prefix rather than the staff one.
  */
 @RestController
-@RequestMapping("/api/v1/portal/auth")
+@RequestMapping(path = "/api/v1/portal/auth", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "portal")
-@SecurityRequirements()
-/*
-  Said explicitly rather than inherited. Without it these three would take
-  SecurityConfig's "any authenticated caller" default and read, in the source,
-  exactly like routes somebody had reasoned about — which is what
-  RouteAuthorizationTest refuses. The permit is real: the caller has no account
-  yet, or is signing in to get one.
-*/
-@PreAuthorize("permitAll()")
 class PortalAuthController {
 
-    private final PortalAuthService authentication;
-    private final PortalCredentialService credentials;
-    private final ClientAccessTokenIssuer tokens;
+    private final PortalLoginService login;
+    private final PortalLoginRateLimiter rateLimiter;
+    private final PortalRefreshTokenIssuer refreshTokens;
 
-    PortalAuthController(PortalAuthService authentication,
-                         PortalCredentialService credentials,
-                         ClientAccessTokenIssuer tokens) {
-        this.authentication = authentication;
-        this.credentials = credentials;
-        this.tokens = tokens;
+    PortalAuthController(PortalLoginService login, PortalLoginRateLimiter rateLimiter,
+                         PortalRefreshTokenIssuer refreshTokens) {
+        this.login = login;
+        this.rateLimiter = rateLimiter;
+        this.refreshTokens = refreshTokens;
+    }
+
+    @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @SecurityRequirements
+    @PreAuthorize("permitAll()")
+    @Operation(operationId = "portalLogin",
+            summary = "Exchange a client's own username and password for a portal session (CP-01)")
+    ResponseEntity<PortalAuthDtos.PortalSessionResponse> login(
+            @Valid @RequestBody PortalAuthDtos.PortalLoginRequest request,
+            HttpServletRequest httpRequest) {
+
+        String clientKey = ClientAddress.of(httpRequest);
+        rateLimiter.checkAndSpend(request.username(), clientKey)
+                .ifPresent(retryAfter -> {
+                    throw new PortalTooManyLoginAttemptsException(retryAfter);
+                });
+
+        PortalLoginService.Signed signed;
+        try {
+            signed = login.login(request.username(), request.password());
+        } catch (PortalInvalidCredentialsException e) {
+            rateLimiter.recordFailure(request.username(), clientKey);
+            throw e;
+        }
+        rateLimiter.recordSuccess(request.username(), clientKey);
+
+        return respond(signed);
     }
 
     /**
-     * <p>200 with a bearer token the caller stores and sends. <b>No refresh
-     * cookie</b> — see {@link PortalAuthService}'s note on why rotation is not
-     * in this task, and what that costs.
+     * The newly-created / reset-password path's own entry point — see {@link
+     * PortalLoginService}'s class note on why this authenticates rather than
+     * merely validating.
      */
-    @PostMapping(path = "/login",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(operationId = "portalLogin", summary = "Sign in to the client portal")
-    PortalAuthDtos.LoginResponseEnvelope login(@Valid @RequestBody PortalAuthDtos.LoginRequest request) {
-        ClientAccountRow account = authentication.authenticate(request.username(), request.password());
-        ClientAccessTokenIssuer.Minted minted = tokens.issue(account);
+    @PostMapping(path = "/redeem", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @SecurityRequirements
+    @PreAuthorize("permitAll()")
+    @Operation(operationId = "portalRedeemCredential",
+            summary = "Redeem a one-time credential link and start a session (CP-01)")
+    ResponseEntity<PortalAuthDtos.PortalSessionResponse> redeem(
+            @Valid @RequestBody PortalAuthDtos.PortalRedeemRequest request,
+            HttpServletRequest httpRequest) {
 
-        return new PortalAuthDtos.LoginResponseEnvelope(new PortalAuthDtos.LoginResponse(
-                minted.value(), minted.expiresInSeconds(), PortalAuthDtos.Client.of(account)));
+        // The 256-bit token itself is the rate-limited identifier here — there
+        // is no username to key on before the token is looked up.
+        String clientKey = ClientAddress.of(httpRequest);
+        rateLimiter.checkAndSpend(request.token(), clientKey)
+                .ifPresent(retryAfter -> {
+                    throw new PortalTooManyLoginAttemptsException(retryAfter);
+                });
+
+        PortalLoginService.Signed signed;
+        try {
+            signed = login.redeem(request.token());
+        } catch (PortalInvalidCredentialTokenException e) {
+            rateLimiter.recordFailure(request.token(), clientKey);
+            throw e;
+        }
+        rateLimiter.recordSuccess(request.token(), clientKey);
+        return respond(signed);
+    }
+
+    @PostMapping(path = "/refresh")
+    @SecurityRequirements
+    @PreAuthorize("permitAll()")
+    @Operation(operationId = "portalRefreshSession",
+            summary = "Rotate the portal refresh token and issue a new access token (CP-01)")
+    ResponseEntity<PortalAuthDtos.PortalSessionResponse> refresh(
+            @CookieValue(name = "${edutrack.auth.portal-refresh-token.cookie-name:portal_refresh_token}",
+                    required = false) String refreshToken) {
+
+        PortalLoginService.Signed signed = login.refresh(refreshToken);
+        return respond(signed);
+    }
+
+    @PostMapping(path = "/logout")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "portalLogout", summary = "End the portal session (CP-01)")
+    ResponseEntity<Void> logout(
+            @CookieValue(name = "${edutrack.auth.portal-refresh-token.cookie-name:portal_refresh_token}",
+                    required = false) String refreshToken) {
+
+        login.logout(refreshToken);
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, refreshTokens.clearing().toString())
+                .build();
     }
 
     /**
-     * Is this link still good, and who is it for?
-     *
-     * <p>A {@code GET} that changes nothing, so following the link twice before
-     * choosing a password is harmless — and so a mail client that prefetches
-     * URLs cannot spend somebody's credential link by looking at it. That last
-     * point is the reason redemption below is a {@code POST} and not this.
+     * The forced-change screen's submit — CP-01's other half. No {@code
+     * currentPassword}; see {@link PortalAuthDtos.PortalSetPasswordRequest}.
      */
-    @GetMapping(path = "/credential/{token}", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(operationId = "describePortalCredentialLink",
-            summary = "Whether a credential link is still valid, and the username it is for")
-    PortalAuthDtos.CredentialLinkEnvelope describe(@PathVariable String token) {
-        return new PortalAuthDtos.CredentialLinkEnvelope(credentials.describe(token));
-    }
+    @PatchMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    @Operation(operationId = "portalSetPassword",
+            summary = "Set the client's own password, clearing the forced-change flag (CP-01)")
+    ResponseEntity<Void> setPassword(
+            @Valid @RequestBody PortalAuthDtos.PortalSetPasswordRequest request,
+            Authentication caller) {
 
-    /**
-     * Spends the link and sets the password.
-     *
-     * <p>204 rather than a session: redeeming is not signing in. Handing back a
-     * token here would mean a link in an inbox is directly exchangeable for a
-     * session, so anyone who reads that mailbox later — a shared
-     * {@code info@} address, a forwarded thread — gets in without ever knowing
-     * the password. The client redeems, then signs in with what they chose.
-     */
-    @PostMapping(path = "/credential/{token}",
-            consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(operationId = "redeemPortalCredentialLink",
-            summary = "Choose a password and activate the portal login")
-    ResponseEntity<Void> redeem(@PathVariable String token,
-                                @Valid @RequestBody PortalAuthDtos.RedeemRequest request) {
-        credentials.redeem(token, request.password());
+        login.setPassword(accountId(caller), request.newPassword());
+        // The claim on the token that made this call is now stale for up to
+        // its remaining lifetime — the same window PasswordChangeGate's own
+        // note names for the staff path. The frontend is expected to call
+        // /refresh immediately after a 204 here to pick up a token with no
+        // mustChangePassword claim, rather than waiting out the access
+        // token's natural expiry.
         return ResponseEntity.noContent().build();
+    }
+
+    // ── plumbing ─────────────────────────────────────────────────────────
+
+    private ResponseEntity<PortalAuthDtos.PortalSessionResponse> respond(PortalLoginService.Signed signed) {
+        PortalAuthDtos.PortalSessionResponse body = new PortalAuthDtos.PortalSessionResponse(
+                PortalAuthDtos.PortalSession.issue(signed.account(), signed.accessToken()));
+
+        return signed.refreshCookie()
+                .map(cookie -> ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body))
+                .orElseGet(() -> ResponseEntity.ok(body));
+    }
+
+    /**
+     * The CLIENT principal's own subject — {@code client_accounts.id}, never
+     * a {@code users} id. Not read through {@code CallerIdentity}, which
+     * refuses a CLIENT-typed token by construction; read through {@link
+     * ClientPrincipal} instead, exactly as every other portal route does.
+     */
+    private static long accountId(Authentication caller) {
+        return ClientPrincipal.of(caller)
+                .orElseThrow(() -> new IllegalStateException(
+                        "authenticated portal-auth route reached with no resolvable CLIENT principal"))
+                .accountId();
     }
 }

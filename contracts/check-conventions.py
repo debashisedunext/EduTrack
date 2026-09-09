@@ -29,6 +29,7 @@ VERBS = ("get", "post", "put", "patch", "delete")
 NO_IF_MATCH = {
     "/onboarding/journey-step-items/{itemId}": "A-118 — ticking a checklist entry. Two people ticking two DIFFERENT items on the same service is the normal case, and the only tag available is the step's, from getObJourneyStep: honouring it would fail the second person for touching a sibling item. The race this leaves open is both ticking the SAME item, which has no loser — the outcome is identical either way. The same argument as /projects/{id}/members/{userId}, where the tag would have to come from a collection with none of its own",
     "/me/password":                        "currentPassword already proves current state",
+    "/portal/auth/password":               "C-121 — the portal's own version of /me/password, deliberately without currentPassword: a newly-issued client_accounts row has a password of 32 random bytes nobody knows, so there is nothing to prove by re-typing it. The CLIENT access token minted by portalRedeemCredential or an earlier portalLogin is the proof; the body names the state it wants rather than a delta, /users/{userId}/status's own idiom",
     "/users/{userId}/status":              "idempotent setter, last write wins is correct",
     "/clients/{clientId}/status":          "idempotent setter, last write wins is correct",
     "/clients/bulk-status":                "idempotent setter, like the single-client route it batches — and one If-Match cannot speak for 200 rows, while per-row tags would fail the whole batch because somebody touched one unrelated client",

@@ -112,6 +112,7 @@ each other:**
 | Endpoint | Why not |
 |---|---|
 | `PATCH /me/password` | `currentPassword` already proves you hold the current state |
+| `PATCH /portal/auth/password` | C-121 — the portal's own version of the row above, and deliberately without `currentPassword`: a newly-issued `client_accounts` row has a password of 32 random bytes nobody knows, so there is nothing the caller could prove by re-typing it. What proves the right to set a new one is the CLIENT access token minted by `portalRedeemCredential` or an earlier `portalLogin` — the same idiom `PATCH /users/{id}/status` uses for an idempotent setter: the body names the state it wants rather than a delta |
 | `PATCH /users/{id}/status`, `/clients/{id}/status` | Idempotent setters — last write wins is the correct semantic |
 | `PATCH /notifications/{id}/read`, `/read-all` | Idempotent; a race is harmless |
 | `PATCH /tickets/{id}/priority` | Reason is mandatory and every change is logged, so concurrent changes are visible rather than lost |

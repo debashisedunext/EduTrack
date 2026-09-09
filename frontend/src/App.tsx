@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { LauncherPage } from './features/launcher/LauncherPage'
@@ -12,6 +12,8 @@ import {
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
 import { RequireAuth } from './features/auth/RequireAuth'
+import { PortalAuthProvider } from './features/portal/auth/PortalAuthProvider'
+import { PortalRequireAuth } from './features/portal/auth/PortalRequireAuth'
 
 const AuditLogPage = lazy(() =>
   import('./features/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })),
@@ -98,6 +100,28 @@ const PublicSignoffPage = lazy(() =>
 )
 const PriorityListPage = lazy(() =>
   import('./features/masters/priorities/PriorityListPage').then((m) => ({ default: m.PriorityListPage })),
+)
+const PortalLoginPage = lazy(() =>
+  import('./features/portal/auth/PortalLoginPage').then((m) => ({ default: m.PortalLoginPage })),
+)
+const PortalSetPasswordPage = lazy(() =>
+  import('./features/portal/auth/PortalSetPasswordPage').then((m) => ({ default: m.PortalSetPasswordPage })),
+)
+const PortalModuleChooserPage = lazy(() =>
+  import('./features/portal/PortalModuleChooserPage').then((m) => ({ default: m.PortalModuleChooserPage })),
+)
+const PortalShell = lazy(() =>
+  import('./features/portal/PortalShell').then((m) => ({ default: m.PortalShell })),
+)
+const PortalOnboardingHomePage = lazy(() =>
+  import('./features/portal/onboarding/PortalOnboardingHomePage').then((m) => ({
+    default: m.PortalOnboardingHomePage,
+  })),
+)
+const PortalPrereqTaskDetailPage = lazy(() =>
+  import('./features/portal/onboarding/PortalPrereqTaskDetailPage').then((m) => ({
+    default: m.PortalPrereqTaskDetailPage,
+  })),
 )
 const ProjectDashboardPage = lazy(() =>
   import('./features/projects/ProjectDashboardPage').then((m) => ({ default: m.ProjectDashboardPage })),
@@ -234,6 +258,60 @@ export default function App() {
           at the rest of the application".
         */}
         <Route path="/signoff" element={withSuspense(<PublicSignoffPage />)} />
+
+        {/*
+          C-121 · CP-01..CP-04 — the client portal's own route subtree, plan
+          §2.3: "Portal routes live in their own trees ... a CLIENT principal
+          on any staff route → 404, and vice versa: the fork is at the route
+          tree, not per-endpoint conditionals." This mirrors that fork on the
+          client: entirely outside `RequireAuth` (which reads the *staff*
+          session store) and outside `AppShell`, with its own guard reading
+          its own store.
+
+          `PortalAuthProvider` wraps the whole subtree, login included, rather
+          than sitting above the router the way the staff `AuthProvider` does
+          in `main.tsx` — mounting it only when a browser actually navigates
+          under `/portal/**` means a staff page never spends a
+          `POST /portal/auth/refresh` it has no reason to make. `main.tsx` is
+          Stream D's file and this task was not asked to widen it.
+        */}
+        <Route
+          path="/portal"
+          element={withSuspense(
+            <PortalAuthProvider>
+              <Outlet />
+            </PortalAuthProvider>,
+          )}
+        >
+          <Route path="login" element={withSuspense(<PortalLoginPage />)} />
+          {/* CP-01's other half — the credential-link landing page and the
+              forced-change screen, one component for both (see its own
+              docstring). No `RequireAuth` here: an unauthenticated visitor
+              with `?token=` is the common case. */}
+          <Route path="set-password" element={withSuspense(<PortalSetPasswordPage />)} />
+
+          <Route element={<PortalRequireAuth />}>
+            {/* CP-02. Shell-less, like the staff launcher and for the same
+                reason: a screen about picking a module framed by one
+                module's chrome is a menu of dead ends. */}
+            <Route path="choose" element={withSuspense(<PortalModuleChooserPage />)} />
+
+            <Route element={withSuspense(<PortalShell />)}>
+              {/* CP-03. CP-06/07 (My tickets) are C-122's, running after
+                  this task on the same branch — no `/portal/tickets` route
+                  is registered yet, so the chooser's Ticketing card links to
+                  a path this router does not resolve until that task lands. */}
+              <Route path="onboarding" element={withSuspense(<PortalOnboardingHomePage />)} />
+              <Route
+                path="onboarding/prereq-tasks/:prereqTaskId"
+                element={withSuspense(<PortalPrereqTaskDetailPage />)}
+              />
+            </Route>
+          </Route>
+
+          <Route index element={<Navigate to="/portal/choose" replace />} />
+          <Route path="*" element={<Navigate to="/portal/login" replace />} />
+        </Route>
 
         <Route element={<RequireAuth />}>
           {/*

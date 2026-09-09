@@ -287,7 +287,8 @@ export const getObPrereqTemplateResponse = zod.object({
   "label": zod.string().max(getObPrereqTemplateResponseDataTasksItemDocsItemLabelMax),
   "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
   "fileName": zod.string().optional(),
-  "sizeBytes": zod.number().optional()
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
 }).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
 }).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
 }).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
@@ -364,7 +365,8 @@ export const publishObPrereqTemplateResponse = zod.object({
   "label": zod.string().max(publishObPrereqTemplateResponseDataTasksItemDocsItemLabelMax),
   "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
   "fileName": zod.string().optional(),
-  "sizeBytes": zod.number().optional()
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
 }).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
 }).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
 }).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
@@ -462,7 +464,8 @@ export const reorderObPrereqTemplateTasksResponse = zod.object({
   "label": zod.string().max(reorderObPrereqTemplateTasksResponseDataTasksItemDocsItemLabelMax),
   "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
   "fileName": zod.string().optional(),
-  "sizeBytes": zod.number().optional()
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
 }).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
 }).describe('`ob_prereq_template_tasks` — one task on one version of the master.'))
 }).describe('`ob_prereq_template_tasks` grouped by version — the org-wide\nprerequisites master (OB-14).\n\n\*\*One master, not one per product.\*\* `ob_journey_templates` is keyed\nby product because a journey delivers a thing that was bought;\nprerequisites are the client\'s own responsibilities, which plan §4\nmakes the same set regardless of what they bought. That is why these\npaths carry no template id.\n')
@@ -539,7 +542,8 @@ export const updateObPrereqTemplateTaskResponse = zod.object({
   "label": zod.string().max(updateObPrereqTemplateTaskResponseDataDocsItemLabelMax),
   "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
   "fileName": zod.string().optional(),
-  "sizeBytes": zod.number().optional()
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
 }).describe('`ob_prereq_template_task_docs` — a reference document on a master task.'))
 }).describe('`ob_prereq_template_tasks` — one task on one version of the master.')
 })

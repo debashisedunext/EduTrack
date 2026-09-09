@@ -1,100 +1,75 @@
 package com.edunext.edutrack.api.feature.portal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-import java.time.Instant;
-
 /**
- * A-130 · the wire shapes for the portal's authentication surface.
- *
- * <p>Separate records rather than the staff {@code Session} and {@code Me},
- * per plan §2.3's "separate portal DTO serializers, never staff DTOs with
- * fields hidden client-side". {@code Me} carries role, permissions, projects,
- * reportees and modules; a client has none of them, and a serializer that
- * nulls five fields is one refactor away from filling one in.
+ * C-121 · the wire shapes for {@code /portal/auth/**}, matching {@code
+ * contracts/openapi.yaml}'s {@code Portal}-prefixed schemas (plan §9 —
+ * "separate portal DTO serializers, never staff DTOs with fields hidden
+ * client-side").
  */
 final class PortalAuthDtos {
 
     private PortalAuthDtos() {
     }
 
-    /**
-     * <p>No complexity rule on the way in, exactly as {@code LoginRequest}
-     * declines one: policy applies when a password is <i>set</i>, not when one
-     * is offered. Rejecting a malformed password here would tell an attacker
-     * which candidates are not worth trying, and would lock out any account
-     * whose password predates a later policy change.
-     */
-    record LoginRequest(
-            @NotBlank @Size(max = 150)
-            @Schema(description = "The username from the credential mail, e.g. ACME.ravi. "
-                    + "Matched case-insensitively.")
-            String username,
+    // ── requests ──────────────────────────────────────────────────────
 
-            @NotBlank
-            @Schema(description = "Plain password. Verified against an Argon2id hash; never logged or stored.")
-            String password) {
+    record PortalLoginRequest(
+            @NotBlank @Size(max = 50) String username,
+            @NotBlank @Size(max = 128) String password) {
+    }
+
+    record PortalRedeemRequest(@NotBlank @Size(max = 200) String token) {
     }
 
     /**
-     * <p>{@code expiresIn} is seconds, not an absolute time: a client whose
-     * clock disagrees with ours would compute the wrong deadline from a
-     * timestamp, and a duration cannot be misread.
+     * No {@code currentPassword}. {@code ClientCredentialTokens}' own note
+     * explains why: the account is created with a hash of 32 random bytes
+     * "never returned, never logged and immediately discarded" — nobody,
+     * including the client, ever knows it. What proves this call's right to
+     * set a new one is the CLIENT-typed access token minted by {@code
+     * /redeem}, not a password the client cannot possibly supply.
      */
-    record LoginResponse(String accessToken, int expiresIn, Client client) {
+    record PortalSetPasswordRequest(@NotBlank @Size(min = 8, max = 128) String newPassword) {
     }
 
+    // ── responses ─────────────────────────────────────────────────────
+
     /**
-     * The signed-in client, as the portal shell renders it.
+     * {@code PortalMe} — the module chooser's whole source of truth (CP-02).
      *
-     * <p>Two ids and a name. Which trees this login can reach is derivable —
-     * a null id means that tree is empty — and stating it as booleans lets the
-     * shell decide which cards to draw without inventing a second vocabulary
-     * for the same fact.
+     * @param hasTicketing  a card for the ticketing module renders when true.
+     * @param hasOnboarding a card for the onboarding module renders when true.
+     *                      {@link ClientPrincipal}'s own doc: "at least one of
+     *                      the two is non-null", so at least one is always true.
      */
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record Client(String username, String displayName,
-                  boolean hasTicketing, boolean hasOnboarding) {
+    record PortalMe(long accountId, String displayName, String email,
+                    boolean hasTicketing, boolean hasOnboarding) {
 
-        static Client of(ClientAccountRow account) {
-            return new Client(account.username(), account.displayName(),
+        static PortalMe from(ClientAccountRow account) {
+            return new PortalMe(account.id(), account.displayName(), account.email(),
                     account.clientId() != null, account.obClientId() != null);
         }
     }
 
     /**
-     * What the redemption page needs before it can ask for a password.
-     *
-     * <p>The username is returned because the client has to know what to sign
-     * in with afterwards, and it is not a secret — it is in the mail this link
-     * came from. Nothing else about the account is: no email, no client name,
-     * no ids. Anybody holding the link can read this, and the link is a bearer
-     * credential in an inbox we do not control.
+     * {@code PortalSession} — {@code Session}'s shape, one principal type
+     * over. No {@code role}, no {@code landingRoute}: a portal caller has no
+     * role, and CP-02's module chooser — not a role table — decides where
+     * this session lands.
      */
-    record CredentialLink(String username, String displayName, Instant expiresAt) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record PortalSession(String accessToken, Integer expiresIn, boolean mustChangePassword, PortalMe user) {
+
+        static PortalSession issue(ClientAccountRow account, PortalAccessToken token) {
+            return new PortalSession(token.value(), token.expiresInSeconds(),
+                    account.mustChangePassword(), PortalMe.from(account));
+        }
     }
 
-    /**
-     * <p>The token travels in the path rather than in this body, so the page
-     * can validate a link on load with a {@code GET} — one shape for both
-     * calls, and no token in a body that a proxy might log differently from a
-     * URL.
-     */
-    record RedeemRequest(
-            @NotBlank
-            @Size(max = PortalPasswordRules.MAX_LENGTH,
-                    message = "That password is longer than " + PortalPasswordRules.MAX_LENGTH + " characters.")
-            @Schema(description = "The password the client is choosing. Must satisfy the portal policy: "
-                    + "at least 12 characters with upper case, lower case, a digit and a symbol.")
-            String password) {
-    }
-
-    record LoginResponseEnvelope(LoginResponse data) {
-    }
-
-    record CredentialLinkEnvelope(CredentialLink data) {
+    record PortalSessionResponse(PortalSession data) {
     }
 }

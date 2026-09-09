@@ -46,6 +46,7 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObPrereqTemplateTaskDocDownloadUrl } from './obPrereqTemplateTaskDocDownloadUrl';
 
 /**
  * `ob_prereq_template_task_docs` — a reference document on a master task.
@@ -62,4 +63,10 @@ document, shown to the client. What comes back the other way is
   attachmentId: number;
   fileName?: string;
   sizeBytes?: number;
+  /** Short-lived signed URL, present only for a CLEAN, non-tombstoned
+attachment. Added by C-121 for CP-04's own read; additive to
+this schema, so the staff OB-05 reader is unaffected by its
+absence.
+ */
+  downloadUrl?: ObPrereqTemplateTaskDocDownloadUrl;
 }

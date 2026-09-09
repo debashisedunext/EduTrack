@@ -167,6 +167,7 @@ public class ObAttachmentPipeline {
             case STEP -> row.setStepId(ownerId);
             case SIGNOFF -> row.setSignoffId(ownerId);
             case PREREQ_TEMPLATE_TASK -> row.setPrereqTemplateTaskId(ownerId);
+            case PREREQ_TASK -> row.setPrereqTaskId(ownerId);
         }
         row.setKind(kind);
         row.setUploadedByType(uploader.type());
@@ -287,6 +288,9 @@ public class ObAttachmentPipeline {
         if (row.getPrereqTemplateTaskId() != null) {
             return ObAttachmentOwner.PREREQ_TEMPLATE_TASK;
         }
+        if (row.getPrereqTaskId() != null) {
+            return ObAttachmentOwner.PREREQ_TASK;
+        }
         return null;
     }
 
@@ -300,6 +304,7 @@ public class ObAttachmentPipeline {
             case STEP -> row.getStepId();
             case SIGNOFF -> row.getSignoffId();
             case PREREQ_TEMPLATE_TASK -> row.getPrereqTemplateTaskId();
+            case PREREQ_TASK -> row.getPrereqTaskId();
         };
     }
 
