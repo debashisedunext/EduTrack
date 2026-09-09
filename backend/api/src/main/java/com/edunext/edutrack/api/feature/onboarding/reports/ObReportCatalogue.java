@@ -16,25 +16,29 @@ import static com.edunext.edutrack.api.feature.onboarding.reports.ObReportFilter
 /**
  * B-122 · every onboarding report this deployment knows about, built or not.
  *
- * <h2>Twelve declared, six runnable</h2>
+ * <h2>Twelve declared, seven runnable</h2>
  *
- * <p>Plan §10 specifies twelve. This task builds six of them. The other six are
- * listed with {@code available: false} and a reason rather than omitted, which
- * is {@code listObReports}' own instruction and matters more here than on the
- * ticketing hub, because this catalogue is <em>known</em> to be arriving in
- * parts: hiding a report would make an undecided one indistinguishable from one
- * that does not exist, which is the state the decision is about.
+ * <p>Plan §10 specifies twelve. B-122 built six of them; B-119 adds CSAT
+ * summary as the seventh, alongside the capture surface that report reads.
+ * The remaining five are listed with {@code available: false} and a reason
+ * rather than omitted, which is {@code listObReports}' own instruction and
+ * matters more here than on the ticketing hub, because this catalogue is
+ * <em>known</em> to be arriving in parts: hiding a report would make an
+ * undecided one indistinguishable from one that does not exist, which is the
+ * state the decision is about.
  *
- * <p>The six that are not built split into two groups with genuinely different
- * reasons, and the reasons are on the cards rather than averaged into one
- * sentence:
+ * <p>The five that are not built split into two groups with genuinely
+ * different reasons, and the reasons are on the cards rather than averaged
+ * into one sentence:
  *
  * <ul>
- *   <li><b>Five are held pending a product decision.</b> Breach log, escalation
- *       log, owner workload, communication audit and CSAT summary are
+ *   <li><b>Four are held pending a product decision.</b> Breach log,
+ *       escalation log, owner workload and communication audit are
  *       PHASE-2-BUILD-PLAN §3 #8's OB4b group — "all straightforward reads over
  *       data that will already exist", scheduled but not committed to phase 2.
- *       Nothing technical is missing.</li>
+ *       Nothing technical is missing. CSAT summary was the group's fifth card
+ *       until B-119, whose own backlog line asks for the summary as part of the
+ *       same task as the capture surface rather than as a sixth deferral.</li>
  *   <li><b>One is waiting on tables that do not exist.</b> Prerequisite aging
  *       reads {@code ob_client_prereq_tasks}, which is B-124/B-125's and is not
  *       in any applied migration — {@code V20260903_2045__ob_attachments.sql}
@@ -123,6 +127,18 @@ final class ObReportCatalogue {
                     ObReportCategory.CLIENT, null,
                     List.of(DATE_RANGE, CLIENT)),
 
+            // B-119 · built alongside the capture surface rather than held as
+            // OB4b — that task's own backlog line asks for "a public
+            // one-question page, storage, and a summary" as one piece of work.
+            // See CsatSummaryRunner's own javadoc for why this one card moved
+            // out of the group below while its four OB4b siblings did not.
+            ObReportDtos.ObReportDescriptor.built(
+                    CsatSummaryRunner.KEY,
+                    "CSAT summary",
+                    "Go-live survey scores by product.",
+                    ObReportCategory.QUALITY, DONUT,
+                    List.of(DATE_RANGE, PRODUCT)),
+
             // ── declared, not runnable here ─────────────────────────────────
             ObReportDtos.ObReportDescriptor.held(
                     "prereq-aging",
@@ -157,14 +173,7 @@ final class ObReportCatalogue {
                     "Communication audit per client",
                     "Every recorded conversation, chronologically.",
                     ObReportCategory.CLIENT, null,
-                    List.of(DATE_RANGE, CLIENT), HELD_AS_OB4B),
-
-            ObReportDtos.ObReportDescriptor.held(
-                    "csat-summary",
-                    "CSAT summary",
-                    "Go-live survey scores by product.",
-                    ObReportCategory.QUALITY, DONUT,
-                    List.of(DATE_RANGE, PRODUCT), HELD_AS_OB4B));
+                    List.of(DATE_RANGE, CLIENT), HELD_AS_OB4B));
 
     /** Every descriptor, in the order the hub groups them. */
     static List<ObReportDtos.ObReportDescriptor> declared() {

@@ -153,7 +153,13 @@ public class ObSignoffAcceptService {
         List<String> gateFailures = completeStepIfAny(signoff);
         boolean stepCompleted = signoff.getKind() == ObSignoffKind.STEP && gateFailures.isEmpty();
 
-        invalidateSessionAfterCommit(sessionToken);
+        // B-119 · a GO_LIVE session is deliberately NOT spent here. See
+        // invalidateSessionAfterCommit's own javadoc for why leaving it
+        // alive is safe, and ObSignoffCsatService for what it is left alive
+        // for.
+        if (signoff.getKind() != ObSignoffKind.GO_LIVE) {
+            invalidateSessionAfterCommit(sessionToken);
+        }
 
         return new PublicSignoffAcceptDtos.AcceptResult(
                 detailOf(signoff),
@@ -288,6 +294,35 @@ public class ObSignoffAcceptService {
      *
      * <p>Outside a transaction (a unit test calling the method directly) the
      * synchronisation manager is not active, so the invalidation runs inline.
+     *
+     * <h2>B-119 · not called at all for a {@code GO_LIVE} sign-off</h2>
+     *
+     * <p>{@code accept}'s only caller of this method skips it for
+     * {@code GO_LIVE} entirely, and the reason is CSAT. The contract rides
+     * the accept session for the go-live survey rather than minting a second
+     * one — "a second link emailed afterwards is a second thing to ignore" —
+     * which means the session has to still resolve after this transaction
+     * commits. Killing it here, as a {@code STEP} acceptance's session is
+     * killed, would leave {@code ObSignoffCsatService} with nothing to read.
+     *
+     * <p><b>This is safe without the invalidation, and here is why a second
+     * {@code accept} on the same token still cannot happen:</b> {@code
+     * accept}'s own status check runs before this method is ever reached —
+     * {@code signoff.getStatus() != PENDING} throws for any second call,
+     * because the first call already moved the row to {@code SIGNED}. The
+     * session being technically still resolvable buys a second caller
+     * nothing; the row-level guard is what was actually doing the work here,
+     * same as {@code ObSignoffObjectService}'s own comment says about why its
+     * status check "is not redundant with the session lookup" — it is the
+     * other direction of the identical argument.
+     *
+     * <p>The session is not immortal even so: {@code ObSignoffSessions}' own
+     * fifteen-minute TTL still applies unchanged, so a client who accepts and
+     * never opens the survey loses nothing but leaves a dead Redis key behind
+     * exactly as before. {@code ObSignoffCsatService} additionally spends the
+     * session itself the moment a survey is actually recorded, so the common
+     * path — accept, then answer — still ends with no live session, just one
+     * request later than a {@code STEP} acceptance's.
      */
     private void invalidateSessionAfterCommit(String sessionToken) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {

@@ -124,6 +124,27 @@ public class ObSignoff {
     @Column(name = "pdf_storage_key", length = 400)
     private String pdfStorageKey;
 
+    /**
+     * B-119 · the one-question go-live survey, 1-5. {@code null} until
+     * answered, and for every {@code STEP} row, which is never offered one.
+     * {@code ck_ob_signoffs_csat} binds it to {@link #csatSubmittedAt}: both
+     * set or neither.
+     */
+    @Column(name = "csat_score")
+    private Integer csatScore;
+
+    /** B-119 · the optional remark beside the score. Not bound into the CHECK — a rating needs no comment. */
+    @Column(name = "csat_comment", length = 2000)
+    private String csatComment;
+
+    /**
+     * B-119 · when the survey was answered. The "already surveyed" guard
+     * {@code ObSignoffCsatService} reads before accepting a second answer,
+     * and the instant the summary report groups on.
+     */
+    @Column(name = "csat_submitted_at")
+    private Instant csatSubmittedAt;
+
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
@@ -314,6 +335,30 @@ public class ObSignoff {
 
     public void setPdfStorageKey(String pdfStorageKey) {
         this.pdfStorageKey = pdfStorageKey;
+    }
+
+    public Integer getCsatScore() {
+        return csatScore;
+    }
+
+    public void setCsatScore(Integer csatScore) {
+        this.csatScore = csatScore;
+    }
+
+    public String getCsatComment() {
+        return csatComment;
+    }
+
+    public void setCsatComment(String csatComment) {
+        this.csatComment = csatComment;
+    }
+
+    public Instant getCsatSubmittedAt() {
+        return csatSubmittedAt;
+    }
+
+    public void setCsatSubmittedAt(Instant csatSubmittedAt) {
+        this.csatSubmittedAt = csatSubmittedAt;
     }
 
     public Instant getCreatedAt() {

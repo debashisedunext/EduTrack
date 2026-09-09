@@ -261,7 +261,12 @@ const OB_REPORTS = [
   { key: 'escalation-log', title: 'Escalation log', description: 'Internal and client escalations side by side.', category: 'QUALITY', chart: null, filters: ['dateRange', 'client'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
   { key: 'owner-workload', title: 'Owner workload', description: 'Open services per implementor over time.', category: 'DELIVERY', chart: 'stacked-bar', filters: ['dateRange', 'owner'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
   { key: 'communication-audit', title: 'Communication audit per client', description: 'Every recorded conversation, chronologically.', category: 'CLIENT', chart: null, filters: ['dateRange', 'client'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
-  { key: 'csat-summary', title: 'CSAT summary', description: 'Go-live survey scores by product.', category: 'QUALITY', chart: 'donut', filters: ['dateRange', 'product'], available: false, unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).' },
+  // B-119 · built alongside the capture surface rather than held — that
+  // task's backlog line asks for "a public one-question page, storage, and a
+  // summary" as one piece of work, so the real server declares this
+  // available now. Flipped here to match, on prereq-aging's own precedent
+  // above for not leaving two servers disagreeing about one key.
+  { key: 'csat-summary', title: 'CSAT summary', description: 'Go-live survey scores by product.', category: 'QUALITY', chart: 'donut', filters: ['dateRange', 'product'], available: true },
 ];
 
 // ── sign-off ────────────────────────────────────────────────────────────────

@@ -447,6 +447,39 @@ class ObSignoffAcceptServiceTest {
     }
 
     @Nested
+    @DisplayName("the session survives a GO_LIVE acceptance, for CSAT (B-119)")
+    class CsatSessionSurvival {
+
+        @Test
+        @DisplayName("a GO_LIVE acceptance does not spend the session")
+        void goLiveAcceptanceLeavesTheSessionAlone() {
+            ObSignoff signoff = given(pendingStepSignoff());
+            signoff.setKind(ObSignoffKind.GO_LIVE);
+            signoff.setStepId(null);
+
+            service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            // ObSignoffCsatService needs to resolve this same token afterwards
+            // — that is the whole point of not spending it here. A second
+            // ObSignoffAcceptService#accept on the same token still cannot
+            // succeed: the status guard above (no longer PENDING) refuses it
+            // before this method is ever reached.
+            verify(sessions, never()).invalidate(anyString());
+        }
+
+        @Test
+        @DisplayName("a STEP acceptance still spends the session, unchanged")
+        void stepAcceptanceStillSpendsTheSession() {
+            given(pendingStepSignoff());
+            when(stepLifecycle.completeOnClientAcceptance(STEP_ID)).thenReturn(List.of());
+
+            service.accept(SESSION, "Priya Raman", null, requestFrom("203.0.113.9", "UA"));
+
+            verify(sessions).invalidate(SESSION);
+        }
+    }
+
+    @Nested
     @DisplayName("what the response does not carry")
     class Disclosure {
 

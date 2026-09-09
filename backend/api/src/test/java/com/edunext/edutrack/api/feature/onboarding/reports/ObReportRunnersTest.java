@@ -418,6 +418,48 @@ class ObReportRunnersTest {
         }
     }
 
+    @Nested
+    class CsatSummary {
+
+        private final CsatSummaryRunner runner = new CsatSummaryRunner(repository);
+
+        @Test
+        void averagesAndCountsTravelTogether() {
+            when(repository.csatSummary(any(), any(), any(), any())).thenReturn(List.of(
+                    new ObReportRepository.CsatRow("ERP", 4, 18, 0, 0, 1, 1, 2)));
+
+            assertThat(only(runner.run(scope, FROM, TO, NOW, null, ObReportFilters.NONE)))
+                    .containsEntry("product", "ERP")
+                    .containsEntry("responses", 4L)
+                    .containsEntry("averageScore", new BigDecimal("4.5"))
+                    .containsEntry("score3", 1L)
+                    .containsEntry("score4", 1L)
+                    .containsEntry("score5", 2L);
+        }
+
+        /**
+         * One decimal place. The score total and count are both integers, and
+         * an unrounded division would print a repeating fraction on screen.
+         */
+        @Test
+        void theAverageRoundsToOneDecimalPlace() {
+            when(repository.csatSummary(any(), any(), any(), any())).thenReturn(List.of(
+                    new ObReportRepository.CsatRow("ERP", 3, 10, 0, 0, 1, 1, 1)));
+
+            assertThat(only(runner.run(scope, FROM, TO, NOW, null, ObReportFilters.NONE)))
+                    .containsEntry("averageScore", new BigDecimal("3.3"));
+        }
+
+        @Test
+        void theProductFilterIsPassedThrough() {
+            when(repository.csatSummary(any(), any(), any(), any())).thenReturn(List.of());
+
+            runner.run(scope, FROM, TO, NOW, null, new ObReportFilters(3L, null, null));
+
+            verify(repository).csatSummary(scope, FROM, TO, 3L);
+        }
+    }
+
     private static Map<String, Object> only(ObReportRunner.Result result) {
         assertThat(result.rows()).hasSize(1);
         return result.rows().get(0);

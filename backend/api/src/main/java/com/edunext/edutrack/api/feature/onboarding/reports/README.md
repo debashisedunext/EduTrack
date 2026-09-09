@@ -10,10 +10,10 @@ behind the viewer, JSON or a file).
 |---|---|
 | `ObReportController` | The two routes, `If-None-Match`, and the `?export=` branch. |
 | `ObReportService` | Catalogue, date window, scope resolution, the ETag, dispatch. |
-| `ObReportCatalogue` | The twelve descriptors plan §10 specifies — six runnable. |
+| `ObReportCatalogue` | The twelve descriptors plan §10 specifies — seven runnable. |
 | `ObReportScope` | A-112's row-scope rule, expressed as SQL predicates. |
 | `ObReportRepository` | Every statement, in one auditable file. |
-| `ObReportRunner` + six runners | "What are the columns and rows", and nothing else. |
+| `ObReportRunner` + seven runners | "What are the columns and rows", and nothing else. |
 | `ObStepRag` | The health formula, shared by the chip and the `?rag=` filter. |
 | `ObReportExportService` | The translation into the shared export engine. |
 | `ObReportSensitivity` | B-123 · what a column holds, as a disclosure question. |
@@ -111,13 +111,15 @@ engine above.
 
 ## What is deliberately not built
 
-Six of the twelve descriptors are `available: false`, in two groups with
+Five of the twelve descriptors are `available: false`, in two groups with
 genuinely different reasons, which is why the reasons are on the cards rather
 than averaged into one sentence:
 
-- **Five are held as OB4b** pending the product decision in
+- **Four are held as OB4b** pending the product decision in
   PHASE-2-BUILD-PLAN §11.6 — breach log, escalation log, owner workload,
-  communication audit, CSAT summary. Nothing technical is missing.
+  communication audit. Nothing technical is missing. CSAT summary was this
+  group's fifth card until B-119 built it alongside the survey's own capture
+  surface — see `CsatSummaryRunner`'s javadoc.
 - **Prerequisite aging is waiting on tables.** It reads
   `ob_client_prereq_tasks`, which B-124/B-125 create and no applied migration
   contains. A-118's MSW mock declared it available; B-122 corrected the mock

@@ -26,7 +26,8 @@ package com.edunext.edutrack.api.feature.onboarding.reports;
  *
  * @param productId  one of §4's products, or null for every product. Honoured
  *                   by {@code journey-funnel}, {@code tat-compliance},
- *                   {@code stuck-and-aging} and {@code time-to-live}.
+ *                   {@code stuck-and-aging}, {@code time-to-live} and
+ *                   {@code csat-summary}.
  * @param obClientId one boarding client, or null for every client. Honoured by
  *                   {@code signoff-pending}.
  * @param rag        GREEN / AMBER / RED, or null for every health. Honoured by

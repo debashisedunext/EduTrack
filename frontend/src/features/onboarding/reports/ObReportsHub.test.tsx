@@ -60,12 +60,15 @@ const CATALOGUE = {
           'The prerequisites master and its per-client tasks are not built yet (B-124, B-125), so there is nothing to age.',
       },
       {
-        key: 'csat-summary',
-        title: 'CSAT summary',
-        description: 'Go-live survey scores by product.',
+        // B-119 moved csat-summary out of the held OB4b group and into the
+        // built set, so breach-log is this fixture's illustrative "held"
+        // card now — see that task's own comment on the real catalogue.
+        key: 'breach-log',
+        title: 'Breach log',
+        description: 'Every TAT breach, with its ladder.',
         category: 'QUALITY',
-        chart: 'donut',
-        filters: ['dateRange', 'product'],
+        chart: null,
+        filters: ['dateRange', 'product', 'owner'],
         available: false,
         unavailableReason: 'Held as OB4b pending the reports decision (PHASE-2-BUILD-PLAN §11.6).',
       },
@@ -139,8 +142,8 @@ describe('OB-10 the onboarding reports hub', () => {
 
     await screen.findByRole('heading', { name: 'Journey funnel by product' })
 
-    expect(screen.queryByRole('link', { name: /CSAT summary/ })).not.toBeInTheDocument()
-    const card = screen.getByRole('group', { name: 'CSAT summary — not available' })
+    expect(screen.queryByRole('link', { name: /Breach log/ })).not.toBeInTheDocument()
+    const card = screen.getByRole('group', { name: 'Breach log — not available' })
     expect(within(card).getByText(/Held as OB4b/)).toBeInTheDocument()
   })
 
@@ -399,7 +402,7 @@ describe('OB-10 the viewer', () => {
 
   it('says a report is not built rather than showing an empty table', async () => {
     catalogue()
-    renderViewer('/onboarding/reports/csat-summary')
+    renderViewer('/onboarding/reports/breach-log')
 
     expect(await screen.findByText('Not built yet')).toBeInTheDocument()
     expect(screen.getByText(/Held as OB4b/)).toBeInTheDocument()

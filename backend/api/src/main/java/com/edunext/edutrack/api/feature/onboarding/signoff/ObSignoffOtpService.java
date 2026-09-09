@@ -217,20 +217,26 @@ public class ObSignoffOtpService {
     /**
      * Whether OB-09 should render the survey question.
      *
-     * <p><b>Answered from the kind alone today, and that is a known
-     * shortfall.</b> The contract wants "true only on a {@code GO_LIVE} session
-     * that has not already been surveyed", and there is no CSAT store to ask —
-     * {@code submitObCsat} is unbuilt and Stream B owns it.
+     * <p>B-119 landed the CSAT store, so this is now the contract's actual
+     * rule rather than the kind-only approximation this method used to
+     * apply: "true only on a {@code GO_LIVE} session that has not already
+     * been surveyed". The second half is checked at the client's grain, not
+     * this one row's — {@link ObSignoffRepository#existsByObClientIdAndKindAndCsatSubmittedAtIsNotNull}'s
+     * own javadoc explains why: a client with several {@code GO_LIVE}
+     * journeys has answered once the client has answered once, whichever
+     * journey's session did it.
      *
-     * <p>Erring true means a client who somehow surveyed twice sees the
-     * question twice, and {@code submitObCsat} refuses the second with the
-     * {@code 422} the contract already declares for exactly that case. Erring
-     * false would hide the question from every legitimate first-time client.
-     * Wrong in the direction a later route can correct rather than the one that
-     * silently drops a feature. Revisit when the CSAT store lands.
+     * <p>Still errs true for a {@code STEP} session's own edge cases in the
+     * same direction the previous version chose deliberately: a caller who
+     * somehow reaches {@code submitObCsat} on an ineligible session is
+     * refused there, by {@code CsatNotOfferedException}'s {@code 422} — this
+     * flag only decides whether OB-09 draws the question, never whether the
+     * server accepts an answer.
      */
-    private static boolean csatOffered(ObSignoff signoff) {
-        return signoff.getKind() == ObSignoffKind.GO_LIVE;
+    private boolean csatOffered(ObSignoff signoff) {
+        return signoff.getKind() == ObSignoffKind.GO_LIVE
+                && !signoffs.existsByObClientIdAndKindAndCsatSubmittedAtIsNotNull(
+                        signoff.getObClientId(), ObSignoffKind.GO_LIVE);
     }
 
     /**
