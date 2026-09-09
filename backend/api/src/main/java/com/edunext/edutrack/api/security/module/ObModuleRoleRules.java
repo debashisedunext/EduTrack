@@ -131,6 +131,10 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/publish", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/steps", ADMIN_ONLY);
         put(m, "PUT", "/api/v1/onboarding/journey-templates/{templateId}/steps/order", ADMIN_ONLY);
+        // C-123 · the Module Service catalogue's own two writes — the same
+        // ADMIN_ONLY every other journey-templates write above already carries.
+        put(m, "PUT", "/api/v1/onboarding/journey-templates/order", ADMIN_ONLY);
+        put(m, "PUT", "/api/v1/onboarding/journey-templates/{templateId}/depends-on", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/journey-template-steps/{stepId}", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/docs", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/items", ADMIN_ONLY);

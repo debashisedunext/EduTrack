@@ -175,6 +175,48 @@ class ObJourneyTemplateController {
         return new ObJourneyTemplateDtos.StepResponse(ObJourneyTemplateDtos.StepDetail.of(step, List.of(), List.of()));
     }
 
+    @PutMapping(value = "/journey-templates/order", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(operationId = "reorderObJourneyTemplateCatalogue",
+            summary = "The Module Service catalogue's ↑/↓ control (C-123)",
+            description = """
+                    `templateIds` is every currently-active template, in the caller's desired \
+                    order — not a delta, and not the same list as `/steps/order`, which reorders \
+                    one template's own steps. Persisted as `sequence` 0..N-1, the order every \
+                    client's journeys from here on instantiate and display in (plan §5 item 5). \
+                    `400` if the list is not exactly the catalogue's current active templates.
+
+                    No `If-Match`: this spans every active template at once rather than one row, \
+                    so two admins reordering seconds apart is a whoever-saved-last-wins replace, \
+                    not a lost update over a single resource a precondition would protect.""")
+    void reorderCatalogue(@Valid @RequestBody ObJourneyTemplateDtos.ReorderCatalogueRequest request) {
+        service.reorderCatalogue(request.templateIds());
+    }
+
+    @PutMapping(value = "/journey-templates/{templateId}/depends-on", consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "updateObJourneyTemplateDependsOn",
+            summary = "The catalogue's \"Service depends on\" picker (C-123)",
+            description = """
+                    `dependsOnTemplateId: null` clears the dependency — the service runs \
+                    unheld from journey start. Cross-product is allowed; a cycle is not — \
+                    `409` naming the template if the chosen dependency already depends, \
+                    directly or transitively, on this one. Works on a draft or the active \
+                    version alike: unlike a step's fields, this is catalogue metadata, not \
+                    journey content an in-flight instantiation has pinned.
+
+                    `If-Match` is required, not optional — `428` without one, `412` if it \
+                    does not match the template's current tag. Read the tag from \
+                    `GET /onboarding/journey-templates/{templateId}`.""")
+    ObJourneyTemplateDtos.ObJourneyTemplateResponse updateDependsOn(
+            @PathVariable long templateId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ObJourneyTemplateDtos.UpdateDependsOnRequest request) {
+        requirePrecondition(templateId, ifMatch);
+        ObJourneyTemplate updated = service.updateDependsOn(templateId, request.dependsOnTemplateId());
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(updated);
+    }
+
     @PutMapping(value = "/journey-templates/{templateId}/steps/order",
             consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.NO_CONTENT)

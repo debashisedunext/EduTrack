@@ -211,12 +211,19 @@ function journeyDto(journey: ObJourney, db: Db) {
 }
 
 function productDto(p: ObProduct, db: Db) {
+  // C-123 · the active template's own catalogue fields, joined here rather
+  // than stored on ObProduct — one active row per product, same "derived,
+  // never a second copy" reasoning journeyCount already follows below.
+  const active = db.obJourneyTemplates.find((t) => t.productId === p.id && t.isActive);
   return {
     ...p,
     journeyCount: db.obClients.reduce(
       (n, c) => n + c.journeys.filter((j) => j.productId === p.id).length,
       0,
     ),
+    activeTemplateId: active?.id ?? null,
+    templateSequence: active?.sequence ?? null,
+    dependsOnTemplateId: active?.dependsOnTemplateId ?? null,
   };
 }
 

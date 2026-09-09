@@ -230,6 +230,71 @@ export const addObJourneyTemplateStepBody = zod.object({
 })
 
 /**
+ * `templateIds` is every currently-active template, in the caller's
+desired order — not a delta, and not the same list as
+`.../steps/order`, which reorders one template's own steps.
+Persisted as `sequence` 0..N-1, the order every client's journeys
+from here on instantiate and display in (plan §5 item 5).
+
+No `If-Match`: this spans every active template at once rather than
+one row, so two admins reordering seconds apart is a
+whoever-saved-last-wins replace, not a lost update over a single
+resource a precondition would protect.
+
+ * @summary The Module Service catalogue's ↑/↓ control (C-123)
+ */
+
+
+
+export const reorderObJourneyTemplateCatalogueBody = zod.object({
+  "templateIds": zod.array(zod.number()).min(1).describe('Every currently-active template, in the caller\'s desired order — not a delta.')
+})
+
+/**
+ * `dependsOnTemplateId: null` clears the dependency — the service runs
+unheld from journey start. Cross-product is allowed; a cycle is
+not — `409` if the chosen dependency already depends, directly or
+transitively, on this template. Works on a draft or the active
+version alike: unlike a step's fields, this is catalogue metadata,
+not journey content an in-flight instantiation has pinned.
+
+`If-Match` is required, not optional — `428` without one, `412` if
+it does not match the template's current tag. Read the tag from
+`GET /onboarding/journey-templates/{templateId}`.
+
+ * @summary The catalogue's "Service depends on" picker (C-123)
+ */
+export const updateObJourneyTemplateDependsOnParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+})
+
+export const updateObJourneyTemplateDependsOnHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObJourneyTemplateDependsOnBody = zod.object({
+  "dependsOnTemplateId": zod.number().nullable().describe('Null clears the dependency: the service runs unheld from journey start.')
+})
+
+export const updateObJourneyTemplateDependsOnResponseDataNameMax = 160;
+
+
+
+export const updateObJourneyTemplateDependsOnResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "name": zod.string().max(updateObJourneyTemplateDependsOnResponseDataNameMax),
+  "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
+  "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
+  "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
+  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "publishedBy": zod.number().nullish(),
+  "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
+}).describe('`ob_journey_templates` — a Module Service, and one version of it.')
+})
+
+/**
  * `stepIds` is the caller's full desired ordering, not a delta —
 every step id the template currently has, each named exactly once.
 Persisted as `sequence` 1..N in that order.

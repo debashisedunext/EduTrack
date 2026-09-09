@@ -16,4 +16,10 @@ public interface ObJourneyTemplateRepository extends JpaRepository<ObJourneyTemp
 
     /** Next version number for a product is this row's {@code version + 1}. */
     Optional<ObJourneyTemplate> findTopByProductIdOrderByVersionDesc(Long productId);
+
+    /** C-123 · the whole Module Service catalogue — one row per product with an active version. */
+    List<ObJourneyTemplate> findByIsActiveTrueOrderBySequenceAsc();
+
+    /** Batch enrichment for {@code GET /onboarding/products}, one statement rather than N. */
+    List<ObJourneyTemplate> findByProductIdInAndIsActiveTrue(java.util.Collection<Long> productIds);
 }

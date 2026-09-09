@@ -124,10 +124,6 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
-                         PanService pan,
-                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
-        this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
-                portalAccounts, Clock.systemUTC());
                          ObClientPrereqService prereqs,
                          PanService pan,
                          com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
@@ -213,15 +209,6 @@ class ObClientWriteService {
             journeys.instantiate(clientId, application.productId());
         }
 
-        // B-126 · the wizard's "create client login" checkbox, honoured rather
-        // than refused. Last, and deliberately so: the account is minted from
-        // the client's name and its primary SPOC, so both rows have to exist,
-        // and the credential mail is queued through B-110's outbox inside this
-        // same transaction — a login created against a client that then rolls
-        // back would be a credential for nothing.
-        if (request.wantsPortalLogin()) {
-            portalAccounts.create(scope, clientId, callerId);
-        }
         // B-109 · the checklist behind the gate. See ObClientPrereqService's
         // own javadoc: idempotent by refusal, so this must run exactly once,
         // which "a client just created" already guarantees.

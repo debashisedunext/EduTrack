@@ -40,6 +40,15 @@ public interface ObJourneyRepository extends JpaRepository<ObJourney, Long>,
     boolean existsByObClientIdAndGateStatus(Long obClientId, ObGateStatus gateStatus);
 
     /**
+     * C-123 · the client's live journey for one product — what a newly
+     * instantiated journey is held behind when its template declares a
+     * service-level dependency (plan §5.5). Same "live" condition as the
+     * uniqueness guard above, so at most one row can match.
+     */
+    Optional<ObJourney> findFirstByObClientIdAndProductIdAndArchivedAtIsNullOrderByIdDesc(
+            Long obClientId, Long productId);
+
+    /**
      * C-107 · the per-journey lock {@code ob_step_history}'s chain needs
      * before an append — {@code TicketRepository#findByIdForUpdate}'s own
      * precedent, one module over. {@code SELECT ... FOR UPDATE} on the parent

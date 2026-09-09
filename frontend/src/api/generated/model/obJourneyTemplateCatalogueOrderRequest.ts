@@ -46,58 +46,11 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObProductTotalTatDays } from './obProductTotalTatDays';
-import type { ObProductActiveTemplateId } from './obProductActiveTemplateId';
-import type { ObProductTemplateSequence } from './obProductTemplateSequence';
-import type { ObProductDependsOnTemplateId } from './obProductDependsOnTemplateId';
 
-/**
- * `ob_products` — the catalogue journey templates bind to.
- */
-export interface ObProduct {
-  id: number;
+export interface ObJourneyTemplateCatalogueOrderRequest {
   /**
-   * Unique case-insensitively. Immutable once a client has bought the product.
-   * @maxLength 32
+   * Every currently-active template, in the caller's desired order — not a delta.
+   * @minItems 1
    */
-  code: string;
-  /** @maxLength 160 */
-  name: string;
-  /** `false` retires the product from the OB-04 picker and changes
-nothing else — in-flight journeys keep running.
- */
-  isActive: boolean;
-  /** Whether an active `ob_journey_templates` row exists for this
-product. **The OB-04 picker requires it**: a purchase with no
-template to instantiate would board a client into nothing.
- */
-  hasActiveTemplate?: boolean;
-  /** Σ of the active template's service TATs, in working days — what a
-journey for this product *costs*, shown on the OB-07 card. Null
-when there is no active template.
- */
-  totalTatDays?: ObProductTotalTatDays;
-  /** Journeys instantiated from this product, across all clients. Inside
-the `ETag`, because it is what a retire decision is made against.
- */
-  journeyCount?: number;
-  /** C-123 · the active template's own id, null when there is none —
-the OB-07 card's link into the designer, and the id
-`PUT /onboarding/journey-templates/order` and
-`PUT /onboarding/journey-templates/{templateId}/depends-on` take.
-The product id itself is never the argument to either.
- */
-  activeTemplateId?: ObProductActiveTemplateId;
-  /** C-123 · the active template's own `sequence` — what
-`/journey-templates/order` writes, driving instantiation and
-display order (plan §5 item 5). Null when there is no active
-template.
- */
-  templateSequence?: ObProductTemplateSequence;
-  /** C-123 · the active template's `dependsOnTemplateId` — the other
-Module Service this one is held behind (plan §5 item 5), or null
-for one that runs unheld. Also null when there is no active
-template to have declared one.
- */
-  dependsOnTemplateId?: ObProductDependsOnTemplateId;
+  templateIds: number[];
 }

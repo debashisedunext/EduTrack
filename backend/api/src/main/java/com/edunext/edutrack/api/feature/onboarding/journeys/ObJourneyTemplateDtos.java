@@ -55,6 +55,20 @@ final class ObJourneyTemplateDtos {
     record ReorderStepsRequest(@NotEmpty List<@NotNull Long> stepIds) {
     }
 
+    /**
+     * C-123 · the OB-07 catalogue's ↑/↓ control, spanning every active
+     * template rather than one template's steps.
+     *
+     * @param templateIds every currently-active template's id, in the
+     *                    caller's desired order — not a delta
+     */
+    record ReorderCatalogueRequest(@NotEmpty List<@NotNull Long> templateIds) {
+    }
+
+    /** C-123 · the catalogue's "Service depends on" picker. {@code null} clears the dependency. */
+    record UpdateDependsOnRequest(Long dependsOnTemplateId) {
+    }
+
     record AddStepItemRequest(
             @NotBlank @Size(max = 300) String label,
             boolean mandatory) {

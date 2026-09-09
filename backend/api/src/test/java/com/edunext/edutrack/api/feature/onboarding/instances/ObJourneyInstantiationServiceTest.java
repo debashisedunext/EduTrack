@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -93,6 +94,12 @@ class ObJourneyInstantiationServiceTest {
         lenient().when(journeys.existsByObClientIdAndGateStatus(any(), any())).thenAnswer(inv ->
                 journeyRows.values().stream().anyMatch(j ->
                         j.getObClientId().equals(inv.<Long>getArgument(0)) && j.getGateStatus() == inv.getArgument(1)));
+        lenient().when(journeys.findFirstByObClientIdAndProductIdAndArchivedAtIsNullOrderByIdDesc(any(), any()))
+                .thenAnswer(inv -> journeyRows.values().stream()
+                        .filter(j -> j.getObClientId().equals(inv.<Long>getArgument(0))
+                                && j.getProductId().equals(inv.<Long>getArgument(1))
+                                && j.getArchivedAt() == null)
+                        .max(Comparator.comparing(ObJourney::getId)));
 
         lenient().when(templates.findByProductIdAndIsActiveTrue(any())).thenAnswer(inv -> {
             ObJourneyTemplate t = new ObJourneyTemplate();
@@ -342,6 +349,102 @@ class ObJourneyInstantiationServiceTest {
             assertThat(created).hasSize(2);
             assertThat(created.get(0).getProductId()).isEqualTo(PRODUCT);
             assertThat(created.get(1).getProductId()).isEqualTo(PRODUCT + 1);
+        }
+    }
+
+    @Nested
+    @DisplayName("service-level dependency — C-123, plan §5 item 5")
+    class ServiceLevelDependency {
+
+        private static final long DEPENDENCY_PRODUCT = 501L;
+        private static final long DEPENDENCY_TEMPLATE = 701L;
+        private static final long DEPENDENT_PRODUCT = 502L;
+        private static final long DEPENDENT_TEMPLATE = 702L;
+
+        private ObJourneyTemplate stubTemplate(long productId, long templateId, Long dependsOnTemplateId) {
+            ObJourneyTemplate t = new ObJourneyTemplate();
+            t.setId(templateId);
+            t.setProductId(productId);
+            t.setVersion(1);
+            t.setActive(true);
+            t.setDependsOnTemplateId(dependsOnTemplateId);
+            lenient().when(templates.findByProductIdAndIsActiveTrue(productId)).thenReturn(Optional.of(t));
+            lenient().when(templates.findById(templateId)).thenReturn(Optional.of(t));
+            lenient().when(templateSteps.findByTemplateIdOrderBySequenceAsc(templateId)).thenReturn(List.of());
+            return t;
+        }
+
+        @Test
+        @DisplayName("instantiates held when the client's dependency journey is still running")
+        void heldWhileDependencyRunning() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
+
+            ObJourney dependency = service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
+            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+
+            assertThat(dependent.getHeldByJourneyId()).isEqualTo(dependency.getId());
+        }
+
+        @Test
+        @DisplayName("instantiates unheld — vacuous — when the client never bought the dependency's product")
+        void vacuousWhenDependencyNeverBought() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
+
+            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+
+            assertThat(dependent.getHeldByJourneyId()).isNull();
+        }
+
+        @Test
+        @DisplayName("instantiates unheld when the client's dependency journey has already completed")
+        void vacuousWhenDependencyCompleted() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
+
+            ObJourney dependency = service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
+            dependency.setCompletedAt(Instant.now());
+
+            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+
+            assertThat(dependent.getHeldByJourneyId()).isNull();
+        }
+
+        @Test
+        @DisplayName("a template with no dependsOnTemplateId never holds, regardless of sibling journeys")
+        void noDependencyDeclaredNeverHolds() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
+
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, null);
+            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+
+            assertThat(dependent.getHeldByJourneyId()).isNull();
+        }
+
+        @Test
+        @DisplayName("instantiateAll orders by template sequence, so the dependency exists before the dependent")
+        void instantiateAllOrdersBySequence() {
+            ObJourneyTemplate dependency = stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            ObJourneyTemplate dependent = stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
+            // Lower sequence instantiates first — the catalogue lists a
+            // dependency before what depends on it, and instantiation order
+            // follows the same number.
+            dependency.setSequence(1);
+            dependent.setSequence(5);
+
+            // Requested in the "wrong" order — the wizard's own multi-select
+            // does not promise one — but the lower-sequence service still
+            // instantiates first, so the dependent one finds it and holds.
+            List<ObJourney> created =
+                    service.instantiateAll(CLIENT, List.of(DEPENDENT_PRODUCT, DEPENDENCY_PRODUCT));
+
+            ObJourney dependencyJourney = created.stream()
+                    .filter(j -> j.getProductId().equals(DEPENDENCY_PRODUCT)).findFirst().orElseThrow();
+            ObJourney dependentJourney = created.stream()
+                    .filter(j -> j.getProductId().equals(DEPENDENT_PRODUCT)).findFirst().orElseThrow();
+            assertThat(dependentJourney.getHeldByJourneyId()).isEqualTo(dependencyJourney.getId());
         }
     }
 }

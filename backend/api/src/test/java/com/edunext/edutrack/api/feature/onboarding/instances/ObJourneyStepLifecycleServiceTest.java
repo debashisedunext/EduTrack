@@ -89,10 +89,11 @@ class ObJourneyStepLifecycleServiceTest {
     private final WorkingCalendarRepository workingCalendars = mock(WorkingCalendarRepository.class);
     private final ObStepClockEventRepository clockEvents = mock(ObStepClockEventRepository.class);
     private final ObStepClockRecorder clockRecorder = mock(ObStepClockRecorder.class);
+    private final ObJourneyDependencyRelease dependencyRelease = mock(ObJourneyDependencyRelease.class);
 
     private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
             journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs,
-            stepJournal, workingHours, workingCalendars, clockEvents, clockRecorder);
+            stepJournal, workingHours, workingCalendars, clockEvents, clockRecorder, dependencyRelease);
 
     @BeforeEach
     void wireFakes() {
@@ -1449,5 +1450,78 @@ class ObJourneyStepLifecycleServiceTest {
     void clientAcceptanceFailsCleanlyForAnUnknownStep() {
         assertThatThrownBy(() -> service.completeOnClientAcceptance(404L))
                 .isInstanceOf(JourneyStepNotFoundException.class);
+    }
+
+    @Test
+    void clientAcceptanceSettlesTheJourneyExactlyAsAnOwnerCompletionDoes() {
+        // completeOnClientAcceptance mirrors complete()'s own ending — C-123's
+        // settleJourney has to run on both paths, or a journey finished
+        // through the public sign-off flow never completes and never
+        // releases whatever it was holding.
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        service.completeOnClientAcceptance(STEP);
+
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isNotNull();
+        verify(dependencyRelease).release(JOURNEY);
+    }
+
+    // ── settleJourney — C-123, plan §5 item 6 ────────────────────────────
+
+    @Test
+    void completingTheOnlyStepSettlesTheJourneyAndReleasesWhatWasHeldByIt() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        // The journey release() reports — activateEligibleSteps re-reads it
+        // for real inside settleJourney, so the fixture needs a real row,
+        // OPEN and with nothing else holding it, exactly as the production
+        // release just left it.
+        ObJourney released = new ObJourney();
+        released.setId(600L);
+        released.setGateStatus(ObGateStatus.OPEN);
+        journeyRows.put(600L, released);
+        when(dependencyRelease.release(JOURNEY)).thenReturn(List.of(600L));
+
+        service.complete(STEP, OWNER);
+
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isNotNull();
+        verify(dependencyRelease).release(JOURNEY);
+        verify(dependencyRelease).notifyUnblocked(600L, JOURNEY);
+    }
+
+    @Test
+    void completingOneOfTwoStepsDoesNotSettleTheJourneyYet() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStep sibling = pendingStep();
+        sibling.setId(STEP + 1);
+        sibling.setSequence(2);
+        stepRows.put(sibling.getId(), sibling);
+
+        service.complete(STEP, OWNER);
+
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isNull();
+        verify(dependencyRelease, never()).release(anyLong());
+    }
+
+    @Test
+    void aSkippedStepSettlesTheJourneyExactlyAsADoneOneDoes() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        service.skip(STEP, STRANGER, MANAGER_ROLE, "not required for this client");
+
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isNotNull();
+        verify(dependencyRelease).release(JOURNEY);
+    }
+
+    @Test
+    void settlingAnAlreadyCompletedJourneyIsANoOp() {
+        journeyRows.get(JOURNEY).setCompletedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        service.complete(STEP, OWNER);
+
+        // The original timestamp is untouched, not merely non-null —
+        // re-settling must not restamp a journey that already landed.
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
+        verify(dependencyRelease, never()).release(anyLong());
     }
 }

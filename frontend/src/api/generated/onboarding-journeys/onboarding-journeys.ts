@@ -82,7 +82,9 @@ import type {
   ObJourneyStepItemUpdateRequest,
   ObJourneyStepResponse,
   ObJourneyStepUpdateRequest,
+  ObJourneyTemplateCatalogueOrderRequest,
   ObJourneyTemplateCreateRequest,
+  ObJourneyTemplateDependsOnRequest,
   ObJourneyTemplateDetailResponse,
   ObJourneyTemplateResponse,
   ObJourneyTemplateStepDocResponse,
@@ -485,6 +487,155 @@ export const useAddObJourneyTemplateStep = <TError = ValidationFailedResponse | 
       > => {
 
       const mutationOptions = getAddObJourneyTemplateStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `templateIds` is every currently-active template, in the caller's
+desired order — not a delta, and not the same list as
+`.../steps/order`, which reorders one template's own steps.
+Persisted as `sequence` 0..N-1, the order every client's journeys
+from here on instantiate and display in (plan §5 item 5).
+
+No `If-Match`: this spans every active template at once rather than
+one row, so two admins reordering seconds apart is a
+whoever-saved-last-wins replace, not a lost update over a single
+resource a precondition would protect.
+
+ * @summary The Module Service catalogue's ↑/↓ control (C-123)
+ */
+export const reorderObJourneyTemplateCatalogue = (
+    obJourneyTemplateCatalogueOrderRequest: ObJourneyTemplateCatalogueOrderRequest,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/journey-templates/order`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyTemplateCatalogueOrderRequest
+    },
+      );
+    }
+  
+
+
+export const getReorderObJourneyTemplateCatalogueMutationOptions = <TError = Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>, TError,{data: ObJourneyTemplateCatalogueOrderRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>, TError,{data: ObJourneyTemplateCatalogueOrderRequest}, TContext> => {
+
+const mutationKey = ['reorderObJourneyTemplateCatalogue'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>, {data: ObJourneyTemplateCatalogueOrderRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  reorderObJourneyTemplateCatalogue(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReorderObJourneyTemplateCatalogueMutationResult = NonNullable<Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>>
+    export type ReorderObJourneyTemplateCatalogueMutationBody = ObJourneyTemplateCatalogueOrderRequest
+    export type ReorderObJourneyTemplateCatalogueMutationError = Problem | ObModuleGatedResponse
+
+    /**
+ * @summary The Module Service catalogue's ↑/↓ control (C-123)
+ */
+export const useReorderObJourneyTemplateCatalogue = <TError = Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>, TError,{data: ObJourneyTemplateCatalogueOrderRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reorderObJourneyTemplateCatalogue>>,
+        TError,
+        {data: ObJourneyTemplateCatalogueOrderRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReorderObJourneyTemplateCatalogueMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `dependsOnTemplateId: null` clears the dependency — the service runs
+unheld from journey start. Cross-product is allowed; a cycle is
+not — `409` if the chosen dependency already depends, directly or
+transitively, on this template. Works on a draft or the active
+version alike: unlike a step's fields, this is catalogue metadata,
+not journey content an in-flight instantiation has pinned.
+
+`If-Match` is required, not optional — `428` without one, `412` if
+it does not match the template's current tag. Read the tag from
+`GET /onboarding/journey-templates/{templateId}`.
+
+ * @summary The catalogue's "Service depends on" picker (C-123)
+ */
+export const updateObJourneyTemplateDependsOn = (
+    templateId: number,
+    obJourneyTemplateDependsOnRequest: ObJourneyTemplateDependsOnRequest,
+ ) => {
+      
+      
+      return http<ObJourneyTemplateResponse>(
+      {url: `/onboarding/journey-templates/${templateId}/depends-on`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyTemplateDependsOnRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObJourneyTemplateDependsOnMutationOptions = <TError = ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>, TError,{templateId: number;data: ObJourneyTemplateDependsOnRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>, TError,{templateId: number;data: ObJourneyTemplateDependsOnRequest}, TContext> => {
+
+const mutationKey = ['updateObJourneyTemplateDependsOn'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>, {templateId: number;data: ObJourneyTemplateDependsOnRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  updateObJourneyTemplateDependsOn(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObJourneyTemplateDependsOnMutationResult = NonNullable<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>>
+    export type UpdateObJourneyTemplateDependsOnMutationBody = ObJourneyTemplateDependsOnRequest
+    export type UpdateObJourneyTemplateDependsOnMutationError = ObModuleGatedResponse | Problem | PreconditionFailedResponse
+
+    /**
+ * @summary The catalogue's "Service depends on" picker (C-123)
+ */
+export const useUpdateObJourneyTemplateDependsOn = <TError = ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>, TError,{templateId: number;data: ObJourneyTemplateDependsOnRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>,
+        TError,
+        {templateId: number;data: ObJourneyTemplateDependsOnRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObJourneyTemplateDependsOnMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

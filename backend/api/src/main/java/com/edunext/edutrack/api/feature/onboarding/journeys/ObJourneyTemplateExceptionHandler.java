@@ -100,4 +100,24 @@ class ObJourneyTemplateExceptionHandler {
         problem.setDetail(e.getMessage());
         return ResponseEntity.badRequest().body(problem);
     }
+
+    /** {@code 400} — C-123's catalogue-wide reorder, {@code StepReorderMismatchException}'s own shape. */
+    @ExceptionHandler(CatalogueReorderMismatchException.class)
+    ResponseEntity<ProblemDetail> handleCatalogueReorderMismatch(CatalogueReorderMismatchException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(VALIDATION);
+        problem.setTitle("Reorder list does not match the catalogue's active templates");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.badRequest().body(problem);
+    }
+
+    /** {@code 409} — C-123's cycle-free depends-on picker, enforced server-side. */
+    @ExceptionHandler(TemplateDependencyCycleException.class)
+    ResponseEntity<ProblemDetail> handleDependencyCycle(TemplateDependencyCycleException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(CONFLICT);
+        problem.setTitle("That dependency would close a cycle");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
 }

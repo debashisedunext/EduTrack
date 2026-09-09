@@ -69,7 +69,28 @@ final class ObProductDtos {
 
             @Schema(description = "Journeys instantiated from this product, across all clients. "
                     + "Part of the ETag, because it is what a retire decision is made against.")
-            int journeyCount
+            int journeyCount,
+
+            @Schema(nullable = true,
+                    description = "C-123 · the active template's own id — null when there is none. "
+                            + "The OB-07 catalogue card's link into the designer, and the id "
+                            + "`/journey-templates/order` and `/journey-templates/{id}/depends-on` "
+                            + "take; the product id itself is never the argument to either.")
+            Long activeTemplateId,
+
+            @Schema(nullable = true,
+                    description = "C-123 · the active template's own `sequence` — what "
+                            + "`/journey-templates/order` writes and drives instantiation and "
+                            + "display order (plan §5 item 5). Null when there is no active "
+                            + "template.")
+            Integer templateSequence,
+
+            @Schema(nullable = true,
+                    description = "C-123 · the active template's `dependsOnTemplateId` — the other "
+                            + "Module Service this one is held behind (plan §5 item 5), or null for "
+                            + "one that runs unheld. Null (rather than a sentinel) also when there "
+                            + "is no active template to have declared one.")
+            Long dependsOnTemplateId
     ) {
     }
 

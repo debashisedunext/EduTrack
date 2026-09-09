@@ -75,10 +75,7 @@ class ObClientWriteServiceTest {
         // including the one that says a body reducing to nothing is refused.
         portalAccounts = mock(com.edunext.edutrack.api.feature.portal.ClientAccountAdminService.class);
         service = new ObClientWriteService(clients, reads, children, requirements,
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan,
-                portalAccounts);
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, pan, portalAccounts);
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan);
+                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan, portalAccounts);
 
         // The happy defaults: one product, on sale, with a published template,
         // and a published prerequisites master (B-109).

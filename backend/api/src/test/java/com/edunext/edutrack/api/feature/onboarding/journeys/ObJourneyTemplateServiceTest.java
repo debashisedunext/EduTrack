@@ -87,6 +87,11 @@ class ObJourneyTemplateServiceTest {
                 templateRows.values().stream()
                         .filter(t -> t.getProductId().equals(inv.<Long>getArgument(0)))
                         .max(Comparator.comparingInt(ObJourneyTemplate::getVersion)));
+        lenient().when(templates.findByIsActiveTrueOrderBySequenceAsc()).thenAnswer(inv ->
+                templateRows.values().stream()
+                        .filter(ObJourneyTemplate::isActive)
+                        .sorted(Comparator.comparingInt(ObJourneyTemplate::getSequence))
+                        .toList());
 
         lenient().when(steps.save(any())).thenAnswer(inv -> {
             ObJourneyTemplateStep s = inv.getArgument(0);
@@ -628,6 +633,134 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
 
             assertThat(service.parallelGroups(draft.getId())).isEmpty();
+        }
+    }
+
+    /** Bypasses createTemplate/publish — an active row with no steps, for the two C-123 nested groups below. */
+    private ObJourneyTemplate activeTemplate(long productId, int sequence, Long dependsOnTemplateId) {
+        ObJourneyTemplate t = new ObJourneyTemplate();
+        t.setProductId(productId);
+        t.setName("Product " + productId);
+        t.setVersion(1);
+        t.setActive(true);
+        t.setSequence(sequence);
+        t.setDependsOnTemplateId(dependsOnTemplateId);
+        return templates.save(t);
+    }
+
+    @Nested
+    @DisplayName("updateDependsOn — C-123's cycle-free picker")
+    class UpdateDependsOn {
+
+        @Test
+        @DisplayName("names a valid dependency")
+        void namesAValidDependency() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+
+            ObJourneyTemplate updated = service.updateDependsOn(biometric.getId(), erp.getId());
+
+            assertThat(updated.getDependsOnTemplateId()).isEqualTo(erp.getId());
+        }
+
+        @Test
+        @DisplayName("null clears an existing dependency")
+        void nullClears() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate biometric = activeTemplate(2, 1, erp.getId());
+
+            ObJourneyTemplate updated = service.updateDependsOn(biometric.getId(), null);
+
+            assertThat(updated.getDependsOnTemplateId()).isNull();
+        }
+
+        @Test
+        @DisplayName("a template cannot depend on itself")
+        void directSelfCycleRefused() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+
+            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), erp.getId()))
+                    .isInstanceOf(TemplateDependencyCycleException.class);
+        }
+
+        @Test
+        @DisplayName("a transitive cycle is refused, not just a direct one")
+        void transitiveCycleRefused() {
+            // A -> B -> C already. Pointing C back at A would close the loop.
+            ObJourneyTemplate a = activeTemplate(1, 0, null);
+            ObJourneyTemplate b = activeTemplate(2, 1, a.getId());
+            ObJourneyTemplate c = activeTemplate(3, 2, b.getId());
+
+            assertThatThrownBy(() -> service.updateDependsOn(a.getId(), c.getId()))
+                    .isInstanceOf(TemplateDependencyCycleException.class);
+
+            // C depending on B (already true) is not itself a cycle to be
+            // refused a second, unrelated time.
+            assertThat(service.updateDependsOn(c.getId(), b.getId()).getDependsOnTemplateId())
+                    .isEqualTo(b.getId());
+        }
+
+        @Test
+        @DisplayName("naming an unknown template is refused, not silently accepted")
+        void unknownDependencyRefused() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+
+            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), 999L))
+                    .isInstanceOf(TemplateNotFoundException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("reorderCatalogue — the Module Service page's up/down control")
+    class ReorderCatalogue {
+
+        @Test
+        @DisplayName("renumbers every active template 0..N-1 in the caller's order")
+        void renumbers() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+            ObJourneyTemplate lms = activeTemplate(3, 2, null);
+
+            service.reorderCatalogue(List.of(lms.getId(), erp.getId(), biometric.getId()));
+
+            assertThat(templateRows.get(lms.getId()).getSequence()).isZero();
+            assertThat(templateRows.get(erp.getId()).getSequence()).isEqualTo(1);
+            assertThat(templateRows.get(biometric.getId()).getSequence()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("a product with only a draft template is not part of the reorder")
+        void draftOnlyTemplateExcluded() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+            ObJourneyTemplate draftOnly = service.createTemplate(3, "New Service", 0, null, ADMIN);
+
+            // draftOnly's product has never had an active version, so it is
+            // neither required in the list nor touched by it.
+            service.reorderCatalogue(List.of(biometric.getId(), erp.getId()));
+
+            assertThat(templateRows.get(draftOnly.getId()).isActive()).isFalse();
+            assertThat(templateRows.get(draftOnly.getId()).getSequence()).isZero();
+        }
+
+        @Test
+        @DisplayName("a repeated id is refused")
+        void duplicateRefused() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+
+            assertThatThrownBy(() -> service.reorderCatalogue(List.of(erp.getId(), erp.getId())))
+                    .isInstanceOf(CatalogueReorderMismatchException.class);
+        }
+
+        @Test
+        @DisplayName("a set that is not exactly the active catalogue is refused")
+        void mismatchedSetRefused() {
+            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            activeTemplate(2, 1, null);
+
+            assertThatThrownBy(() -> service.reorderCatalogue(List.of(erp.getId())))
+                    .isInstanceOf(CatalogueReorderMismatchException.class);
         }
     }
 }
