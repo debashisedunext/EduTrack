@@ -102,7 +102,12 @@ class RouteAuthorizationTest {
             // surface exists for. The token is what authenticates, and
             // PublicSignoffAccess is where it is checked.
             "POST /api/v1/public/onboarding/signoff/otp",
-            "POST /api/v1/public/onboarding/signoff/otp/verify");
+            "POST /api/v1/public/onboarding/signoff/otp/verify",
+            // B-115 · the third route on the same surface, and the same caller.
+            // What authenticates here is the session ObSignoffSessions minted
+            // when that caller proved the OTP — not the link token, and not a
+            // principal.
+            "POST /api/v1/public/onboarding/signoff/accept");
 
     /**
      * By name: actuator contributes a second
