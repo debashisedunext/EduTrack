@@ -982,6 +982,7 @@ export interface Db {
   obPrereqHistory: ObPrereqHistoryRow[];
   obSignoffs: ObSignoffRow[];
   obSignoffSessions: ObSignoffSessionRow[];
+  obClientAccounts: ObClientAccountRow[];
   obEscalations: ObEscalationRow[];
   obClientEscalations: ObClientEscalationRow[];
   obModuleAccess: ObModuleAccessRow[];
@@ -2334,6 +2335,17 @@ export function createDb(): Db {
     obPrereqHistory: [],
     obSignoffs: structuredClone(OB_SIGNOFFS),
     obSignoffSessions: [],
+    // B-126 · Contoso (client 3) is LIVE and has a portal login; Northwind
+    // and Acme have none, which is what makes "create" reachable in a test
+    // rather than always answering 409.
+    obClientAccounts: [
+      {
+        id: 1, obClientId: 3, username: 'CONTOSO.arjun', displayName: 'Arjun Mehta',
+        email: 'arjun@contoso.example', isActive: true, mustChangePassword: false,
+        lastLoginAt: '2026-09-02T08:15:00.000Z', lockedUntil: null,
+        credentialSentAt: '2026-08-12T09:00:00.000Z',
+      },
+    ],
     obEscalations: structuredClone(OB_ESCALATIONS),
     obClientEscalations: structuredClone(OB_CLIENT_ESCALATIONS),
     obModuleAccess: structuredClone(OB_MODULE_ACCESS),
@@ -3026,6 +3038,26 @@ export interface ObSignoffRow {
 }
 
 /** A verified public session — opaque, short-lived, one sign-off. Not a principal. */
+/**
+ * B-126 · `client_accounts` as the OB-05 panel sees it.
+ *
+ * No `passwordHash` and no token. The real table has both; neither reaches any
+ * response, so a mock that carried them would let a screen be built against a
+ * field the server will never send.
+ */
+export interface ObClientAccountRow {
+  id: number;
+  obClientId: number;
+  username: string;
+  displayName: string;
+  email: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  lockedUntil: string | null;
+  credentialSentAt: string | null;
+}
+
 export interface ObSignoffSessionRow {
   token: string; signoffId: number; expiresAt: string; used: boolean;
 }

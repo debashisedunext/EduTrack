@@ -78,9 +78,12 @@ import type {
   ListObPrereqCommentsParams,
   ListObPrereqHistoryParams,
   ListObSignoffsParams,
+  NotFoundResponse,
   ObApplicationWriteRequest,
   ObAttachmentListResponse,
   ObAttachmentResponse,
+  ObClientAccountResponse,
+  ObClientAccountStatusRequest,
   ObClientCreateRequest,
   ObClientDetailResponse,
   ObClientEscalationListResponse,
@@ -1630,6 +1633,344 @@ export const useDeleteObClientAttachment = <TError = Problem | ObModuleGatedResp
       > => {
 
       const mutationOptions = getDeleteObClientAttachmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **404 for a client with no login and for a client outside this
+caller's scope, indistinguishably.** The caller is staff who can
+already see the client list, so this is not the existence-leak rule
+A-112 enforces — it is simpler: both mean the panel has nothing to act
+on, and its response to either is the same, which is to offer to
+create one.
+
+ * @summary The client's portal login, if it has one (OB-05)
+ */
+export const getObClientAccount = (
+    obClientId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientAccountResponse>(
+      {url: `/onboarding/clients/${obClientId}/account`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObClientAccountQueryKey = (obClientId?: number,) => {
+    return [
+    `/onboarding/clients/${obClientId}/account`
+    ] as const;
+    }
+
+    
+export const getGetObClientAccountQueryOptions = <TData = Awaited<ReturnType<typeof getObClientAccount>>, TError = UnauthorizedResponse | NotFoundResponse>(obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObClientAccountQueryKey(obClientId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObClientAccount>>> = ({ signal }) => getObClientAccount(obClientId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(obClientId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObClientAccountQueryResult = NonNullable<Awaited<ReturnType<typeof getObClientAccount>>>
+export type GetObClientAccountQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetObClientAccount<TData = Awaited<ReturnType<typeof getObClientAccount>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ obClientId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientAccount>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientAccount>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientAccount<TData = Awaited<ReturnType<typeof getObClientAccount>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObClientAccount>>,
+          TError,
+          Awaited<ReturnType<typeof getObClientAccount>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObClientAccount<TData = Awaited<ReturnType<typeof getObClientAccount>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The client's portal login, if it has one (OB-05)
+ */
+
+export function useGetObClientAccount<TData = Awaited<ReturnType<typeof getObClientAccount>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ obClientId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObClientAccount>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObClientAccountQueryOptions(obClientId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Mints the username, creates the account, and queues a
+`CLIENT_LOGIN_CREATED` mail to the client's **primary** SPOC carrying
+a single-use link.
+
+## A link, never a password
+
+B-111 ruled on this and this operation is where it is cashed in:
+`CLIENT_LOGIN_CREATED` "declares no password variable — the payload is
+JSON on a row that outlives the send, so a temporary password in it is
+a live credential in the database indefinitely". The account is created
+with a hash of random bytes that are never returned and never logged;
+the link is the only way in.
+
+## Refused rather than ignored
+
+B-102 already made this argument for `createPortalLogin` and it holds
+here: a boarder who is told 201 tells their client credentials are
+coming. So a client with no active primary SPOC is a `422` and not a
+silent success — the mail would have nowhere to go, and nothing would
+say so.
+
+ * @summary Create the portal login and mail the primary SPOC a link (OB-05)
+ */
+export const createObClientAccount = (
+    obClientId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientAccountResponse>(
+      {url: `/onboarding/clients/${obClientId}/account`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getCreateObClientAccountMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObClientAccount>>, TError,{obClientId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createObClientAccount>>, TError,{obClientId: number}, TContext> => {
+
+const mutationKey = ['createObClientAccount'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createObClientAccount>>, {obClientId: number}> = (props) => {
+          const {obClientId} = props ?? {};
+
+          return  createObClientAccount(obClientId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateObClientAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createObClientAccount>>>
+    
+    export type CreateObClientAccountMutationError = UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Create the portal login and mail the primary SPOC a link (OB-05)
+ */
+export const useCreateObClientAccount = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObClientAccount>>, TError,{obClientId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createObClientAccount>>,
+        TError,
+        {obClientId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateObClientAccountMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **Stated, not toggled** — the same call `setUserStatus` makes for
+staff and for the same reason: a toggle makes the outcome depend on
+what the caller believed the current state to be, which on a
+two-person support desk is how a login gets switched back on by
+somebody who did not know it had been switched off.
+
+**Disabling retires every outstanding credential link.** Without that,
+a mail sent yesterday would still be redeemable against an account
+somebody has just switched off, while the operator believes they have
+closed the door.
+
+Nothing is mailed either way. A client does not need to be told the
+moment their access is suspended by a mail they cannot act on, and
+re-enabling restores the account that existed rather than issuing a
+new one — A-125: "a deactivated login preserves what it signed".
+
+No `If-Match`: setting a flag to a stated value has no lost update for
+a tag to prevent, which is the exemption `setUserStatus` already
+carries.
+
+ * @summary Enable or disable the portal login (OB-05, OB-08)
+ */
+export const setObClientAccountStatus = (
+    obClientId: number,
+    obClientAccountStatusRequest: ObClientAccountStatusRequest,
+ ) => {
+      
+      
+      return http<ObClientAccountResponse>(
+      {url: `/onboarding/clients/${obClientId}/account`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obClientAccountStatusRequest
+    },
+      );
+    }
+  
+
+
+export const getSetObClientAccountStatusMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setObClientAccountStatus>>, TError,{obClientId: number;data: ObClientAccountStatusRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof setObClientAccountStatus>>, TError,{obClientId: number;data: ObClientAccountStatusRequest}, TContext> => {
+
+const mutationKey = ['setObClientAccountStatus'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setObClientAccountStatus>>, {obClientId: number;data: ObClientAccountStatusRequest}> = (props) => {
+          const {obClientId,data} = props ?? {};
+
+          return  setObClientAccountStatus(obClientId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetObClientAccountStatusMutationResult = NonNullable<Awaited<ReturnType<typeof setObClientAccountStatus>>>
+    export type SetObClientAccountStatusMutationBody = ObClientAccountStatusRequest
+    export type SetObClientAccountStatusMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse
+
+    /**
+ * @summary Enable or disable the portal login (OB-05, OB-08)
+ */
+export const useSetObClientAccountStatus = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setObClientAccountStatus>>, TError,{obClientId: number;data: ObClientAccountStatusRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setObClientAccountStatus>>,
+        TError,
+        {obClientId: number;data: ObClientAccountStatusRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSetObClientAccountStatusMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Queues a `CLIENT_PASSWORD_RESET` mail to the primary SPOC and
+**invalidates every link issued before it**. A reset that left the
+previous link alive would mean an old mail in an inbox is a second way
+in that nobody remembers exists, which is the opposite of what
+somebody pressing "reset" is asking for.
+
+Works on a disabled account, deliberately: resetting and re-enabling
+are two decisions, and folding them together would mean a reset
+silently switched a login back on.
+
+ * @summary Issue a fresh credential link and retire the last one (OB-05)
+ */
+export const resetObClientAccountPassword = (
+    obClientId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientAccountResponse>(
+      {url: `/onboarding/clients/${obClientId}/account/reset`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getResetObClientAccountPasswordMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetObClientAccountPassword>>, TError,{obClientId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof resetObClientAccountPassword>>, TError,{obClientId: number}, TContext> => {
+
+const mutationKey = ['resetObClientAccountPassword'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetObClientAccountPassword>>, {obClientId: number}> = (props) => {
+          const {obClientId} = props ?? {};
+
+          return  resetObClientAccountPassword(obClientId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResetObClientAccountPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof resetObClientAccountPassword>>>
+    
+    export type ResetObClientAccountPasswordMutationError = UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Issue a fresh credential link and retire the last one (OB-05)
+ */
+export const useResetObClientAccountPassword = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetObClientAccountPassword>>, TError,{obClientId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resetObClientAccountPassword>>,
+        TError,
+        {obClientId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getResetObClientAccountPasswordMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

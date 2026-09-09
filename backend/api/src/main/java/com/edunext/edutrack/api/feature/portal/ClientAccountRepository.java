@@ -111,6 +111,58 @@ class ClientAccountRepository {
              WHERE id = ?
             """;
 
+    /**
+     * B-126 · the OB-05 panel's read — one client's portal login, if it has one.
+     *
+     * <p>No {@code is_active} predicate here either, but for a different reason
+     * from the two statements above: the panel's whole job is to show a
+     * disabled login and offer to re-enable it. Filtering would make a
+     * deactivated account indistinguishable from none, and the operator would
+     * create a second one — which {@code uq_client_accounts_ob_client} then
+     * refuses, on a screen that had just told them there was no account.
+     */
+    private static final String FIND_BY_OB_CLIENT = """
+            SELECT id, username, password_hash, client_id, ob_client_id,
+                   display_name, email, is_active, must_change_password,
+                   failed_attempts, locked_until, last_login_at
+              FROM client_accounts
+             WHERE ob_client_id = ?
+            """;
+
+    /**
+     * B-126 · creating a login for an onboarding client.
+     *
+     * <p>{@code client_id} is deliberately left NULL. The two masters are not
+     * linked — V20260905_1630's header is explicit that nothing in the schema
+     * says {@code clients.id 5} and {@code ob_clients.id 9} are the same
+     * company — so guessing a ticketing client here would be inventing a
+     * correspondence nobody established, on the table where that correspondence
+     * is supposed to eventually live.
+     *
+     * <p>{@code must_change_password} is not named: the column defaults to 1,
+     * and A-125's own comment says defaulting rather than relying on every
+     * creator to remember is the point.
+     */
+    private static final String INSERT = """
+            INSERT INTO client_accounts
+                   (username, password_hash, ob_client_id, display_name, email, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """;
+
+    /**
+     * B-126 · enable or disable, as a stated value rather than a toggle.
+     *
+     * <p>Disabling deliberately does not touch {@code password_hash} or the
+     * lockout counters. A-125's migration makes the case one table over — "a
+     * deactivated login preserves what it signed" — and the same holds here:
+     * re-enabling has to restore the account that existed, not a blank one.
+     */
+    private static final String SET_ACTIVE = """
+            UPDATE client_accounts
+               SET is_active = ?
+             WHERE id = ?
+            """;
+
     private static final RowMapper<ClientAccountRow> MAPPER = ClientAccountRepository::map;
 
     private final JdbcClient jdbc;
@@ -148,6 +200,33 @@ class ClientAccountRepository {
      * that is the schema's guarantee and not this method's, which is why the
      * query returns an {@code Optional} rather than asserting it.
      */
+    Optional<ClientAccountRow> findByObClientId(long obClientId) {
+        return jdbc.sql(FIND_BY_OB_CLIENT).param(obClientId).query(MAPPER).optional();
+    }
+
+    /**
+     * @return the new account's id, from {@code LAST_INSERT_ID()} rather than a
+     *         second lookup by username — the row is unique on it, but a
+     *         re-read would be a second statement that can see a different
+     *         row if anything else has raced.
+     */
+    long insert(String username, String passwordHash, long obClientId,
+                String displayName, String email, Long createdBy) {
+        jdbc.sql(INSERT)
+                .param(username)
+                .param(passwordHash)
+                .param(obClientId)
+                .param(displayName)
+                .param(email)
+                .param(createdBy)
+                .update();
+        return jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+    }
+
+    void setActive(long id, boolean active) {
+        jdbc.sql(SET_ACTIVE).param(active).param(id).update();
+    }
+
     boolean usernameExists(String username) {
         return jdbc.sql("SELECT 1 FROM client_accounts WHERE username = ?")
                 .param(username)

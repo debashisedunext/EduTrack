@@ -753,6 +753,55 @@ final class PermissionMatrix {
             {"token":"matrix-fixture-token","otp":"000000"}""";
 
     /**
+     * B-115 · {@code ObSignoffAcceptRequest}: {@code sessionToken} and
+     * {@code acceptedName} are both {@code @NotBlank}, {@code note} is optional.
+     *
+     * <p>The session token is deliberately one no {@code verifyObSignoffOtp}
+     * ever minted, so the fixture reaches {@code ObSignoffAcceptService} and is
+     * refused there with the surface's one generic 401 — this file's standing
+     * rule that a fixture has to reach authorisation rather than succeed past
+     * it. Succeeding would mean this matrix run accepted a real sign-off.
+     */
+    /**
+     * B-126 · {@code ObClientAccountStatusRequest}: {@code isActive} is
+     * {@code @NotNull}, and there is nothing else on the body. A fixture that
+     * omitted it would be refused by validation before authorisation, which is
+     * this file's standing rule about reaching authorisation rather than
+     * succeeding past it — read the other way round.
+     */
+    /**
+     * B-113 · {@code ObSettingsWriteRequest}: both numbers are bounded and the
+     * ladder must be exactly three rungs, so a shorter fixture would be refused
+     * by validation before authorisation ever ran. The values are the seeds,
+     * which keeps the fixture a legal request that is nonetheless refused at the
+     * role check — this file's standing rule that a fixture must reach
+     * authorisation rather than succeed past it.
+     *
+     * <p>It also carries no {@code If-Match}, so an OB Admin reaching the
+     * handler would be refused with 428 rather than saving. Belt and braces on
+     * the same rule.
+     */
+    /**
+     * B-113 · {@code ObNotificationTemplateUpdateRequest}: {@code recipients}
+     * is {@code @NotEmpty} when present, so a fixture omitting it is valid and
+     * reaches authorisation — which is what this file needs. The body uses a
+     * merge tag the catalogue really declares, so an OB Admin reaching the
+     * handler would be refused by the missing {@code If-Match} rather than by
+     * validation.
+     */
+    private static final String OB_TEMPLATE_UPDATE = """
+            {"bodyTemplate":"<p>{{client_name}}</p>"}""";
+
+    private static final String OB_SETTINGS_WRITE = """
+            {"amberThresholdPercent":75,"scannerIntervalMinutes":5,"ladder":[            {"level":"L1","afterWorkingHours":0,"recipient":"STEP_OWNER"},            {"level":"L2","afterWorkingHours":4,"recipient":"BACKUP_OWNER"},            {"level":"L3","afterWorkingHours":8,"recipient":"ONBOARDING_MANAGER"}]}""";
+
+    private static final String OB_CLIENT_ACCOUNT_STATUS = """
+            {"isActive":false}""";
+
+    private static final String SIGNOFF_ACCEPT = """
+            {"sessionToken":"matrix-fixture-session","acceptedName":"Matrix Fixture"}""";
+
+    /**
      * A-124 · {@code ObProductDtos.WriteRequest}: {@code code} is
      * {@code @NotBlank} and must match {@code ^[A-Z0-9_-]+$}, {@code name} is
      * {@code @NotBlank}. Serves both the POST and the PATCH — the contract
@@ -942,6 +991,11 @@ final class PermissionMatrix {
             // PublicSignoffAccess rather than by anything this matrix speaks.
             everyRole("POST", "/api/v1/public/onboarding/signoff/otp", SIGNOFF_OTP_REQUEST),
             everyRole("POST", "/api/v1/public/onboarding/signoff/otp/verify", SIGNOFF_OTP_VERIFY),
+            // B-115 · the same surface and the same caller. What authenticates
+            // here is the session the OTP bought, not the link token — and
+            // still nothing this matrix speaks, because there is still no
+            // principal.
+            everyRole("POST", "/api/v1/public/onboarding/signoff/accept", SIGNOFF_ACCEPT),
 
             // ── me · every operation is about the caller's own account ───────
             // §2 grants no capability for these and must not: gating a password
@@ -2368,6 +2422,42 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/contacts", UPSERT_OB_CONTACT),
             everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}",
                     UPSERT_OB_CONTACT),
+
+            // B-126 · the client-account panel. The same shape as the contacts
+            // routes directly above and for the same reason: none of the six
+            // ticketing-role fixtures carries onboarding standing, so each of
+            // them reaches the scoped client read and gets 404. The role split
+            // this feature actually applies — mayWrite() to create,
+            // isModerator() to reset and disable — is expressed in
+            // ObClientScope and refused as 404 too, so it needs a real OB role
+            // to observe and is ClientAccountAdminServiceTest's case rather
+            // than this file's.
+            everyRole("GET", "/api/v1/onboarding/clients/{obClientId}/account"),
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/account"),
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/account/reset"),
+            everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}/account",
+                    OB_CLIENT_ACCOUNT_STATUS),
+
+            // B-113 · OB-11. The one onboarding resource that answers 403
+            // rather than 404 to a caller who may not have it, and the contract
+            // gives the reason: "org-wide settings are not a row-scoped
+            // resource, so a 403 tells a non-Admin only what the 404 from
+            // ModuleGuard already would". None of the six ticketing-role
+            // fixtures holds an onboarding grant, so each of them is refused —
+            // which is what this file asserts; that the refusal is 403 for an
+            // OB Viewer and 200 for an OB Admin needs a real onboarding role
+            // and is ObSettingsServiceTest's and the IT's case.
+            everyRole("GET", "/api/v1/onboarding/settings"),
+            everyRole("PUT", "/api/v1/onboarding/settings", OB_SETTINGS_WRITE),
+
+            // B-113 · OB-12, on the same OB-Admin-only rule as OB-11 above and
+            // for the reason the contract gives on the vocabulary route: it is
+            // a catalogue of enum values, Admin-only because the screen it
+            // feeds is.
+            everyRole("GET", "/api/v1/onboarding/notification-templates"),
+            everyRole("GET", "/api/v1/onboarding/notification-templates/vocabulary"),
+            everyRole("PATCH", "/api/v1/onboarding/notification-templates/{templateId}",
+                    OB_TEMPLATE_UPDATE),
             everyRole("DELETE", "/api/v1/onboarding/clients/{obClientId}/contacts/{contactId}"),
             // ── A-117 · OB-08, module access ──────────────────────────────────
             //

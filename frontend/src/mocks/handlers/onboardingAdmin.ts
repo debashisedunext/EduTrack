@@ -579,6 +579,82 @@ export const obAdminHandlers = [
   }),
 
   // ── sign-off, public (A-120, A-121) ───────────────────────────────────────
+  // ── B-126 · the client-account panel ──────────────────────────────────────
+  //
+  // No response below carries a password, a hash or a credential link. The
+  // link goes to the client's own mailbox; a mock that returned it would let a
+  // screen be built around a field the server will never send.
+
+  http.get(url('/onboarding/clients/:obClientId/account'), ({ params }) => {
+    const db = getDb();
+    const account = db.obClientAccounts.find((a) => a.obClientId === Number(params.obClientId));
+    return account ? ok(account) : notFound('Portal login');
+  }),
+
+  http.post(url('/onboarding/clients/:obClientId/account'), ({ params }) => {
+    const db = getDb();
+    const obClientId = Number(params.obClientId);
+    const client = db.obClients.find((c) => c.id === obClientId);
+    if (!client) return notFound('Client');
+    if (db.obClientAccounts.some((a) => a.obClientId === obClientId)) {
+      return problem(409, 'ob-client-account-exists',
+        'This client already has a portal login.');
+    }
+    // The primary SPOC is who the credential mail goes to. With none it goes
+    // to nobody and nothing says so, which is the failure this refuses.
+    const primary = client.contacts?.find((c) => c.isPrimary && c.isActive);
+    if (!primary) {
+      return problem(422, 'ob-client-no-primary-contact',
+        'This client has no active primary SPOC to send credentials to.');
+    }
+    const prefix = client.name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'CLIENT';
+    const local = primary.name.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+    const account = {
+      id: nextId(db, 'obClientAccount'),
+      obClientId,
+      username: `${prefix}.${local}`,
+      displayName: primary.name,
+      email: primary.email,
+      isActive: true,
+      // Always true on a new account: the first password is issued by us and
+      // must be replaced before anything else resolves.
+      mustChangePassword: true,
+      lastLoginAt: null,
+      lockedUntil: null,
+      credentialSentAt: new Date().toISOString(),
+    };
+    db.obClientAccounts.push(account);
+    return ok(account, undefined, { status: 201 });
+  }),
+
+  http.post(url('/onboarding/clients/:obClientId/account/reset'), ({ params }) => {
+    const db = getDb();
+    const account = db.obClientAccounts.find((a) => a.obClientId === Number(params.obClientId));
+    if (!account) return notFound('Portal login');
+    const client = db.obClients.find((c) => c.id === Number(params.obClientId));
+    if (!client?.contacts?.some((c) => c.isPrimary && c.isActive)) {
+      return problem(422, 'ob-client-no-primary-contact',
+        'This client has no active primary SPOC to send credentials to.');
+    }
+    // Reissuing does not re-enable. Two decisions, and folding them together
+    // would mean a reset silently switched a login back on.
+    account.credentialSentAt = new Date().toISOString();
+    account.mustChangePassword = true;
+    return ok(account);
+  }),
+
+  http.patch(url('/onboarding/clients/:obClientId/account'), async ({ params, request }) => {
+    const db = getDb();
+    const account = db.obClientAccounts.find((a) => a.obClientId === Number(params.obClientId));
+    if (!account) return notFound('Portal login');
+    const body = (await request.json()) as { isActive?: boolean };
+    if (typeof body.isActive !== 'boolean') {
+      return validationFailed({ isActive: ['is required'] });
+    }
+    account.isActive = body.isActive;
+    return ok(account);
+  }),
+
   http.post(url('/public/onboarding/signoff/otp'), async ({ request }) => {
     const db = getDb();
     const { token } = (await request.json()) as { token?: string };
@@ -933,7 +1009,13 @@ export const obAdminHandlers = [
       // this is the last place to catch it.
       const unknown = (body.bodyTemplate.match(/\{\{[a-z_]+\}\}/g) ?? []).filter((tag) => !MERGE_TAGS.includes(tag));
       if (unknown.length > 0) {
-        return validationFailed({ bodyTemplate: [`unknown merge tag(s): ${unknown.join(', ')}`] });
+        // `unknownTags` beside the field error, matching what the server sends:
+        // OB-12 highlights the tags rather than asking the admin to re-read
+        // their own paragraph, and a mock without it would let the screen be
+        // built against a message it will not get.
+        return problem(400, 'validation-failed',
+          `unknown merge tag(s): ${unknown.join(', ')}`,
+          { unknownTags: unknown, errors: { bodyTemplate: [`unknown merge tag(s): ${unknown.join(', ')}`] } });
       }
       if (!body.bodyTemplate.trim()) return validationFailed({ bodyTemplate: ['must not be blank'] });
       t.bodyTemplate = body.bodyTemplate;

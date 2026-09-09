@@ -85,6 +85,15 @@ public class ObSignoff {
     @Column(name = "signed_by_contact_id")
     private Long signedByContactId;
 
+    /**
+     * B-115 · typed by the signatory on OB-09, and part of the same record as
+     * {@link #signedAt} rather than an optional extra —
+     * {@code ck_ob_signoffs_signed} binds the three together, so a row cannot
+     * carry a timestamp and a contact with nobody's name against it.
+     */
+    @Column(name = "signed_name", length = 160)
+    private String signedName;
+
     @Column(name = "signed_at")
     private Instant signedAt;
 
@@ -93,6 +102,17 @@ public class ObSignoff {
 
     @Column(name = "signed_user_agent", length = 500)
     private String signedUserAgent;
+
+    /**
+     * B-115 · the optional remark a client can type with an acceptance.
+     *
+     * <p>Deliberately not {@link #objectionNote}: that one is a reason an
+     * objection must carry — {@code ck_ob_signoffs_objection} enforces it and
+     * B-117 reverts a step on it — whereas this reverts nothing and may be
+     * absent from every accepted row.
+     */
+    @Column(name = "acceptance_note", length = 2000)
+    private String acceptanceNote;
 
     @Column(name = "objected_at")
     private Instant objectedAt;
@@ -232,6 +252,14 @@ public class ObSignoff {
         this.signedByContactId = signedByContactId;
     }
 
+    public String getSignedName() {
+        return signedName;
+    }
+
+    public void setSignedName(String signedName) {
+        this.signedName = signedName;
+    }
+
     public Instant getSignedAt() {
         return signedAt;
     }
@@ -254,6 +282,14 @@ public class ObSignoff {
 
     public void setSignedUserAgent(String signedUserAgent) {
         this.signedUserAgent = signedUserAgent;
+    }
+
+    public String getAcceptanceNote() {
+        return acceptanceNote;
+    }
+
+    public void setAcceptanceNote(String acceptanceNote) {
+        this.acceptanceNote = acceptanceNote;
     }
 
     public Instant getObjectedAt() {
