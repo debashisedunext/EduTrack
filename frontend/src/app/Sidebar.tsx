@@ -1,8 +1,8 @@
-import { NavLink } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
-  Building2,
+  Building2, PlusCircle, Timer, Mail,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -13,10 +13,26 @@ interface NavItem {
   label: string
   icon: typeof LayoutDashboard
   adminOnly?: boolean
+  /*
+    Overrides the default prefix match, which lights two rows at once wherever
+    one destination sits under another — `/onboarding/clients` and
+    `/onboarding/clients/new` being the pair that forced this. Only supplied
+    where the default is wrong.
+  */
+  isActive?: (pathname: string) => boolean
 }
 
+/** A labelled break in the list. Renders as a rule when the rail is collapsed. */
+interface NavSection {
+  section: string
+}
+
+type NavEntry = NavItem | NavSection
+
+const isSection = (entry: NavEntry): entry is NavSection => 'section' in entry
+
 // Left sidebar, collapsible 240px — blueprint §7.2.
-const NAV_ITEMS: NavItem[] = [
+const TICKETING_NAV: NavEntry[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/my-tasks', label: 'My Tasks', icon: ListChecks },
   /*
@@ -54,14 +70,17 @@ const NAV_ITEMS: NavItem[] = [
     reason `/tickets` is this list's entry rather than a ticketing launcher.
 
     Not `adminOnly`, and there is no `onboardingOnly` to reach for: the
-    module's own entitlement (`user_module_access`, plan §2.1) has no
-    client-side signal at all today — `isAdmin` below reads the *platform*
-    role a session logged in with, and the onboarding module's roles
-    (OB_ADMIN, OB_SALES, …) are a separate, server-only vocabulary this
-    sidebar cannot see. Every route this points at already accepts that:
-    `ObModuleGuard` answers a caller with no entitlement 404, same as every
-    other onboarding route today, and hiding the link for everyone would not
-    change who can reach the screen — only whether they can find it.
+    onboarding module's roles (OB_ADMIN, OB_SALES, …) are a separate,
+    server-only vocabulary this sidebar cannot see. Every route this points at
+    already accepts that: `ObModuleGuard` answers a caller with no entitlement
+    404, same as every other onboarding route today, and hiding the link for
+    everyone would not change who can reach the screen — only whether they can
+    find it.
+
+    A-129 · the *module* half of that has since gained a client-side signal —
+    `me.modules`, which A-116 added for the launcher — so this row now leads
+    into a nav section rather than to a lone screen. The *role* half has not,
+    and is what still keeps this entry ungated.
   */
   { to: '/onboarding/clients', label: 'Onboarding', icon: Building2 },
   { to: '/masters', label: 'Masters', icon: Database, adminOnly: true },
@@ -72,6 +91,73 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/audit-logs', label: 'Audit log', icon: ScrollText, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
+/*
+  A-129 · the Onboarding module's own navigation.
+
+  <h2>Only the screens that exist</h2>
+
+  The design this follows has nine entries; four of them point at screens no
+  task has built yet — Module Service (the journey-template *list*; C-102 built
+  the designer, which is reachable only by template id), Prerequisites master
+  (B-124), and Roles & module access (A-117's screen, whose API is already
+  merged). They are deliberately absent rather than present-and-dead: a nav row
+  that lands on a 404 is worse than no row, because it reads as a broken
+  product rather than an unfinished one. Each is one line here the day its
+  screen lands.
+
+  <h2>Ungated, like the entry that leads here</h2>
+
+  No row carries `adminOnly`. That flag reads the *platform* role
+  (ADMIN/PM/DEVELOPER/…), and the entries below divide on the *onboarding*
+  role (OB_ADMIN, OB_MANAGER, OB_SALES, …) — a different vocabulary, and one
+  the session does not carry: `Me` has `modules` but no `moduleRoles`, though
+  `AccessTokenIssuer` already mints the claim into the token. Gating on the
+  platform role would be worse than not gating, since the two do not
+  correspond: an onboarding OB_VIEWER may well be a platform ADMIN.
+
+  So the Administration section is shown to everyone holding the module, and
+  `ObModuleRoleFilter` refuses what the caller may not have — the same bargain
+  the ticketing Onboarding entry already documents above. Exposing
+  `moduleRoles` on `Me` is the follow-up that makes real gating possible; it is
+  a contract change and does not belong in a navigation task.
+*/
+const ONBOARDING_NAV: NavEntry[] = [
+  { to: '/onboarding/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  {
+    to: '/onboarding/clients',
+    label: 'Clients',
+    icon: Building2,
+    // Stays lit on a client's detail page, which is where following a row goes.
+    isActive: (p) => p.startsWith('/onboarding/clients') && p !== '/onboarding/clients/new',
+  },
+  {
+    to: '/onboarding/clients/new',
+    label: 'New client',
+    icon: PlusCircle,
+    isActive: (p) => p === '/onboarding/clients/new',
+  },
+  { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
+  { section: 'Administration' },
+  { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
+  { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
+]
+
+/** The module a path belongs to. The URL is the source of truth, not a store. */
+const ONBOARDING_PREFIX = '/onboarding'
+
+/**
+ * Whether a row is the page being looked at.
+ *
+ * <p>The default reproduces what `NavLink` did before this file computed it
+ * itself — the exact path, or anything nested under it, so `/masters` stays
+ * current on `/masters/resources`. Rows whose destination contains another
+ * row's say so themselves.
+ */
+function isEntryActive(entry: NavItem, pathname: string): boolean {
+  if (entry.isActive) return entry.isActive(pathname)
+  return pathname === entry.to || pathname.startsWith(`${entry.to}/`)
+}
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed)
@@ -101,8 +187,28 @@ export function Sidebar() {
     own task, not a prerequisite for the navigation working.
   */
   const isAdmin = useAuthStore((s) => s.user?.role) === 'ADMIN'
+  const modules = useAuthStore((s) => s.user?.modules) ?? []
+  const { pathname } = useLocation()
 
-  const items = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
+  /*
+    A-129 · which navigation to draw.
+
+    Keyed on the route rather than on a "current module" store, so the two
+    cannot disagree — a deep link, a browser back button and a bookmark all
+    arrive with the answer already in the URL, and there is no state to
+    initialise or reset on sign-out.
+
+    The entitlement is checked as well as the path: a caller without the
+    onboarding grant who reaches an `/onboarding/**` URL gets 404s from the
+    server for the data, and showing them that module's navigation would be
+    the frontend disagreeing with the gate about what exists.
+  */
+  const inOnboarding =
+    pathname.startsWith(ONBOARDING_PREFIX) && modules.includes('ONBOARDING')
+
+  const entries = (inOnboarding ? ONBOARDING_NAV : TICKETING_NAV).filter(
+    (entry) => isSection(entry) || !entry.adminOnly || isAdmin,
+  )
 
   return (
     <aside
@@ -113,29 +219,63 @@ export function Sidebar() {
     >
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <div className="h-6 w-6 shrink-0 rounded bg-primary" aria-hidden />
-        {!collapsed && <span className="text-sm font-semibold tracking-wide text-content">EDUTRACK</span>}
+        {!collapsed && (
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold tracking-wide text-content">
+              EDUTRACK
+            </span>
+            {/* Which module you are in, said once, where the product is named. */}
+            {inOnboarding && (
+              <span className="block truncate text-[11px] leading-tight text-content-muted">
+                Client Onboarding
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto p-2" aria-label="Main">
-        {items.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              cn(
+      <nav
+        className="flex-1 space-y-1 overflow-y-auto p-2"
+        aria-label={inOnboarding ? 'Onboarding' : 'Main'}
+      >
+        {entries.map((entry) =>
+          isSection(entry) ? (
+            collapsed ? (
+              <hr key={entry.section} className="mx-2 my-2 border-t border-border" />
+            ) : (
+              <div
+                key={entry.section}
+                className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+              >
+                {entry.section}
+              </div>
+            )
+          ) : (
+            <Link
+              key={entry.to}
+              to={entry.to}
+              title={collapsed ? entry.label : undefined}
+              /*
+                `aria-current` and the highlight are decided together, from one
+                predicate. `NavLink` would compute its own for the attribute
+                and accept an override only for the class, so a row corrected
+                visually would still announce itself as the current page —
+                two of them, on the wizard route.
+              */
+              aria-current={isEntryActive(entry, pathname) ? 'page' : undefined}
+              className={cn(
                 'flex items-center gap-3 rounded-control px-3 py-2 text-sm font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                isActive
+                isEntryActive(entry, pathname)
                   ? 'bg-primary-soft text-primary'
                   : 'text-content-muted hover:bg-subtle hover:text-content',
-              )
-            }
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span className="truncate">{label}</span>}
-          </NavLink>
-        ))}
+              )}
+            >
+              <entry.icon className="h-4 w-4 shrink-0" />
+              {!collapsed && <span className="truncate">{entry.label}</span>}
+            </Link>
+          ),
+        )}
       </nav>
 
       <button
