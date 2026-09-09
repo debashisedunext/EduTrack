@@ -75,6 +75,16 @@ public class ObSignoffOtpService {
      */
     static final Duration OTP_TTL = Duration.ofMinutes(10);
 
+    /**
+     * B-116 · the channel every OTP goes out on today, named once so the
+     * acceptance PDF can state a fact rather than assume one. {@link #issue}
+     * is the only place that sends a code, and it sends by mail regardless of
+     * whether the contact also carries a phone — the day that stops being
+     * true, this constant is the one place that has to move, and the PDF
+     * moves with it because it reads this rather than a second literal.
+     */
+    static final ObChannel OTP_CHANNEL = ObChannel.EMAIL;
+
     private final ObSignoffRepository signoffs;
     private final PublicSignoffAccess access;
     private final ObSignoffSessions sessions;
@@ -142,7 +152,7 @@ public class ObSignoffOtpService {
 
         outbox.enqueue(new ObNotification(
                 ObNotificationEvent.SIGNOFF_OTP.name(),
-                ObChannel.EMAIL,
+                OTP_CHANNEL,
                 new ObRecipient.Client(signoff.getSentToContactId()),
                 signoff.getObClientId(),
                 signoff.getJourneyId(),

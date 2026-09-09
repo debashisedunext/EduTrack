@@ -142,4 +142,65 @@ describe('OB-09 public sign-off page', () => {
     // reachable by someone we know nothing about beyond one email.
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
+
+  // ── B-117 · the objection path ──────────────────────────────────────────
+
+  describe('objecting instead of accepting', () => {
+    it('offers a way to object from the review step', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${TOKEN}`)
+      await identify(user)
+      await screen.findByLabelText(/your full name/i)
+
+      expect(
+        screen.getByRole('button', { name: /raise an objection instead/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('will not submit an objection with no reason typed', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${TOKEN}`)
+      await identify(user)
+      await screen.findByLabelText(/your full name/i)
+
+      await user.click(screen.getByRole('button', { name: /raise an objection instead/i }))
+
+      expect(await screen.findByRole('button', { name: /submit objection/i })).toBeDisabled()
+    })
+
+    it('records the objection and says so, in client-facing words rather than internal codes', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${TOKEN}`)
+      await identify(user)
+      await screen.findByLabelText(/your full name/i)
+
+      await user.click(screen.getByRole('button', { name: /raise an objection instead/i }))
+      await user.type(
+        await screen.findByLabelText(/your objection/i),
+        'The invoice total is wrong.',
+      )
+      await user.click(screen.getByRole('button', { name: /submit objection/i }))
+
+      const heading = await screen.findByRole('heading', { name: /your objection is recorded/i })
+      expect(heading).toBeInTheDocument()
+      // The reader was never shown these — the page says only what changes
+      // for them, not the status names the backend moved between.
+      expect(screen.queryByText(/in_progress/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/waiting_on_client/i)).not.toBeInTheDocument()
+    })
+
+    it('lets the reader cancel back to the accept form without sending anything', async () => {
+      const user = userEvent.setup()
+      visit(`?token=${TOKEN}`)
+      await identify(user)
+      await screen.findByLabelText(/your full name/i)
+
+      await user.click(screen.getByRole('button', { name: /raise an objection instead/i }))
+      await screen.findByRole('button', { name: /submit objection/i })
+      await user.click(screen.getByRole('button', { name: /back to review/i }))
+
+      expect(await screen.findByRole('button', { name: /^accept$/i })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /submit objection/i })).not.toBeInTheDocument()
+    })
+  })
 })

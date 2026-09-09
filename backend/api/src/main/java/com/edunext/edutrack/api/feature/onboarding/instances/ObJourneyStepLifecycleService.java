@@ -396,6 +396,84 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
+     * B-117 · revert a step because the client objected instead of signing.
+     *
+     * <h2>The two states this actually reverts</h2>
+     *
+     * <p>{@code IN_PROGRESS} and {@code WAITING_ON_CLIENT} — the two states a
+     * step can be in while a sign-off it does not yet hold is still
+     * {@code PENDING}. The clock resume only applies to the second: {@code
+     * WAITING_ON_CLIENT} is C-105's own pause, so returning from it is the
+     * plan's own "our clock resumes" — see {@link #resume}, whose {@code
+     * RESUMED} write this reuses rather than re-implements. A step still
+     * plainly {@code IN_PROGRESS} (a sign-off requested without pausing it)
+     * needs no clock event: nothing here paused it.
+     *
+     * <p><b>{@code DONE}, {@code SKIPPED}, {@code PENDING} and {@code BLOCKED}
+     * are left alone</b> — on {@link #completeOnClientAcceptance}'s own
+     * precedent for the identical shape of caller: there is no user here to
+     * refuse with an exception, and unwinding a step that already completed
+     * (and may already have activated siblings and settled the journey) is a
+     * cascade this task's own line does not ask for. The objection is still
+     * journalled either way; a step in one of these states is the owner's own
+     * state to reconcile, not this method's to force.
+     *
+     * <h2>The objection is logged unconditionally</h2>
+     *
+     * <p>{@link #appendObjectedHistory} runs whether or not the step actually
+     * reverted, on {@link #skip}'s own precedent for what "logged to the
+     * communication timeline" means one class over — an {@code OBJECTED} row
+     * naming the previous status, the (possibly unchanged) new one, and the
+     * client contact who raised it.
+     *
+     * @param objectingContactId {@code ob_signoffs.sent_to_contact_id} — the
+     *                           contact the session was minted for, recorded
+     *                           as {@code actor_contact_id} rather than a
+     *                           staff {@code actor_id}
+     * @param objectionNote      the mandatory reason, written to the
+     *                           timeline's {@code remarks}
+     * @return whether the step actually reverted, and its owner — B-117's
+     *         caller uses the owner to route {@code SIGNOFF_OBJECTED}
+     * @throws JourneyStepNotFoundException no such step
+     */
+    @Transactional
+    public ObjectionResult revertOnClientObjection(long stepId, Long objectingContactId, String objectionNote) {
+        ObJourneyStep step = requireStep(stepId);
+        ObJourney journey = journeys.findById(step.getJourneyId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "journey step " + stepId + " points at journey " + step.getJourneyId() + " which does not exist"));
+
+        ObJourneyStepStatus previousStatus = step.getStatus();
+        boolean reverted = previousStatus == ObJourneyStepStatus.IN_PROGRESS
+                || previousStatus == ObJourneyStepStatus.WAITING_ON_CLIENT;
+
+        if (reverted) {
+            step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+            if (previousStatus == ObJourneyStepStatus.WAITING_ON_CLIENT) {
+                Instant resumedAt = Instant.now();
+                recomputeDueAtOnResume(step, resumedAt);
+
+                ObStepClockEvent resumed = new ObStepClockEvent();
+                resumed.setStepId(step.getId());
+                resumed.setJourneyId(step.getJourneyId());
+                resumed.setEventType(ObStepClockEventType.RESUMED);
+                resumed.setAttributedTo(ObStepClockAttribution.INTERNAL);
+                resumed.setOccurredAt(resumedAt);
+                resumed.setActorType(ObStepClockActorType.SYSTEM);
+                clockRecorder.record(resumed);
+            }
+        }
+
+        appendObjectedHistory(journey, step, previousStatus, objectingContactId, objectionNote);
+        return new ObjectionResult(reverted, step.getOwnerUserId());
+    }
+
+    /** {@link #revertOnClientObjection}'s own answer — B-117's own record type. */
+    public record ObjectionResult(boolean stepReverted, Long ownerUserId) {
+    }
+
+    /**
      * The gate's verdict as the contract's codes.
      *
      * <p>Codes rather than sentences, and the contract says why: "OB-09 shows
@@ -1063,6 +1141,29 @@ public class ObJourneyStepLifecycleService {
         entry.setActorId(actorId);
         entry.setActorType("USER");
         entry.setRemarks(reason);
+        stepJournal.append(entry);
+    }
+
+    /**
+     * B-117 · one {@code OBJECTED} row per objection, on {@link
+     * #appendSkippedHistory}'s exact shape one method up — {@code actorType}
+     * is {@code CLIENT} rather than {@code USER} and {@code actorContactId}
+     * carries the contact rather than {@code actorId}, which is the row's own
+     * way of saying nobody on our staff made this decision.
+     */
+    private void appendObjectedHistory(ObJourney journey, ObJourneyStep step, ObJourneyStepStatus previousStatus,
+                                        Long objectingContactId, String objectionNote) {
+        ObStepHistory entry = new ObStepHistory();
+        entry.setJourneyId(journey.getId());
+        entry.setStepId(step.getId());
+        entry.setObClientId(journey.getObClientId());
+        entry.setEventType("OBJECTED");
+        entry.setFieldName("status");
+        entry.setOldValue(previousStatus.name());
+        entry.setNewValue(step.getStatus().name());
+        entry.setActorType("CLIENT");
+        entry.setActorContactId(objectingContactId);
+        entry.setRemarks(objectionNote);
         stepJournal.append(entry);
     }
 

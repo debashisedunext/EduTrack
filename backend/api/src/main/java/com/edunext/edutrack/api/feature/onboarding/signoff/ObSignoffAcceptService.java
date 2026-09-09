@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.signoff;
 
+import com.edunext.edutrack.api.feature.onboarding.clients.ObClientGoLiveService;
 import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyStepLifecycleService;
 import com.edunext.edutrack.api.security.ClientAddress;
 import com.edunext.edutrack.domain.onboarding.ObSignoff;
@@ -7,6 +8,8 @@ import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,10 +59,15 @@ import java.util.OptionalLong;
 @Service
 public class ObSignoffAcceptService {
 
+    private static final Logger log = LoggerFactory.getLogger(ObSignoffAcceptService.class);
+
     private final ObSignoffRepository signoffs;
     private final ObSignoffSessions sessions;
     private final ObSignoffContactReader contacts;
     private final ObJourneyStepLifecycleService stepLifecycle;
+    private final ObSignoffCertificateService certificates;
+    private final ObClientGoLiveService clientGoLive;
+    private final ObGoLiveHandoverService handover;
     private final Clock clock;
 
     /**
@@ -75,8 +83,12 @@ public class ObSignoffAcceptService {
     ObSignoffAcceptService(ObSignoffRepository signoffs,
                            ObSignoffSessions sessions,
                            ObSignoffContactReader contacts,
-                           ObJourneyStepLifecycleService stepLifecycle) {
-        this(signoffs, sessions, contacts, stepLifecycle, Clock.systemUTC());
+                           ObJourneyStepLifecycleService stepLifecycle,
+                           ObSignoffCertificateService certificates,
+                           ObClientGoLiveService clientGoLive,
+                           ObGoLiveHandoverService handover) {
+        this(signoffs, sessions, contacts, stepLifecycle, certificates, clientGoLive, handover,
+                Clock.systemUTC());
     }
 
     /**
@@ -88,11 +100,17 @@ public class ObSignoffAcceptService {
                            ObSignoffSessions sessions,
                            ObSignoffContactReader contacts,
                            ObJourneyStepLifecycleService stepLifecycle,
+                           ObSignoffCertificateService certificates,
+                           ObClientGoLiveService clientGoLive,
+                           ObGoLiveHandoverService handover,
                            Clock clock) {
         this.signoffs = signoffs;
         this.sessions = sessions;
         this.contacts = contacts;
         this.stepLifecycle = stepLifecycle;
+        this.certificates = certificates;
+        this.clientGoLive = clientGoLive;
+        this.handover = handover;
         this.clock = clock;
     }
 
@@ -123,6 +141,14 @@ public class ObSignoffAcceptService {
 
         recordAcceptance(signoff, acceptedName, note, http);
         signoffs.save(signoff);
+
+        // B-116 · archived once the row is SIGNED and saved, never before —
+        // the same "the acceptance is not a hostage to something downstream"
+        // reasoning the completion gate below is built on. A rendering or
+        // storage fault leaves pdfStorageKey null rather than losing the
+        // signature; the certificate can be regenerated later, an
+        // accepted-but-uncertified sign-off cannot be un-lost.
+        signoff.setPdfStorageKey(archiveCertificateQuietly(signoff));
 
         List<String> gateFailures = completeStepIfAny(signoff);
         boolean stepCompleted = signoff.getKind() == ObSignoffKind.STEP && gateFailures.isEmpty();
@@ -189,22 +215,65 @@ public class ObSignoffAcceptService {
     }
 
     /**
-     * <b>Always false, and honestly so: the go-live flip is B-118 and does not
-     * exist yet.</b>
-     *
-     * <p>The contract describes this field as "this acceptance was the last
-     * one, every journey is complete, and the client is Live-Green". No code in
-     * the application flips a client to Live-Green today, so no acceptance can
-     * be that one, and {@code false} is the accurate answer rather than a
-     * placeholder — a page rendering it will correctly show nothing about going
-     * live, because nothing did.
-     *
-     * <p>This is the one field on the response B-118 changes. It is a method
-     * rather than a literal so that the change is a body rather than a hunt.
+     * {@link ObSignoffCertificateService#archive}, with every failure caught
+     * rather than left to unwind this transaction. See the call site: a
+     * signature the client just gave us is not something a PDF renderer or an
+     * object-storage outage gets to take back.
      */
-    @SuppressWarnings("unused")
+    private String archiveCertificateQuietly(ObSignoff signoff) {
+        try {
+            return certificates.archive(signoff);
+        } catch (RuntimeException certificateFailed) {
+            log.warn("ob-signoff {}: acceptance recorded, but the certificate could not be archived",
+                    signoff.getId(), certificateFailed);
+            return null;
+        }
+    }
+
+    /**
+     * B-118 · "this acceptance was the last one, every journey is complete,
+     * and the client is Live-Green" — the contract's own description of this
+     * field, made real.
+     *
+     * <p>Only a {@code GO_LIVE} sign-off can be that one; a {@code STEP}
+     * acceptance never touches {@code ob_clients} and this returns
+     * {@code false} for it without asking {@link ObClientGoLiveService}
+     * anything. {@link ObClientGoLiveService#flipIfEarned} is the actual
+     * decision — "every one of this client's <em>other</em> live journeys
+     * already carries a {@code SIGNED GO_LIVE}" — and it runs in this same
+     * transaction (plain method call, {@code Propagation.MANDATORY} on its
+     * side), so the acceptance and the flip it earns commit or roll back
+     * together.
+     *
+     * <p>{@code signoff.getSignedAt()} is passed as {@code live_at} rather
+     * than a fresh {@code clock.instant()} call: the flip is earned by this
+     * acceptance, so it carries this acceptance's own timestamp.
+     *
+     * <p>The handover note is generated only once the flip has actually
+     * fired, and its failure is caught here exactly as the certificate's is a
+     * few lines up — the client went live, and a storage or rendering fault
+     * afterwards must not cost them that the way it must not cost a signature.
+     */
     private boolean wentLive(ObSignoff signoff) {
-        return false;
+        if (signoff.getKind() != ObSignoffKind.GO_LIVE) {
+            return false;
+        }
+        boolean flipped = clientGoLive.flipIfEarned(
+                signoff.getObClientId(), signoff.getJourneyId(), signoff.getSignedAt());
+        if (flipped) {
+            generateHandoverQuietly(signoff.getObClientId());
+        }
+        return flipped;
+    }
+
+    /** {@link #archiveCertificateQuietly}'s own reasoning, for the handover note instead of the certificate. */
+    private void generateHandoverQuietly(long obClientId) {
+        try {
+            handover.generate(obClientId);
+        } catch (RuntimeException handoverFailed) {
+            log.warn("ob-client {}: went live, but the support handover note could not be generated",
+                    obClientId, handoverFailed);
+        }
     }
 
     /**
