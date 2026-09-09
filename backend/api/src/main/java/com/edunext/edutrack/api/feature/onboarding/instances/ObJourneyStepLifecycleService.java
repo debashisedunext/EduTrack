@@ -128,6 +128,27 @@ public class ObJourneyStepLifecycleService {
      */
     private static final String WAITING_ON_CLIENT_PAUSE_REASON = "WAITING_ON_CLIENT";
 
+    /**
+     * B-115 · the {@code gateFailures} vocabulary, named here because
+     * {@link #completeOnClientAcceptance} is where they are produced and the
+     * contract calls them <em>stable</em> — OB-09 and the owner's view both
+     * branch on the string, so a literal retyped at a call site is a silent
+     * dead branch on whichever side did not change.
+     */
+    private static final String GATE_ITEMS_UNANSWERED = "ob-step-items-unanswered";
+
+    private static final String GATE_DOCS_MISSING = "ob-step-docs-missing";
+
+    /**
+     * Unreachable from {@link #completeOnClientAcceptance} today — the sign-off
+     * is {@code SIGNED} before it is called — and mapped rather than omitted so
+     * the gate cannot acquire a failure the response silently drops.
+     */
+    private static final String GATE_SIGNOFF_MISSING = "ob-step-signoff-missing";
+
+    /** Not a gate failure but the same kind of answer: our side is not ready. */
+    private static final String GATE_STEP_NOT_IN_PROGRESS = "ob-step-not-in-progress";
+
     private final ObJourneyStepRepository journeySteps;
     private final ObJourneyRepository journeys;
     private final ObJourneyStepItemRepository stepItems;
@@ -261,6 +282,25 @@ public class ObJourneyStepLifecycleService {
      * instantiation.
      */
     private void requireCompletionGate(ObJourneyStep step) {
+        evaluateCompletionGate(step).ifPresent(failure -> {
+            throw failure;
+        });
+    }
+
+    /**
+     * The gate itself, separated from the throwing so that B-115's client
+     * acceptance can read the same verdict without catching an exception it
+     * expects.
+     *
+     * <p>Split rather than duplicated for the reason the contract gives for
+     * routing acceptance through this gate at all: PHASE-2-BUILD-PLAN §3 #4
+     * found the prototype enforcing three gates on {@code stComplete} and
+     * none on {@code signoffAccept}, so a client could accept a service whose
+     * required documents were never attached. A second evaluation written
+     * beside this one would be the same bug with a longer fuse — it would
+     * agree today and drift on whichever change touches only one of them.
+     */
+    private java.util.Optional<CompletionGateException> evaluateCompletionGate(ObJourneyStep step) {
         List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
         Map<Long, Boolean> mandatoryByTemplateItemId = mandatoryByTemplateItemId(items);
 
@@ -282,8 +322,101 @@ public class ObJourneyStepLifecycleService {
                 && !signoffs.existsByStepIdAndKindAndStatus(step.getId(), ObSignoffKind.STEP, ObSignoffStatus.SIGNED);
 
         if (!unanswered.isEmpty() || missingDocs > 0 || signoffMissing) {
-            throw new CompletionGateException(step.getId(), unanswered, missingDocs, signoffMissing);
+            return java.util.Optional.of(
+                    new CompletionGateException(step.getId(), unanswered, missingDocs, signoffMissing));
         }
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * B-115 · complete a step because the client accepted its sign-off, or
+     * report why we could not.
+     *
+     * <h2>Why this is not {@link #complete}</h2>
+     *
+     * <p>Two things differ, and neither is the gate. There is <b>no caller</b>
+     * — the actor is a customer holding a one-time session, who is not a user,
+     * owns nothing and could never satisfy {@link #requireOwnership}. And the
+     * gate <b>must not throw</b>: the contract is explicit that acceptance
+     * succeeding while completion fails is "a normal outcome, not an error",
+     * because "the client did accept, they are not the ones who left a document
+     * unattached, and asking them to click twice for our own incomplete record
+     * is the version of this that loses a signature".
+     *
+     * <p>Everything else is deliberately identical, and identical by sharing
+     * rather than by resemblance: the same {@link #evaluateCompletionGate}, the
+     * same {@code DONE} and {@code finishedAt}, and the same
+     * {@link #activateEligibleSteps} sweep — a step completed by acceptance
+     * unblocks its siblings exactly as one completed by its owner does, and a
+     * journey that stalled because the last completion came through the public
+     * surface would be the hardest kind of bug to see.
+     *
+     * <h2>The ownership check is skipped, not weakened</h2>
+     *
+     * <p>What stands in its place is upstream and stronger for this actor: the
+     * caller proved possession of a mailed link <em>and</em> an OTP sent to the
+     * contact on the row, and {@code ObSignoffAcceptService} passes only the
+     * {@code step_id} of the sign-off that session was minted for. There is no
+     * argument here a caller can choose.
+     *
+     * @return empty when the step completed; otherwise the contract's stable
+     *         {@code gateFailures} codes, in a fixed order so two clients
+     *         refused for the same reasons get the same array
+     */
+    @Transactional
+    public List<String> completeOnClientAcceptance(long stepId) {
+        ObJourneyStep step = requireStep(stepId);
+
+        // Not IN_PROGRESS is its own answer rather than an exception. A step
+        // already DONE has nothing to complete and the acceptance still stands;
+        // one BLOCKED or WAITING_ON_CLIENT is our own state to clear, which is
+        // exactly what gateFailures is for — telling the owner what is missing
+        // while the client sees "we are finishing our side".
+        if (step.getStatus() != ObJourneyStepStatus.IN_PROGRESS) {
+            return step.getStatus() == ObJourneyStepStatus.DONE
+                    ? List.of()
+                    : List.of(GATE_STEP_NOT_IN_PROGRESS);
+        }
+
+        java.util.Optional<CompletionGateException> failure = evaluateCompletionGate(step);
+        if (failure.isPresent()) {
+            return gateFailureCodes(failure.get());
+        }
+
+        step.setStatus(ObJourneyStepStatus.DONE);
+        step.setFinishedAt(Instant.now());
+        activateEligibleSteps(step.getJourneyId());
+        return List.of();
+    }
+
+    /**
+     * The gate's verdict as the contract's codes.
+     *
+     * <p>Codes rather than sentences, and the contract says why: "OB-09 shows
+     * the client 'your acceptance is recorded; we are finishing our side' while
+     * the same codes tell the owner exactly what to attach. One field, two
+     * audiences, and only the internal one needs the detail." So the item
+     * labels {@link CompletionGateException} carries are deliberately not
+     * forwarded — they are our internal checklist wording, on an
+     * unauthenticated response.
+     *
+     * <p>{@code signoffMissing} cannot fire on this path: the sign-off was set
+     * {@code SIGNED} in the same transaction immediately before. It is mapped
+     * anyway rather than assumed away, because an assumption that holds by
+     * ordering is one refactor from being wrong silently.
+     */
+    private static List<String> gateFailureCodes(CompletionGateException failure) {
+        List<String> codes = new ArrayList<>(3);
+        if (!failure.unansweredMandatoryItems().isEmpty()) {
+            codes.add(GATE_ITEMS_UNANSWERED);
+        }
+        if (failure.missingRequiredDocs() > 0) {
+            codes.add(GATE_DOCS_MISSING);
+        }
+        if (failure.signoffMissing()) {
+            codes.add(GATE_SIGNOFF_MISSING);
+        }
+        return List.copyOf(codes);
     }
 
     /**

@@ -1285,4 +1285,169 @@ class ObJourneyStepLifecycleServiceTest {
                 JsonNullable.of(NEW_OWNER), JsonNullable.undefined(), null, JsonNullable.undefined()))
                 .isInstanceOf(JourneyStepNotFoundException.class);
     }
+
+    // ── completeOnClientAcceptance (B-115) ────────────────────────────────
+
+    @Test
+    void clientAcceptanceCompletesAStepWhoseGateIsSatisfied() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        assertThat(failures).isEmpty();
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+        assertThat(step.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void clientAcceptanceNeedsNoOwner() {
+        // The whole point of the seam. complete() refuses a caller who is
+        // neither owner nor backup; the client accepting is not a user at all
+        // and could never satisfy that check.
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setOwnerUserId(OWNER);
+        step.setBackupOwnerUserId(BACKUP_OWNER);
+
+        assertThatThrownBy(() -> service.complete(STEP, STRANGER))
+                .isInstanceOf(NotStepOwnerException.class);
+        assertThat(service.completeOnClientAcceptance(STEP)).isEmpty();
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+    }
+
+    @Test
+    void clientAcceptanceReportsUnansweredMandatoryItemsAsACodeRatherThanThrowing() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem unanswered = new ObJourneyStepItem();
+        unanswered.setId(1L);
+        unanswered.setStepId(STEP);
+        unanswered.setSequence(1);
+        unanswered.setLabel("Signed MSA received");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(unanswered));
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        assertThat(failures).containsExactly("ob-step-items-unanswered");
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void clientAcceptanceNeverLeaksOurChecklistWordingToTheClient() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObJourneyStepItem unanswered = new ObJourneyStepItem();
+        unanswered.setId(1L);
+        unanswered.setStepId(STEP);
+        unanswered.setSequence(1);
+        unanswered.setLabel("Chase Priya about the missing PAN");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(unanswered));
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        // The contract's reasoning: one field, two audiences, and only the
+        // internal one gets the detail. This response is unauthenticated.
+        assertThat(failures).noneMatch(code -> code.contains("Priya"));
+        assertThat(failures).allMatch(code -> code.startsWith("ob-step-"));
+    }
+
+    @Test
+    void clientAcceptanceReportsAMissingRequiredDocument() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setTemplateStepId(4242L);
+        ObJourneyTemplateStepDoc required = new ObJourneyTemplateStepDoc();
+        required.setId(1L);
+        required.setStepId(4242L);
+        required.setSequence(1);
+        required.setLabel("Purchase order");
+        required.setRequired(true);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(4242L)).thenReturn(List.of(required));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(0L);
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        assertThat(failures).containsExactly("ob-step-docs-missing");
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void clientAcceptanceReportsEveryOutstandingReasonTogether() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        step.setTemplateStepId(4242L);
+        ObJourneyStepItem unanswered = new ObJourneyStepItem();
+        unanswered.setId(1L);
+        unanswered.setStepId(STEP);
+        unanswered.setSequence(1);
+        unanswered.setLabel("Signed MSA received");
+        when(stepItems.findByStepIdOrderBySequenceAsc(STEP)).thenReturn(List.of(unanswered));
+        ObJourneyTemplateStepDoc required = new ObJourneyTemplateStepDoc();
+        required.setId(1L);
+        required.setStepId(4242L);
+        required.setSequence(1);
+        required.setLabel("Purchase order");
+        required.setRequired(true);
+        when(templateStepDocs.findByStepIdOrderBySequenceAsc(4242L)).thenReturn(List.of(required));
+        when(attachments.countByStepIdAndScanStatusAndDeletedAtIsNull(STEP, ObAttachmentScanStatus.CLEAN))
+                .thenReturn(0L);
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        // C-106's own rule, kept on this path: a caller fixing one thing should
+        // not have to resubmit to discover the next.
+        assertThat(failures).containsExactly("ob-step-items-unanswered", "ob-step-docs-missing");
+    }
+
+    @Test
+    void clientAcceptanceOnAnAlreadyDoneStepIsNotAFailure() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.DONE);
+
+        // Staff completed it between the link being sent and the client
+        // clicking. There is nothing to do and nothing was wrong.
+        assertThat(service.completeOnClientAcceptance(STEP)).isEmpty();
+    }
+
+    @Test
+    void clientAcceptanceOnABlockedStepReportsOurSideRatherThanThrowing() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.BLOCKED);
+
+        List<String> failures = service.completeOnClientAcceptance(STEP);
+
+        assertThat(failures).containsExactly("ob-step-not-in-progress");
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.BLOCKED);
+    }
+
+    @Test
+    void clientAcceptanceActivatesSiblingsExactlyAsAnOwnerCompletionDoes() {
+        ObJourneyStep first = stepRows.get(STEP);
+        first.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        ObJourneyStep next = new ObJourneyStep();
+        next.setId(STEP + 1);
+        next.setJourneyId(JOURNEY);
+        next.setSequence(2);
+        next.setName("Configure tenant");
+        next.setTatDays(2);
+        next.setOwnerUserId(OWNER);
+        next.setStatus(ObJourneyStepStatus.PENDING);
+        next.setDependsOnStepId(STEP);
+        stepRows.put(next.getId(), next);
+
+        service.completeOnClientAcceptance(STEP);
+
+        // A journey that stalled because the last completion came through the
+        // public surface would be the hardest kind of bug to see.
+        assertThat(next.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void clientAcceptanceFailsCleanlyForAnUnknownStep() {
+        assertThatThrownBy(() -> service.completeOnClientAcceptance(404L))
+                .isInstanceOf(JourneyStepNotFoundException.class);
+    }
 }
