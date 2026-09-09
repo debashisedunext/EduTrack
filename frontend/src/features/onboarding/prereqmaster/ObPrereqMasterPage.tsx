@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { FileText, X } from 'lucide-react'
+import { FileText, ListChecks, Lock, X } from 'lucide-react'
 
 import {
   getGetObPrereqTemplateQueryKey,
@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toast } from '@/components/ui/use-toast'
+import { cn } from '@/lib/utils'
 
 /**
  * B-124 · OB-14 — the prerequisites master.
@@ -48,6 +49,22 @@ import { toast } from '@/components/ui/use-toast'
  * that half-finished edits were already live. So the mutation controls are
  * enabled only while a draft is open, the header names which version is being
  * looked at, and Publish carries the snapshot rule in its own words.
+ *
+ * <h2>A fresh organisation is not a broken screen</h2>
+ *
+ * `GET /onboarding/prereq-template` with no `version` answers <b>404</b> when
+ * nothing has been published and no draft is open, and
+ * `ObPrereqTemplateController` gives the reason in its own words: an empty
+ * `200` would say a master exists and is empty, which is a different thing
+ * from one nobody has authored. So that particular 404 is the *first visit*,
+ * not a failure — somebody arriving to write the first checklist — and it
+ * renders as an empty state offering to start one.
+ *
+ * Everything else still renders as an error: 403, 5xx, a network failure, and
+ * a 404 for an explicitly requested `version` (that one means a version that
+ * was asked for by number is gone, which is a real fault). The distinguishing
+ * fact is `draftVersion === null` — i.e. this screen asked for *the active
+ * master* and was told there isn't one.
  *
  * <h2>Finding the draft again</h2>
  *
@@ -120,14 +137,14 @@ export function ObPrereqMasterPage() {
     keeps a delete and a reorder from racing each other's sequence numbers.
   */
   const apply = React.useCallback(
-    async (work: () => Promise<unknown>) => {
+    async (work: () => Promise<unknown>, describe: (caught: unknown) => string = messageFor) => {
       setError(null)
       setBusy(true)
       try {
         await work()
         await refresh()
       } catch (caught) {
-        setError(messageFor(caught))
+        setError(describe(caught))
       } finally {
         setBusy(false)
       }
@@ -141,13 +158,23 @@ export function ObPrereqMasterPage() {
         const revision = await beginRevision.mutateAsync()
         setDraftVersion(revision.data.version)
       } catch (caught) {
-        if (caught instanceof ApiError && caught.is('ob-prereq-draft-exists') && template) {
-          setDraftVersion(template.version + 1)
+        /*
+          Any 409 from this route is "a draft already exists" — it is the only
+          conflict `beginRevision` raises. Matched on the status as well as on
+          the problem type because the server's own handler types all three of
+          its 409s as the generic `errors/conflict`, so the type test alone
+          matches the mock and misses production.
+
+          Versions are sequential, so the one outstanding draft is active + 1;
+          with no active version at all it can only be the first, v1.
+        */
+        if (caught instanceof ApiError && (caught.status === 409 || caught.is('ob-prereq-draft-exists'))) {
+          setDraftVersion((template?.version ?? 0) + 1)
           return
         }
         throw caught
       }
-    })
+    }, beginFailureMessage)
 
   const publish = () =>
     apply(async () => {
@@ -211,11 +238,49 @@ export function ObPrereqMasterPage() {
     )
   }
 
+  /*
+    The one 404 that is not a fault: nobody has authored a master yet. Narrow
+    on purpose — only the read this screen makes for *the active master*
+    (`draftVersion === null`) can mean "not authored yet". A 404 on a version
+    asked for by number means a version that should exist does not, which is
+    the error branch below.
+  */
+  if (
+    draftVersion === null &&
+    templateQuery.isError &&
+    templateQuery.error instanceof ApiError &&
+    templateQuery.error.status === 404
+  ) {
+    return (
+      <div className="max-w-[900px] p-6">
+        <PageHeading />
+        {error && <ErrorNote className="mt-4">{error}</ErrorNote>}
+        <div className="mt-5 rounded-card border border-border bg-surface shadow-rest">
+          <EmptyState
+            icon={<ListChecks className="h-6 w-6" strokeWidth={1.5} />}
+            title="No prerequisites checklist has been authored yet"
+            description={
+              'This is the checklist every newly boarded client is asked for, and nobody has written it. ' +
+              'Its mandatory tasks gate every client journey, so a client boarded now would have nothing ' +
+              'to clear. Starting one opens a draft — nothing reaches a client until you publish it.'
+            }
+            action={
+              <Button onClick={begin} disabled={busy}>
+                Author the first checklist
+              </Button>
+            }
+          />
+        </div>
+      </div>
+    )
+  }
+
   if (templateQuery.isError || !template) {
     return (
-      <p role="alert" className="m-6 max-w-[900px] rounded-card border border-danger p-4 text-sm text-danger-text">
-        {messageFor(templateQuery.error)}
-      </p>
+      <div className="max-w-[900px] p-6">
+        <PageHeading />
+        <ErrorNote className="mt-5">{messageFor(templateQuery.error)}</ErrorNote>
+      </div>
     )
   }
 
@@ -225,14 +290,7 @@ export function ObPrereqMasterPage() {
   return (
     <div className="max-w-[900px] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-content">Prerequisites master</h1>
-          <p className="mt-1 max-w-2xl text-caption text-content-muted">
-            The default client-responsibility checklist — applied to every newly boarded client.
-            Mandatory tasks gate every journey; existing clients keep the snapshot they were
-            boarded with.
-          </p>
-        </div>
+        <PageHeading />
         <div className="flex items-center gap-3">
           {editing ? (
             <>
@@ -257,16 +315,30 @@ export function ObPrereqMasterPage() {
       <p className="mt-4 text-caption text-content-muted" role="status">
         {mandatoryCount} mandatory {mandatoryCount === 1 ? 'task gates' : 'tasks gate'} every
         journey.{' '}
-        {editing
-          ? 'Changes apply only when published, and only to clients boarded after that.'
-          : 'The active version is read-only — begin a revision to change the checklist.'}
+        {editing && 'Changes apply only when published, and only to clients boarded after that.'}
       </p>
 
-      {error && (
-        <p role="alert" className="mt-4 rounded-card border border-danger p-3 text-sm text-danger-text">
-          {error}
-        </p>
+      {/*
+        Read-only is a guarantee this screen is keeping, not a permission it is
+        missing — so it is stated as one. Disabled controls with nothing beside
+        them read as a broken page, which is the same mistake the 404 empty
+        state above exists to undo.
+      */}
+      {!editing && (
+        <div className="mt-3 flex items-start gap-2 rounded-card border border-info bg-surface p-3 text-sm text-info-text">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <p>
+            <span className="font-medium">
+              Version {template.version} is published, so it is read-only.
+            </span>{' '}
+            Every client boarded against it keeps exactly this checklist. Begin a revision to
+            change it — that drafts a copy, leaves this version untouched, and applies to
+            clients boarded after you publish.
+          </p>
+        </div>
       )}
+
+      {error && <ErrorNote className="mt-4">{error}</ErrorNote>}
 
       <TableContainer className="mt-5 bg-surface shadow-rest">
         <Table>
@@ -321,7 +393,7 @@ export function ObPrereqMasterPage() {
                 </TableCell>
                 <TableCell>
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="sm"
                     disabled={!editing || busy}
                     aria-label={`Delete ${task.title}`}
@@ -441,6 +513,50 @@ export function ObPrereqMasterPage() {
       </form>
     </div>
   )
+}
+
+/**
+ * The title and caption, which every state of this screen carries — including
+ * the two that render nothing else. An error or a first visit is still the
+ * prerequisites master, and a page that answers with a bare red sentence and
+ * no heading is the thing this screen was reported for.
+ */
+function PageHeading() {
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-content">Prerequisites master</h1>
+      <p className="mt-1 max-w-2xl text-caption text-content-muted">
+        The default client-responsibility checklist — applied to every newly boarded client.
+        Mandatory tasks gate every journey; existing clients keep the snapshot they were boarded
+        with.
+      </p>
+    </div>
+  )
+}
+
+function ErrorNote({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p
+      role="alert"
+      className={cn('rounded-card border border-danger p-3 text-sm text-danger-text', className)}
+    >
+      {children}
+    </p>
+  )
+}
+
+/**
+ * `beginRevision` needs no active version — the server opens v1 against an
+ * empty master (`ObPrereqTemplateService.beginRevision` clones the active
+ * version's tasks only `ifPresent`). A 404 from it therefore means the API
+ * behind this screen does not do that, and the admin needs to be told the
+ * draft was *not* opened rather than shown a bare "not found".
+ */
+function beginFailureMessage(caught: unknown): string {
+  if (caught instanceof ApiError && caught.status === 404) {
+    return 'No draft was opened — this API would not start a checklist from nothing. Nothing has been changed; the master needs to be seeded server-side.'
+  }
+  return messageFor(caught)
 }
 
 function messageFor(caught: unknown): string {

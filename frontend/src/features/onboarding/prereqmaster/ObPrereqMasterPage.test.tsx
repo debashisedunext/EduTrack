@@ -165,6 +165,28 @@ describe('OB-14 · prerequisites master', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  /**
+   * The same conflict as the server actually sends it.
+   * `ObPrereqTemplateExceptionHandler` types all three of its 409s as the
+   * generic `errors/conflict`, so a screen matching only on the mock's
+   * `ob-prereq-draft-exists` would adopt the draft in tests and dead-end in
+   * production. `beginRevision` raises no other 409, so the status is enough.
+   */
+  it('adopts the existing draft on the conflict type the server really sends', async () => {
+    beginMutate.mockRejectedValue(
+      apiError(409, 'https://edutrack/errors/conflict', 'A draft already exists — publish or discard it first.'),
+    )
+    getTemplate.mockImplementation((params?: { version?: number }) =>
+      params?.version === 6 ? result(draft()) : result(active()),
+    )
+    renderPage()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Begin a revision' }))
+
+    expect(await screen.findByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('adds a task to the draft with exactly what was typed', async () => {
     getTemplate.mockReturnValue(result(draft()))
     renderPage()
@@ -259,6 +281,44 @@ describe('OB-14 · prerequisites master', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/clear its own gate/i)
     expect(toastSpy).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A 404 on the *unversioned* read is the fresh-organisation state the
+   * service documents as legitimate — the first visit is somebody arriving to
+   * author a checklist, not a failure. Pinned here as well as in the MSW
+   * suite because this is the file that decides what the markup is.
+   */
+  it('offers to author the first checklist when no version exists yet', async () => {
+    getTemplate.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      error: apiError(404, 'about:blank', 'no version of the prerequisites master has been authored yet'),
+    })
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Prerequisites master' })).toBeInTheDocument()
+    expect(screen.getByText(/No prerequisites checklist has been authored yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // `beginRevision` needs no active version to clone — the server opens v1
+    // against an empty master, so the empty state's action is the real one.
+    await userEvent.click(screen.getByRole('button', { name: 'Author the first checklist' }))
+    await waitFor(() => expect(beginMutate).toHaveBeenCalledTimes(1))
+  })
+
+  it('keeps every other failure an error', () => {
+    getTemplate.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      error: apiError(500),
+    })
+    renderPage()
+
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Author the first checklist' })).not.toBeInTheDocument()
   })
 
   it('says who to ask when the caller is not an OB Admin', () => {

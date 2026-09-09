@@ -128,6 +128,88 @@ class OnboardingFixtureCorpusIT {
         assertThat(dependent).isEqualTo(1);
     }
 
+    // ── the prerequisites master ────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the prerequisites master exists, published and active — OB-14 404s without it")
+    void thePrerequisitesMasterLands() {
+        assertThat(count("SELECT COUNT(*) FROM ob_prereq_template_versions")).isEqualTo(1);
+        assertThat(count("""
+                SELECT COUNT(*) FROM ob_prereq_template_versions
+                 WHERE version = 1 AND is_active = 1
+                   AND published_at IS NOT NULL AND published_by IS NOT NULL
+                """))
+                .as("getObPrereqTemplate falls back to the draft and then 404s; an unpublished or "
+                        + "inactive master is the broken screen this seed exists to fix")
+                .isEqualTo(1);
+        // draft_key is GENERATED from published_at — 1 for a draft, NULL
+        // otherwise, which is how one draft org-wide is a unique index rather
+        // than a service rule. Asserted rather than assumed: a seeded draft
+        // would spend that single slot and 409 the first Admin who pressed
+        // "start a revision" on a demo database.
+        assertThat(count("""
+                SELECT COUNT(*) FROM ob_prereq_template_versions WHERE draft_key IS NOT NULL
+                """)).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT u.full_name FROM ob_prereq_template_versions v
+                  JOIN users u ON u.id = v.published_by
+                """, String.class))
+                .as("the prototype's OB Admin publishes the org-wide master")
+                .isEqualTo("Anita Rao");
+    }
+
+    @Test
+    @DisplayName("the master is the prototype's five tasks, four mandatory, whitelisting the valve")
+    void thePrerequisiteTasksAreTheDesignsOwn() {
+        Long versionId = jdbc.queryForObject(
+                "SELECT id FROM ob_prereq_template_versions WHERE is_active = 1", Long.class);
+
+        assertThat(count("SELECT COUNT(*) FROM ob_prereq_template_tasks WHERE version_id = ?", versionId))
+                .isEqualTo(5);
+        assertThat(count("""
+                SELECT COUNT(*) FROM ob_prereq_template_tasks
+                 WHERE version_id = ? AND is_mandatory = 1 AND is_active = 1
+                """, versionId)).isEqualTo(4);
+
+        // The one non-mandatory task is the one the prototype skips for
+        // Bluebell. A master where everything is mandatory can only be complete
+        // or stuck, and plan §5.3's skip valve would never be exercisable.
+        assertThat(jdbc.queryForList("""
+                SELECT title FROM ob_prereq_template_tasks
+                 WHERE version_id = ? AND is_mandatory = 0
+                """, String.class, versionId))
+                .containsExactly("Whitelist EduTrack mail & WhatsApp IDs");
+
+        assertThat(jdbc.queryForList("""
+                SELECT title FROM ob_prereq_template_tasks WHERE version_id = ? ORDER BY sequence
+                """, String.class, versionId))
+                .containsExactly(
+                        "Share final student & staff master data",
+                        "Nominate SPOC & escalation contact",
+                        "Confirm branding assets (logo, colours)",
+                        "Whitelist EduTrack mail & WhatsApp IDs",
+                        "Advance payment confirmation");
+        assertThat(jdbc.queryForList("""
+                SELECT tat_days FROM ob_prereq_template_tasks WHERE version_id = ? ORDER BY sequence
+                """, Integer.class, versionId))
+                .containsExactly(6, 2, 3, 1, 3);
+        assertThat(count("""
+                SELECT COUNT(*) FROM ob_prereq_template_tasks
+                 WHERE version_id = ? AND (description IS NULL OR description = '')
+                """, versionId))
+                .as("every task carries the prototype's own explanatory line — it is what CP-03 reads")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("no reference document is fabricated — an attachment MinIO does not hold would 404")
+    void referenceDocumentsAreAbsentRatherThanInvented() {
+        assertThat(count("SELECT COUNT(*) FROM ob_prereq_template_task_docs"))
+                .as("ob_prereq_template_task_docs needs a real attachment_id; a download chip that "
+                        + "404s is worse than an absent one. The refDoc names are transcribed unused.")
+                .isZero();
+    }
+
     // ── clients ─────────────────────────────────────────────────────────────
 
     @Test
@@ -378,6 +460,10 @@ class OnboardingFixtureCorpusIT {
 
         assertThat(count("SELECT COUNT(*) FROM ob_clients")).isEqualTo(clientsBefore);
         assertThat(count("SELECT COUNT(*) FROM ob_journeys")).isEqualTo(journeysBefore);
+        // A second master would not merely duplicate: version 1 is unique and
+        // the active slot holds one row, so a re-run that reached this far
+        // would fail on the insert rather than here.
+        assertThat(count("SELECT COUNT(*) FROM ob_prereq_template_versions")).isEqualTo(1);
     }
 
     @Test
