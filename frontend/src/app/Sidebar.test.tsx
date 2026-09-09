@@ -29,13 +29,18 @@ import { Sidebar } from './Sidebar'
 const ADMIN: Me = { id: 1, displayName: 'Priya Nair', role: 'ADMIN' }
 const DEVELOPER: Me = { id: 4, displayName: 'Ravi Kumar', role: 'DEVELOPER' }
 
+/** Holds both modules, like the only dual-module account in the fixtures. */
+const OB_ADMIN = { ...ADMIN, modules: ['TICKETING', 'ONBOARDING'] } as Me
+/** Entitled to ticketing alone — the case the module check exists for. */
+const TICKETING_ONLY = { ...DEVELOPER, modules: ['TICKETING'] } as Me
+
 /** The store is a module singleton; a role left behind would decide the next test. */
 beforeEach(() => useAuthStore.setState(initialAuthState))
 
-function renderSidebarAs(user: Me | null) {
+function renderSidebarAs(user: Me | null, route = '/') {
   useAuthStore.setState({ status: user ? 'authenticated' : 'anonymous', user })
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <Sidebar />
     </MemoryRouter>,
   )
@@ -43,6 +48,10 @@ function renderSidebarAs(user: Me | null) {
 
 function nav() {
   return screen.getByRole('navigation', { name: 'Main' })
+}
+
+function obNav() {
+  return screen.getByRole('navigation', { name: 'Onboarding' })
 }
 
 describe('Sidebar', () => {
@@ -90,5 +99,92 @@ describe('Sidebar', () => {
   it('reads the role without issuing a request', () => {
     expect(() => renderSidebarAs(ADMIN)).not.toThrow()
     expect(within(nav()).getByRole('link', { name: 'Audit log' })).toBeInTheDocument()
+  })
+})
+
+/**
+ * A-129 · the onboarding module's navigation.
+ *
+ * <p>Twelve onboarding screens were merged and reachable only by typing their
+ * URL, because this file had no concept of a second module. The assertions that
+ * matter are the two swaps — ticketing nav gives way to onboarding nav on an
+ * `/onboarding/**` route and comes back off it — and the entitlement check,
+ * which is the one that could leak a module's shape to somebody the server
+ * would 404.
+ */
+describe('Sidebar · onboarding module', () => {
+  it('swaps to the onboarding navigation on an onboarding route', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    for (const label of ['Dashboard', 'Clients', 'New client', 'Reports', 'TAT & escalation']) {
+      expect(within(obNav()).getByRole('link', { name: label })).toBeInTheDocument()
+    }
+    // The ticketing entries are gone, not merely pushed down.
+    expect(within(obNav()).queryByRole('link', { name: 'Tickets' })).not.toBeInTheDocument()
+    expect(screen.getByText('Client Onboarding')).toBeInTheDocument()
+  })
+
+  it('keeps the ticketing navigation everywhere else', () => {
+    renderSidebarAs(OB_ADMIN, '/dashboard')
+
+    expect(within(nav()).getByRole('link', { name: 'Tickets' })).toBeInTheDocument()
+    expect(screen.queryByText('Client Onboarding')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The path alone must not be enough. A caller without the grant gets 404s
+   * from `ObModuleGuard` for every byte of data on these screens, so drawing
+   * the module's navigation for them would be the frontend describing a module
+   * the server denies exists.
+   */
+  it('does not draw the onboarding navigation without the module grant', () => {
+    renderSidebarAs(TICKETING_ONLY, '/onboarding/dashboard')
+
+    expect(screen.queryByRole('navigation', { name: 'Onboarding' })).not.toBeInTheDocument()
+    expect(within(nav()).getByRole('link', { name: 'Tickets' })).toBeInTheDocument()
+  })
+
+  it('does not draw it for a session with no modules at all', () => {
+    renderSidebarAs(ADMIN, '/onboarding/dashboard')
+
+    expect(screen.queryByRole('navigation', { name: 'Onboarding' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * `NavLink` matches on prefix, so `/onboarding/clients` would light up on the
+   * wizard route too and the rail would show two current pages at once.
+   */
+  it('marks exactly one row current when the wizard sits under the list', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/clients/new')
+
+    expect(within(obNav()).getByRole('link', { name: 'New client' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(within(obNav()).getByRole('link', { name: 'Clients' })).not.toHaveAttribute(
+      'aria-current',
+    )
+  })
+
+  it('keeps Clients current on a client detail page', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/clients/42')
+
+    expect(within(obNav()).getByRole('link', { name: 'Clients' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  /**
+   * Every row must lead somewhere that exists. Four entries in the design point
+   * at screens no task has built (Module Service's list, Prerequisites master,
+   * Roles & module access) — a row that 404s reads as a broken product.
+   */
+  it('offers no row for a screen that is not built yet', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    for (const label of ['Prerequisites master', 'Roles & module access', 'Module Service']) {
+      expect(within(obNav()).queryByRole('link', { name: label })).not.toBeInTheDocument()
+    }
   })
 })
