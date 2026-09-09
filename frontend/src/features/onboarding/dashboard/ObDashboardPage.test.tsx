@@ -50,9 +50,9 @@ describe('ObDashboardPage', () => {
       expect.stringContaining("This week's deadlines"),
       expect.stringContaining("Today's delivery"),
       expect.stringContaining('Overdue clients'),
+      expect.stringContaining('Client escalations'),
       expect.stringContaining('Live'),
       expect.stringContaining('At risk'),
-      expect.stringContaining('Client escalations'),
     ])
   })
 
@@ -66,8 +66,19 @@ describe('ObDashboardPage', () => {
 
     await screen.findByText('Ongoing projects', undefined, SLOW)
 
-    expect(screen.getByText(/Counting all clients/)).toBeInTheDocument()
-    expect(screen.getByRole('time')).toHaveAttribute('datetime', '2026-09-05T06:00:00.000Z')
+    const staleness = screen.getByText(/Counting all clients/)
+    expect(staleness).toBeInTheDocument()
+    /*
+      Scoped to the staleness line rather than the page. `getByRole('time')`
+      was unambiguous only while B-128's grids had no rows to draw — the moment
+      the fixture gives them start dates and recomputed finishes, the page
+      carries five more `<time>` cells. That is a property of the fixture, not
+      of the board.
+    */
+    expect(within(staleness).getByRole('time')).toHaveAttribute(
+      'datetime',
+      '2026-08-20T06:00:00.000Z',
+    )
   })
 
   it('shows a skeleton of the same shape while the first request is in flight', () => {
