@@ -46,12 +46,11 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObDashboardItem } from './obDashboardItem';
-import type { ObDashboardItemListResponseMeta } from './obDashboardItemListResponseMeta';
+import type { Meta } from './meta';
+import type { ObDashboardItemListResponseMetaAllOf } from './obDashboardItemListResponseMetaAllOf';
 
-export interface ObDashboardItemListResponse {
-  data: ObDashboardItem[];
-  /** Carries `computedAt` alongside the cursor, repeating the card's
+/**
+ * Carries `computedAt` alongside the cursor, repeating the card's
 own so a screen can say which number these rows belong to. The
 count is pre-aggregated and this list is live, so they may differ
 by up to one refresh interval — see `listObDashboardCardItems`.
@@ -65,6 +64,6 @@ contract shaped that way while its own prose promised the field.
 already extend `Meta` with a second `allOf` member the same way,
 for `unreadCount` and the two effort totals; this follows that
 precedent rather than inventing a new one.
+
  */
-  meta: ObDashboardItemListResponseMeta;
-}
+export type ObDashboardItemListResponseMeta = Meta & ObDashboardItemListResponseMetaAllOf;

@@ -113,4 +113,67 @@ class ObDashboardScopeTest {
         return new CallerIdentity(
                 42, "SUPPORT", List.of(), List.of("ONBOARDING"), Map.of("ONBOARDING", moduleRole));
     }
+
+    // ── B-127 · the two SQL predicates the item-list route reads ────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {"OB_ADMIN", "OB_MANAGER", "OB_VIEWER"})
+    void an_unrestricted_role_denies_nothing(String role) {
+        assertThat(ObDashboardScope.of(caller(role)).deniesEverything()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"OB_SALES", "OB_STEP_OWNER"})
+    @DisplayName("the two narrowed roles do not deny everything here, unlike the summary route")
+    void aNarrowedRoleIsNotDeniedOnTheItemRoute(String role) {
+        assertThat(ObDashboardScope.of(caller(role)).deniesEverything()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TICKETING_MEMBER", "OB_SUPERUSER", ""})
+    void anything_that_is_not_one_of_the_five_denies_everything(String role) {
+        assertThat(ObDashboardScope.of(caller(role)).deniesEverything()).isTrue();
+    }
+
+    @Test
+    void an_unrestricted_journey_predicate_is_a_tautology() {
+        assertThat(ObDashboardScope.of(caller("OB_MANAGER")).journeyPredicate("jr", "cl"))
+                .isEqualTo("1 = 1");
+    }
+
+    @Test
+    void a_sales_journey_predicate_reads_the_clients_created_by_column() {
+        assertThat(ObDashboardScope.of(caller("OB_SALES")).journeyPredicate("jr", "cl"))
+                .contains("cl.created_by")
+                .contains(ObDashboardScope.USER_PARAM);
+    }
+
+    @Test
+    void a_step_owner_journey_predicate_reads_both_owner_columns() {
+        String predicate = ObDashboardScope.of(caller("OB_STEP_OWNER")).journeyPredicate("jr", "cl");
+
+        assertThat(predicate)
+                .contains("jr.id IN")
+                .contains("so.owner_user_id")
+                .contains("so.backup_owner_user_id");
+    }
+
+    @Test
+    void a_step_owner_client_predicate_goes_one_join_further_than_the_journey_one() {
+        String predicate = ObDashboardScope.of(caller("OB_STEP_OWNER")).clientPredicate("cl");
+
+        assertThat(predicate)
+                .contains("cl.id IN")
+                .contains("ob_journeys")
+                .contains("so.owner_user_id")
+                .contains("so.backup_owner_user_id");
+    }
+
+    @Test
+    void a_denied_role_predicate_is_a_contradiction() {
+        ObDashboardScope denied = ObDashboardScope.of(caller("TICKETING_MEMBER"));
+
+        assertThat(denied.journeyPredicate("jr", "cl")).isEqualTo("1 = 0");
+        assertThat(denied.clientPredicate("cl")).isEqualTo("1 = 0");
+    }
 }

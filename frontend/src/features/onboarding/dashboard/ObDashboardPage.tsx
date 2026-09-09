@@ -1,7 +1,11 @@
+import { useState } from 'react'
+
 import { useGetObDashboardSummary } from '@/api/generated/onboarding/onboarding'
+import type { ObDashboardCard, ObDashboardCardKey } from '@/api/generated/model'
 import { EmptyState } from '@/components/ui/empty-state'
 
 import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
+import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
 
 /**
  * B-121 · OB-02, the onboarding dashboard — `/onboarding/dashboard`.
@@ -27,23 +31,29 @@ import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardC
  * deployment's first days. An empty board there is honest; a board of zeroes
  * would not be.
  *
- * <h2>What this screen is not, yet</h2>
+ * <h2>Every card opens the S-06 slide-over — B-127</h2>
  *
- * The cards do not open anything. Plan §9 wants each to open the S-06 right
- * slide-over listing the matching clients, and that is **B-127** — the route
- * behind it (`/cards/{cardKey}/items`) is in the contract and has no
- * implementation. The tiles are already the right control for it: they render
- * as plain regions without an `onOpen`, so nothing here is a button that does
- * nothing when pressed, and B-127 passes a handler rather than rebuilding them.
+ * `openCard` is the whole handoff: a tile's `onOpen` sets it, and
+ * {@link ObDashboardDrillPanel} reads it to fetch and render
+ * `listObDashboardCardItems`. Nothing about *which* card is decided twice —
+ * the tile passes its own `card.key` straight through, so the panel opens
+ * exactly the card that was clicked.
+ *
+ * <h2>What this screen is not, yet</h2>
  *
  * The two grids below the board — Delayed Projects, and Implementor workload &
  * performance — are **B-128**.
  */
 export function ObDashboardPage() {
   const { data, isPending, isError } = useGetObDashboardSummary()
+  const [openCard, setOpenCard] = useState<ObDashboardCardKey | null>(null)
 
   const summary = data?.data
   const cards = summary?.cards ?? []
+
+  function openDrill(card: ObDashboardCard) {
+    setOpenCard(card.key)
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
@@ -76,11 +86,13 @@ export function ObDashboardPage() {
               ))
             : cards.map((card) => (
                 <div role="listitem" key={card.key}>
-                  <ObDashboardCardTile card={card} />
+                  <ObDashboardCardTile card={card} onOpen={openDrill} />
                 </div>
               ))}
         </div>
       )}
+
+      <ObDashboardDrillPanel cardKey={openCard} onClose={() => setOpenCard(null)} />
     </div>
   )
 }

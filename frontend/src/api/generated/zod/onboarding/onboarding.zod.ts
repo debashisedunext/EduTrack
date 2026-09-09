@@ -3052,7 +3052,9 @@ export const listObDashboardCardItemsResponse = zod.object({
   "nextCursor": zod.string().nullish(),
   "hasMore": zod.boolean().optional(),
   "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
-}).describe('Carries `computedAt` alongside the cursor, repeating the card\'s\nown so a screen can say which number these rows belong to. The\ncount is pre-aggregated and this list is live, so they may differ\nby up to one refresh interval — see `listObDashboardCardItems`.\n')
+}).and(zod.object({
+  "computedAt": zod.string().datetime({}).nullish()
+})).describe('Carries `computedAt` alongside the cursor, repeating the card\'s\nown so a screen can say which number these rows belong to. The\ncount is pre-aggregated and this list is live, so they may differ\nby up to one refresh interval — see `listObDashboardCardItems`.\n\nB-127 · found as a genuine gap rather than assumed: the plain\n`{ $ref: Meta }` this line used to be carries `nextCursor` and\n`hasMore` only, and nothing in `Meta` can hold `computedAt` — the\nsingle-element `allOf` this became was the only place in the\ncontract shaped that way while its own prose promised the field.\n`ObNotificationListResponse.meta` and `EffortLogListResponse.meta`\nalready extend `Meta` with a second `allOf` member the same way,\nfor `unreadCount` and the two effort totals; this follows that\nprecedent rather than inventing a new one.\n')
 })
 
 /**

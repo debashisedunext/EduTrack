@@ -2659,6 +2659,58 @@ final class PermissionMatrix {
             // exactly as above.
             everyRole("GET", "/api/v1/onboarding/dashboard/summary"),
 
+            // ── B-127 · the S-06 slide-over behind one card ───────────────────
+            //
+            // Every role, on the summary route's own reasoning above: none of
+            // the six ticketing-role fixtures carry any onboarding standing,
+            // and the refusal this route gives an unrecognised or absent
+            // module role is 200 with an empty page, not 403 — the same
+            // "words rather than a 403" direction the summary route takes,
+            // reached here through ObDashboardScope.deniesEverything() rather
+            // than through an unavailableReason, because there is no card to
+            // hang a sentence on when the response is a list.
+            //
+            // What is NOT true of this route, unlike the summary above: OB_SALES
+            // and OB_STEP_OWNER are answerable here. ObDashboardScope's summary
+            // -side limitation is that ob_dashboard_summary carries no scope
+            // dimension; this route reads ob_journey_steps and
+            // ob_client_prereq_tasks directly, both of which do, so a narrowed
+            // caller gets real, correctly-scoped rows rather than a sentence.
+            // That is a fact about what the *rows* are scoped to, which this
+            // matrix cannot express any more than it expresses row scoping on
+            // /tickets — it is ObDashboardCardItemsIT's job, across all five
+            // module roles including these two, and it is the reason this task
+            // was told the summary route's limitation does not apply to it.
+            //
+            // The module gate is A-111's, still unwired, exactly as above.
+            everyRole("GET", "/api/v1/onboarding/dashboard/cards/{cardKey}/items"),
+
+            // ── B-128 · plan §9's two OB-02 grids ──────────────────────────────
+            //
+            // Every role, on the same reading as the two routes just above:
+            // none of the six ticketing-role fixtures carry any onboarding
+            // standing, and what an unrecognised or absent module role gets
+            // back from either route is an empty list — reached through
+            // ObDashboardScope.deniesEverything() for the delayed-projects
+            // grid and through implementorPredicate's own "1 = 0" default for
+            // the workload one — never a 403.
+            //
+            // The workload route in particular narrows OB_SALES to nothing
+            // rather than to "everyone", for a reason of its own:
+            // ob_implementor_daily_stats carries no client-creator column, so
+            // A-112's "clients you created" rule has nothing to intersect
+            // against — the same genuine gap ObDashboardScope's own header
+            // names for the summary board one route up, restated for a table
+            // keyed by person instead of by product. OB_STEP_OWNER narrows to
+            // exactly their own row, which this table's grain answers exactly
+            // unlike the journey- and client-scoped routes elsewhere in this
+            // module. Both are ObImplementorWorkloadIT's and ObDelayedProjectsIT's
+            // to prove against real rows, not this file's.
+            //
+            // The module gate is A-111's, still unwired, exactly as above.
+            everyRole("GET", "/api/v1/onboarding/dashboard/delayed-projects"),
+            everyRole("GET", "/api/v1/onboarding/dashboard/implementor-workload"),
+
             // ── A-127 · CP-06/07, the client portal's ticketing side ─────
             //
             // Every row is "everyRole", on the same reading as the onboarding

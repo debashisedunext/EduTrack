@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.dashboard;
 
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardItemListMeta;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardItemListResponse;
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardSummaryResponse;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import io.swagger.v3.oas.annotations.Operation;
@@ -10,21 +12,24 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * B-121 · {@code /onboarding/dashboard} per {@code contracts/openapi.yaml} —
  * OB-02, the card board.
  *
- * <p>This task registers one route. The other three the contract declares under
- * this prefix belong to the tasks that build what they feed:
- * {@code /cards/{cardKey}/items} is B-127's slide-over and
- * {@code /delayed-projects} and {@code /implementor-workload} are B-128's two
- * grids. They land in this package beside this method rather than in one of
- * their own — feature packaging, and they share {@link ObDashboardCardKey} and
+ * <p>Two routes so far: {@link #summary} (B-121) and {@link #cardItems}
+ * (B-127), the S-06 slide-over behind one card. The other two the contract
+ * declares under this prefix — {@code /delayed-projects} and
+ * {@code /implementor-workload} — are B-128's two grids and belong here when
+ * they land, in this package rather than one of their own — feature
+ * packaging, and they share {@link ObDashboardCardKey} and
  * {@link ObDashboardScope}, which is the whole reason those two are types
  * rather than private constants.
  *
@@ -59,9 +64,11 @@ import org.springframework.web.bind.annotation.RestController;
 class ObDashboardController {
 
     private final ObDashboardService dashboard;
+    private final ObDashboardCardItemsService cardItems;
 
-    ObDashboardController(ObDashboardService dashboard) {
+    ObDashboardController(ObDashboardService dashboard, ObDashboardCardItemsService cardItems) {
         this.dashboard = dashboard;
+        this.cardItems = cardItems;
     }
 
     /**
@@ -99,6 +106,37 @@ class ObDashboardController {
             response = response.eTag(rendered.etag());
         }
         return response.body(new ObDashboardSummaryResponse(rendered.summary()));
+    }
+
+    /**
+     * B-127 · the S-06 slide-over behind one card.
+     *
+     * <p>No {@code ETag} on this route — the contract declares none, unlike
+     * {@link #summary}: the count above is a function of {@code computed_at}
+     * alone, but this is a bounded row fetch against the live tables, and a
+     * validator built from anything cheaper than the query itself would be a
+     * promise this route cannot keep.
+     *
+     * <p>An unidentifiable caller reaches {@link ObDashboardScope#deniesEverything()}'s
+     * empty page rather than an exception, on {@link #summary}'s own reasoning:
+     * {@code @PreAuthorize} has already refused the anonymous case, so a
+     * caller {@link CallerIdentity#of} still cannot resolve is a second,
+     * narrower line rather than the first.
+     */
+    @GetMapping(path = "/cards/{cardKey}/items", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listObDashboardCardItems", summary = "The slide-over behind one card (OB-02)")
+    ObDashboardItemListResponse cardItems(
+            Authentication authentication,
+            @PathVariable String cardKey,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+
+        return CallerIdentity.of(authentication)
+                .map(caller -> cardItems.items(caller, cardKey, productId, ownerUserId, cursor, limit))
+                .orElseGet(() -> new ObDashboardItemListResponse(
+                        List.of(), new ObDashboardItemListMeta(null, false, null)));
     }
 
     /**

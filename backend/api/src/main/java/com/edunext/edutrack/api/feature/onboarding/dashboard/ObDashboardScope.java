@@ -50,6 +50,27 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  * is written down. The difference here is that no approximation is available:
  * "clients I created" has no proxy among these columns at all.
  *
+ * <h2>B-127 widened this with {@code userId} and two SQL predicates</h2>
+ *
+ * <p>The summary route above only ever needs {@link #unrestricted()} and
+ * {@link #unavailableReason()} — {@code ob_dashboard_summary} has no scope
+ * dimension, so OB_SALES and OB_STEP_OWNER are simply unanswerable from it.
+ * {@code listObDashboardCardItems} reads {@code ob_journey_steps} and
+ * {@code ob_client_prereq_tasks} directly, which do carry every column
+ * {@code OnboardingScopeResolver} filters on, so <b>the two narrowed roles are
+ * answerable there</b> — the task's own point, and the reason this type grew
+ * rather than gaining a sibling. {@link #journeyPredicate} and
+ * {@link #clientPredicate} are {@code OnboardingScopeResolver.clientCreatedBy}
+ * and {@code .hasStepOwnedBy} restated as SQL text instead of a JPA
+ * {@link org.springframework.data.jpa.domain.Specification}, for
+ * {@code ObEscalationScope}'s own reason one package over: a
+ * {@code Specification<ObJourney>} answers a JPA root this union query never
+ * builds, so the rule is expressed a second time against SQL directly rather
+ * than forced through a root that does not exist. Two expressions of one
+ * security rule is the risk this trades for; kept in step by
+ * {@code ObDashboardCardItemsIT}, which asserts both against the same fixture
+ * {@code OnboardingScopeResolverIT} uses.
+ *
  * @param unrestricted true when the caller sees every journey, which is the
  *                     only case {@code ob_dashboard_summary} can serve.
  * @param moduleRole   the caller's {@code ONBOARDING} role, or empty string
@@ -57,8 +78,19 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  *                     roles asking the same URL must not share a validator, or
  *                     a cache hands one of them the other's board after a
  *                     grant changes.
+ * @param userId       B-127 · the caller's own id, bound under
+ *                     {@link #USER_PARAM} whenever {@link #journeyPredicate}
+ *                     or {@link #clientPredicate} names it. Zero and unused
+ *                     for every caller of the two-argument constructor, which
+ *                     is every call site that only ever reads
+ *                     {@link #unrestricted()}.
  */
-record ObDashboardScope(boolean unrestricted, String moduleRole) {
+record ObDashboardScope(boolean unrestricted, String moduleRole, long userId) {
+
+    /** B-121's shape, kept for every call site that never needed a user id. */
+    ObDashboardScope(boolean unrestricted, String moduleRole) {
+        this(unrestricted, moduleRole, 0L);
+    }
 
     /** Plan §3's five module roles. Mirrors {@code OnboardingScopeResolver}'s own constants. */
     static final String OB_ADMIN = "OB_ADMIN";
@@ -78,7 +110,7 @@ record ObDashboardScope(boolean unrestricted, String moduleRole) {
      */
     static ObDashboardScope of(CallerIdentity caller) {
         String role = caller.moduleRole(ModuleAccessGuard.ONBOARDING).orElse("");
-        return new ObDashboardScope(isUnrestricted(role), role);
+        return new ObDashboardScope(isUnrestricted(role), role, caller.userId());
     }
 
     /**
@@ -142,5 +174,80 @@ record ObDashboardScope(boolean unrestricted, String moduleRole) {
                     + "The lists below are scoped correctly.";
             default -> "You hold no onboarding role, so there is nothing to count.";
         };
+    }
+
+    /** B-127 · the named parameter {@link #journeyPredicate} and {@link #clientPredicate} bind {@link #userId} under. */
+    static final String USER_PARAM = "obDashboardScopeUserId";
+
+    /**
+     * B-127 · true for every path that is not one of the five §3 rules —
+     * {@code ObEscalationScope.deniesEverything}'s own predicate. A caller here
+     * gets an empty list rather than a 404: A-111's module gate is what refuses
+     * a caller with no {@code ONBOARDING} entitlement at all, and a caller who
+     * holds the entitlement but an unrecognised module role is a
+     * misconfiguration, whose safe answer is still nothing rather than an
+     * error a legitimate route should never produce.
+     */
+    boolean deniesEverything() {
+        return !unrestricted && !OB_SALES.equals(moduleRole) && !OB_STEP_OWNER.equals(moduleRole);
+    }
+
+    /**
+     * B-127 · the scope over a {@code SERVICE} row, as SQL against the query's
+     * own journey and client aliases.
+     *
+     * <p>{@code OnboardingScopeResolver.hasStepOwnedBy} restated: a Step Owner
+     * sees every step of a journey that contains at least one of their own,
+     * backup owner counting for the reason that class gives at length — the
+     * backup exists to cover the step, so excluding them would under-report
+     * who is actually covering it.
+     *
+     * @param journeyAlias the query's alias for {@code ob_journeys}
+     * @param clientAlias  the query's alias for {@code ob_clients}
+     */
+    String journeyPredicate(String journeyAlias, String clientAlias) {
+        if (unrestricted) {
+            return "1 = 1";
+        }
+        if (OB_SALES.equals(moduleRole)) {
+            return clientAlias + ".created_by = :" + USER_PARAM;
+        }
+        if (OB_STEP_OWNER.equals(moduleRole)) {
+            return journeyAlias + ".id IN ("
+                    + "SELECT DISTINCT so.journey_id FROM ob_journey_steps so"
+                    + " WHERE so.owner_user_id = :" + USER_PARAM
+                    + " OR so.backup_owner_user_id = :" + USER_PARAM + ")";
+        }
+        return "1 = 0";
+    }
+
+    /**
+     * B-127 · the scope over a {@code PREREQUISITE} row, as SQL against the
+     * query's own client alias.
+     *
+     * <p>A prerequisite task carries no journey — plan §5.3's gate sits in
+     * front of every journey a client holds, not inside one — so a Step
+     * Owner's visibility is "does this client have a journey containing one of
+     * my steps", the same set {@link #journeyPredicate} narrows to, one join
+     * further out.
+     *
+     * @param clientAlias the query's alias for {@code ob_clients}
+     */
+    String clientPredicate(String clientAlias) {
+        if (unrestricted) {
+            return "1 = 1";
+        }
+        if (OB_SALES.equals(moduleRole)) {
+            return clientAlias + ".created_by = :" + USER_PARAM;
+        }
+        if (OB_STEP_OWNER.equals(moduleRole)) {
+            return clientAlias + ".id IN ("
+                    + "SELECT DISTINCT j.ob_client_id FROM ob_journeys j"
+                    + " WHERE j.archived_at IS NULL AND j.id IN ("
+                    + "SELECT DISTINCT so.journey_id FROM ob_journey_steps so"
+                    + " WHERE so.owner_user_id = :" + USER_PARAM
+                    + " OR so.backup_owner_user_id = :" + USER_PARAM + "))";
+        }
+        return "1 = 0";
     }
 }

@@ -5,18 +5,20 @@ Stream B; A-108 named B-121 in the migration that created the tables read here.
 
 OB-02, the card board.
 
-## The route (B-121)
+## The routes
 
-`GET /onboarding/dashboard/summary` — seven counters, one round trip, the
-board's whole first paint.
+`GET /onboarding/dashboard/summary` (**B-121**) — seven counters, one round
+trip, the board's whole first paint.
 
-The other three routes the contract declares under this prefix are not built
-yet and belong here when they are: `/cards/{cardKey}/items` is **B-127**'s
-slide-over, `/delayed-projects` and `/implementor-workload` are **B-128**'s two
-grids. They land in this package beside the summary rather than in packages of
-their own — that is why `ObDashboardCardKey` and `ObDashboardScope` are types
-with a `fromWire` and an `appliedScope` on them rather than private constants
-inside the service.
+`GET /onboarding/dashboard/cards/{cardKey}/items` (**B-127**) — the S-06
+slide-over behind one card, its own section below.
+
+The other two the contract declares under this prefix are not built yet and
+belong here when they are: `/delayed-projects` and `/implementor-workload` are
+**B-128**'s two grids. All four land in this package rather than in packages
+of their own — that is why `ObDashboardCardKey` and `ObDashboardScope` are
+types with a `fromWire`, an `appliedScope` and (since B-127) two SQL
+predicates on them rather than private constants inside one service.
 
 ## 🔴 Three of the seven cards overstate on the all-products board
 
@@ -123,12 +125,51 @@ reach it and get a board of unavailable cards. Deliberately not patched over
 with a second gate here — a module gate in a feature package is how the first
 one comes to be relaxed without anybody noticing.
 
+## B-127 · `GET /cards/{cardKey}/items` — the S-06 slide-over
+
+Landed in this package beside the summary, exactly as this file said it would:
+`ObDashboardCardItemsController` (folded into `ObDashboardController`),
+`ObDashboardCardItemsService`, `ObDashboardCardItemsRepository`,
+`UnrecognisedCardKeyException` and `InvalidCursorException` (both 400 via
+`ObDashboardExceptionHandler`). `ObDashboardScope` grew a `userId` and two SQL
+predicates (`journeyPredicate`, `clientPredicate`) for it.
+
+**Not a live `COUNT(*)`.** The count above stays pre-aggregated; this is a
+bounded, `LIMIT`-and-cursor row fetch against `ob_journey_steps` and
+`ob_client_prereq_tasks` directly — CLAUDE.md's rule is about the *count*
+behind a dashboard, and a card's rows are not one.
+
+**Every module role is answerable here, unlike the summary above.** The two
+roles the summary board cannot narrow — OB_SALES, OB_STEP_OWNER — read this
+route's own tables directly, which carry every column
+`OnboardingScopeResolver` filters on. `ObDashboardCardItemsIT`'s
+`theScopePredicateAndTheSpecificationAgree` asserts the SQL predicate and the
+JPA specification select the same journeys, for all seven role inputs.
+
+Per-card semantics (which rows a card's click surfaces) are documented on
+`ObDashboardCardItemsRepository`'s class javadoc rather than repeated here —
+restated from `ObDashboardStatsRepository`'s `OPEN`/`OVERDUE`/`AMBER`
+constants, since the `worker` module cannot be depended on from `api`.
+
+**A genuine contract gap, fixed and flagged.** `ObDashboardItemListResponse.meta`
+was a bare `{ $ref: Meta }` while its own prose promised `computedAt`, which
+`Meta` has no field for — the only place in the whole contract shaped that
+way. Fixed with the `allOf` extension `ObNotificationListResponse.meta` and
+`EffortLogListResponse.meta` already use for their own extra fields; the
+frontend client is regenerated. Flagged for Stream A's sign-off since
+`contracts/openapi.yaml` is not this stream's file.
+
+- *`api/feature/onboarding/dashboard/` — 60 unit cases across 5 classes
+  (`ObDashboardCardItemsServiceTest`, `ObDashboardCardItemsRepositoryTest`, the
+  `ObDashboardScopeTest` additions, plus the two existing B-121 classes still
+  green), 23 against real MySQL in `ObDashboardCardItemsIT`.*
+- *`frontend/src/features/onboarding/dashboard/ObDashboardDrillPanel.tsx` — the
+  generic panel, exported for B-128's workload-grid cells to open the same way
+  via `ownerUserId`. `ObDashboardCardTile` needed no changes — B-121's own note
+  said B-127 would only ever need to pass it a handler.*
+
 ## Not done yet
 
-- **No slide-over.** Every card is meant to open the S-06 right panel (B-127).
-  The tiles are already buttons with the ARIA the panel will need, so that task
-  wires a handler rather than rebuilding them.
-- **No product filter on the screen.** The route takes `productId` and it is
-  tested; the picker belongs with B-127's board, which is also what makes the
-  exact client-counted figures reachable from the UI.
-- **No grids.** Delayed Projects and Implementor workload are B-128.
+- **No grids.** Delayed Projects and Implementor workload are B-128, which is
+  also what is meant to open `ObDashboardDrillPanel` from a workload cell via
+  `ownerUserId`.
