@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
-  Building2, PlusCircle, Timer, Mail,
+  Building2, PlusCircle, Timer, Mail, ShieldCheck,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -97,11 +97,10 @@ const TICKETING_NAV: NavEntry[] = [
 
   <h2>Only the screens that exist</h2>
 
-  The design this follows has nine entries; four of them point at screens no
+  The design this follows has nine entries; two of them point at screens no
   task has built yet — Module Service (the journey-template *list*; C-102 built
-  the designer, which is reachable only by template id), Prerequisites master
-  (B-124), and Roles & module access (A-117's screen, whose API is already
-  merged). They are deliberately absent rather than present-and-dead: a nav row
+  the designer, which is reachable only by template id) and Prerequisites
+  master (B-124). They are deliberately absent rather than present-and-dead: a nav row
   that lands on a 404 is worse than no row, because it reads as a broken
   product rather than an unfinished one. Each is one line here the day its
   screen lands.
@@ -139,6 +138,7 @@ const ONBOARDING_NAV: NavEntry[] = [
   },
   { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
   { section: 'Administration' },
+  { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
   { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
   { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
 ]
