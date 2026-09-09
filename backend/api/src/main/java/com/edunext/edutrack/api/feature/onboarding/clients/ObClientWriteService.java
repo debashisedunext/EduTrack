@@ -37,9 +37,11 @@ import java.util.Set;
  * silent</h2>
  *
  * <ul>
- *   <li><b>No portal login.</b> {@code createPortalLogin: true} is refused
- *       rather than ignored — see {@link PortalLoginUnavailableException} for
- *       why refusing is the safer of the two.</li>
+ *   <li><b>Portal login: built.</b> {@code createPortalLogin: true} was refused
+ *       rather than ignored until B-126; it is now honoured, through
+ *       {@code ClientAccountAdminService} rather than a second implementation
+ *       here. {@code PortalLoginUnavailableException} and its handler branch are
+ *       deleted, as that exception's own javadoc said they would be.</li>
  * </ul>
  *
  * <h2>B-109 · the prerequisites instance</h2>
@@ -86,6 +88,18 @@ class ObClientWriteService {
     private final ObClientPrereqService prereqs;
     private final PanService pan;
 
+    /**
+     * B-126 · the client-account panel's service, called for the OB-04 wizard's
+     * "create client login" checkbox.
+     *
+     * <p>Reached across features rather than reimplemented here: username
+     * generation, the placeholder password, the single-use link and the
+     * credential mail are one path, and a second copy of it in the wizard is a
+     * second set of rules to keep in step. The class is {@code public} for
+     * exactly this call.
+     */
+    private final com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
+
     /** B-103 · one instant per create, stamped onto every contact's consent. */
     private final Clock clock;
 
@@ -103,9 +117,10 @@ class ObClientWriteService {
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
                          ObClientPrereqService prereqs,
-                         PanService pan) {
+                         PanService pan,
+                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
         this(clients, reads, children, requirements, requirementBodies, details, journeys, prereqs, pan,
-                Clock.systemUTC());
+                portalAccounts, Clock.systemUTC());
     }
 
     ObClientWriteService(ObClientRepository clients,
@@ -117,6 +132,7 @@ class ObClientWriteService {
                          ObJourneyInstantiationService journeys,
                          ObClientPrereqService prereqs,
                          PanService pan,
+                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts,
                          Clock clock) { // test seam
         this.clients = clients;
         this.reads = reads;
@@ -127,6 +143,7 @@ class ObClientWriteService {
         this.journeys = journeys;
         this.prereqs = prereqs;
         this.pan = pan;
+        this.portalAccounts = portalAccounts;
         this.clock = clock;
     }
 
@@ -138,9 +155,6 @@ class ObClientWriteService {
     ObClientDtos.ObClientDetail create(ObClientScope scope, long callerId,
                                        ObClientDtos.ObClientCreateRequest request) {
         requireWriter(scope);
-        if (request.wantsPortalLogin()) {
-            throw new PortalLoginUnavailableException();
-        }
 
         validateForCreate(request);
         // Sealed once. seal() produces the ciphertext and the blind index
@@ -191,6 +205,18 @@ class ObClientWriteService {
         // own javadoc: idempotent by refusal, so this must run exactly once,
         // which "a client just created" already guarantees.
         prereqs.instantiate(clientId);
+
+        // B-126 · the wizard's "create client login" checkbox, honoured rather
+        // than refused. Last, and deliberately so: the account is minted from
+        // the client's name and its primary SPOC, so both rows have to exist,
+        // and the credential mail is queued through B-110's outbox inside this
+        // same transaction — a login created against a client that then rolls
+        // back would be a credential for nothing. After the prerequisites for
+        // the same reason: a client who receives credentials before their
+        // checklist exists can log in to a portal with nothing on it.
+        if (request.wantsPortalLogin()) {
+            portalAccounts.create(scope, clientId, callerId);
+        }
 
         return details.findDetail(scope, clientId)
                 .orElseThrow(() -> new IllegalStateException(

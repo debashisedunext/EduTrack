@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,6 +56,7 @@ class ObClientWriteServiceTest {
     private ObJourneyInstantiationService journeys;
     private ObClientPrereqService prereqs;
     private PanService pan;
+    private com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
     private ObClientWriteService service;
 
     @BeforeEach
@@ -71,8 +73,10 @@ class ObClientWriteServiceTest {
         // §3.9 allow-list, and a mock of it would make every assertion in this
         // class about what the wizard stores an assertion about a stub —
         // including the one that says a body reducing to nothing is refused.
+        portalAccounts = mock(com.edunext.edutrack.api.feature.portal.ClientAccountAdminService.class);
         service = new ObClientWriteService(clients, reads, children, requirements,
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan);
+                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan,
+                portalAccounts);
 
         // The happy defaults: one product, on sale, with a published template,
         // and a published prerequisites master (B-109).
@@ -125,22 +129,37 @@ class ObClientWriteServiceTest {
     // ── the portal-login flag ───────────────────────────────────────────────
 
     /**
-     * The one place this implementation departs from the contract, and it
-     * departs loudly rather than quietly — see
-     * {@link PortalLoginUnavailableException}.
+     * B-126 · the flag is honoured now. It was refused rather than ignored
+     * until this task existed, and B-102's argument for refusing is the same
+     * one that makes this assertion worth keeping: a boarder who ticks the box
+     * and is told 201 believes their client has credentials coming.
      */
     @Test
-    @DisplayName("asking for a portal login is refused, not ignored, and boards nothing")
-    void portalLoginIsRefusedRatherThanIgnored() {
+    @DisplayName("asking for a portal login creates one")
+    void portalLoginIsCreated() {
         ObClientDtos.ObClientCreateRequest wantsLogin = new ObClientDtos.ObClientCreateRequest(
                 "Acme", null, BOARDED, null, null, null, null,
                 List.of(contact("spoc@example.com", true)),
                 List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
                 null, true, false);
 
-        assertThatThrownBy(() -> service.create(ADMIN, CALLER, wantsLogin))
-                .isInstanceOf(PortalLoginUnavailableException.class);
-        verify(clients, never()).saveAndFlush(any());
+        service.create(ADMIN, CALLER, wantsLogin);
+
+        verify(portalAccounts).create(eq(ADMIN), anyLong(), eq(CALLER));
+    }
+
+    @Test
+    @DisplayName("not asking for one creates nothing — the checkbox is the whole trigger")
+    void noPortalLoginWhenNotAsked() {
+        ObClientDtos.ObClientCreateRequest noLogin = new ObClientDtos.ObClientCreateRequest(
+                "Acme", null, BOARDED, null, null, null, null,
+                List.of(contact("spoc@example.com", true)),
+                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
+                null, false, false);
+
+        service.create(ADMIN, CALLER, noLogin);
+
+        verify(portalAccounts, never()).create(any(), anyLong(), any());
     }
 
     // ── the create's own validation set ─────────────────────────────────────
