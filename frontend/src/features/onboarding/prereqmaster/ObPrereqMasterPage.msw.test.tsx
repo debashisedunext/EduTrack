@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -106,17 +106,40 @@ describe('ObPrereqMasterPage · against the mock server', () => {
   })
 
   /**
-   * Read-only is the snapshot guarantee doing its job — a client keeps the
-   * checklist it was boarded against — so the screen says so where the
-   * disabled controls are, rather than leaving them looking broken.
+   * The resting screen is the design's: the checklist edits in place, and the
+   * versioning is machinery rather than furniture — no chip, no revision
+   * button, nothing announcing a draft until one exists.
    */
-  it('says why the published version is read-only instead of just disabling it', async () => {
+  it('draws the design’s screen — live controls and no revision chrome', async () => {
     renderPage()
 
-    expect(await screen.findByText(/is published, so it is read-only/i, undefined, SLOW))
-      .toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Begin a revision' })).toBeEnabled()
-    expect(screen.getByRole('checkbox', { name: 'Mandatory: Signed service agreement' })).toBeDisabled()
+    await screen.findByText('Signed service agreement', undefined, SLOW)
+
+    expect(screen.getByRole('checkbox', { name: 'Mandatory: Signed service agreement' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Delete Signed service agreement' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Begin a revision' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Unpublished changes')).not.toBeInTheDocument()
+  })
+
+  /**
+   * End to end over the real handlers: ticking a box on the published version
+   * opens the draft, writes to the *clone* — a new id, the same `sequence` —
+   * and only then does the screen admit there is something to publish.
+   */
+  it('opens the draft on the first edit and surfaces the publish bar', async () => {
+    renderPage()
+
+    await userEvent.click(
+      await screen.findByRole('checkbox', { name: 'Mandatory: Signed service agreement' }, SLOW),
+    )
+
+    expect(await screen.findByText('Unpublished changes', undefined, SLOW)).toBeInTheDocument()
+    // Enabled only once the write and its refetch have settled — the bar
+    // arrives with the draft, the button waits for the screen to be idle.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Publish version/ })).toBeEnabled(),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   /**
@@ -234,7 +257,11 @@ describe('ObPrereqMasterPage · against the mock server', () => {
     )
     renderPage()
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Begin a revision' }, SLOW))
+    // The first edit is what opens the draft now, so it is what exposes the
+    // draft that vanished underneath it.
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete Signed service agreement' }, SLOW),
+    )
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/draft could not be loaded/i)
     expect(screen.getByText('Signed service agreement')).toBeInTheDocument()
