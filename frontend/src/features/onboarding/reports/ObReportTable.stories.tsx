@@ -77,7 +77,7 @@ export const TatComplianceWithUnmeasurableRows: Story = {
   args: {
     columns: [
       { key: 'service', label: 'Service', type: 'string' },
-      { key: 'owner', label: 'Owner', type: 'string' },
+      { key: 'owner', label: 'Implementor', type: 'string' },
       { key: 'completed', label: 'Completed', type: 'number' },
       { key: 'measured', label: 'With a TAT', type: 'number' },
       { key: 'onTime', label: 'On time', type: 'number' },

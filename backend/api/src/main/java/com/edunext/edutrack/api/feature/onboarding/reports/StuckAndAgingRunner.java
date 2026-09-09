@@ -108,7 +108,7 @@ class StuckAndAgingRunner implements ObReportRunner {
                 new ObReportDtos.Column("service", "Service", STRING),
                 new ObReportDtos.Column("rag", "Health", RAG),
                 new ObReportDtos.Column("state", "State", STRING),
-                new ObReportDtos.Column("owner", "Owner", STRING),
+                new ObReportDtos.Column("owner", "Implementor", STRING),
                 new ObReportDtos.Column("clock", "Clock", STRING),
                 new ObReportDtos.Column("waitingSince", "In this state since", DATE),
                 new ObReportDtos.Column("overdueBy", "Overdue by", DURATION),

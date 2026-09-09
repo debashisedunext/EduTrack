@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
 import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
+import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
 import com.edunext.edutrack.api.security.pan.PanService;
 import com.edunext.edutrack.api.text.RichTextSanitizer;
 import com.edunext.edutrack.domain.onboarding.ObClient;
@@ -53,6 +54,7 @@ class ObClientWriteServiceTest {
     private ObRequirementWriteRepository requirements;
     private ObClientService details;
     private ObJourneyInstantiationService journeys;
+    private ObClientPrereqService prereqs;
     private PanService pan;
     private com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
     private ObClientWriteService service;
@@ -65,6 +67,7 @@ class ObClientWriteServiceTest {
         requirements = mock(ObRequirementWriteRepository.class);
         details = mock(ObClientService.class);
         journeys = mock(ObJourneyInstantiationService.class);
+        prereqs = mock(ObClientPrereqService.class);
         pan = mock(PanService.class);
         // B-106 · ObRequirementBody is real rather than mocked. It is the
         // §3.9 allow-list, and a mock of it would make every assertion in this
@@ -73,11 +76,14 @@ class ObClientWriteServiceTest {
         portalAccounts = mock(com.edunext.edutrack.api.feature.portal.ClientAccountAdminService.class);
         service = new ObClientWriteService(clients, reads, children, requirements,
                 new ObRequirementBody(new RichTextSanitizer()), details, journeys, pan, portalAccounts);
+                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan);
 
-        // The happy defaults: one product, on sale, with a published template.
+        // The happy defaults: one product, on sale, with a published template,
+        // and a published prerequisites master (B-109).
         when(children.sellableProductIds(any())).thenReturn(Set.of(1L));
         when(children.productIdsWithActiveTemplate(any())).thenReturn(Set.of(1L));
         when(children.isActiveUser(anyLong())).thenReturn(true);
+        when(prereqs.hasActivePrereqMaster()).thenReturn(true);
         when(reads.namesContaining(anyString(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(List.of());
         // The id is the database's, so a save has to hand one back — everything
@@ -395,6 +401,32 @@ class ObClientWriteServiceTest {
         verify(children).insertApplications(anyLong(), any());
         verify(journeys).instantiate(42L, 1L);
         verify(journeys).instantiate(42L, 2L);
+    }
+
+    // ── B-109 · the prerequisites instance ──────────────────────────────────
+
+    @Nested
+    @DisplayName("the prerequisites checklist")
+    class Prerequisites {
+
+        @Test
+        @DisplayName("nothing published on OB-14 boards no client at all")
+        void noActiveMasterBoardsNothing() {
+            when(prereqs.hasActivePrereqMaster()).thenReturn(false);
+
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER, request()))
+                    .isInstanceOf(NoPublishedPrerequisitesException.class);
+            verify(clients, never()).saveAndFlush(any());
+            verify(prereqs, never()).instantiate(anyLong());
+        }
+
+        @Test
+        @DisplayName("the new client is snapshotted onto the active master, inside the same create")
+        void snapshotsTheActiveMaster() {
+            service.create(ADMIN, CALLER, request());
+
+            verify(prereqs).instantiate(42L);
+        }
     }
 
     // ── the edit ────────────────────────────────────────────────────────────

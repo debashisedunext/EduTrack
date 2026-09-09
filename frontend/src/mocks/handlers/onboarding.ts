@@ -670,10 +670,16 @@ export const onboardingHandlers = [
       const needle = normaliseName(body.name!);
       const similar = db.obClients.filter((c) => normaliseName(c.name) === needle);
       if (similar.length) {
+        // B-109 · the real service's shape (`ObClientExceptionHandler.handleSimilarName`):
+        // `candidates` is what the wizard renders and links, `detail` is prose for
+        // whoever is not branching on the structured property.
         return problem(409, 'ob-client-name-similar',
           'A client with a very similar name already exists', {
             detail: similar.map((c) => c.name).join(', '),
-            hint: 'Resubmit with acknowledgeSimilarNames: true if these are different companies.',
+            forceable: true,
+            acknowledgeWith: 'acknowledgeSimilarNames',
+            candidates: similar.map((c) => ({ id: c.id, name: c.name })),
+            hiddenCandidateCount: 0,
           });
       }
     }
@@ -687,6 +693,18 @@ export const onboardingHandlers = [
             detail: 'A purchase with no template to instantiate would board this client into nothing.',
           });
       }
+    }
+
+    // B-109 · the wizard's third thing this call creates. Checked here, ahead
+    // of every write below, on `ob-product-no-template`'s own shape: a boarder
+    // finds out nothing is published before the rest of the form is thrown
+    // away, not after.
+    const activePrereqVersion = db.obPrereqVersions.find((v) => v.isActive);
+    if (!activePrereqVersion) {
+      return problem(409, 'ob-client-no-prereq-master',
+        'No prerequisites checklist is published yet', {
+          detail: 'An onboarding admin publishes one on OB-14 before this client can be boarded.',
+        });
     }
 
     const clientId = Math.max(0, ...db.obClients.map((c) => c.id)) + 1;
@@ -777,6 +795,33 @@ export const onboardingHandlers = [
     };
 
     db.obClients.push(created);
+
+    // B-109 · the checklist behind the gate, snapshotted from the active
+    // master — the mock's own mirror of `ObClientPrereqService.instantiate`.
+    // Every task's clock starts now, on the same plan §5.4 line the real
+    // service reads: prerequisite time is attributed to the client from
+    // boarding, not from gate-open or first login.
+    db.obClientPrereqs.push({
+      obClientId: clientId, templateVersion: activePrereqVersion.version,
+      status: 'IN_PROGRESS', clearedAt: null,
+    });
+    let prereqTaskId = Math.max(0, ...db.obClientPrereqTasks.map((t) => t.id));
+    const boardedAt = new Date().toISOString();
+    for (const source of db.obPrereqTemplateTasks.filter(
+      (t) => t.templateVersion === activePrereqVersion.version && t.isActive,
+    )) {
+      db.obClientPrereqTasks.push({
+        id: ++prereqTaskId, obClientId: clientId, templateTaskId: source.id,
+        sequence: source.sequence, title: source.title, description: source.description,
+        isMandatory: source.isMandatory, isAdHoc: false,
+        status: 'PENDING', dueAt: boardedAt,
+        submittedAt: null, submittedVia: null,
+        verifiedAt: null, verifiedById: null,
+        skippedAt: null, skippedById: null, skipReason: null,
+        referenceDocs: source.docs, submissions: [],
+      });
+    }
+
     return ok(obClientDetailDto(created, db), undefined, { status: 201 });
   }),
 

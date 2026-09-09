@@ -64,6 +64,9 @@ const ObClientListPage = lazy(() =>
 const ObDashboardPage = lazy(() =>
   import('./features/onboarding/dashboard/ObDashboardPage').then((m) => ({ default: m.ObDashboardPage })),
 )
+const NewObClientWizardPage = lazy(() =>
+  import('./features/onboarding/clients/NewObClientWizardPage').then((m) => ({ default: m.NewObClientWizardPage })),
+)
 const ObNotificationCentrePage = lazy(() =>
   import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
 )
@@ -435,9 +438,9 @@ export default function App() {
               asked for the page for precisely that reason — "a full page is
               needed for history and for the digest links to land somewhere" —
               and a destination that arrives after the mail pointing at it is a
-              mail with a broken link. There is still no onboarding nav section,
-              so this is reached by link until B-108/B-109 build one; the bell
-              popover mounts on that shell when it lands.
+              mail with a broken link. B-109 has since built the nav section —
+              see `Sidebar.tsx` — but the bell popover mounting on it is a
+              separate task and has not landed.
             */}
             <Route path="/onboarding/notifications" element={withSuspense(<ObNotificationCentrePage />)} />
             {/* OB-11 — B-113. OB Admin only; the server answers 403 and the page
@@ -458,8 +461,8 @@ export default function App() {
               Two routes rather than one, because the viewer is the thing people
               bookmark and send: its filters live in the URL, so a report
               narrowed to one product and a quarter has to be a path somebody
-              can paste. There is still no onboarding nav section, so both are
-              reached by link until B-108/B-109 build one.
+              can paste. Reached by link rather than from the sidebar — B-109's
+              nav entry points at the client list, not at reports.
             */}
             <Route path="/onboarding/reports" element={withSuspense(<ObReportsHubPage />)} />
             <Route path="/onboarding/reports/:reportKey" element={withSuspense(<ObReportViewerPage />)} />
@@ -472,11 +475,8 @@ export default function App() {
               its own summary tables, its own vocabulary, and A-115's ArchUnit
               rule refusing the import between them.
 
-              Still no onboarding nav section, so this is reached by direct link
-              until B-108/B-109 build the shell. It is registered now anyway,
-              because it is the destination B-127's slide-over and B-128's grids
-              are added *to* — and a board that arrives after the things that
-              hang off it is a board nobody can review.
+              B-109 adds the sidebar entry this comment used to say was
+              missing — see `Sidebar.tsx`.
             */}
             <Route path="/onboarding/dashboard" element={withSuspense(<ObDashboardPage />)} />
             {/*
@@ -496,8 +496,8 @@ export default function App() {
               `features/onboarding/journey/` rather than `.../clients/`; see its
               docstring for why the directory and the URL differ.
 
-              Still no onboarding nav section, so this is reached from a mail
-              link or the OB-03 list (B-108) rather than from the sidebar.
+              Reached from a mail link, the OB-03 list (B-108) or the sidebar
+              (B-109) — this page has no route of its own to link out to.
             */}
             {/*
               B-108 · OB-03, the onboarding client list. Registered *before*
@@ -510,11 +510,21 @@ export default function App() {
 
               This is the screen the four routes above have each said they were
               waiting for — "reached by direct link until B-108/B-109 build
-              one". It is not yet a nav section: the onboarding shell is
-              B-109's, and the module still has no sidebar entry, so this page
-              links out to the dashboard rather than pretending to be one.
+              one" — and it is now also `Sidebar.tsx`'s "Onboarding" entry's
+              destination: a client roster is the module's natural landing
+              screen, the same call `/tickets` makes for the ticketing side.
             */}
             <Route path="/onboarding/clients" element={withSuspense(<ObClientListPage />)} />
+            {/*
+              B-109 · OB-04, the four-step new client wizard. Registered
+              *before* `/onboarding/clients/:obClientId` for the identical
+              reason `/onboarding/clients` is — a literal path outranks a
+              parameterised one regardless of order, but readability still
+              wants the concrete route next to the id-bearing one it resembles.
+              `ObClientListPage`'s "New client" button is the only link to it;
+              nothing 404s any more.
+            */}
+            <Route path="/onboarding/clients/new" element={withSuspense(<NewObClientWizardPage />)} />
             <Route
               path="/onboarding/clients/:obClientId"
               element={withSuspense(<ObClientDetailPage />)}
