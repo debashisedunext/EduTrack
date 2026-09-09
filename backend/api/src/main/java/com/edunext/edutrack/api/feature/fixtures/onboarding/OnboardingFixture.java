@@ -46,7 +46,8 @@ import java.util.Optional;
  * <p>Everything the corpus <em>is</em> lives in {@link OnboardingFixtureData};
  * everything about <em>where it goes</em> lives here. It seeds four products,
  * three journey template versions with their steps, Task List items and
- * document checklists, eight clients with SPOCs, purchases and requirements,
+ * document checklists, the org-wide prerequisites master (B-124) as one
+ * published version, eight clients with SPOCs, purchases and requirements,
  * eleven journeys across them, every step under those journeys with its Task
  * List answers, the clock events that produced their elapsed time, the
  * communications timeline, the journey history and one open client escalation.
@@ -145,6 +146,7 @@ public class OnboardingFixture {
         Map<String, Long> userIds = createUsers();
         Map<String, Long> productIds = createProducts(userIds);
         Map<String, TemplateRefs> templates = createTemplates(productIds, userIds);
+        createPrereqMaster(userIds);
 
         for (ClientSpec client : OnboardingFixtureData.CLIENTS) {
             createClient(client, userIds, productIds, templates, zone, anchor);
@@ -284,6 +286,73 @@ public class OnboardingFixture {
             byKey.put(spec.key(), new TemplateRefs(templateId, spec.steps(), List.copyOf(stepIds)));
         }
         return byKey;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // The prerequisites master (OB-14)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * B-124 · the org-wide prerequisites master: one published, active version
+     * and the prototype's five tasks under it.
+     *
+     * <p><b>Why the corpus has to carry this rather than leave it to an
+     * Admin.</b> The master is singular and org-wide, so unlike a journey
+     * template there is no product it can be absent for — {@code
+     * getObPrereqTemplate} answers 404 when no version has ever been authored,
+     * and OB-14 renders that as a failure rather than as an empty state. A
+     * fixture database that boots into a broken screen is not a fixture
+     * database.
+     *
+     * <p><b>Three columns are never written, and that is deliberate.</b>
+     * {@code is_draft}, {@code active_key} and {@code draft_key} are GENERATED
+     * … STORED; MySQL refuses an INSERT that names one, and the whole reason
+     * the migration derives them is that nothing outside the database gets to
+     * have an opinion about them. Setting {@code published_at} is what makes
+     * this row not a draft; setting {@code is_active} is what takes the single
+     * active slot.
+     *
+     * <p>{@code published_by} is a real user for
+     * {@code ck_ob_prereq_template_versions_published}, which refuses a publish
+     * timestamp with nobody's name against it. It comes out of the corpus's own
+     * user map rather than a literal id — the prototype's OB Admin, resolved
+     * the same way every other actor here is.
+     *
+     * <p><b>Reference documents are not written.</b>
+     * {@code ob_prereq_template_task_docs.attachment_id} is NOT NULL and points
+     * into {@code ob_attachments}, so seeding the prototype's three
+     * {@code refDoc} names would mean inventing a {@code storage_key} for an
+     * object MinIO does not hold: CP-04 would draw a download chip that 404s,
+     * which is a worse defect than the absent chip. The names are transcribed
+     * onto {@code PrereqTaskSpec#refDocName()}, unused, exactly as
+     * {@code ClientSpec#attachmentNames()} carried A-102's before it landed.
+     */
+    private void createPrereqMaster(Map<String, Long> userIds) {
+        Long publisher = userIds.get(OnboardingFixtureData.PREREQ_PUBLISHER_KEY);
+        // Published "now" rather than at a serial: the master is not part of
+        // any client's timeline, and a version published before the org's own
+        // first client would be a date the corpus cannot justify.
+        Timestamp publishedAt = Timestamp.from(Instant.now());
+
+        long versionId = insert("""
+                INSERT INTO ob_prereq_template_versions (version, is_active, published_at, published_by,
+                                                         created_by)
+                     VALUES (?, 1, ?, ?, ?)
+                """, OnboardingFixtureData.PREREQ_MASTER_VERSION, publishedAt, publisher, publisher);
+
+        for (int i = 0; i < OnboardingFixtureData.PREREQ_MASTER.size(); i++) {
+            var task = OnboardingFixtureData.PREREQ_MASTER.get(i);
+            // version_id is the header row's id, not its version number — the
+            // FK points at ob_prereq_template_versions.id and 1 would resolve
+            // to whatever row happens to hold that id.
+            insert("""
+                    INSERT INTO ob_prereq_template_tasks (version_id, sequence, title, description,
+                                                          tat_days, is_mandatory, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    versionId, i + 1, task.title(), task.description(), task.tatDays(),
+                    task.mandatory() ? 1 : 0);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════

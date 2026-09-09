@@ -39,9 +39,28 @@ import java.util.List;
  *       not landed. The prototype's file names are transcribed onto
  *       {@link ClientSpec#attachmentNames()} anyway, unused, so B-107 can seed
  *       them without re-reading the prototype.</li>
- *   <li><b>Prerequisites, client accounts, sign-offs, notifications and CSAT
- *       are dropped</b> — B-124/B-125, A-125, A-107 and B-119 respectively.
- *       None of their tables exist yet.</li>
+ *   <li><b>The prerequisites master is seeded; its per-client instances are
+ *       not.</b> B-124's tables landed on 8 Sep, so the exclusion that used to
+ *       stand here no longer holds for the master: {@link #PREREQ_MASTER} is
+ *       transcribed and {@link OnboardingFixture} writes it, because OB-14
+ *       answers 404 without it and renders that as a broken screen.
+ *       B-125's {@code ob_client_prereqs} / {@code ob_client_prereq_tasks} —
+ *       the prototype's per-client {@code c.prereqs}, with Bluebell's skipped
+ *       non-mandatory task and Little Scholars' in-flight set behind the
+ *       locked gate — are a larger separate piece of work and stay dropped.
+ *       Until they are seeded, {@code c7}'s {@code gate_status = 'LOCKED'} is
+ *       a column with no checklist behind it.</li>
+ *   <li><b>The master's reference documents are dropped.</b>
+ *       {@code ob_prereq_template_task_docs} needs an {@code attachment_id}
+ *       into {@code ob_attachments}, which means a {@code storage_key} naming
+ *       an object MinIO does not hold; the chip would render and the download
+ *       would 404, which is worse than no chip. The prototype's {@code refDoc}
+ *       names are transcribed onto {@link PrereqTaskSpec#refDocName()} anyway,
+ *       unused, on the same terms as {@link ClientSpec#attachmentNames()}.</li>
+ *   <li><b>Client accounts, sign-offs, notifications and CSAT are dropped</b> —
+ *       A-125, A-107 and B-119. Their tables have since landed too
+ *       ({@code client_accounts}, {@code ob_signoffs}, {@code ob_notifications});
+ *       what is missing is the transcription, not the schema.</li>
  *   <li><b>{@code city} and {@code payMode} have no column.</b> City is folded
  *       into {@code address}, which is where the prototype's own address string
  *       already carries it. Payment mode goes with the payments.</li>
@@ -298,6 +317,85 @@ final class OnboardingFixtureData {
                     STANDARD_SAAS_STEPS),
             new TemplateSpec("t3", "Biometric Device Rollout", 2, "p2", true, 2, "t1",
                     BIOMETRIC_STEPS));
+
+    // ══════════════════════════════════════════════════════════════════════
+    // The prerequisites master (OB-14)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * One row of {@code ob_prereq_template_tasks}.
+     *
+     * @param key         the prototype's own id ({@code q1}…{@code q5})
+     * @param title       verbatim
+     * @param description the prototype's {@code desc}, verbatim
+     * @param tatDays     the prototype's {@code tat}. <b>Working days</b>, the
+     *                    unit B-124's column carries and the whole module
+     *                    settled on in v1.2
+     * @param mandatory   the prototype's {@code mand}. Set on the master and
+     *                    never on an instance — B-124's own §3 note, and what
+     *                    makes {@code skipObClientPrereqTask}'s 422 a guarantee
+     * @param refDocName  the prototype's {@code refDoc}, transcribed and
+     *                    <b>unused</b> — see the class javadoc. Empty string
+     *                    where the prototype has one, rather than {@code null},
+     *                    because that is what it says
+     */
+    record PrereqTaskSpec(String key, String title, String description, int tatDays, boolean mandatory,
+                          String refDocName) {
+    }
+
+    /**
+     * The version number of the seeded master.
+     *
+     * <p>One, and published: the prototype has a single {@code PREREQ_MASTER}
+     * array with no version history behind it, so inventing retired versions
+     * would be inventing an authoring past nobody had. A draft is not seeded
+     * either — {@code uq_ob_prereq_template_versions_draft} allows exactly one
+     * org-wide, and spending it in the fixture would 409 the first Admin who
+     * pressed "start a revision" on a demo database.
+     */
+    static final int PREREQ_MASTER_VERSION = 1;
+
+    /**
+     * Who published the master: the prototype's OB Admin, Anita Rao.
+     *
+     * <p>{@code ck_ob_prereq_template_versions_published} makes
+     * {@code published_at} and {@code published_by} move together, so an active
+     * version has to name a real user — and the org-wide master is the OB
+     * Admin's screen, which is the role {@code u1} carries.
+     */
+    static final String PREREQ_PUBLISHER_KEY = "u1";
+
+    /**
+     * The prototype's {@code PREREQ_MASTER} — five tasks, four of them
+     * mandatory, TATs 1–6 working days.
+     *
+     * <p><b>The non-mandatory one is the whitelisting task, and it is the whole
+     * point of the flag being here.</b> The prototype skips exactly that task
+     * for Bluebell ("Client IT policy blocks whitelisting"), which is what plan
+     * §5.3's gate needs to be demonstrable: a checklist where everything is
+     * mandatory can only ever be complete or stuck, and the valve that lets a
+     * journey start anyway would never be exercised.
+     *
+     * <p>Order is the prototype's array order, which becomes {@code sequence}
+     * 1–5. That number is presentation only — prerequisites have no dependency
+     * model, so nothing reads it but OB-14 and CP-03.
+     */
+    static final List<PrereqTaskSpec> PREREQ_MASTER = List.of(
+            new PrereqTaskSpec("q1", "Share final student & staff master data",
+                    "Fill the shared template exactly — this feeds data migration.",
+                    6, true, "Master_data_template.xlsx"),
+            new PrereqTaskSpec("q2", "Nominate SPOC & escalation contact",
+                    "One primary and one backup contact, with email and WhatsApp.",
+                    2, true, ""),
+            new PrereqTaskSpec("q3", "Confirm branding assets (logo, colours)",
+                    "Vector logo plus colour codes.",
+                    3, true, "Brand_asset_checklist.pdf"),
+            new PrereqTaskSpec("q4", "Whitelist EduTrack mail & WhatsApp IDs",
+                    "So OTPs and alerts never land in spam.",
+                    1, false, "IT_whitelisting_note.pdf"),
+            new PrereqTaskSpec("q5", "Advance payment confirmation",
+                    "Share the UTR / reference of the advance payment.",
+                    3, true, ""));
 
     // ══════════════════════════════════════════════════════════════════════
     // Clients and their journeys
