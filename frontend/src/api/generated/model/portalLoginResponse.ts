@@ -46,17 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { PortalLoginResult } from './portalLoginResult';
 
-export interface PortalLoginRequest {
-  /**
-   * The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.
-   * @minLength 1
-   * @maxLength 150
-   */
-  username: string;
-  /**
-   * Plain password. Verified against an Argon2id hash; never logged or stored.
-   * @minLength 1
-   */
-  password: string;
+export interface PortalLoginResponse {
+  data: PortalLoginResult;
 }

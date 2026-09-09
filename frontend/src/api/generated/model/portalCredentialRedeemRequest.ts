@@ -46,8 +46,22 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { PortalSession } from './portalSession';
 
-export interface PortalSessionResponse {
-  data: PortalSession;
+/**
+ * The token travels in the path, not here, so the page can validate a
+link on load with a GET and reuse the same shape for the POST.
+
+ */
+export interface PortalCredentialRedeemRequest {
+  /**
+   * The password the client is choosing. Bean Validation on
+`RedeemRequest` only bounds the length (`@Size(max=200)`); the
+12-character-plus-complexity rule (`PortalPasswordRules`) is
+enforced afterwards as a business rule — a failure there is the
+`weak-password` 400 below, not a `ValidationFailed` one.
+
+   * @minLength 1
+   * @maxLength 200
+   */
+  password: string;
 }

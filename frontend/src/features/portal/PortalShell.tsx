@@ -11,7 +11,7 @@ import { usePortalSignOut } from './auth/usePortalSignOut'
  * exists to prevent from the other direction too.
  */
 export function PortalShell() {
-  const user = usePortalAuthStore((state) => state.user)
+  const client = usePortalAuthStore((state) => state.client)
   const signOut = usePortalSignOut()
 
   return (
@@ -27,7 +27,7 @@ export function PortalShell() {
           EduTrack
         </div>
         <div className="flex items-center gap-4 text-sm text-content-muted">
-          {user?.displayName ? <span>{user.displayName}</span> : null}
+          {client?.displayName ? <span>{client.displayName}</span> : null}
           <button
             type="button"
             onClick={signOut}

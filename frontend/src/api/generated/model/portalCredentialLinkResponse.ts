@@ -46,22 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { PortalMe } from './portalMe';
+import type { PortalCredentialLink } from './portalCredentialLink';
 
-/**
- * `Session`'s shape, one principal type over. No `role`, no
-`landingRoute`: a portal caller has no role, and CP-02's module
-chooser — not a role table — decides where this session lands.
-
- */
-export interface PortalSession {
-  accessToken: string;
-  expiresIn: number;
-  /** True immediately after `/redeem` — the link only authenticates,
-it does not clear the flag. CP-01's forced-change screen calls
-`portalSetPassword` before anything else on the portal will admit
-this token; see `PortalPasswordChangeGate`.
- */
-  mustChangePassword: boolean;
-  user: PortalMe;
+export interface PortalCredentialLinkResponse {
+  data: PortalCredentialLink;
 }

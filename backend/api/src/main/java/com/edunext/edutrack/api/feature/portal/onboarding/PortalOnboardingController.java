@@ -4,7 +4,6 @@ import com.edunext.edutrack.api.feature.onboarding.escalations.ObClientEscalatio
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObPrereqTaskService;
 import com.edunext.edutrack.api.feature.portal.ClientPrincipal;
-import com.edunext.edutrack.api.feature.portal.PortalPasswordChangeGate;
 import com.edunext.edutrack.domain.onboarding.ObClientPrereqTask;
 import com.edunext.edutrack.domain.onboarding.ObPrereqActorType;
 import io.swagger.v3.oas.annotations.Operation;
@@ -60,11 +59,15 @@ import java.util.List;
  * on the staff side. Nothing about this controller's other routes changed to
  * make room for it, which was the point of naming the slot ahead of time.
  *
- * <h2>Password-change gate, called explicitly on every route</h2>
+ * <h2>No forced-password-change gate</h2>
  *
- * <p>{@link PortalPasswordChangeGate#require} is the first line of every
- * handler here — see that class's own note on why it is a call rather than a
- * filter.
+ * <p>A-130's redemption flow spends the credential link and sets the real
+ * password in the same transaction (see {@code PortalCredentialService}), so
+ * a login only ever succeeds once a real password has been chosen — there is
+ * no separate must-change state for a route on this controller to police.
+ * C-121 originally called a {@code PortalPasswordChangeGate} here; it is gone
+ * along with the rest of that duplicate login stack now that A-130 owns
+ * portal auth.
  */
 @RestController
 @RequestMapping(path = "/api/v1/portal/onboarding", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -80,7 +83,6 @@ public class PortalOnboardingController {
     private final PortalReferenceDocReader referenceDocs;
     private final PortalPrereqAttachmentService attachments;
     private final PortalPrimaryContactReader clients;
-    private final PortalPasswordChangeGate passwordChangeGate;
     private final PortalSignoffReader signoffs;
     private final PortalEscalationStepReader escalationSteps;
     private final ObClientEscalationService clientEscalations;
@@ -93,7 +95,6 @@ public class PortalOnboardingController {
                                PortalReferenceDocReader referenceDocs,
                                PortalPrereqAttachmentService attachments,
                                PortalPrimaryContactReader clients,
-                               PortalPasswordChangeGate passwordChangeGate,
                                PortalSignoffReader signoffs,
                                PortalEscalationStepReader escalationSteps,
                                ObClientEscalationService clientEscalations) {
@@ -105,7 +106,6 @@ public class PortalOnboardingController {
         this.referenceDocs = referenceDocs;
         this.attachments = attachments;
         this.clients = clients;
-        this.passwordChangeGate = passwordChangeGate;
         this.signoffs = signoffs;
         this.escalationSteps = escalationSteps;
         this.clientEscalations = clientEscalations;
@@ -115,7 +115,6 @@ public class PortalOnboardingController {
     @Operation(operationId = "getPortalOnboardingHome",
             summary = "Interactive prerequisites above read-only journey accordions (CP-03)")
     ResponseEntity<PortalOnboardingDtos.PortalOnboardingHomeResponse> home(Authentication caller) {
-        passwordChangeGate.require(caller);
         long obClientId = obClientId(caller);
 
         List<PortalOnboardingDtos.PortalJourneyStrip> strips = journeys.journeysOf(obClientId);
@@ -156,7 +155,6 @@ public class PortalOnboardingController {
     @Operation(operationId = "listPortalSignoffs",
             summary = "Pending and past sign-offs, deep-linking into the §8 flow (CP-05)")
     ResponseEntity<PortalOnboardingDtos.PortalSignoffListResponse> signoffs(Authentication caller) {
-        passwordChangeGate.require(caller);
         long obClientId = obClientId(caller);
         return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffListResponse(signoffs.listFor(obClientId)));
     }
@@ -183,7 +181,6 @@ public class PortalOnboardingController {
             @Valid @RequestBody PortalOnboardingDtos.PortalEscalationRaiseRequest request,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         long obClientId = obClientId(caller);
         PortalEscalationStepReader.StepContext step = escalationSteps.stepContextFor(obClientId, stepId)
                 .orElseThrow(PortalOnboardingNotFoundException::new);
@@ -209,7 +206,6 @@ public class PortalOnboardingController {
             @RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         ObClientPrereqTask task = requireOwnTask(prereqTaskId, caller);
 
         PortalOnboardingDtos.PortalPrereqTaskDetail detail = PortalOnboardingDtos.PortalPrereqTaskDetail.of(
@@ -232,7 +228,6 @@ public class PortalOnboardingController {
             @RequestBody(required = false) @Valid PortalOnboardingDtos.PortalPrereqSubmitRequest request,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         requireOwnTask(prereqTaskId, caller);
         long contactId = requirePrimaryContact(obClientId(caller));
 
@@ -249,7 +244,6 @@ public class PortalOnboardingController {
             @RequestParam(name = "limit", required = false) Integer limit,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         requireOwnTask(prereqTaskId, caller);
         return ResponseEntity.ok(thread.comments(prereqTaskId, cursor, limit));
     }
@@ -264,7 +258,6 @@ public class PortalOnboardingController {
             @Valid @RequestBody PortalOnboardingDtos.PortalPrereqCommentCreateRequest request,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         requireOwnTask(prereqTaskId, caller);
         long contactId = requirePrimaryContact(obClientId(caller));
 
@@ -287,7 +280,6 @@ public class PortalOnboardingController {
             @RequestParam("file") MultipartFile file,
             Authentication caller) {
 
-        passwordChangeGate.require(caller);
         requireOwnTask(prereqTaskId, caller);
         long contactId = requirePrimaryContact(obClientId(caller));
 

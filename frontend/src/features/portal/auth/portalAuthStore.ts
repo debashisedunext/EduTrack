@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 
 import { setAccessToken } from '@/api/http'
-import type { PortalSession } from '@/api/generated/model/portalSession'
+import type { PortalClient } from '@/api/generated/model/portalClient'
+import type { PortalLoginResult } from '@/api/generated/model/portalLoginResult'
 
 /**
- * C-121 · who is signed in to the client portal — {@code authStore.ts}'s
- * shape, one principal type over.
+ * A-130 · who is signed in to the client portal — `authStore.ts`'s shape,
+ * one principal type over.
  *
  * ## The shared token slot, and why this is safe
  *
@@ -25,32 +26,36 @@ import type { PortalSession } from '@/api/generated/model/portalSession'
  * principal type. Flagged here rather than worked around, since `http.ts` is
  * not this stream's file to widen unilaterally.
  *
- * ## No idle/absolute timeout
+ * ## No refresh, no idle/absolute timeout
  *
- * A-025's 30-minute idle and 12-hour absolute limits are a staff session
- * concern this task was not asked to reproduce for the portal, and the
- * backend's own `PortalRefreshTokenStore` does not yet implement the
- * device-family tracking those limits would need to mean anything client
- * side. This store only renews before expiry — see `PortalAuthProvider`.
+ * A-130 issues a single access token with no refresh cookie and no rotation
+ * — a portal session lasts one access-token lifetime, full stop. There is
+ * nothing here to renew: when `expiresAt` passes, the session simply ends
+ * and the client signs in again. (C-121's original store here modelled a
+ * refresh cycle against a backend that never shipped one; A-130's real
+ * surface has none, so neither does this store.)
  */
 
-export type PortalAuthStatus = 'unknown' | 'authenticated' | 'anonymous'
+/**
+ * No `'unknown'` state: with no cookie and no refresh, there is nothing to
+ * check on a fresh page load — a reload is always an anonymous visitor.
+ * (C-121's original store modelled a startup restore against a refresh
+ * endpoint that A-130 never built.)
+ */
+export type PortalAuthStatus = 'authenticated' | 'anonymous'
 
 interface PortalAuthState {
   status: PortalAuthStatus
-  user: PortalSession['user'] | null
-  mustChangePassword: boolean
+  client: PortalClient | null
   expiresAt: number | null
 
-  signIn: (session: PortalSession) => void
+  signIn: (session: PortalLoginResult) => void
   signOut: () => void
-  clearPasswordChangeRequirement: () => void
 }
 
 export const initialPortalAuthState = {
-  status: 'unknown' as PortalAuthStatus,
-  user: null,
-  mustChangePassword: false,
+  status: 'anonymous' as PortalAuthStatus,
+  client: null,
   expiresAt: null,
 }
 
@@ -61,8 +66,7 @@ export const usePortalAuthStore = create<PortalAuthState>((set) => ({
     setAccessToken(session.accessToken)
     set({
       status: 'authenticated',
-      user: session.user,
-      mustChangePassword: session.mustChangePassword ?? false,
+      client: session.client,
       expiresAt: Date.now() + session.expiresIn * 1000,
     })
   },
@@ -72,8 +76,6 @@ export const usePortalAuthStore = create<PortalAuthState>((set) => ({
     // does and for the same reason: a re-render against 'anonymous' state
     // must never find `http.ts` still holding a live token to refetch with.
     setAccessToken(null)
-    set({ status: 'anonymous', user: null, mustChangePassword: false, expiresAt: null })
+    set({ status: 'anonymous', client: null, expiresAt: null })
   },
-
-  clearPasswordChangeRequirement: () => set({ mustChangePassword: false }),
 }))

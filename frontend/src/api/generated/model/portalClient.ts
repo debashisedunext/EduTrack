@@ -48,12 +48,16 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * CP-02's whole source of truth for which module cards to show.
+ * The signed-in client, as the portal shell renders it. Two ids are
+derivable from these booleans — a null id means that tree is empty —
+so the shell decides which module cards to draw without a second
+vocabulary for the same fact. CP-02's whole source of truth for the
+module chooser: read straight off the login response, no extra call.
+
  */
-export interface PortalMe {
-  accountId: number;
+export interface PortalClient {
+  username: string;
   displayName: string;
-  email: string;
   /** A Ticketing card renders when true. */
   hasTicketing: boolean;
   /** An Onboarding card renders when true. At least one of

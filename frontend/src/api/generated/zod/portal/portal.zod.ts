@@ -241,120 +241,80 @@ export const listPortalTicketAttachmentsResponse = zod.object({
 })
 
 /**
- * Ordinary sign-in, for an account that has already set its own
-password via `portalSetPassword`. A newly created or reset account
-has no password to type yet — see `portalRedeemCredential`.
+ * Ordinary sign-in, for an account that has already chosen its own
+password via `redeemPortalCredentialLink`. A newly created or reset
+account has no password to type yet — that's what the credential
+link is for.
 
 Failures are deliberately indistinguishable, exactly as `login` is
-for staff: wrong username, wrong password, unknown username and a
-deactivated account all answer `invalid-credentials`.
+for staff: wrong username, wrong password and unknown username all
+answer `invalid-credentials`. Lockout is reported only once the
+password is correct.
 
- * @summary Exchange a client's own username and password for a portal session (CP-01)
+ * @summary Sign in to the client portal
  */
-export const portalLoginBodyUsernameMax = 50;
+export const portalLoginBodyUsernameMax = 150;
 
-export const portalLoginBodyPasswordMax = 128;
 
 
 
 export const portalLoginBody = zod.object({
-  "username": zod.string().min(1).max(portalLoginBodyUsernameMax),
-  "password": zod.string().min(1).max(portalLoginBodyPasswordMax)
+  "username": zod.string().min(1).max(portalLoginBodyUsernameMax).describe('The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.'),
+  "password": zod.string().min(1).describe('Plain password. Verified against an Argon2id hash; never logged or stored.')
 })
 
 export const portalLoginResponse = zod.object({
   "data": zod.object({
   "accessToken": zod.string(),
   "expiresIn": zod.number(),
-  "mustChangePassword": zod.boolean().describe('True immediately after `\/redeem` — the link only authenticates,\nit does not clear the flag. CP-01\'s forced-change screen calls\n`portalSetPassword` before anything else on the portal will admit\nthis token; see `PortalPasswordChangeGate`.\n'),
-  "user": zod.object({
-  "accountId": zod.number(),
+  "client": zod.object({
+  "username": zod.string(),
   "displayName": zod.string(),
-  "email": zod.string(),
   "hasTicketing": zod.boolean().describe('A Ticketing card renders when true.'),
   "hasOnboarding": zod.boolean().describe('An Onboarding card renders when true. At least one of\n`hasTicketing`\/`hasOnboarding` is always true — a `client_accounts`\nrow with neither is unreachable (`ck_client_accounts_has_a_master`).\n')
-}).describe('CP-02\'s whole source of truth for which module cards to show.')
-}).describe('`Session`\'s shape, one principal type over. No `role`, no\n`landingRoute`: a portal caller has no role, and CP-02\'s module\nchooser — not a role table — decides where this session lands.\n')
+}).describe('The signed-in client, as the portal shell renders it. Two ids are\nderivable from these booleans — a null id means that tree is empty —\nso the shell decides which module cards to draw without a second\nvocabulary for the same fact. CP-02\'s whole source of truth for the\nmodule chooser: read straight off the login response, no extra call.\n')
+}).describe('No refresh token: a portal session lasts one access-token lifetime,\nand expiry means signing in again. `expiresIn` is seconds, not an\nabsolute time, so a client whose clock disagrees with ours cannot\ncompute the wrong deadline from a timestamp.\n')
 })
 
 /**
- * Authenticates in its own right — see `PortalRedeemRequest`'s note.
-`mustChangePassword` is always true on the returned session; CP-01's
-forced-change screen calls `portalSetPassword` before anything else
-on the portal admits this token.
+ * Changes nothing, so a page can validate a link on load — or a mail
+client can prefetch the URL — without spending it. That's what makes
+redemption below a `POST` rather than this verb.
 
- * @summary Redeem a one-time credential link and start a session (CP-01)
+ * @summary Whether a credential link is still valid, and the username it is for
  */
-export const portalRedeemCredentialBodyTokenMax = 200;
+export const describePortalCredentialLinkParams = zod.object({
+  "token": zod.string().describe('The 256-bit random value from the credential mail. Single-use, seven-day TTL.')
+})
 
-
-
-export const portalRedeemCredentialBody = zod.object({
-  "token": zod.string().min(1).max(portalRedeemCredentialBodyTokenMax)
-}).describe('Redeems the one-time link a credential mail carries — the newly\ncreated and reset-password paths\' shared entry point. A newly issued\n`client_accounts` row has a password of 32 random bytes nobody\nknows, including the client (`ClientCredentialTokens`\'s own\njavadoc), so there is no password to type on a first sign-in: the\nlink authenticates in its own right, exactly as this operation does.\n')
-
-export const portalRedeemCredentialResponse = zod.object({
+export const describePortalCredentialLinkResponse = zod.object({
   "data": zod.object({
-  "accessToken": zod.string(),
-  "expiresIn": zod.number(),
-  "mustChangePassword": zod.boolean().describe('True immediately after `\/redeem` — the link only authenticates,\nit does not clear the flag. CP-01\'s forced-change screen calls\n`portalSetPassword` before anything else on the portal will admit\nthis token; see `PortalPasswordChangeGate`.\n'),
-  "user": zod.object({
-  "accountId": zod.number(),
+  "username": zod.string(),
   "displayName": zod.string(),
-  "email": zod.string(),
-  "hasTicketing": zod.boolean().describe('A Ticketing card renders when true.'),
-  "hasOnboarding": zod.boolean().describe('An Onboarding card renders when true. At least one of\n`hasTicketing`\/`hasOnboarding` is always true — a `client_accounts`\nrow with neither is unreachable (`ck_client_accounts_has_a_master`).\n')
-}).describe('CP-02\'s whole source of truth for which module cards to show.')
-}).describe('`Session`\'s shape, one principal type over. No `role`, no\n`landingRoute`: a portal caller has no role, and CP-02\'s module\nchooser — not a role table — decides where this session lands.\n')
+  "expiresAt": zod.string().datetime({})
+}).describe('What the redemption page needs before it can ask for a password.\nNothing else about the account: no email, no client name beyond the\ndisplay name, no ids. Anybody holding the link can read this, and the\nlink is a bearer credential in an inbox we do not control.\n')
 })
 
 /**
- * Reads the `portal_refresh_token` cookie; takes no body. Rotate-and-
-replace, simpler than the staff refresh: no device family or reuse
-detection yet — see `PortalRefreshTokenStore`'s own class note. The
-identity is re-read from `client_accounts` on every call, so a
-deactivation takes effect at the next refresh rather than after
-seven days.
+ * Spends the link and sets the password, both in one transaction. `204`
+rather than a session: redeeming is not signing in — handing back a
+token here would make a link sitting in an inbox directly
+exchangeable for a session. The client redeems, then calls
+`portalLogin` separately with the password just chosen.
 
- * @summary Rotate the portal refresh token and issue a new access token (CP-01)
+ * @summary Choose a password and activate the portal login
  */
-export const portalRefreshSessionResponse = zod.object({
-  "data": zod.object({
-  "accessToken": zod.string(),
-  "expiresIn": zod.number(),
-  "mustChangePassword": zod.boolean().describe('True immediately after `\/redeem` — the link only authenticates,\nit does not clear the flag. CP-01\'s forced-change screen calls\n`portalSetPassword` before anything else on the portal will admit\nthis token; see `PortalPasswordChangeGate`.\n'),
-  "user": zod.object({
-  "accountId": zod.number(),
-  "displayName": zod.string(),
-  "email": zod.string(),
-  "hasTicketing": zod.boolean().describe('A Ticketing card renders when true.'),
-  "hasOnboarding": zod.boolean().describe('An Onboarding card renders when true. At least one of\n`hasTicketing`\/`hasOnboarding` is always true — a `client_accounts`\nrow with neither is unreachable (`ck_client_accounts_has_a_master`).\n')
-}).describe('CP-02\'s whole source of truth for which module cards to show.')
-}).describe('`Session`\'s shape, one principal type over. No `role`, no\n`landingRoute`: a portal caller has no role, and CP-02\'s module\nchooser — not a role table — decides where this session lands.\n')
+export const redeemPortalCredentialLinkParams = zod.object({
+  "token": zod.string().describe('The 256-bit random value from the credential mail. Single-use, seven-day TTL.')
 })
 
-/**
- * No `If-Match` — see `PortalSetPasswordRequest`'s own note: the body
-names the password it wants rather than a delta, and there is no
-prior representation of it to precondition against (the caller
-cannot even read the one being replaced). The same idiom
-`setObClientAccountStatus` and `/users/{userId}/status` use for an
-idempotent setter.
-
-The claim on the token that made this call is stale for up to its
-remaining lifetime; call `portalRefreshSession` immediately after a
-`204` to pick up a token with no `mustChangePassword` claim.
-
- * @summary Set the client's own password, clearing the forced-change flag (CP-01)
- */
-export const portalSetPasswordBodyNewPasswordMin = 8;
-export const portalSetPasswordBodyNewPasswordMax = 128;
+export const redeemPortalCredentialLinkBodyPasswordMax = 200;
 
 
 
-export const portalSetPasswordBody = zod.object({
-  "newPassword": zod.string().min(portalSetPasswordBodyNewPasswordMin).max(portalSetPasswordBodyNewPasswordMax)
-}).describe('No `currentPassword` — see `PortalRedeemRequest`\'s note on why one is\nnot askable the first time. What proves this call\'s right to set a\nnew password is the CLIENT-typed access token minted by `\/redeem` or\nan earlier `\/login`, not a password the client cannot possibly\nsupply.\n')
+export const redeemPortalCredentialLinkBody = zod.object({
+  "password": zod.string().min(1).max(redeemPortalCredentialLinkBodyPasswordMax).describe('The password the client is choosing. Bean Validation on\n`RedeemRequest` only bounds the length (`@Size(max=200)`); the\n12-character-plus-complexity rule (`PortalPasswordRules`) is\nenforced afterwards as a business rule — a failure there is the\n`weak-password` 400 below, not a `ValidationFailed` one.\n')
+}).describe('The token travels in the path, not here, so the page can validate a\nlink on load with a GET and reuse the same shape for the POST.\n')
 
 /**
  * The prerequisites are the full staff wire shape (`ObClientPrereqs`) —
@@ -362,10 +322,6 @@ plan §9/§11's never-visible list is about journeys, and none of it is
 on a prerequisite row. The journeys are `PortalJourneyStrip`, plan
 §9's own narrower CP-03 row: step status only, no owner names, no
 internal comms, no block reasons, no TAT internals.
-
-Every route under `/portal/onboarding/**` answers `403` (not
-declared per-operation below, since it applies uniformly) while the
-account still carries `mustChangePassword` — see `portalSetPassword`.
 
  * @summary Interactive prerequisites above read-only journey accordions (CP-03)
  */

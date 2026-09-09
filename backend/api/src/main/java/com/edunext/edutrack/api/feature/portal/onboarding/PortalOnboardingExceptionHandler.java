@@ -1,7 +1,6 @@
 package com.edunext.edutrack.api.feature.portal.onboarding;
 
 import com.edunext.edutrack.api.feature.onboarding.attachments.ObAttachmentTooLargeException;
-import com.edunext.edutrack.api.feature.portal.PortalPasswordChangeRequiredException;
 import com.edunext.edutrack.api.upload.UnsupportedUploadTypeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -23,8 +22,6 @@ class PortalOnboardingExceptionHandler {
     private static final URI NOT_FOUND = URI.create("https://edutrack/errors/not-found");
     private static final URI NO_PRIMARY_CONTACT =
             URI.create("https://edutrack/errors/portal-no-primary-contact");
-    private static final URI PASSWORD_CHANGE_REQUIRED =
-            URI.create("https://edutrack/errors/portal-password-change-required");
     private static final URI STEP_NOT_RUNNING =
             URI.create("https://edutrack/errors/portal-step-not-running");
 
@@ -44,15 +41,6 @@ class PortalOnboardingExceptionHandler {
         problem.setTitle("No active primary contact");
         problem.setDetail(e.getMessage());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
-    }
-
-    @ExceptionHandler(PortalPasswordChangeRequiredException.class)
-    ResponseEntity<ProblemDetail> handlePasswordChangeRequired(PortalPasswordChangeRequiredException e) {
-        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
-        problem.setType(PASSWORD_CHANGE_REQUIRED);
-        problem.setTitle("Password change required");
-        problem.setDetail(e.getMessage());
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
     /** 422 — escalating a step that is not currently running. */

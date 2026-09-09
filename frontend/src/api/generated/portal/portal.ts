@@ -78,15 +78,15 @@ import type {
   PortalAttachmentResponse,
   PortalClientEscalationResponse,
   PortalCommentListResponse,
+  PortalCredentialLinkResponse,
+  PortalCredentialRedeemRequest,
   PortalEscalationRaiseRequest,
   PortalLoginRequest,
+  PortalLoginResponse,
   PortalOnboardingHomeResponse,
   PortalPrereqCommentListResponse,
   PortalPrereqCommentResponse,
   PortalPrereqSubmitRequest,
-  PortalRedeemRequest,
-  PortalSessionResponse,
-  PortalSetPasswordRequest,
   PortalSignoffListResponse,
   PortalTicketListResponse,
   PortalTicketResponse,
@@ -533,15 +533,17 @@ export function useListPortalTicketAttachments<TData = Awaited<ReturnType<typeof
 
 
 /**
- * Ordinary sign-in, for an account that has already set its own
-password via `portalSetPassword`. A newly created or reset account
-has no password to type yet — see `portalRedeemCredential`.
+ * Ordinary sign-in, for an account that has already chosen its own
+password via `redeemPortalCredentialLink`. A newly created or reset
+account has no password to type yet — that's what the credential
+link is for.
 
 Failures are deliberately indistinguishable, exactly as `login` is
-for staff: wrong username, wrong password, unknown username and a
-deactivated account all answer `invalid-credentials`.
+for staff: wrong username, wrong password and unknown username all
+answer `invalid-credentials`. Lockout is reported only once the
+password is correct.
 
- * @summary Exchange a client's own username and password for a portal session (CP-01)
+ * @summary Sign in to the client portal
  */
 export const portalLogin = (
     portalLoginRequest: PortalLoginRequest,
@@ -549,7 +551,7 @@ export const portalLogin = (
 ) => {
       
       
-      return http<PortalSessionResponse>(
+      return http<PortalLoginResponse>(
       {url: `/portal/auth/login`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: portalLoginRequest, signal
@@ -589,7 +591,7 @@ const {mutation: mutationOptions} = options ?
     export type PortalLoginMutationError = ValidationFailedResponse | Problem
 
     /**
- * @summary Exchange a client's own username and password for a portal session (CP-01)
+ * @summary Sign in to the client portal
  */
 export const usePortalLogin = <TError = ValidationFailedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalLogin>>, TError,{data: PortalLoginRequest}, TContext>, }
@@ -605,240 +607,132 @@ export const usePortalLogin = <TError = ValidationFailedResponse | Problem,
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * Authenticates in its own right — see `PortalRedeemRequest`'s note.
-`mustChangePassword` is always true on the returned session; CP-01's
-forced-change screen calls `portalSetPassword` before anything else
-on the portal admits this token.
+ * Changes nothing, so a page can validate a link on load — or a mail
+client can prefetch the URL — without spending it. That's what makes
+redemption below a `POST` rather than this verb.
 
- * @summary Redeem a one-time credential link and start a session (CP-01)
+ * @summary Whether a credential link is still valid, and the username it is for
  */
-export const portalRedeemCredential = (
-    portalRedeemRequest: PortalRedeemRequest,
+export const describePortalCredentialLink = (
+    token: string,
  signal?: AbortSignal
 ) => {
       
       
-      return http<PortalSessionResponse>(
-      {url: `/portal/auth/redeem`, method: 'POST',
-      headers: {'Content-Type': 'application/json', },
-      data: portalRedeemRequest, signal
+      return http<PortalCredentialLinkResponse>(
+      {url: `/portal/auth/credential/${token}`, method: 'GET', signal
     },
       );
     }
   
 
 
-export const getPortalRedeemCredentialMutationOptions = <TError = ValidationFailedResponse | Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalRedeemCredential>>, TError,{data: PortalRedeemRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof portalRedeemCredential>>, TError,{data: PortalRedeemRequest}, TContext> => {
 
-const mutationKey = ['portalRedeemCredential'];
-const {mutation: mutationOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
-
-      
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof portalRedeemCredential>>, {data: PortalRedeemRequest}> = (props) => {
-          const {data} = props ?? {};
-
-          return  portalRedeemCredential(data,)
-        }
-
-        
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type PortalRedeemCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof portalRedeemCredential>>>
-    export type PortalRedeemCredentialMutationBody = PortalRedeemRequest
-    export type PortalRedeemCredentialMutationError = ValidationFailedResponse | Problem
-
-    /**
- * @summary Redeem a one-time credential link and start a session (CP-01)
- */
-export const usePortalRedeemCredential = <TError = ValidationFailedResponse | Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalRedeemCredential>>, TError,{data: PortalRedeemRequest}, TContext>, }
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof portalRedeemCredential>>,
-        TError,
-        {data: PortalRedeemRequest},
-        TContext
-      > => {
-
-      const mutationOptions = getPortalRedeemCredentialMutationOptions(options);
-
-      return useMutation(mutationOptions, queryClient);
+export const getDescribePortalCredentialLinkQueryKey = (token?: string,) => {
+    return [
+    `/portal/auth/credential/${token}`
+    ] as const;
     }
-    /**
- * Reads the `portal_refresh_token` cookie; takes no body. Rotate-and-
-replace, simpler than the staff refresh: no device family or reuse
-detection yet — see `PortalRefreshTokenStore`'s own class note. The
-identity is re-read from `client_accounts` on every call, so a
-deactivation takes effect at the next refresh rather than after
-seven days.
 
- * @summary Rotate the portal refresh token and issue a new access token (CP-01)
- */
-export const portalRefreshSession = (
     
- signal?: AbortSignal
+export const getDescribePortalCredentialLinkQueryOptions = <TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
 ) => {
-      
-      
-      return http<PortalSessionResponse>(
-      {url: `/portal/auth/refresh`, method: 'POST', signal
-    },
-      );
-    }
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDescribePortalCredentialLinkQueryKey(token);
+
   
 
-
-export const getPortalRefreshSessionMutationOptions = <TError = Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalRefreshSession>>, TError,void, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof portalRefreshSession>>, TError,void, TContext> => {
-
-const mutationKey = ['portalRefreshSession'];
-const {mutation: mutationOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof describePortalCredentialLink>>> = ({ signal }) => describePortalCredentialLink(token, signal);
 
       
 
+      
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof portalRefreshSession>>, void> = () => {
-          
+   return  { queryKey, queryFn, enabled: !!(token), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
 
-          return  portalRefreshSession()
-        }
-
-        
+export type DescribePortalCredentialLinkQueryResult = NonNullable<Awaited<ReturnType<typeof describePortalCredentialLink>>>
+export type DescribePortalCredentialLinkQueryError = Problem
 
 
-  return  { mutationFn, ...mutationOptions }}
-
-    export type PortalRefreshSessionMutationResult = NonNullable<Awaited<ReturnType<typeof portalRefreshSession>>>
-    
-    export type PortalRefreshSessionMutationError = Problem
-
-    /**
- * @summary Rotate the portal refresh token and issue a new access token (CP-01)
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describePortalCredentialLink>>,
+          TError,
+          Awaited<ReturnType<typeof describePortalCredentialLink>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describePortalCredentialLink>>,
+          TError,
+          Awaited<ReturnType<typeof describePortalCredentialLink>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Whether a credential link is still valid, and the username it is for
  */
-export const usePortalRefreshSession = <TError = Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalRefreshSession>>, TError,void, TContext>, }
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof portalRefreshSession>>,
-        TError,
-        void,
-        TContext
-      > => {
 
-      const mutationOptions = getPortalRefreshSessionMutationOptions(options);
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-      return useMutation(mutationOptions, queryClient);
-    }
-    /**
- * Discards the refresh token. Idempotent — an absent or already-consumed cookie is not an error.
- * @summary End the portal session (CP-01)
+  const queryOptions = getDescribePortalCredentialLinkQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Spends the link and sets the password, both in one transaction. `204`
+rather than a session: redeeming is not signing in — handing back a
+token here would make a link sitting in an inbox directly
+exchangeable for a session. The client redeems, then calls
+`portalLogin` separately with the password just chosen.
+
+ * @summary Choose a password and activate the portal login
  */
-export const portalLogout = (
-    
+export const redeemPortalCredentialLink = (
+    token: string,
+    portalCredentialRedeemRequest: PortalCredentialRedeemRequest,
  signal?: AbortSignal
 ) => {
       
       
       return http<void>(
-      {url: `/portal/auth/logout`, method: 'POST', signal
-    },
-      );
-    }
-  
-
-
-export const getPortalLogoutMutationOptions = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalLogout>>, TError,void, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof portalLogout>>, TError,void, TContext> => {
-
-const mutationKey = ['portalLogout'];
-const {mutation: mutationOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
-
-      
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof portalLogout>>, void> = () => {
-          
-
-          return  portalLogout()
-        }
-
-        
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type PortalLogoutMutationResult = NonNullable<Awaited<ReturnType<typeof portalLogout>>>
-    
-    export type PortalLogoutMutationError = UnauthorizedResponse
-
-    /**
- * @summary End the portal session (CP-01)
- */
-export const usePortalLogout = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalLogout>>, TError,void, TContext>, }
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof portalLogout>>,
-        TError,
-        void,
-        TContext
-      > => {
-
-      const mutationOptions = getPortalLogoutMutationOptions(options);
-
-      return useMutation(mutationOptions, queryClient);
-    }
-    /**
- * No `If-Match` — see `PortalSetPasswordRequest`'s own note: the body
-names the password it wants rather than a delta, and there is no
-prior representation of it to precondition against (the caller
-cannot even read the one being replaced). The same idiom
-`setObClientAccountStatus` and `/users/{userId}/status` use for an
-idempotent setter.
-
-The claim on the token that made this call is stale for up to its
-remaining lifetime; call `portalRefreshSession` immediately after a
-`204` to pick up a token with no `mustChangePassword` claim.
-
- * @summary Set the client's own password, clearing the forced-change flag (CP-01)
- */
-export const portalSetPassword = (
-    portalSetPasswordRequest: PortalSetPasswordRequest,
- ) => {
-      
-      
-      return http<void>(
-      {url: `/portal/auth/password`, method: 'PATCH',
+      {url: `/portal/auth/credential/${token}`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: portalSetPasswordRequest
+      data: portalCredentialRedeemRequest, signal
     },
       );
     }
   
 
 
-export const getPortalSetPasswordMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalSetPassword>>, TError,{data: PortalSetPasswordRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof portalSetPassword>>, TError,{data: PortalSetPasswordRequest}, TContext> => {
+export const getRedeemPortalCredentialLinkMutationOptions = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext> => {
 
-const mutationKey = ['portalSetPassword'];
+const mutationKey = ['redeemPortalCredentialLink'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -848,10 +742,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof portalSetPassword>>, {data: PortalSetPasswordRequest}> = (props) => {
-          const {data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, {token: string;data: PortalCredentialRedeemRequest}> = (props) => {
+          const {token,data} = props ?? {};
 
-          return  portalSetPassword(data,)
+          return  redeemPortalCredentialLink(token,data,)
         }
 
         
@@ -859,23 +753,23 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PortalSetPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof portalSetPassword>>>
-    export type PortalSetPasswordMutationBody = PortalSetPasswordRequest
-    export type PortalSetPasswordMutationError = ValidationFailedResponse | UnauthorizedResponse
+    export type RedeemPortalCredentialLinkMutationResult = NonNullable<Awaited<ReturnType<typeof redeemPortalCredentialLink>>>
+    export type RedeemPortalCredentialLinkMutationBody = PortalCredentialRedeemRequest
+    export type RedeemPortalCredentialLinkMutationError = ValidationFailedResponse | Problem
 
     /**
- * @summary Set the client's own password, clearing the forced-change flag (CP-01)
+ * @summary Choose a password and activate the portal login
  */
-export const usePortalSetPassword = <TError = ValidationFailedResponse | UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalSetPassword>>, TError,{data: PortalSetPasswordRequest}, TContext>, }
+export const useRedeemPortalCredentialLink = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof portalSetPassword>>,
+        Awaited<ReturnType<typeof redeemPortalCredentialLink>>,
         TError,
-        {data: PortalSetPasswordRequest},
+        {token: string;data: PortalCredentialRedeemRequest},
         TContext
       > => {
 
-      const mutationOptions = getPortalSetPasswordMutationOptions(options);
+      const mutationOptions = getRedeemPortalCredentialLinkMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -885,10 +779,6 @@ plan §9/§11's never-visible list is about journeys, and none of it is
 on a prerequisite row. The journeys are `PortalJourneyStrip`, plan
 §9's own narrower CP-03 row: step status only, no owner names, no
 internal comms, no block reasons, no TAT internals.
-
-Every route under `/portal/onboarding/**` answers `403` (not
-declared per-operation below, since it applies uniformly) while the
-account still carries `mustChangePassword` — see `portalSetPassword`.
 
  * @summary Interactive prerequisites above read-only journey accordions (CP-03)
  */

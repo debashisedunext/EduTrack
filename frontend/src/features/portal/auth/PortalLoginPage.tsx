@@ -7,13 +7,9 @@ import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-import { PortalAuthAlert, PortalAuthCard, PortalAuthField } from './PortalAuthUi'
+import { PortalAuthAlert, PortalAuthCard, PortalAuthField, PortalAuthNotice } from './PortalAuthUi'
 import { usePortalAuthStore } from './portalAuthStore'
-import {
-  PORTAL_ACCOUNT_LOCKED,
-  PORTAL_INVALID_CREDENTIALS,
-  PORTAL_TOO_MANY_ATTEMPTS,
-} from './portalProblemTypes'
+import { PORTAL_ACCOUNT_LOCKED, PORTAL_INVALID_CREDENTIALS } from './portalProblemTypes'
 
 /**
  * CP-01 · portal login. `LoginPage`'s shape, one principal type over — the
@@ -39,7 +35,9 @@ export function PortalLoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<Values>({ defaultValues: { username: '', password: '' } })
 
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+  const state = location.state as { from?: { pathname?: string }; justRedeemed?: boolean } | null
+  const from = state?.from?.pathname
+  const justRedeemed = state?.justRedeemed ?? false
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null)
@@ -59,13 +57,16 @@ export function PortalLoginPage() {
         <span className="text-content-muted">
           Trouble signing in?{' '}
           <Link to="/portal/set-password" className="text-primary underline-offset-2 hover:underline">
-            Use your one-time link
+            Use your credential link
           </Link>{' '}
           or contact your account manager.
         </span>
       }
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        {justRedeemed && !formError ? (
+          <PortalAuthNotice>Password set. Sign in with your new password.</PortalAuthNotice>
+        ) : null}
         {formError ? <PortalAuthAlert>{formError}</PortalAuthAlert> : null}
 
         <PortalAuthField id="portal-username" label="Username" error={errors.username?.message}>
@@ -111,7 +112,10 @@ function messageFor(error: unknown): string {
   if (error.is(PORTAL_INVALID_CREDENTIALS)) {
     return 'Username or password is incorrect.'
   }
-  if (error.is(PORTAL_TOO_MANY_ATTEMPTS) || error.status === 429) {
+  // No PORTAL_TOO_MANY_ATTEMPTS type — A-130 ships no rate limiter on this
+  // route yet (named there as deliberately deferred). Still handle a bare
+  // 429 as a generic fallback in case something upstream ever throttles it.
+  if (error.status === 429) {
     return 'Too many attempts. Wait a minute and try again.'
   }
   return 'Something went wrong signing you in. Try again.'

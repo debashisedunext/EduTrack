@@ -46,19 +46,17 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { PortalClient } from './portalClient';
 
 /**
- * No `currentPassword` — see `PortalRedeemRequest`'s note on why one is
-not askable the first time. What proves this call's right to set a
-new password is the CLIENT-typed access token minted by `/redeem` or
-an earlier `/login`, not a password the client cannot possibly
-supply.
+ * No refresh token: a portal session lasts one access-token lifetime,
+and expiry means signing in again. `expiresIn` is seconds, not an
+absolute time, so a client whose clock disagrees with ours cannot
+compute the wrong deadline from a timestamp.
 
  */
-export interface PortalSetPasswordRequest {
-  /**
-   * @minLength 8
-   * @maxLength 128
-   */
-  newPassword: string;
+export interface PortalLoginResult {
+  accessToken: string;
+  expiresIn: number;
+  client: PortalClient;
 }

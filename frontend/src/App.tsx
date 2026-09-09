@@ -286,9 +286,13 @@ export default function App() {
           `PortalAuthProvider` wraps the whole subtree, login included, rather
           than sitting above the router the way the staff `AuthProvider` does
           in `main.tsx` — mounting it only when a browser actually navigates
-          under `/portal/**` means a staff page never spends a
-          `POST /portal/auth/refresh` it has no reason to make. `main.tsx` is
-          Stream D's file and this task was not asked to widen it.
+          under `/portal/**` means a staff page never mounts portal-only
+          session state it has no reason to hold. `main.tsx` is Stream D's
+          file and this task was not asked to widen it.
+
+          A-130 issues a single access token with no refresh cycle, so this
+          provider does not restore or renew anything (see its own note) —
+          it only ends the session locally once that token's lifetime is up.
         */}
         <Route
           path="/portal"
@@ -299,10 +303,10 @@ export default function App() {
           )}
         >
           <Route path="login" element={withSuspense(<PortalLoginPage />)} />
-          {/* CP-01's other half — the credential-link landing page and the
-              forced-change screen, one component for both (see its own
-              docstring). No `RequireAuth` here: an unauthenticated visitor
-              with `?token=` is the common case. */}
+          {/* CP-01's other half — the credential-link landing page,
+              redemption only (see its own docstring on why there is no
+              forced-change branch here). No `RequireAuth`: an unauthenticated
+              visitor with `?token=` is the only caller. */}
           <Route path="set-password" element={withSuspense(<PortalSetPasswordPage />)} />
 
           <Route element={<PortalRequireAuth />}>

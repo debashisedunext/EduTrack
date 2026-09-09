@@ -18,12 +18,12 @@ import { usePortalSignOut } from './auth/usePortalSignOut'
  * while that route did not yet exist.
  */
 export function PortalModuleChooserPage() {
-  const user = usePortalAuthStore((state) => state.user)
+  const client = usePortalAuthStore((state) => state.client)
   const signOut = usePortalSignOut()
 
-  const hasTicketing = user?.hasTicketing ?? false
-  const hasOnboarding = user?.hasOnboarding ?? false
-  const firstName = user?.displayName?.trim().split(/\s+/)[0]
+  const hasTicketing = client?.hasTicketing ?? false
+  const hasOnboarding = client?.hasOnboarding ?? false
+  const firstName = client?.displayName?.trim().split(/\s+/)[0]
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-app p-6">

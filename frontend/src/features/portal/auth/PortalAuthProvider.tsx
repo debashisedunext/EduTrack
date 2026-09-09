@@ -1,79 +1,33 @@
 import * as React from 'react'
 
-import { portalLogout, portalRefreshSession } from '@/api/generated/portal/portal'
-
 import { usePortalAuthStore } from './portalAuthStore'
 
 /**
- * C-121 · the portal session's clock — `AuthProvider`'s shape, mounted only
+ * A-130 · the portal session's clock — `AuthProvider`'s shape, mounted only
  * under `/portal/**` rather than above the whole app, so a staff page never
- * spends a `POST /portal/auth/refresh` it has no reason to make.
+ * mounts portal-only state it has no reason to hold.
  *
- * No idle/absolute timeout renewal logic — see `portalAuthStore`'s own note
- * on why that is not reproduced here. This restores the session after a
- * reload and renews the access token ahead of its 15-minute expiry, nothing
- * more.
+ * A-130 issues one access token with no refresh cookie and no rotation: a
+ * portal session lasts exactly one access-token lifetime. So unlike the
+ * staff `AuthProvider`, there is no startup restore (nothing survives a
+ * reload — see `portalAuthStore`'s own note) and no renewal to schedule.
+ * The one job left is ending the session locally once the token's lifetime
+ * is up, so `PortalRequireAuth` redirects to sign-in instead of letting
+ * every subsequent call start silently failing with `401`.
  */
-
-const RENEW_MARGIN_MS = 60_000
-const MIN_RENEW_DELAY_MS = 5_000
-
-/**
- * One startup refresh per mount of the portal tree, guarded the same way
- * `AuthProvider`'s own module-level promise is — React StrictMode's double
- * invocation must not replay a consumed rotation token.
- */
-let startupRefreshInFlight: ReturnType<typeof portalRefreshSession> | null = null
-
-function startupRefresh(): ReturnType<typeof portalRefreshSession> {
-  startupRefreshInFlight ??= portalRefreshSession()
-  return startupRefreshInFlight
-}
-
 export function PortalAuthProvider({ children }: { children: React.ReactNode }) {
-  const signIn = usePortalAuthStore((state) => state.signIn)
   const signOut = usePortalAuthStore((state) => state.signOut)
   const status = usePortalAuthStore((state) => state.status)
   const expiresAt = usePortalAuthStore((state) => state.expiresAt)
 
-  const endSession = React.useCallback(
-    (notifyServer = true) => {
-      if (notifyServer) {
-        portalLogout().catch(() => {
-          /* best effort — the local clear below is what the user sees */
-        })
-      }
-      signOut()
-    },
-    [signOut],
-  )
-
-  React.useEffect(() => {
-    let cancelled = false
-    startupRefresh()
-      .then((response) => {
-        if (!cancelled) signIn(response.data)
-      })
-      .catch(() => {
-        if (!cancelled) signOut()
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [signIn, signOut])
-
   React.useEffect(() => {
     if (status !== 'authenticated' || expiresAt === null) return
 
-    const delay = Math.max(MIN_RENEW_DELAY_MS, expiresAt - Date.now() - RENEW_MARGIN_MS)
-    const timer = setTimeout(() => {
-      portalRefreshSession()
-        .then((response) => signIn(response.data))
-        .catch(() => endSession(false))
-    }, delay)
+    const delay = Math.max(0, expiresAt - Date.now())
+    const timer = setTimeout(signOut, delay)
 
     return () => clearTimeout(timer)
-  }, [status, expiresAt, endSession, signIn])
+  }, [status, expiresAt, signOut])
 
   return <>{children}</>
 }

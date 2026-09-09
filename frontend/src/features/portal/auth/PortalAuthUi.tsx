@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
  *
  * `AuthField`'s own file explains why the staff versions are not reached
  * into: they are Stream A's, and depending on them couples the portal's
- * forced-change screen to a refactor nobody there knows this depends on.
+ * login/redemption screens to a refactor nobody there knows this depends on.
  * These are small enough that a second copy is cheaper than the coupling —
  * the same call that file itself makes about not reaching into Stream C's
  * ticket form.

@@ -48,18 +48,14 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Redeems the one-time link a credential mail carries — the newly
-created and reset-password paths' shared entry point. A newly issued
-`client_accounts` row has a password of 32 random bytes nobody
-knows, including the client (`ClientCredentialTokens`'s own
-javadoc), so there is no password to type on a first sign-in: the
-link authenticates in its own right, exactly as this operation does.
+ * What the redemption page needs before it can ask for a password.
+Nothing else about the account: no email, no client name beyond the
+display name, no ids. Anybody holding the link can read this, and the
+link is a bearer credential in an inbox we do not control.
 
  */
-export interface PortalRedeemRequest {
-  /**
-   * @minLength 1
-   * @maxLength 200
-   */
-  token: string;
+export interface PortalCredentialLink {
+  username: string;
+  displayName: string;
+  expiresAt: string;
 }
