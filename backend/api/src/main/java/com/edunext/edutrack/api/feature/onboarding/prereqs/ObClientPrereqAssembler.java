@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,28 +41,83 @@ class ObClientPrereqAssembler {
 
     /** One task, with its counts resolved individually. */
     ObClientPrereqDtos.ObClientPrereqTaskDto task(ObClientPrereqTask task) {
-        return task(task, countsFor(List.of(task.getId())), Instant.now());
+        return task(task, countsFor(List.of(task.getId())),
+                referenceDocsFor(templateTaskIds(List.of(task))), Instant.now());
     }
 
     List<ObClientPrereqDtos.ObClientPrereqTaskDto> tasks(List<ObClientPrereqTask> rows) {
         List<Long> ids = rows.stream().map(ObClientPrereqTask::getId).toList();
         Map<Long, Counts> counts = countsFor(ids);
+        // One statement for the whole checklist, not one per row: five tasks
+        // asking for their own documents is five round trips for a panel that
+        // draws in one paint. `countsFor` above batches for the same reason.
+        Map<Long, List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc>> docs =
+                referenceDocsFor(templateTaskIds(rows));
         Instant now = Instant.now();
 
         List<ObClientPrereqDtos.ObClientPrereqTaskDto> out = new ArrayList<>();
         for (ObClientPrereqTask row : rows) {
-            out.add(task(row, counts, now));
+            out.add(task(row, counts, docs, now));
         }
         return out;
     }
 
+    private static List<Long> templateTaskIds(List<ObClientPrereqTask> rows) {
+        // An ad-hoc task has no master row to read through, so it contributes
+        // no id and answers with an empty list below.
+        return rows.stream()
+                .map(ObClientPrereqTask::getTemplateTaskId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
     private ObClientPrereqDtos.ObClientPrereqTaskDto task(
-            ObClientPrereqTask row, Map<Long, Counts> counts, Instant now) {
+            ObClientPrereqTask row, Map<Long, Counts> counts,
+            Map<Long, List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc>> docs, Instant now) {
 
         Counts c = counts.getOrDefault(row.getId(), Counts.NONE);
+        List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc> refs = row.getTemplateTaskId() == null
+                ? List.of()
+                : docs.getOrDefault(row.getTemplateTaskId(), List.of());
         return ObClientPrereqDtos.ObClientPrereqTaskDto.of(row, now,
                 userRef(row.getVerifiedBy()), userRef(row.getSkippedBy()),
-                c.comments(), c.attachments());
+                c.comments(), c.attachments(), refs);
+    }
+
+    /**
+     * Every reference document for a set of master tasks, keyed by the task
+     * they hang off — {@link #referenceDocsOf}'s query widened to an
+     * {@code IN}, and its javadoc's reasoning applies here unchanged.
+     */
+    private Map<Long, List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc>> referenceDocsFor(
+            List<Long> templateTaskIds) {
+
+        if (templateTaskIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc>> byTask = new LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT d.id, d.template_task_id, d.label, d.attachment_id,
+                               a.file_name, a.size_bytes
+                          FROM ob_prereq_template_task_docs d
+                          LEFT JOIN ob_attachments a ON a.id = d.attachment_id
+                         WHERE d.template_task_id IN (:taskIds)
+                         ORDER BY d.template_task_id ASC, d.sequence ASC, d.id ASC
+                        """)
+                .param("taskIds", templateTaskIds)
+                .query((rs, n) -> new ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc(
+                        rs.getLong("id"),
+                        rs.getLong("template_task_id"),
+                        rs.getString("label"),
+                        rs.getLong("attachment_id"),
+                        rs.getString("file_name"),
+                        rs.getObject("size_bytes") == null ? null : rs.getLong("size_bytes")))
+                .list()
+                .forEach(doc -> byTask
+                        .computeIfAbsent(doc.templateTaskId(), key -> new ArrayList<>())
+                        .add(doc));
+        return byTask;
     }
 
     /**

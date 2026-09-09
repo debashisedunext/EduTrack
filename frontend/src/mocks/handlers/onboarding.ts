@@ -299,6 +299,12 @@ function obClientDetailDto(c: ObClient, db: Db) {
     journeys: c.journeys.map((j) => journeyDto(j, db)),
     createdBy: userRef(c.createdById, db),
     createdAt: c.createdAt,
+    // B-119 · the answered go-live survey, if any — the server reads the most
+    // recently answered GO_LIVE row; the seed keeps at most one per client, so
+    // "the last one in the array" is the same answer here.
+    csatScore: db.obSignoffs
+      .filter((s) => s.obClientId === c.id && s.kind === 'GO_LIVE' && s.csatScore != null)
+      .at(-1)?.csatScore ?? null,
   };
 }
 
@@ -849,7 +855,7 @@ export const onboardingHandlers = [
       db.obClientPrereqTasks.push({
         id: ++prereqTaskId, obClientId: clientId, templateTaskId: source.id,
         sequence: source.sequence, title: source.title, description: source.description,
-        isMandatory: source.isMandatory, isAdHoc: false,
+        tatDays: source.tatDays, isMandatory: source.isMandatory, isAdHoc: false,
         status: 'PENDING', dueAt: boardedAt,
         submittedAt: null, submittedVia: null,
         verifiedAt: null, verifiedById: null,

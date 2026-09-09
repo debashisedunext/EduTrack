@@ -53,11 +53,23 @@ export interface PrereqAccordionProps {
   onToggle: () => void
 }
 
+/**
+ * The mockup's `prqChip` wording, which says who the ball is with rather than
+ * naming the enum.
+ *
+ * "Pending with client" and "Submitted — awaiting verification" are the two
+ * that matter: a verifier scanning this list is deciding what to pick up, and
+ * "Pending"/"Submitted" alone leave them working out which of the two is
+ * theirs. `SKIPPED` keeps our own word, **Waived** — the mockup says "Skipped",
+ * but the action beside it and every dialog in this file call it waiving, and
+ * one screen using two words for one act is worse than differing from the
+ * prototype's label.
+ */
 const STATUS_CHIP: Record<string, { label: string; variant: 'neutral' | 'info' | 'success' | 'warning' }> = {
-  PENDING: { label: 'Pending', variant: 'neutral' },
-  SUBMITTED: { label: 'Submitted', variant: 'info' },
-  VERIFIED: { label: 'Verified', variant: 'success' },
-  SKIPPED: { label: 'Waived', variant: 'warning' },
+  PENDING: { label: '○ Pending with client', variant: 'neutral' },
+  SUBMITTED: { label: '📥 Submitted — awaiting verification', variant: 'info' },
+  VERIFIED: { label: '✓ Verified', variant: 'success' },
+  SKIPPED: { label: '⏭ Waived', variant: 'warning' },
 }
 
 function formatDate(value: string | null | undefined): string | null {
@@ -124,10 +136,22 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
         }
         summary={
           <>
-            <span className="shrink-0 text-sm font-semibold text-content">Prerequisites</span>
+            {/* The mockup's own heading. The trailing clause is the whole
+                point of the strip: it says whose work this is and why the
+                journeys below cannot move, which "Prerequisites" alone does
+                not. */}
+            <span className="shrink-0 text-sm font-semibold text-content">
+              <span aria-hidden="true">📋 </span>
+              Prerequisites
+              <span className="hidden font-normal text-content-muted sm:inline">
+                {' '}— client responsibilities before any journey starts
+              </span>
+            </span>
 
             <Chip variant={progress.isCleared ? 'success' : 'warning'}>
-              {progress.isCleared ? 'Gate open' : 'Gate locked'}
+              {progress.isCleared
+                ? '✓ Cleared — gate open'
+                : `${progress.verified}/${progress.total} mandatory verified — journeys locked`}
             </Chip>
 
             <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -144,7 +168,7 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
                 aria-valuemax={progress.total}
                 aria-valuenow={progress.verified}
                 aria-valuetext={`${progress.verified} of ${progress.total} verified`}
-                className="h-1.5 w-32 shrink-0 overflow-hidden rounded-full bg-subtle"
+                className="h-1.5 min-w-[80px] flex-1 overflow-hidden rounded-full bg-subtle"
               >
                 <span
                   className={cn('block h-full rounded-full', progress.isCleared ? 'bg-success' : 'bg-warning')}
@@ -190,11 +214,56 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
                       {task.isMandatory ? 'Mandatory' : 'Optional'}
                     </Chip>
                   </span>
+                  {/*
+                    The Admin's own wording for the task, which is the half
+                    that tells the client what to actually do — "Fill the
+                    shared template exactly, this feeds data migration" is not
+                    recoverable from the title above it.
+                  */}
+                  {task.description && (
+                    <span className="mt-0.5 block text-caption text-content-muted">
+                      {task.description}
+                    </span>
+                  )}
                   <span className="block text-caption text-content-muted">
                     {task.isAdHoc && 'added for this client · '}
+                    {/*
+                      The budget beside the date, the mockup's "TAT 6d · due
+                      18 Aug 2026". The pair is the only way to tell a task
+                      nearly out of time from one given a week with six days
+                      left, and the budget is not derivable from the date
+                      without the working calendar.
+                    */}
+                    {task.tatDays != null && `TAT ${task.tatDays}d`}
+                    {task.tatDays != null && formatDate(task.dueAt) && ' · '}
                     {formatDate(task.dueAt) && `due ${formatDate(task.dueAt)}`}
                     {task.status === 'SKIPPED' && task.skipReason && ` · waived: ${task.skipReason}`}
                   </span>
+                  {/*
+                    The Admin's reference documents, named — the mockup's
+                    "📄 Master_data_template.xlsx (reference)".
+
+                    A chip and not a link, which is where this departs from the
+                    prototype. A-102 will not serve bytes for an attachment
+                    that is not `CLEAN`, and the seeded reference rows name
+                    objects storage does not hold — so a download control here
+                    would be one that refuses. The name is the part the reader
+                    actually needs ("fill *that* template"), and offering it
+                    without a broken promise is better than the promise. It
+                    becomes a link when the master's files are real uploads.
+                  */}
+                  {(task.referenceDocs ?? []).length > 0 && (
+                    <span className="mt-1 flex flex-wrap gap-1.5">
+                      {(task.referenceDocs ?? []).map((doc) => (
+                        <Chip key={doc.id} variant="info" className="max-w-full">
+                          <span aria-hidden="true">📄</span>
+                          <span className="truncate">{doc.fileName ?? doc.label}</span>
+                          <span className="font-normal opacity-70">(reference)</span>
+                        </Chip>
+                      ))}
+                    </span>
+                  )}
+
                   {/* What the client has said and sent on this task — counts
                       are all the checklist read carries; the entries
                       themselves live on the portal surface. */}

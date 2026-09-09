@@ -3254,6 +3254,7 @@ export type ObPrereqStatus = 'PENDING' | 'SUBMITTED' | 'VERIFIED' | 'SKIPPED';
 export interface ObClientPrereqTaskRow {
   id: number; obClientId: number; templateTaskId: number | null;
   sequence: number; title: string; description: string | null;
+  tatDays: number;
   isMandatory: boolean; isAdHoc: boolean;
   status: ObPrereqStatus; dueAt: string;
   submittedAt: string | null; submittedVia: 'PORTAL' | 'STAFF' | null;
@@ -3445,7 +3446,7 @@ function prereqInstancesFor(
     const settled = status === 'VERIFIED';
     return {
       id: idBase + i, obClientId, templateTaskId: t.id, sequence: t.sequence,
-      title: t.title, description: t.description,
+      title: t.title, description: t.description, tatDays: t.tatDays,
       isMandatory: t.isMandatory, isAdHoc: false,
       status,
       dueAt,
@@ -3505,6 +3506,20 @@ const OB_SIGNOFFS: ObSignoffRow[] = [
     objectedAt: null, objectionNote: null,
     pdfStorageKey: 'ob-signoffs/2/certificate.pdf',
     csatScore: null, csatComment: null,
+  },
+  // B-119 · GreenValley's go-live sign-off, signed and surveyed — the row
+  // behind the LIVE banner's "sign-offs on record · CSAT 5/5" on OB-05, and
+  // the answered end of the CSAT pair (Cambridge below is the unanswered one).
+  {
+    id: 4, obClientId: 1, journeyId: 11, stepId: null, kind: 'GO_LIVE', status: 'SIGNED',
+    token: 'ob-signoff-demo-token-4', tokenExpiresAt: '2026-08-14T12:00:00.000Z',
+    otp: null, otpAttempts: 0,
+    requestedById: 2, requestedAt: '2026-08-06T10:00:00.000Z', sentToContactId: 1,
+    signedByContactId: 1, signedAt: '2026-08-07T11:38:00.000Z',
+    signedIp: '203.0.113.24', signedUserAgent: 'Mozilla/5.0 (Macintosh)',
+    objectedAt: null, objectionNote: null,
+    pdfStorageKey: 'ob-signoffs/4/certificate.pdf',
+    csatScore: 5, csatComment: 'Smooth from kickoff to go-live.',
   },
   // B-119 · Cambridge's go-live sign-off, out and unanswered — what OB-09
   // needs to exercise the CSAT prompt: a GO_LIVE row nobody has surveyed yet.

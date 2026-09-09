@@ -136,6 +136,125 @@ public class OnboardingFixture {
         return count != null && count > 0;
     }
 
+    /**
+     * Clients the corpus wrote that have no prerequisites checklist behind
+     * them — the state every database seeded before the fix is in.
+     *
+     * <p>{@link #alreadyLoaded} is deliberately coarse: it asks whether the
+     * ERP product exists and nothing else, so a database seeded by an earlier
+     * build is "loaded" and the whole of {@link #load} is skipped. That is the
+     * right default — reloading eight clients on top of themselves would
+     * duplicate the corpus — but it also means a piece the corpus never used
+     * to write can never arrive without wiping the volume, and
+     * {@code getObClientPrereqs} answers 404 for every one of those clients
+     * until it does. A developer should not have to throw away their database
+     * to get a screen that loads.
+     */
+    @Transactional(readOnly = true)
+    public int clientsMissingPrereqs() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                  FROM ob_clients c
+                 WHERE NOT EXISTS (SELECT 1 FROM ob_client_prereqs p WHERE p.ob_client_id = c.id)
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Seed the checklist for the clients {@link #clientsMissingPrereqs}
+     * counted, and nothing else.
+     *
+     * <p>A top-up rather than a reload: it writes only the rows that are
+     * absent, so running it against a complete database is a no-op and running
+     * it twice is the same as running it once. Each client is matched back to
+     * its {@link ClientSpec} by name — the corpus's names are unique and are
+     * what the spec is keyed on for the eye — and clients the corpus did not
+     * write (a developer's own, created through the wizard) are skipped
+     * entirely, because {@code ObClientWriteService} already gave those one.
+     */
+    @Transactional
+    public void loadMissingPrereqs() {
+        PrereqMasterRefs master = existingPrereqMaster();
+        if (master == null) {
+            return;
+        }
+        ZoneId zone = calendars.getCalendar().zone();
+        Map<String, Long> userIds = userIdsByKey();
+
+        for (ClientSpec spec : OnboardingFixtureData.CLIENTS) {
+            Long clientId = clientIdByName(spec.name());
+            if (clientId == null || hasPrereqs(clientId)) {
+                continue;
+            }
+            createClientPrereqs(spec, clientId, userIds, contactIdsOf(clientId), master,
+                    onboardingDateOf(clientId), zone);
+        }
+    }
+
+    /**
+     * The active master already in the database, positional task ids and all.
+     *
+     * <p>Null when there is no active version, or when its task count does not
+     * match {@link OnboardingFixtureData#PREREQ_MASTER} — the snapshot below
+     * pairs spec and row by index, and a master somebody has since edited
+     * would silently pair the wrong wording with the wrong id. Doing nothing
+     * is the right answer there: the corpus is not the authority on a master
+     * an admin has taken over.
+     */
+    private PrereqMasterRefs existingPrereqMaster() {
+        List<Long> versions = jdbc.queryForList(
+                "SELECT id FROM ob_prereq_template_versions WHERE is_active = 1", Long.class);
+        if (versions.isEmpty()) {
+            return null;
+        }
+        List<Long> taskIds = jdbc.queryForList("""
+                SELECT id FROM ob_prereq_template_tasks
+                 WHERE version_id = ? AND is_active = 1
+                 ORDER BY sequence, id
+                """, Long.class, versions.get(0));
+        return taskIds.size() == OnboardingFixtureData.PREREQ_MASTER.size()
+                ? new PrereqMasterRefs(versions.get(0), taskIds)
+                : null;
+    }
+
+    private Long clientIdByName(String name) {
+        List<Long> ids = jdbc.queryForList("SELECT id FROM ob_clients WHERE name = ?", Long.class, name);
+        return ids.size() == 1 ? ids.get(0) : null;
+    }
+
+    private boolean hasPrereqs(long clientId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ob_client_prereqs WHERE ob_client_id = ?", Integer.class, clientId);
+        return count != null && count > 0;
+    }
+
+    private Map<String, Long> userIdsByKey() {
+        Map<String, Long> byKey = new LinkedHashMap<>();
+        for (UserSpec spec : OnboardingFixtureData.USERS) {
+            List<Long> ids = jdbc.queryForList(
+                    "SELECT id FROM users WHERE username = ?", Long.class, spec.username());
+            if (ids.size() == 1) {
+                byKey.put(spec.key(), ids.get(0));
+            }
+        }
+        return byKey;
+    }
+
+    private Map<String, Long> contactIdsOf(long clientId) {
+        Map<String, Long> byName = new LinkedHashMap<>();
+        jdbc.query("SELECT id, name FROM ob_client_contacts WHERE ob_client_id = ?",
+                rs -> {
+                    byName.put(rs.getString("name"), rs.getLong("id"));
+                }, clientId);
+        return byName;
+    }
+
+    private LocalDate onboardingDateOf(long clientId) {
+        List<LocalDate> dates = jdbc.queryForList(
+                "SELECT onboarding_date FROM ob_clients WHERE id = ?", LocalDate.class, clientId);
+        return dates.isEmpty() ? LocalDate.now() : dates.get(0);
+    }
+
     /** Write the whole corpus. One transaction — a half-loaded corpus is worse than none. */
     @Transactional
     public void load() {
@@ -146,10 +265,10 @@ public class OnboardingFixture {
         Map<String, Long> userIds = createUsers();
         Map<String, Long> productIds = createProducts(userIds);
         Map<String, TemplateRefs> templates = createTemplates(productIds, userIds);
-        createPrereqMaster(userIds);
+        PrereqMasterRefs prereqMaster = createPrereqMaster(userIds);
 
         for (ClientSpec client : OnboardingFixtureData.CLIENTS) {
-            createClient(client, userIds, productIds, templates, zone, anchor);
+            createClient(client, userIds, productIds, templates, prereqMaster, zone, anchor);
         }
     }
 
@@ -318,16 +437,24 @@ public class OnboardingFixture {
      * user map rather than a literal id — the prototype's OB Admin, resolved
      * the same way every other actor here is.
      *
-     * <p><b>Reference documents are not written.</b>
+     * <p><b>Reference documents are written, and their bytes are not.</b>
      * {@code ob_prereq_template_task_docs.attachment_id} is NOT NULL and points
-     * into {@code ob_attachments}, so seeding the prototype's three
-     * {@code refDoc} names would mean inventing a {@code storage_key} for an
-     * object MinIO does not hold: CP-04 would draw a download chip that 404s,
-     * which is a worse defect than the absent chip. The names are transcribed
-     * onto {@code PrereqTaskSpec#refDocName()}, unused, exactly as
-     * {@code ClientSpec#attachmentNames()} carried A-102's before it landed.
+     * into {@code ob_attachments}, so a seeded row necessarily names a
+     * {@code storage_key} MinIO does not hold. The exclusion that used to
+     * stand here reasoned from that to dropping the rows altogether, on the
+     * grounds that a download chip which 404s is worse than no chip — and that
+     * is true of a <em>download</em> chip. It is not true of the name.
+     *
+     * <p>The checklist's whole job is to say what to send and what to send it
+     * on, and "fill the shared template exactly" is not actionable without the
+     * template's name. So the rows are seeded, and the screens render the name
+     * without offering the file: {@code scan_status} is {@code PENDING}, which
+     * A-102 already forbids serving bytes for, so the download route refuses
+     * these on its own rule rather than on a special case. What a reader gets
+     * is the document's name, which is what the prototype's chip is mostly
+     * carrying anyway.
      */
-    private void createPrereqMaster(Map<String, Long> userIds) {
+    private PrereqMasterRefs createPrereqMaster(Map<String, Long> userIds) {
         Long publisher = userIds.get(OnboardingFixtureData.PREREQ_PUBLISHER_KEY);
         // Published "now" rather than at a serial: the master is not part of
         // any client's timeline, and a version published before the org's own
@@ -340,19 +467,74 @@ public class OnboardingFixture {
                      VALUES (?, 1, ?, ?, ?)
                 """, OnboardingFixtureData.PREREQ_MASTER_VERSION, publishedAt, publisher, publisher);
 
+        List<Long> taskIds = new ArrayList<>();
         for (int i = 0; i < OnboardingFixtureData.PREREQ_MASTER.size(); i++) {
             var task = OnboardingFixtureData.PREREQ_MASTER.get(i);
             // version_id is the header row's id, not its version number — the
             // FK points at ob_prereq_template_versions.id and 1 would resolve
             // to whatever row happens to hold that id.
-            insert("""
+            long taskId = insert("""
                     INSERT INTO ob_prereq_template_tasks (version_id, sequence, title, description,
                                                           tat_days, is_mandatory, is_active)
                          VALUES (?, ?, ?, ?, ?, ?, 1)
                     """,
                     versionId, i + 1, task.title(), task.description(), task.tatDays(),
                     task.mandatory() ? 1 : 0);
+            taskIds.add(taskId);
+            createReferenceDoc(task.refDocName(), taskId, publisher);
         }
+        return new PrereqMasterRefs(versionId, List.copyOf(taskIds));
+    }
+
+    /**
+     * One master task's reference document — the {@code ob_attachments} row it
+     * needs, and the join row that names it.
+     *
+     * <p>Nothing for a task the prototype gave no {@code refDoc}: two of the
+     * five have none, and a corpus that invented one for them would make the
+     * chip look mandatory when it is the exception.
+     *
+     * <p>{@code scan_status} is {@code PENDING} rather than {@code CLEAN},
+     * which is the honest value and also the safe one — the storage key names
+     * an object MinIO does not hold, and A-102 already refuses to serve bytes
+     * for anything not {@code CLEAN}. So the name renders and the download
+     * refuses on the rule that exists, with no special case anywhere.
+     * {@code content_type} and {@code size_bytes} are plausible rather than
+     * measured; {@code ck_ob_attachments_size} only requires a positive
+     * number.
+     */
+    private void createReferenceDoc(String fileName, long templateTaskId, Long uploader) {
+        if (fileName == null || fileName.isBlank()) {
+            return;
+        }
+        String contentType = fileName.endsWith(".xlsx")
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "application/pdf";
+
+        long attachmentId = insert("""
+                INSERT INTO ob_attachments (prereq_template_task_id, kind, file_name, content_type,
+                                            size_bytes, storage_key, scan_status,
+                                            uploaded_by_type, uploaded_by_user)
+                     VALUES (?, 'REFERENCE', ?, ?, ?, ?, 'PENDING', 'STAFF', ?)
+                """,
+                templateTaskId, fileName, contentType, 148_480L,
+                "ob-prereq-reference/" + templateTaskId + "/" + fileName, uploader);
+
+        insert("""
+                INSERT INTO ob_prereq_template_task_docs (template_task_id, attachment_id, label, sequence)
+                     VALUES (?, ?, ?, 0)
+                """, templateTaskId, attachmentId, fileName);
+    }
+
+    /**
+     * The seeded master, addressable by the client instances snapshotted from
+     * it. {@code taskIds} is positional — index i is
+     * {@code OnboardingFixtureData.PREREQ_MASTER.get(i)} — because
+     * {@code ob_client_prereq_tasks.template_task_id} is a real FK and
+     * {@code ck_ob_client_prereq_tasks_ad_hoc} requires it on every
+     * non-ad-hoc row.
+     */
+    private record PrereqMasterRefs(long versionId, List<Long> taskIds) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -360,7 +542,8 @@ public class OnboardingFixture {
     // ══════════════════════════════════════════════════════════════════════
 
     private void createClient(ClientSpec spec, Map<String, Long> userIds, Map<String, Long> productIds,
-                              Map<String, TemplateRefs> templates, ZoneId zone, LocalDate anchor) {
+                              Map<String, TemplateRefs> templates, PrereqMasterRefs prereqMaster,
+                              ZoneId zone, LocalDate anchor) {
         LocalDate onboardingDate = dateFor(spec.onboardSerial(), anchor);
         Instant liveAt = spec.liveSerial() == null
                 ? null
@@ -380,11 +563,136 @@ public class OnboardingFixture {
         Map<String, Long> contactIds = createContacts(spec, clientId, userIds, onboardingDate);
         createApplications(spec, clientId, productIds, onboardingDate);
         createRequirements(spec, clientId, userIds);
+        createClientPrereqs(spec, clientId, userIds, contactIds, prereqMaster, onboardingDate, zone);
 
         Map<String, Long> journeyIds = new LinkedHashMap<>();
         for (JourneySpec journey : spec.journeys()) {
             createJourney(spec, journey, clientId, productIds, templates, userIds, contactIds,
                     journeyIds, zone, anchor);
+        }
+    }
+
+    /**
+     * B-125 · this client's own copy of the prerequisites checklist.
+     *
+     * <h2>Why this is not optional seed data</h2>
+     *
+     * <p>{@code getObClientPrereqs} answers <b>404</b> when a client has no
+     * {@code ob_client_prereqs} row, and OB-05 renders the gate from that read.
+     * A corpus that sets {@code ob_journeys.gate_status = 'LOCKED'} without
+     * writing the checklist behind it therefore produces a client detail page
+     * whose header says "Prerequisites pending" over a checklist that cannot be
+     * loaded — a broken screen for the one client the locked gate exists to
+     * demonstrate. Production cannot reach that state: {@code
+     * ObClientWriteService.create} calls {@code ObClientPrereqService
+     * .instantiate} inside the same transaction as the client row, so a client
+     * never exists without one. Only the fixture could, and did.
+     *
+     * <h2>The state each client is left in</h2>
+     *
+     * <p>Snapshotted from the active master exactly as {@code instantiate}
+     * does — copied wording, TAT and mandatory flag, {@code template_task_id}
+     * pinned, {@code due_at} through the working calendar — then advanced to
+     * match the gate the journeys already carry, because the two are one fact
+     * and a corpus whose checklist disagreed with its gate would be worse than
+     * no checklist:
+     *
+     * <ul>
+     *   <li><b>Gate open</b> — every task {@code VERIFIED} and the header
+     *       {@code CLEARED}, which is what opened the gate. One non-mandatory
+     *       task is {@code SKIPPED} instead on the client named by
+     *       {@link OnboardingFixtureData#PREREQ_SKIP_CLIENT_KEY}, so the corpus
+     *       exercises plan §5.3's only valve — and carries the skip reason
+     *       {@code ck_ob_client_prereq_tasks_skipped} demands.</li>
+     *   <li><b>Gate locked</b> — the in-flight mix the verifier's queue is
+     *       built to show: the first task {@code SUBMITTED} and awaiting
+     *       verification, the second {@code VERIFIED}, the rest {@code
+     *       PENDING}. Mandatory work outstanding is what keeps the gate shut,
+     *       so this state and {@code gate_status = 'LOCKED'} agree.</li>
+     * </ul>
+     *
+     * <p>A submission is attributed to the primary SPOC through {@code PORTAL},
+     * which is the arm of {@code ck_ob_client_prereq_tasks_submitted} a client
+     * upload takes; verifications and skips are attributed to the staff user
+     * who boarded the client.
+     */
+    private void createClientPrereqs(ClientSpec spec, long clientId, Map<String, Long> userIds,
+                                     Map<String, Long> contactIds, PrereqMasterRefs master,
+                                     LocalDate onboardingDate, ZoneId zone) {
+
+        // A client's gate is one fact across its journeys — ObJourneyGateReader
+        // reads it that way — so any locked journey means the checklist is
+        // still in flight.
+        boolean gateOpen = spec.journeys().stream().allMatch(JourneySpec::gateOpen);
+
+        Instant boardedAt = onboardingDate.atTime(10, 0).toInstant(ZoneOffset.UTC);
+        // The gate cleared on the boarding day for a corpus whose journeys
+        // started from it; a moment after boarding keeps cleared_at after
+        // created_at without inventing a second date.
+        Instant clearedAt = boardedAt.plusSeconds(3600);
+        Long staff = userIds.get(spec.createdByUserKey());
+        Long primaryContact = spec.contacts().stream()
+                .filter(ContactSpec::primary).findFirst()
+                .map(c -> contactIds.get(c.name())).orElse(null);
+        boolean skipsOne = OnboardingFixtureData.PREREQ_SKIP_CLIENT_KEY.equals(spec.key());
+
+        long headerId = insert("""
+                INSERT INTO ob_client_prereqs (ob_client_id, template_version_id, template_version,
+                                               status, cleared_at, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                clientId, master.versionId(), OnboardingFixtureData.PREREQ_MASTER_VERSION,
+                gateOpen ? "CLEARED" : "IN_PROGRESS",
+                gateOpen ? Timestamp.from(clearedAt) : null,
+                Timestamp.from(boardedAt));
+
+        for (int i = 0; i < OnboardingFixtureData.PREREQ_MASTER.size(); i++) {
+            var task = OnboardingFixtureData.PREREQ_MASTER.get(i);
+            boolean skipped = gateOpen && skipsOne && !task.mandatory();
+
+            String status;
+            if (gateOpen) {
+                status = skipped ? "SKIPPED" : "VERIFIED";
+            } else {
+                status = switch (i) {
+                    case 0 -> "SUBMITTED";
+                    case 1 -> "VERIFIED";
+                    default -> "PENDING";
+                };
+            }
+
+            boolean isSubmitted = "SUBMITTED".equals(status);
+            boolean isVerified = "VERIFIED".equals(status);
+            // A verified task was submitted first — the row would otherwise
+            // claim a verification of nothing.
+            boolean hasSubmission = isSubmitted || isVerified;
+            Instant submittedAt = boardedAt.plusSeconds(1800);
+            Instant verifiedAt = boardedAt.plusSeconds(2700);
+
+            insert("""
+                    INSERT INTO ob_client_prereq_tasks (ob_client_prereqs_id, ob_client_id,
+                                                        template_task_id, sequence, title, description,
+                                                        tat_days, is_mandatory, is_ad_hoc, status,
+                                                        due_at, submitted_at, submitted_via,
+                                                        submitted_by_user, submitted_by_contact,
+                                                        verified_at, verified_by,
+                                                        skipped_at, skipped_by, skip_reason,
+                                                        created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    headerId, clientId, master.taskIds().get(i), i + 1, task.title(), task.description(),
+                    task.tatDays(), task.mandatory() ? 1 : 0, status,
+                    Timestamp.from(dueAt(boardedAt, task.tatDays(), zone)),
+                    hasSubmission ? Timestamp.from(submittedAt) : null,
+                    hasSubmission ? "PORTAL" : null,
+                    null,
+                    hasSubmission ? primaryContact : null,
+                    isVerified ? Timestamp.from(verifiedAt) : null,
+                    isVerified ? staff : null,
+                    skipped ? Timestamp.from(verifiedAt) : null,
+                    skipped ? staff : null,
+                    skipped ? OnboardingFixtureData.PREREQ_SKIP_REASON : null,
+                    Timestamp.from(boardedAt));
         }
     }
 

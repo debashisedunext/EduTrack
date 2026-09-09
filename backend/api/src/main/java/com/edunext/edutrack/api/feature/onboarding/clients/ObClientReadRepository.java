@@ -110,6 +110,35 @@ class ObClientReadRepository {
             EXISTS (SELECT 1 FROM client_accounts pa WHERE pa.ob_client_id = c.id)
             """;
 
+    /**
+     * B-119's go-live survey score, for OB-05's LIVE banner — "…sign-offs on
+     * record · CSAT 5/5".
+     *
+     * <p><b>Detail only, never the list.</b> OB-03 renders one row per client
+     * and has no banner; adding a correlated subquery to {@link #LIST_COLUMNS}
+     * would pay for it once per row on every page for a field nothing there
+     * reads.
+     *
+     * <p>{@code ORDER BY … LIMIT 1} rather than {@code MAX}, because the column
+     * being ordered is not the column being selected: a client can hold more
+     * than one {@code GO_LIVE} sign-off (an objection cancels one and a fresh
+     * request replaces it — see {@code ck_ob_signoffs_objection}), and the
+     * banner wants the score from the <em>most recently answered</em> survey
+     * rather than the highest number anybody ever gave. {@code csat_score} is
+     * non-null exactly when {@code csat_submitted_at} is —
+     * {@code ck_ob_signoffs_csat} binds them — so the filter and the sort
+     * cannot disagree about which rows are candidates.
+     */
+    private static final String CSAT_SCORE = """
+            (SELECT cs.csat_score
+               FROM ob_signoffs cs
+              WHERE cs.ob_client_id = c.id
+                AND cs.kind = 'GO_LIVE'
+                AND cs.csat_score IS NOT NULL
+              ORDER BY cs.csat_submitted_at DESC
+              LIMIT 1)
+            """;
+
     private static final String LIST_COLUMNS = """
             SELECT c.id                AS id,
                    c.name              AS name,
@@ -207,12 +236,13 @@ class ObClientReadRepository {
                    %s                  AS gateStatus,
                    %s                  AS journeyCount,
                    %s                  AS journeysComplete,
-                   %s                  AS hasPortalLogin
+                   %s                  AS hasPortalLogin,
+                   %s                  AS csatScore
               FROM ob_clients c
          LEFT JOIN users sp ON sp.id = c.sales_person_id
          LEFT JOIN users cb ON cb.id = c.created_by
             """.formatted(RAG_EXPRESSION, GATE_EXPRESSION, JOURNEY_COUNT, JOURNEYS_COMPLETE,
-            HAS_PORTAL_LOGIN)
+            HAS_PORTAL_LOGIN, CSAT_SCORE)
             // The scope predicate is the caller's, so it is applied where it is
             // used rather than baked in here.
             + """
@@ -662,7 +692,7 @@ class ObClientReadRepository {
 
     record DetailRow(ListRow summary, String description, String address, String licenseType,
                      String statusReason, byte[] panCiphertext, Long createdBy, String createdByName,
-                     Instant createdAt) {
+                     Instant createdAt, Integer csatScore) {
     }
 
     record ProductRow(long obClientId, long id, String code, String name) {
@@ -814,7 +844,8 @@ class ObClientReadRepository {
             rs.getBytes("panCiphertext"),
             nullableLong(rs, "createdBy"),
             rs.getString("createdByName"),
-            instant(rs, "createdAt"));
+            instant(rs, "createdAt"),
+            nullableInt(rs, "csatScore"));
 
     private static final RowMapper<ProductRow> PRODUCT_MAPPER = (rs, n) -> new ProductRow(
             rs.getLong("obClientId"), rs.getLong("id"), rs.getString("code"), rs.getString("name"));

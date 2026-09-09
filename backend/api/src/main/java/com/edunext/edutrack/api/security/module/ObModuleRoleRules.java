@@ -196,6 +196,12 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/comments", STEP_ACTORS);
         put(m, "GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/history", EVERY_ROLE);
 
+        // C-110 · OB-05's expanded ribbon. Every role, on the same footing as
+        // the step read below it: a Viewer who may see the client's collapsed
+        // strip inside getObClient may see the same journey expanded, and the
+        // rows are the ones that strip already summarised.
+        put(m, "GET", "/api/v1/onboarding/journeys/{journeyId}", EVERY_ROLE);
+
         put(m, "GET", "/api/v1/onboarding/journey-steps/{stepId}", EVERY_ROLE);
         put(m, "PATCH", "/api/v1/onboarding/journey-step-items/{itemId}", STEP_ACTORS);
         put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/start", STEP_ACTORS);

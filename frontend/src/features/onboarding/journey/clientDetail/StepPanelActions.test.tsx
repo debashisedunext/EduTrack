@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -39,10 +39,32 @@ function renderClient(id = 8) {
 
 const SLOW = { timeout: 5000 }
 
-/** Expand the ERP journey and wait for its panel. */
+/**
+ * OB-05 drives more reads per mount than any other screen in the module — the
+ * client, its prerequisites, the directory, the open escalations, then the
+ * opened journey's ribbon, its step detail, that step's communications and its
+ * sign-off. Every one is an MSW round trip with latency, and vitest runs the
+ * files in parallel.
+ *
+ * Vitest's 5s default therefore sat exactly on `SLOW`, so a `findBy` that used
+ * its full budget timed the *test* out before it could report which query
+ * failed. The extra headroom buys a real assertion failure instead of a
+ * stopwatch one; it does not make any individual wait longer.
+ */
+vi.setConfig({ testTimeout: 20_000 })
+
+/**
+ * Expand the ERP journey and wait for its panel.
+ *
+ * The page opens its running journey on first paint, so on Trinity the ERP
+ * accordion is usually expanded already and a click would *collapse* it. The
+ * helper reads `aria-expanded` rather than assuming either way, so it keeps
+ * working whichever journey the page decides to open.
+ */
 async function openErpPanel(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText('Trinity College of Commerce', undefined, SLOW)
-  await user.click(screen.getByRole('button', { name: /^EduTrack ERP —/ }))
+  const trigger = screen.getByRole('button', { name: /^EduTrack ERP —/ })
+  if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger)
   return screen.findByTestId('journey-step-panel', undefined, SLOW)
 }
 

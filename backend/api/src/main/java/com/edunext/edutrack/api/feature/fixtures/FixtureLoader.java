@@ -91,6 +91,19 @@ class FixtureLoader implements ApplicationRunner {
     private void loadOnboardingCorpus() {
         if (onboarding.alreadyLoaded()) {
             log.info("B-101 onboarding corpus already present (product ERP exists) — skipping.");
+            // ...except for pieces the corpus did not used to write. A
+            // database seeded by an earlier build has clients whose
+            // gate_status says LOCKED with no checklist behind it, and
+            // getObClientPrereqs answers 404 for every one of them — a broken
+            // gate on OB-05 that no amount of restarting fixes, because the
+            // check above is what skips the write. Topping up is idempotent
+            // and touches only the clients that are missing it, so a developer
+            // does not have to delete their volume to get the screen back.
+            int missing = onboarding.clientsMissingPrereqs();
+            if (missing > 0) {
+                log.info("B-101: {} client(s) have no prerequisites checklist — seeding those.", missing);
+                onboarding.loadMissingPrereqs();
+            }
             return;
         }
         log.info("B-101: loading the onboarding corpus (journey templates, 8 clients, their journeys)...");

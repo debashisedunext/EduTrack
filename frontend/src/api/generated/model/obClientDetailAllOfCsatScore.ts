@@ -46,12 +46,17 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObPrereqSubmissionFile } from './obPrereqSubmissionFile';
 
-export type ObClientPrereqTaskDetailAllOf = {
-  /** What the client sent back — `ob_attachments` with `kind:
-SUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an
-implementor recorded a document that arrived by email.
+/**
+ * B-119's go-live survey answer, from the most recently answered
+`GO_LIVE` sign-off — OB-05's LIVE banner prints it as
+"CSAT 5/5". Null until a client answers one, which is the
+ordinary state: the survey is optional by construction. Detail
+only — the OB-03 list has no banner and does not pay for the
+read. Added as an optional field — CONVENTIONS.md §1, not
+breaking.
+
+ * @minimum 1
+ * @maximum 5
  */
-  submissions: ObPrereqSubmissionFile[];
-};
+export type ObClientDetailAllOfCsatScore = number | null;

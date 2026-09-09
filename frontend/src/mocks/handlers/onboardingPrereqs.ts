@@ -69,7 +69,7 @@ function taskDto(t: ObClientPrereqTaskRow, db: Db) {
   return {
     id: t.id, obClientId: t.obClientId, templateTaskId: t.templateTaskId,
     sequence: t.sequence, title: t.title, description: t.description,
-    isMandatory: t.isMandatory, isAdHoc: t.isAdHoc,
+    tatDays: t.tatDays, isMandatory: t.isMandatory, isAdHoc: t.isAdHoc,
     status: t.status, dueAt: t.dueAt, isOverdue: isOverdue(t),
     submittedAt: t.submittedAt, submittedVia: t.submittedVia,
     verifiedAt: t.verifiedAt, verifiedBy: userRef(t.verifiedById, db),
@@ -77,12 +77,12 @@ function taskDto(t: ObClientPrereqTaskRow, db: Db) {
     skipReason: t.skipReason,
     commentCount: db.obPrereqComments.filter((c) => c.prereqTaskId === t.id).length,
     attachmentCount: t.submissions.length,
+    referenceDocs: t.referenceDocs.map((d) => docDto(d, t.templateTaskId ?? t.id)),
   };
 }
 
 const taskDetailDto = (t: ObClientPrereqTaskRow, db: Db) => ({
   ...taskDto(t, db),
-  referenceDocs: t.referenceDocs.map((d) => docDto(d, t.templateTaskId ?? t.id)),
   submissions: t.submissions,
 });
 
@@ -373,6 +373,7 @@ export const obPrereqHandlers = [
       obClientId, templateTaskId: null,
       sequence: clientTasks(obClientId, db).length + 1,
       title: body.title, description: body.description ?? null,
+      tatDays: body.tatDays ?? 1,
       isMandatory: body.isMandatory ?? false, isAdHoc: true,
       status: 'PENDING', dueAt: dueFromTat(body.tatDays ?? 1),
       submittedAt: null, submittedVia: null,

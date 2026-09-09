@@ -138,6 +138,6 @@ class ObClientServiceTest {
 
     private static ObClientReadRepository.DetailRow detailRow(long id) {
         return new ObClientReadRepository.DetailRow(
-                listRow(id), null, null, null, null, null, null, null, null);
+                listRow(id), null, null, null, null, null, null, null, null, null);
     }
 }

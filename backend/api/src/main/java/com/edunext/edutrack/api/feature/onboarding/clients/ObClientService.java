@@ -146,7 +146,8 @@ class ObClientService {
                 reads.requirementsOf(id).stream().map(ObClientService::requirement).toList(),
                 journeys(id),
                 ObClientDtos.UserRef.of(row.createdBy(), row.createdByName()),
-                row.createdAt());
+                row.createdAt(),
+                row.csatScore());
     }
 
     /**

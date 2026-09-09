@@ -1,15 +1,23 @@
 import * as React from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { format, parseISO } from 'date-fns'
 
-import { useGetObClient, useGetObClientPrereqs } from '@/api/generated/onboarding/onboarding'
+import {
+  getObClientAccount,
+  useGetObClient,
+  useGetObClientPrereqs,
+} from '@/api/generated/onboarding/onboarding'
 import { useListUsers } from '@/api/generated/users/users'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { ObClientAccountPanel } from '../../clients/ObClientAccountPanel'
 import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
 import { EscalationBanner } from './EscalationBanner'
 import { JourneyAccordion } from './JourneyAccordion'
+import { ObClientInfoCard } from './ObClientInfoCard'
 import { PrereqAccordion } from './PrereqAccordion'
 import { ragLabel, ragVariant } from './journeyStrip'
 import { useOpenEscalations } from './useOpenEscalations'
@@ -40,25 +48,24 @@ import { useOpenEscalations } from './useOpenEscalations'
  * omission: plan §1.2 took financial tracking out of the module entirely after
  * the prototype had it. The prototype is not the specification here.
  *
- * <h2>What this page is not, yet</h2>
+ * <h2>The header's "Login:" and B-126's panel share one read</h2>
  *
- * - **The step update panel** — start, complete, block, the task-list gate and
- *   the history — is **C-111** (OB-06). `JourneyStepPanel` renders the step
- *   read-only until then, with no dead controls standing in for the actions.
- * - **The client-account panel** — create, reset and disable a portal login —
- *   is **B-126**, on Stream B's side of the ownership map. The page's
- *   `hasPortalLogin` line is the read-only fact until it lands.
- * - **SD/FD in the ribbon meta line and the animated status emojis** remain
- *   **C-125**'s.
+ * The mockup's caption line ends "Login: CL-30412". The username lives on
+ * `getObClientAccount`, which `ObClientAccountPanel` below already fetches
+ * under the key `['obClientAccount', id]` — so the header uses the identical
+ * key and React Query serves both from one request. The read is enabled only
+ * when `hasPortalLogin` says a row exists: for the ordinary boarded client
+ * with no login it would be a guaranteed 404 asked solely to render the words
+ * "no portal login", which `hasPortalLogin` already carries.
  *
  * <h2>C-112 · the stitched communications panel, and why it is at the bottom</h2>
  *
  * §9's order is the argument the page is built on — the gate first, because
- * nothing below it can move while it is locked, then the journeys. The
- * communications panel is not actionable in that sense: it is the record of
- * what has been said, read before a call rather than worked down. So it sits
- * under the accordions, where it does not push the one thing a reader has to
- * act on further down the page.
+ * nothing below it can move while it is locked, then the journeys, then the
+ * two closing cards. The communications panel is not actionable in that
+ * sense: it is the record of what has been said, read before a call rather
+ * than worked down. So it sits last, where it does not push anything a reader
+ * has to act on further down the page.
  *
  * It is a **panel rather than a tab**, which is a departure from the task's own
  * wording. OB-05 has no tab strip — the page is an accordion stack — and
@@ -98,8 +105,21 @@ export function ObClientDetailPage() {
   const userList = users.data?.data ?? []
 
   const detail = client.data?.data
-  const journeys = detail?.journeys ?? []
+  // Memoised rather than defaulted inline: a fresh `[]` on every render would
+  // re-run `defaultJourneyId` below each time, and with it the accordion the
+  // page decides to open.
+  const journeys = React.useMemo(() => detail?.journeys ?? [], [detail?.journeys])
   const gate = prereqs.data?.data
+
+  // The header docstring above: B-126's queryKey, so the panel's fetch and
+  // this one are the same cache entry.
+  const account = useQuery({
+    queryKey: ['obClientAccount', obClientId],
+    queryFn: () => getObClientAccount(obClientId),
+    retry: false,
+    enabled: Number.isFinite(obClientId) && detail?.hasPortalLogin === true,
+  })
+  const username = account.data?.data?.username
 
   // C-126 · this client's open escalations — the banner below and the red
   // ring on each journey's step dots both read from the one call.
@@ -113,7 +133,34 @@ export function ObClientDetailPage() {
    * client comparing two products wants both ribbons at once.
    */
   const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set())
+  const [touchedJourneys, setTouchedJourneys] = React.useState(false)
   const [touchedPrereqs, setTouchedPrereqs] = React.useState(false)
+
+  /**
+   * One journey opens itself, the way the mockup's `vClient` does.
+   *
+   * `A.selJourney` picks "the first journey that is running and unfinished,
+   * else the first", expands it and selects a step — so the prototype never
+   * draws this page without a ribbon on it. Ours began with an empty set,
+   * which meant the common case (a client with one product) opened on a row
+   * of collapsed strips and no ribbon anywhere, and the ribbon is the screen.
+   *
+   * Derived rather than seeded into state, for `prereqsOpen`'s reason: the
+   * journeys arrive one render *after* the page mounts, so an initialiser
+   * would run against an empty list and open nothing. Once the reader has
+   * touched any accordion their set wins outright — including when they close
+   * the one this opened, which a re-derived default would fight them over.
+   */
+  const defaultJourneyId = React.useMemo(() => {
+    if (journeys.length === 0) return undefined
+    const running = journeys.find(
+      (j) => j.gateStatus !== 'LOCKED' && j.heldByJourneyId == null && (j.percentComplete ?? 0) < 100,
+    )
+    return (running ?? journeys[0]).id
+  }, [journeys])
+
+  const isJourneyOpen = (journeyId: number) =>
+    touchedJourneys ? open.has(`journey-${journeyId}`) : journeyId === defaultJourneyId
 
   const setOpenState = React.useCallback((key: string, isOpen: boolean) => {
     setOpen((current) => {
@@ -150,7 +197,7 @@ export function ObClientDetailPage() {
 
   if (client.isError) {
     return (
-      <div className="mx-auto w-full max-w-5xl p-6">
+      <div className="mx-auto w-full max-w-[1280px] p-6">
         <EmptyState
           title="Client not found"
           description="It may have been removed, or it may be outside the clients you can see."
@@ -160,31 +207,75 @@ export function ObClientDetailPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 p-6">
       {client.isPending || !detail ? (
         <PageSkeleton />
       ) : (
         <>
-          <header className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="m-0 text-lg font-semibold text-content">{detail.name}</h1>
-              <Chip variant="neutral">{detail.status}</Chip>
-              {/*
-                Health and gate are two facts and get two chips. `ObRag`'s own
-                description is that folding "prerequisites pending" into the
-                colour would give a reader an enum where "RED" and "LIVE" are
-                the same kind of answer, which they are not.
-              */}
-              {detail.rag && <Chip variant={ragVariant(detail.rag)}>{ragLabel(detail.rag)}</Chip>}
-              {detail.gateStatus === 'LOCKED' && <Chip variant="warning">Prerequisites pending</Chip>}
+          <Link
+            to="/onboarding/clients"
+            className="self-start rounded-control px-2 py-1 text-sm font-medium text-primary no-underline hover:bg-subtle"
+          >
+            ← All clients
+          </Link>
+
+          {/* The mockup's banner-live row — status is the guard, `liveAt` the
+              date, so a client flipped LIVE by an old migration with no stamp
+              still reads as live rather than losing its banner. */}
+          {detail.status === 'LIVE' && (
+            <div
+              className="flex flex-wrap items-center gap-2.5 rounded-card border border-level-low bg-level-low-soft px-5 py-3.5 font-semibold text-success-text"
+              role="status"
+            >
+              <span aria-hidden="true">🎉</span>
+              <span>
+                Fully onboarded &amp; LIVE
+                {detail.liveAt && ` since ${formatDay(detail.liveAt)}`} — all {journeys.length}{' '}
+                {journeys.length === 1 ? 'journey' : 'journeys'} complete, sign-offs on record
+                {detail.csatScore != null && ` · CSAT ${detail.csatScore}/5`}.
+              </span>
             </div>
-            {/* No PAN — see the header docstring. */}
-            <p className="m-0 text-sm text-content-muted">
-              Boarded {detail.onboardingDate}
-              {detail.salesPerson && ` · ${detail.salesPerson.displayName}`}
-              {` · ${journeys.length} ${journeys.length === 1 ? 'journey' : 'journeys'}`}
-              {detail.hasPortalLogin ? ' · portal login active' : ' · no portal login'}
-            </p>
+          )}
+
+          <header className="flex flex-wrap items-start gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="m-0 text-2xl font-semibold text-content [text-wrap:balance]">
+                  {detail.name}
+                </h1>
+                <Chip variant="neutral">{detail.status}</Chip>
+                {detail.gateStatus === 'LOCKED' && <Chip variant="warning">Prerequisites pending</Chip>}
+              </div>
+              {/* No PAN — see the page docstring. */}
+              <p className="m-0 mt-1 text-sm text-content-muted">
+                {detail.licenseType && `${detail.licenseType} · `}
+                {detail.salesPerson && `Sales: ${detail.salesPerson.displayName} · `}
+                Boarded {formatDay(detail.onboardingDate)}
+                {username
+                  ? ` · Login: ${username}`
+                  : detail.hasPortalLogin
+                    ? ' · portal login active'
+                    : ' · no portal login'}
+              </p>
+            </div>
+            <span className="min-w-0 flex-1" aria-hidden="true" />
+            <div className="text-right">
+              {/*
+                Health and gate are two facts and get two chips — the gate chip
+                stays beside the name, the colour lands here, the mockup's own
+                split. `ObRag`'s description is that folding "prerequisites
+                pending" into the colour would give a reader an enum where
+                "RED" and "LIVE" are the same kind of answer.
+              */}
+              {detail.status === 'LIVE' ? (
+                <Chip variant="success">● Live</Chip>
+              ) : (
+                detail.rag && <Chip variant={ragVariant(detail.rag)}>{ragLabel(detail.rag)}</Chip>
+              )}
+              <div className="mt-1.5 text-caption text-content-muted">
+                {journeys.length} product {journeys.length === 1 ? 'journey' : 'journeys'}
+              </div>
+            </div>
           </header>
 
           {/* C-126 · absent when there are none — see the component's own note. */}
@@ -192,9 +283,11 @@ export function ObClientDetailPage() {
 
           {/*
             The gate accordion is absent rather than empty while its own read is
-            in flight or has failed. A "Gate locked" strip drawn from no data
-            would be an assertion the page cannot support, and this is the one
-            claim on the screen everything below it depends on.
+            in flight — a "Gate locked" strip drawn from no data would be an
+            assertion the page cannot support, and this is the one claim on the
+            screen everything below it depends on. A *failed* read is different:
+            silence there hides that the page is missing its gate, so the
+            failure gets a strip that says so instead of nothing.
           */}
           {gate && (
             <PrereqAccordion
@@ -212,6 +305,15 @@ export function ObClientDetailPage() {
               }}
             />
           )}
+          {prereqs.isError && (
+            <div
+              className="rounded-card border border-level-high bg-level-high-soft px-5 py-3 text-sm text-warning-text"
+              role="alert"
+            >
+              📋 The prerequisites checklist could not be loaded, so the gate cannot be shown.
+              Reload the page to try again.
+            </div>
+          )}
 
           {journeys.length === 0 ? (
             <EmptyState
@@ -227,11 +329,34 @@ export function ObClientDetailPage() {
                 users={userList}
                 obClientId={obClientId}
                 openEscalationStepIds={openEscalationStepIds}
-                isOpen={open.has(`journey-${journey.id}`)}
-                onToggle={() => toggle(`journey-${journey.id}`)}
+                isOpen={isJourneyOpen(journey.id)}
+                onToggle={() => {
+                  // Seed the set from what is on screen before the first
+                  // toggle, exactly as the prerequisites accordion does: a
+                  // blind toggle of a key that was never added would *open*
+                  // the accordion the reader is trying to close.
+                  if (!touchedJourneys) {
+                    setTouchedJourneys(true)
+                    setOpen(
+                      journey.id === defaultJourneyId
+                        ? new Set()
+                        : new Set([`journey-${defaultJourneyId}`, `journey-${journey.id}`]),
+                    )
+                    return
+                  }
+                  toggle(`journey-${journey.id}`)
+                }}
               />
             ))
           )}
+
+          {/* §9's closing pair — B-126's panel on the left, the info card on
+              the right. The panel is Stream B's component, mounted here as
+              built; the page owns the grid, not the panel. */}
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <ObClientAccountPanel obClientId={obClientId} />
+            <ObClientInfoCard detail={detail} />
+          </div>
 
           {/* C-112 · plan §6's client-level half. See the page docstring for
               why it is a panel here and not a tab. */}
@@ -240,6 +365,12 @@ export function ObClientDetailPage() {
       )}
     </div>
   )
+}
+
+/** `2026-08-07T11:40:00Z` and `2026-08-07` both → "7 Aug 2026" — the caption line's format. */
+function formatDay(value: string): string {
+  const parsed = parseISO(value)
+  return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'd MMM yyyy')
 }
 
 function PageSkeleton() {

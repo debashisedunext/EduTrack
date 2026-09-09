@@ -493,6 +493,7 @@ export * from './obClientCurrentStepProperty';
 export * from './obClientDetail';
 export * from './obClientDetailAllOf';
 export * from './obClientDetailAllOfAddress';
+export * from './obClientDetailAllOfCsatScore';
 export * from './obClientDetailAllOfDescription';
 export * from './obClientDetailAllOfLicenseType';
 export * from './obClientDetailAllOfPan';

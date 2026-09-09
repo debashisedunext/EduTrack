@@ -19137,6 +19137,18 @@ components:
                 and the accordion needs the set to render the page.
             createdBy: { $ref: '#/components/schemas/UserRef' }
             createdAt: { type: string, format: date-time }
+            csatScore:
+              type: [integer, 'null']
+              minimum: 1
+              maximum: 5
+              description: |
+                B-119's go-live survey answer, from the most recently answered
+                `GO_LIVE` sign-off — OB-05's LIVE banner prints it as
+                "CSAT 5/5". Null until a client answers one, which is the
+                ordinary state: the survey is optional by construction. Detail
+                only — the OB-03 list has no banner and does not pay for the
+                read. Added as an optional field — CONVENTIONS.md §1, not
+                breaking.
       description: 'The OB-05 page in one document.'
     ObClientCreateRequest:
       type: object
@@ -19852,7 +19864,8 @@ components:
 
     ObClientPrereqTask:
       type: object
-      required: [id, obClientId, sequence, title, isMandatory, isAdHoc, status, dueAt]
+      required: [id, obClientId, sequence, title, tatDays, isMandatory, isAdHoc, status, dueAt,
+                 referenceDocs]
       properties:
         id: { type: integer, format: int64 }
         obClientId: { type: integer, format: int64 }
@@ -19866,6 +19879,35 @@ components:
         sequence: { type: integer }
         title: { type: string, maxLength: 200 }
         description: { type: [string, 'null'], maxLength: 4000 }
+        tatDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: |
+            The working-day budget snapshotted from the master when this
+            client was boarded, which is what `dueAt` was derived from.
+
+            Both, rather than the date alone: OB-05 and CP-03 print "TAT 6d ·
+            due 18 Aug", and the pair is the only way a reader can tell a task
+            that is nearly out of time from one that was given a week and has
+            six days left. Deriving the budget back out of `dueAt` is not
+            available to a client — it would need the working calendar, the
+            org holidays and the boarding moment.
+        referenceDocs:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
+          description: |
+            The Admin's reference documents, read through the task's
+            `templateTaskId` rather than copied onto it — a specimen form the
+            Admin may replace with a clearer one, which the client benefits
+            from, unlike the wording, which is frozen at boarding.
+
+            **On the list as well as the detail**, because OB-05's accordion
+            and CP-03 both name them per row: the checklist's whole job is to
+            say what to send and what to send it on, and a reader who has to
+            open each task to find the template is reading the checklist
+            twice. Empty on an ad-hoc task, which has no master row to read
+            through.
         isMandatory: { type: boolean }
         isAdHoc:
           type: boolean
@@ -19924,15 +19966,8 @@ components:
       allOf:
         - { $ref: '#/components/schemas/ObClientPrereqTask' }
         - type: object
-          required: [referenceDocs, submissions]
+          required: [submissions]
           properties:
-            referenceDocs:
-              type: array
-              items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
-              description: |
-                The Admin's documents, carried through from the master task at
-                snapshot time. Empty on an ad-hoc task unless one was attached
-                to it directly.
             submissions:
               type: array
               items: { $ref: '#/components/schemas/ObPrereqSubmissionFile' }

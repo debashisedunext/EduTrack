@@ -586,6 +586,6 @@ class ObClientWriteServiceTest {
                 42L, "Acme", BOARDED, "ONBOARDING", null, "LOCKED", 1, 0,
                 null, List.of(), null, null, null, false,
                 null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), null, null);
+                List.of(), List.of(), List.of(), List.of(), null, null, null);
     }
 }
