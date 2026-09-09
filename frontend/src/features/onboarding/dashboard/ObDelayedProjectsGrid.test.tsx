@@ -65,7 +65,7 @@ describe('ObDelayedProjectsGrid', () => {
     renderGrid()
 
     expect(screen.getByRole('cell', { name: /3 working days/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Horizon Retail' })).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /Horizon Retail/ })).toBeInTheDocument()
   })
 
   it('names the client, the module and the responsible implementor as their own columns', () => {
@@ -86,10 +86,10 @@ describe('ObDelayedProjectsGrid', () => {
     expect(row).toHaveTextContent('—')
   })
 
-  it("opening a client's name navigates to the client, closing nothing else on this page", async () => {
+  it("opening a client's row navigates to the client, closing nothing else on this page", async () => {
     renderGrid()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Horizon Retail' }))
+    await userEvent.click(screen.getByRole('row', { name: /Horizon Retail/ }))
 
     expect(navigate).toHaveBeenCalledWith('/onboarding/clients/42')
   })

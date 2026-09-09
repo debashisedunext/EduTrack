@@ -41,11 +41,22 @@ export function ObDelayedProjectsGrid() {
   const hasMore = data?.meta?.hasMore ?? false
 
   return (
-    <section aria-labelledby="ob-delayed-projects-heading" className="flex flex-col gap-2">
-      <h2 id="ob-delayed-projects-heading" className="text-base font-semibold text-content">
-        Delayed projects
-      </h2>
-
+    <section
+      aria-labelledby="ob-delayed-projects-heading"
+      className="overflow-hidden rounded-card border border-border bg-surface shadow-sm"
+    >
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-1 pt-3.5">
+        <h2
+          id="ob-delayed-projects-heading"
+          className="text-[11px] font-semibold uppercase tracking-[.08em] text-content-muted"
+        >
+          Delayed projects
+        </h2>
+        <span className="text-xs text-content-muted">
+          every journey running behind, with who holds it and the recomputed finish
+        </span>
+      </div>
+      <div className="p-4 pt-2">
       {isPending ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 4 }, (_, i) => (
@@ -94,28 +105,28 @@ export function ObDelayedProjectsGrid() {
       )}
 
       {hasMore && (
-        <p className="text-xs text-content-muted">
+        <p className="mt-2 text-xs text-content-muted">
           Showing the first {PAGE_LIMIT}, worst first. Narrow with a product or owner filter to see the rest.
         </p>
       )}
+      </div>
     </section>
   )
 }
 
 function DelayedProjectRow({ row, onOpenClient }: { row: ObDelayedProject; onOpenClient: () => void }) {
   return (
-    <tr className="border-t border-border align-top">
-      <td className="py-2 pl-3 pr-3 whitespace-nowrap">
-        <button
-          type="button"
-          onClick={onOpenClient}
-          className="rounded-sm text-primary underline-offset-2 hover:underline
-                     focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
-                     focus-visible:outline-primary"
-        >
-          {row.obClientName}
-        </button>
-      </td>
+    <tr
+      tabIndex={0}
+      onClick={onOpenClient}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpenClient()
+      }}
+      className="cursor-pointer border-t border-border align-top hover:bg-subtle
+                 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2
+                 focus-visible:outline-primary"
+    >
+      <td className="py-2 pl-3 pr-3 whitespace-nowrap font-medium text-content">{row.obClientName}</td>
       <td className="py-2 pr-3 whitespace-nowrap text-content-muted">
         {row.startedAt ? (
           <time dateTime={row.startedAt}>{format(parseISO(row.startedAt), 'd MMM yyyy')}</time>

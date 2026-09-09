@@ -56,52 +56,55 @@ export interface ObDashboardCardTileProps {
  * recoverable without a schema change.
  */
 export function ObDashboardCardTile({ card, onOpen }: ObDashboardCardTileProps) {
-  const { label, tone } = cardLook(card.key)
+  const { label, tone, caption } = cardLook(card.key)
   const delta = describeDelta(card.deltaFromYesterday)
   const unavailable = card.unavailableReason
   const interactive = Boolean(onOpen) && !unavailable
 
   const body = (
     <>
-      <span className="flex items-center gap-1.5 text-sm text-[color:var(--text-secondary)]">
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.08em] text-[color:var(--text-secondary)]">
         {label}
         {card.countIsUpperBound && (
-          <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 normal-case" />
         )}
       </span>
 
       {unavailable ? (
         <p className="text-sm leading-snug text-[color:var(--text-secondary)]">{unavailable}</p>
       ) : (
-        <span className="flex items-baseline gap-2">
-          <span
-            className="text-2xl font-semibold tabular-nums text-[color:var(--text-primary)]"
-            style={tone === 'neutral' ? undefined : { color: TONE_ACCENT[tone] }}
-          >
-            {/*
-              The `≈` is aria-hidden and the same caveat is spelled out in the
-              accessible name. A screen reader announcing "almost equal to
-              twelve" says nothing about *why*, which is the only part that
-              helps.
-            */}
-            {card.countIsUpperBound && <span aria-hidden="true">≈</span>}
-            {card.count.toLocaleString()}
-          </span>
-          {delta && (
-            <span className="text-xs tabular-nums text-[color:var(--text-secondary)]">
-              <span aria-hidden="true">
-                {delta.arrow} {delta.magnitude.toLocaleString()}
-              </span>
+        <>
+          <span className="flex items-baseline gap-2">
+            <span
+              className="text-[28px] font-[650] leading-9 tabular-nums tracking-[-.01em] text-[color:var(--text-primary)]"
+              style={tone === 'neutral' ? undefined : { color: TONE_ACCENT[tone] }}
+            >
+              {/*
+                The `≈` is aria-hidden and the same caveat is spelled out in the
+                accessible name. A screen reader announcing "almost equal to
+                twelve" says nothing about *why*, which is the only part that
+                helps.
+              */}
+              {card.countIsUpperBound && <span aria-hidden="true">≈</span>}
+              {card.count.toLocaleString()}
             </span>
-          )}
-        </span>
+            {delta && (
+              <span className="text-xs tabular-nums text-[color:var(--text-secondary)]">
+                <span aria-hidden="true">
+                  {delta.arrow} {delta.magnitude.toLocaleString()}
+                </span>
+              </span>
+            )}
+          </span>
+          {caption && <span className="text-xs text-[color:var(--text-secondary)]">{caption}</span>}
+        </>
       )}
     </>
   )
 
   const shell =
-    'rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] p-4 ' +
-    'flex flex-col gap-2 text-left min-h-[6.5rem]'
+    'rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] shadow-sm px-5 py-4 ' +
+    'flex h-full w-full flex-col gap-1 text-left min-h-[6.5rem]'
 
   if (!interactive) {
     return (
@@ -124,7 +127,7 @@ export function ObDashboardCardTile({ card, onOpen }: ObDashboardCardTileProps) 
       onClick={() => onOpen?.(card)}
       className={cn(
         shell,
-        'transition-shadow hover:shadow-sm',
+        'transition-shadow hover:shadow-lg',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
         'focus-visible:outline-[color:var(--primary)]',
       )}

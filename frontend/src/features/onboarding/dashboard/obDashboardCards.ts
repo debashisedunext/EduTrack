@@ -15,6 +15,13 @@ interface CardLook {
   /** What the number is *of*, for the accessible name. The label alone is a heading. */
   unit: string
   /**
+   * The short sentence under the number — the mockup's `.kpi .d` line. Static
+   * copy rather than a second server field: every one of these is true of the
+   * card by definition (an overdue client is, by definition, one that needs
+   * action), so nothing here can drift from what the count already means.
+   */
+  caption: string
+  /**
    * Whether a rise is bad. Not "is a rise good" — several of these are neither,
    * and colouring every rise green would congratulate somebody on their backlog
    * growing. `KpiCard`'s DeltaBadge makes the same call one module over and
@@ -31,13 +38,34 @@ interface CardLook {
  * than a layout.
  */
 const LOOK: Record<ObDashboardCardKey, CardLook> = {
-  'ongoing-projects': { label: 'Ongoing projects', unit: 'journeys in progress', tone: 'neutral' },
-  'this-weeks-deadlines': { label: "This week's deadlines", unit: 'items due Mon–Sun', tone: 'neutral' },
-  'todays-delivery': { label: "Today's delivery", unit: 'items due today', tone: 'neutral' },
-  'overdue-clients': { label: 'Overdue clients', unit: 'clients past a date', tone: 'danger' },
-  live: { label: 'Live', unit: 'clients live', tone: 'neutral' },
-  'at-risk': { label: 'At risk', unit: 'journeys amber or red', tone: 'warning' },
-  'client-escalations': { label: 'Client escalations', unit: 'clients with an open escalation', tone: 'danger' },
+  'ongoing-projects': {
+    label: 'Ongoing projects', unit: 'journeys in progress', tone: 'neutral',
+    caption: 'clients being onboarded',
+  },
+  'this-weeks-deadlines': {
+    label: "This week's deadlines", unit: 'items due Mon–Sun', tone: 'neutral',
+    caption: 'client tasks due Mon–Sun',
+  },
+  'todays-delivery': {
+    label: "Today's delivery", unit: 'items due today', tone: 'neutral',
+    caption: 'services due today',
+  },
+  'overdue-clients': {
+    label: 'Overdue clients', unit: 'clients past a date', tone: 'danger',
+    caption: 'past a due date — need action now',
+  },
+  live: {
+    label: 'Live', unit: 'clients live', tone: 'neutral',
+    caption: 'fully onboarded',
+  },
+  'at-risk': {
+    label: 'At risk', unit: 'journeys amber or red', tone: 'warning',
+    caption: 'close to a service TAT limit',
+  },
+  'client-escalations': {
+    label: 'Client escalations', unit: 'clients with an open escalation', tone: 'danger',
+    caption: 'clients escalated from the portal',
+  },
 }
 
 /**
@@ -49,7 +77,7 @@ const LOOK: Record<ObDashboardCardKey, CardLook> = {
  * renders with its own token as the label and no accent.
  */
 export function cardLook(key: string): CardLook {
-  return LOOK[key as ObDashboardCardKey] ?? { label: key, unit: '', tone: 'neutral' }
+  return LOOK[key as ObDashboardCardKey] ?? { label: key, unit: '', caption: '', tone: 'neutral' }
 }
 
 /**

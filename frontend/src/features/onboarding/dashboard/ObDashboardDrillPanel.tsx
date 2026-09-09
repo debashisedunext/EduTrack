@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns'
 
 import { useListObDashboardCardItems } from '@/api/generated/onboarding/onboarding'
 import type { ObDashboardCardKey, ObDashboardItem } from '@/api/generated/model'
+import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -103,12 +104,22 @@ export function ObDashboardDrillPanel({
 
   return (
     <SlideOver open={open} onOpenChange={(next) => !next && onClose()}>
-      <SlideOverContent className="max-w-2xl" aria-describedby="ob-dashboard-drill-description">
+      <SlideOverContent className="max-w-lg" aria-describedby="ob-dashboard-drill-description">
         <SlideOverHeader>
-          <SlideOverTitle>{heading}</SlideOverTitle>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[.08em] text-content-muted">
+                Drill-down
+              </p>
+              <SlideOverTitle className="mt-0.5">{heading}</SlideOverTitle>
+            </div>
+            {!isPending && !isError && (
+              <Chip variant="info" className="mt-0.5 shrink-0">{rows.length}</Chip>
+            )}
+          </div>
           <p id="ob-dashboard-drill-description" className="text-xs text-content-muted">
             {data?.meta?.computedAt
-              ? `The count above is as of ${new Date(data.meta.computedAt).toLocaleString(undefined, {
+              ? `As of ${new Date(data.meta.computedAt).toLocaleString(undefined, {
                   dateStyle: 'medium',
                   timeStyle: 'short',
                 })}; these rows are live.`
@@ -134,31 +145,18 @@ export function ObDashboardDrillPanel({
               description="The board's count can be up to a few minutes ahead of this list — B-120's refresh interval."
             />
           ) : (
-            <table className="w-full text-left text-sm">
-              <caption className="sr-only">{heading}</caption>
-              <thead className="text-xs text-content-muted">
-                <tr>
-                  <th scope="col" className="py-2 font-medium">Client</th>
-                  <th scope="col" className="py-2 font-medium">Product</th>
-                  <th scope="col" className="py-2 font-medium">Item</th>
-                  <th scope="col" className="py-2 font-medium">Owner</th>
-                  <th scope="col" className="py-2 font-medium whitespace-nowrap">Due</th>
-                  <th scope="col" className="py-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((item) => (
-                  <DrillRow
-                    key={`${item.itemType}-${item.itemId}`}
-                    item={item}
-                    onOpenClient={() => {
-                      onClose()
-                      navigate(`/onboarding/clients/${item.obClientId}`)
-                    }}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <div>
+              {rows.map((item) => (
+                <DrillRow
+                  key={`${item.itemType}-${item.itemId}`}
+                  item={item}
+                  onOpenClient={() => {
+                    onClose()
+                    navigate(`/onboarding/clients/${item.obClientId}`)
+                  }}
+                />
+              ))}
+            </div>
           )}
 
           {hasMore && (
@@ -172,36 +170,49 @@ export function ObDashboardDrillPanel({
   )
 }
 
+/**
+ * One row, two lines rather than one wrapping line of seven pieces.
+ *
+ * A single flex-wrap row of client/product/item/owner/due/status/action never
+ * lines up between rows — a long client name or a long item title pushes
+ * every piece after it sideways by a different amount on every row, which is
+ * what "misaligned" meant here. Splitting into a fixed top line (name, always
+ * left; the action, always right — `justify-between` pins both regardless of
+ * either one's length) and a second, purely informational meta line removes
+ * the thing that needed aligning in the first place: the meta line never has
+ * to match a sibling row's column widths, because nothing reads it as a column.
+ */
 function DrillRow({ item, onOpenClient }: { item: ObDashboardItem; onOpenClient: () => void }) {
   return (
-    <tr className="border-t border-border align-top">
-      <td className="py-2 pr-3 whitespace-nowrap">
-        <button
-          type="button"
-          onClick={onOpenClient}
-          className="rounded-sm text-primary underline-offset-2 hover:underline
-                     focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
-                     focus-visible:outline-primary"
-        >
-          {item.obClientName}
-        </button>
-      </td>
-      <td className="py-2 pr-3 text-content-muted">{item.product?.name ?? '—'}</td>
-      <td className="py-2 pr-3">{item.title}</td>
-      <td className="py-2 pr-3 text-content-muted">{item.owner?.displayName ?? '—'}</td>
-      <td className="py-2 pr-3 whitespace-nowrap text-content-muted">
-        {item.dueAt ? (
-          <time dateTime={item.dueAt}>{format(parseISO(item.dueAt), 'd MMM yyyy')}</time>
-        ) : (
-          '—'
-        )}
-      </td>
-      <td className="py-2 whitespace-nowrap">
-        <span className="flex items-center gap-1.5">
-          {item.status}
-          {item.isOverdue && <Chip variant="danger">Overdue</Chip>}
+    <div className="border-b border-subtle py-3 hover:bg-subtle">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate font-semibold text-content">{item.obClientName}</span>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={onOpenClient}>
+          Open →
+        </Button>
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-content-muted">
+        <Chip variant="neutral">{item.product?.name ?? '—'}</Chip>
+        <span className="text-content">{item.title}</span>
+        <span aria-hidden="true">·</span>
+        <span>{item.owner?.displayName ?? '—'}</span>
+        <span aria-hidden="true">·</span>
+        <span className="tabular-nums">
+          {item.dueAt ? (
+            <time dateTime={item.dueAt}>{format(parseISO(item.dueAt), 'd MMM yyyy')}</time>
+          ) : (
+            '—'
+          )}
         </span>
-      </td>
-    </tr>
+        <span aria-hidden="true">·</span>
+        <span>{item.status}</span>
+        {item.isOverdue && (
+          <span className="flex items-center gap-1">
+            <span aria-hidden="true">⚠</span>
+            <Chip variant="danger">Overdue</Chip>
+          </span>
+        )}
+      </div>
+    </div>
   )
 }

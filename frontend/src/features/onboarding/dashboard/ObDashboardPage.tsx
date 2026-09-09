@@ -1,11 +1,15 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { useGetObDashboardSummary } from '@/api/generated/onboarding/onboarding'
 import type { ObDashboardCard, ObDashboardCardKey } from '@/api/generated/model'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 
 import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
 import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
+import { ObDashboardRagBoard } from './ObDashboardRagBoard'
+import { ObDashboardStuckPanel } from './ObDashboardStuckPanel'
 import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
 import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
 
@@ -75,10 +79,18 @@ export function ObDashboardPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-lg font-semibold text-content">Onboarding</h1>
-        {summary && <AsOf computedAt={summary.computedAt} appliedScope={summary.appliedScope} />}
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 p-6">
+      <header className="flex flex-wrap items-start gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold leading-8 text-content">Onboarding dashboard</h1>
+          <p className="mt-0.5 text-xs text-content-muted">
+            Every client in flight, where it is, and where it's stuck.
+          </p>
+          {summary && <AsOf computedAt={summary.computedAt} appliedScope={summary.appliedScope} />}
+        </div>
+        <Button asChild size="sm" className="ml-auto">
+          <Link to="/onboarding/clients/new">+ Board a new client</Link>
+        </Button>
       </header>
 
       {isError ? (
@@ -95,7 +107,14 @@ export function ObDashboardPage() {
           */
           role="list"
           aria-label="Onboarding summary"
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          /*
+            Fixed-width tracks (`auto-fill`, not `auto-fit … 1fr`) — every card
+            is 190px whatever the row it lands in. `1fr` stretches whichever row
+            has the fewest cards to fill the leftover width, which is exactly
+            what made "Live"/"At risk" (a two-card second row) balloon wider
+            than the five cards above them.
+          */
+          className="grid grid-cols-[repeat(auto-fill,190px)] items-stretch gap-4"
         >
           {isPending
             ? Array.from({ length: 7 }, (_, index) => (
@@ -111,6 +130,8 @@ export function ObDashboardPage() {
         </div>
       )}
 
+      <ObDashboardRagBoard />
+      <ObDashboardStuckPanel />
       <ObDelayedProjectsGrid />
       <ObImplementorWorkloadGrid onDrill={setDrill} />
 

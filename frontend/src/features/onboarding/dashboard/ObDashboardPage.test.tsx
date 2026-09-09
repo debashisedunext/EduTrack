@@ -27,8 +27,13 @@ function renderBoard() {
   )
 }
 
-/** MSW adds latency and the suite is heavily parallel — `ClientListPage.test.tsx`'s convention. */
-const SLOW = { timeout: 5000 }
+/**
+ * MSW adds latency and the suite is heavily parallel — `ClientListPage.test.tsx`'s
+ * convention. Widened from 5000: the RAG board and "Where it's stuck" panel add
+ * five more concurrent requests to the page's first paint, and the slowest of
+ * them is what this budget has to cover.
+ */
+const SLOW = { timeout: 10000 }
 
 describe('ObDashboardPage', () => {
   /**
@@ -54,7 +59,7 @@ describe('ObDashboardPage', () => {
       expect.stringContaining('Live'),
       expect.stringContaining('At risk'),
     ])
-  })
+  }, SLOW.timeout)
 
   /**
    * The numbers are up to one refresh interval stale by design, and a board
@@ -79,7 +84,7 @@ describe('ObDashboardPage', () => {
       'datetime',
       '2026-08-20T06:00:00.000Z',
     )
-  })
+  }, SLOW.timeout)
 
   it('shows a skeleton of the same shape while the first request is in flight', () => {
     renderBoard()
@@ -109,7 +114,7 @@ describe('ObDashboardPage', () => {
     const cardList = screen.getByRole('list', { name: 'Onboarding summary' })
     expect(within(cardList).getAllByRole('button')).toHaveLength(7)
     expect(within(cardList).queryAllByRole('group')).toHaveLength(0)
-  })
+  }, SLOW.timeout)
 
   /**
    * The click-through: a card names its own key, and the panel that opens
@@ -123,5 +128,5 @@ describe('ObDashboardPage', () => {
 
     expect(await screen.findByRole('heading', { name: "This week's deadlines" }, SLOW))
       .toBeInTheDocument()
-  })
+  }, SLOW.timeout)
 })
