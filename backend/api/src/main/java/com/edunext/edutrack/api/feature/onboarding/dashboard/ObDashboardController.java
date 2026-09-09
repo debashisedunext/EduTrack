@@ -1,32 +1,40 @@
 package com.edunext.edutrack.api.feature.onboarding.dashboard;
 
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardItemListMeta;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardItemListResponse;
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardSummaryResponse;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDelayedProjectListResponse;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObImplementorWorkloadListResponse;
 import com.edunext.edutrack.api.security.CallerIdentity;
+import com.edunext.edutrack.common.pagination.PageMeta;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
+import java.util.List;
+
 /**
  * B-121 · {@code /onboarding/dashboard} per {@code contracts/openapi.yaml} —
  * OB-02, the card board.
  *
- * <p>This task registers one route. The other three the contract declares under
- * this prefix belong to the tasks that build what they feed:
- * {@code /cards/{cardKey}/items} is B-127's slide-over and
- * {@code /delayed-projects} and {@code /implementor-workload} are B-128's two
- * grids. They land in this package beside this method rather than in one of
- * their own — feature packaging, and they share {@link ObDashboardCardKey} and
- * {@link ObDashboardScope}, which is the whole reason those two are types
- * rather than private constants.
+ * <p>Four routes: {@link #summary} (B-121); {@link #cardItems} (B-127), the
+ * S-06 slide-over behind one card; and {@link #delayedProjects} /
+ * {@link #implementorWorkload} (B-128), plan §9's two grids. All four in this
+ * package rather than each in one of their own — feature packaging, and they
+ * share {@link ObDashboardCardKey} and {@link ObDashboardScope}, which is the
+ * whole reason those two are types rather than private constants.
  *
  * <h2>Auth: {@code isAuthenticated()}, with the real gate elsewhere</h2>
  *
@@ -59,9 +67,16 @@ import org.springframework.web.bind.annotation.RestController;
 class ObDashboardController {
 
     private final ObDashboardService dashboard;
+    private final ObDashboardCardItemsService cardItems;
+    private final ObDelayedProjectsService delayedProjects;
+    private final ObImplementorWorkloadService implementorWorkload;
 
-    ObDashboardController(ObDashboardService dashboard) {
+    ObDashboardController(ObDashboardService dashboard, ObDashboardCardItemsService cardItems,
+            ObDelayedProjectsService delayedProjects, ObImplementorWorkloadService implementorWorkload) {
         this.dashboard = dashboard;
+        this.cardItems = cardItems;
+        this.delayedProjects = delayedProjects;
+        this.implementorWorkload = implementorWorkload;
     }
 
     /**
@@ -99,6 +114,91 @@ class ObDashboardController {
             response = response.eTag(rendered.etag());
         }
         return response.body(new ObDashboardSummaryResponse(rendered.summary()));
+    }
+
+    /**
+     * B-127 · the S-06 slide-over behind one card.
+     *
+     * <p>No {@code ETag} on this route — the contract declares none, unlike
+     * {@link #summary}: the count above is a function of {@code computed_at}
+     * alone, but this is a bounded row fetch against the live tables, and a
+     * validator built from anything cheaper than the query itself would be a
+     * promise this route cannot keep.
+     *
+     * <p>An unidentifiable caller reaches {@link ObDashboardScope#deniesEverything()}'s
+     * empty page rather than an exception, on {@link #summary}'s own reasoning:
+     * {@code @PreAuthorize} has already refused the anonymous case, so a
+     * caller {@link CallerIdentity#of} still cannot resolve is a second,
+     * narrower line rather than the first.
+     */
+    @GetMapping(path = "/cards/{cardKey}/items", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listObDashboardCardItems", summary = "The slide-over behind one card (OB-02)")
+    ObDashboardItemListResponse cardItems(
+            Authentication authentication,
+            @PathVariable String cardKey,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+
+        return CallerIdentity.of(authentication)
+                .map(caller -> cardItems.items(caller, cardKey, productId, ownerUserId, cursor, limit))
+                .orElseGet(() -> new ObDashboardItemListResponse(
+                        List.of(), new ObDashboardItemListMeta(null, false, null)));
+    }
+
+    /**
+     * B-128 · plan §9's Delayed Projects grid.
+     *
+     * <p>No {@code ETag}, on {@link #cardItems}'s own reasoning: this is a
+     * bounded live query, not a function of {@code computed_at}, so there is
+     * no validator cheaper than running it.
+     *
+     * <p>An unidentifiable caller reaches {@link ObDashboardScope#deniesEverything()}'s
+     * empty page inside {@link ObDelayedProjectsService}, on {@link #cardItems}'s
+     * own precedent — {@code @PreAuthorize} has already refused the anonymous
+     * case, so a caller {@link CallerIdentity#of} still cannot resolve is a
+     * second, narrower line rather than the first.
+     */
+    @GetMapping(path = "/delayed-projects", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listObDelayedProjects", summary = "The Delayed Projects grid (OB-02)")
+    ObDelayedProjectListResponse delayedProjects(
+            Authentication authentication,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(required = false) Integer minDelayDays,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+
+        return CallerIdentity.of(authentication)
+                .map(caller -> delayedProjects.list(caller, productId, ownerUserId, minDelayDays, cursor, limit))
+                .orElseGet(() -> new ObDelayedProjectListResponse(List.of(), PageMeta.last()));
+    }
+
+    /**
+     * B-128 · plan §9's Implementor workload & performance grid.
+     *
+     * <p>{@code statDate} defaults to the most recently computed day, read
+     * inside {@link ObImplementorWorkloadService} rather than here — the same
+     * split {@link #summary} keeps between "which day" and "what to render".
+     *
+     * <p>No {@code ETag}, {@link #delayedProjects}'s own reasoning: the
+     * contract declares none, and unlike {@link #summary} this route can be
+     * asked for a historical {@code statDate} whose {@code computed_at} this
+     * controller has not read.
+     */
+    @GetMapping(path = "/implementor-workload", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "listObImplementorWorkload", summary = "The Implementor workload & performance grid (OB-02)")
+    ObImplementorWorkloadListResponse implementorWorkload(
+            Authentication authentication,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate statDate,
+            @RequestParam(required = false, defaultValue = "false") boolean includeInactive,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+
+        return CallerIdentity.of(authentication)
+                .map(caller -> implementorWorkload.list(caller, statDate, includeInactive, cursor, limit))
+                .orElseGet(() -> new ObImplementorWorkloadListResponse(List.of(), PageMeta.last()));
     }
 
     /**

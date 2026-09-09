@@ -19973,12 +19973,28 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ObDashboardItem' }
         meta:
-          allOf: [{ $ref: '#/components/schemas/Meta' }]
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                computedAt:
+                  type: [string, 'null']
+                  format: date-time
           description: |
             Carries `computedAt` alongside the cursor, repeating the card's
             own so a screen can say which number these rows belong to. The
             count is pre-aggregated and this list is live, so they may differ
             by up to one refresh interval — see `listObDashboardCardItems`.
+
+            B-127 · found as a genuine gap rather than assumed: the plain
+            `{ $ref: Meta }` this line used to be carries `nextCursor` and
+            `hasMore` only, and nothing in `Meta` can hold `computedAt` — the
+            single-element `allOf` this became was the only place in the
+            contract shaped that way while its own prose promised the field.
+            `ObNotificationListResponse.meta` and `EffortLogListResponse.meta`
+            already extend `Meta` with a second `allOf` member the same way,
+            for `unreadCount` and the two effort totals; this follows that
+            precedent rather than inventing a new one.
 
     ObDelayedProject:
       type: object

@@ -1,7 +1,28 @@
+import { useState } from 'react'
+
 import { useGetObDashboardSummary } from '@/api/generated/onboarding/onboarding'
+import type { ObDashboardCard, ObDashboardCardKey } from '@/api/generated/model'
 import { EmptyState } from '@/components/ui/empty-state'
 
 import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
+import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
+import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
+import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
+
+/**
+ * B-127/B-128 · what the S-06 slide-over is currently showing, or nothing.
+ *
+ * One shape for both readers of {@link ObDashboardDrillPanel} — a card tile,
+ * which only ever names its own `cardKey`, and {@link ObImplementorWorkloadGrid},
+ * which also narrows by `ownerUserId` and supplies its own `title`. A single
+ * piece of state and a single panel instance, rather than one panel per
+ * caller, is the reuse B-127 built the panel for in the first place.
+ */
+interface DrillTarget {
+  cardKey: ObDashboardCardKey
+  ownerUserId?: number
+  title?: string
+}
 
 /**
  * B-121 · OB-02, the onboarding dashboard — `/onboarding/dashboard`.
@@ -27,23 +48,31 @@ import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardC
  * deployment's first days. An empty board there is honest; a board of zeroes
  * would not be.
  *
- * <h2>What this screen is not, yet</h2>
+ * <h2>Every card opens the S-06 slide-over — B-127</h2>
  *
- * The cards do not open anything. Plan §9 wants each to open the S-06 right
- * slide-over listing the matching clients, and that is **B-127** — the route
- * behind it (`/cards/{cardKey}/items`) is in the contract and has no
- * implementation. The tiles are already the right control for it: they render
- * as plain regions without an `onOpen`, so nothing here is a button that does
- * nothing when pressed, and B-127 passes a handler rather than rebuilding them.
+ * `drill` is the whole handoff: a tile's `onOpen` sets it, and
+ * {@link ObDashboardDrillPanel} reads it to fetch and render
+ * `listObDashboardCardItems`. Nothing about *which* card is decided twice —
+ * the tile passes its own `card.key` straight through, so the panel opens
+ * exactly the card that was clicked.
  *
- * The two grids below the board — Delayed Projects, and Implementor workload &
- * performance — are **B-128**.
+ * <h2>The two grids below the board — B-128</h2>
+ *
+ * Delayed Projects and Implementor workload &amp; performance, in plan §9's
+ * own order. The workload grid's cells open the identical slide-over via the
+ * same `drill` state, narrowed by `ownerUserId` — {@link DrillTarget}'s own
+ * note on why this is one piece of state rather than two panels.
  */
 export function ObDashboardPage() {
   const { data, isPending, isError } = useGetObDashboardSummary()
+  const [drill, setDrill] = useState<DrillTarget | null>(null)
 
   const summary = data?.data
   const cards = summary?.cards ?? []
+
+  function openDrill(card: ObDashboardCard) {
+    setDrill({ cardKey: card.key })
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
@@ -76,11 +105,21 @@ export function ObDashboardPage() {
               ))
             : cards.map((card) => (
                 <div role="listitem" key={card.key}>
-                  <ObDashboardCardTile card={card} />
+                  <ObDashboardCardTile card={card} onOpen={openDrill} />
                 </div>
               ))}
         </div>
       )}
+
+      <ObDelayedProjectsGrid />
+      <ObImplementorWorkloadGrid onDrill={setDrill} />
+
+      <ObDashboardDrillPanel
+        cardKey={drill?.cardKey ?? null}
+        onClose={() => setDrill(null)}
+        title={drill?.title}
+        ownerUserId={drill?.ownerUserId}
+      />
     </div>
   )
 }

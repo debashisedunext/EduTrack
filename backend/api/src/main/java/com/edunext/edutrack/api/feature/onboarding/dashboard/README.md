@@ -5,18 +5,21 @@ Stream B; A-108 named B-121 in the migration that created the tables read here.
 
 OB-02, the card board.
 
-## The route (B-121)
+## The routes
 
-`GET /onboarding/dashboard/summary` — seven counters, one round trip, the
-board's whole first paint.
+`GET /onboarding/dashboard/summary` (**B-121**) — seven counters, one round
+trip, the board's whole first paint.
 
-The other three routes the contract declares under this prefix are not built
-yet and belong here when they are: `/cards/{cardKey}/items` is **B-127**'s
-slide-over, `/delayed-projects` and `/implementor-workload` are **B-128**'s two
-grids. They land in this package beside the summary rather than in packages of
-their own — that is why `ObDashboardCardKey` and `ObDashboardScope` are types
-with a `fromWire` and an `appliedScope` on them rather than private constants
-inside the service.
+`GET /onboarding/dashboard/cards/{cardKey}/items` (**B-127**) — the S-06
+slide-over behind one card, its own section below.
+
+`GET /onboarding/dashboard/delayed-projects` and
+`GET /onboarding/dashboard/implementor-workload` (**B-128**) — plan §9's two
+grids, its own section further below. All four land in this package rather
+than in packages of their own — that is why `ObDashboardCardKey` and
+`ObDashboardScope` are types with a `fromWire`, an `appliedScope` and (since
+B-127/B-128) three SQL predicates on them rather than private constants
+inside one service.
 
 ## 🔴 Three of the seven cards overstate on the all-products board
 
@@ -123,12 +126,117 @@ reach it and get a board of unavailable cards. Deliberately not patched over
 with a second gate here — a module gate in a feature package is how the first
 one comes to be relaxed without anybody noticing.
 
-## Not done yet
+## B-127 · `GET /cards/{cardKey}/items` — the S-06 slide-over
 
-- **No slide-over.** Every card is meant to open the S-06 right panel (B-127).
-  The tiles are already buttons with the ARIA the panel will need, so that task
-  wires a handler rather than rebuilding them.
-- **No product filter on the screen.** The route takes `productId` and it is
-  tested; the picker belongs with B-127's board, which is also what makes the
-  exact client-counted figures reachable from the UI.
-- **No grids.** Delayed Projects and Implementor workload are B-128.
+Landed in this package beside the summary, exactly as this file said it would:
+`ObDashboardCardItemsController` (folded into `ObDashboardController`),
+`ObDashboardCardItemsService`, `ObDashboardCardItemsRepository`,
+`UnrecognisedCardKeyException` and `InvalidCursorException` (both 400 via
+`ObDashboardExceptionHandler`). `ObDashboardScope` grew a `userId` and two SQL
+predicates (`journeyPredicate`, `clientPredicate`) for it.
+
+**Not a live `COUNT(*)`.** The count above stays pre-aggregated; this is a
+bounded, `LIMIT`-and-cursor row fetch against `ob_journey_steps` and
+`ob_client_prereq_tasks` directly — CLAUDE.md's rule is about the *count*
+behind a dashboard, and a card's rows are not one.
+
+**Every module role is answerable here, unlike the summary above.** The two
+roles the summary board cannot narrow — OB_SALES, OB_STEP_OWNER — read this
+route's own tables directly, which carry every column
+`OnboardingScopeResolver` filters on. `ObDashboardCardItemsIT`'s
+`theScopePredicateAndTheSpecificationAgree` asserts the SQL predicate and the
+JPA specification select the same journeys, for all seven role inputs.
+
+Per-card semantics (which rows a card's click surfaces) are documented on
+`ObDashboardCardItemsRepository`'s class javadoc rather than repeated here —
+restated from `ObDashboardStatsRepository`'s `OPEN`/`OVERDUE`/`AMBER`
+constants, since the `worker` module cannot be depended on from `api`.
+
+**A genuine contract gap, fixed and flagged.** `ObDashboardItemListResponse.meta`
+was a bare `{ $ref: Meta }` while its own prose promised `computedAt`, which
+`Meta` has no field for — the only place in the whole contract shaped that
+way. Fixed with the `allOf` extension `ObNotificationListResponse.meta` and
+`EffortLogListResponse.meta` already use for their own extra fields; the
+frontend client is regenerated. Flagged for Stream A's sign-off since
+`contracts/openapi.yaml` is not this stream's file.
+
+- *`api/feature/onboarding/dashboard/` — 60 unit cases across 5 classes
+  (`ObDashboardCardItemsServiceTest`, `ObDashboardCardItemsRepositoryTest`, the
+  `ObDashboardScopeTest` additions, plus the two existing B-121 classes still
+  green), 23 against real MySQL in `ObDashboardCardItemsIT`.*
+- *`frontend/src/features/onboarding/dashboard/ObDashboardDrillPanel.tsx` — the
+  generic panel, exported for B-128's workload-grid cells to open the same way
+  via `ownerUserId`. `ObDashboardCardTile` needed no changes — B-121's own note
+  said B-127 would only ever need to pass it a handler.*
+
+## B-128 · `GET /delayed-projects` and `GET /implementor-workload` — the two grids
+
+`ObDelayedProjectsRepository`/`ObDelayedProjectsService` and
+`ObImplementorWorkloadRepository`/`ObImplementorWorkloadService`, folded into
+`ObDashboardController` beside the two routes above. `ObDashboardScope`
+grew `implementorPredicate` — a third SQL predicate beside B-127's two, over
+`ob_implementor_daily_stats`'s own grain (one row per person, not per journey
+or client). `ObDashboardCardItemsRepository.OVERDUE_SERVICE` and
+`.JOURNEY_IS_RUNNING` went from `private` to package-private so
+`ObDelayedProjectsRepository` restates neither a third time within one
+package.
+
+**Delayed Projects is a bounded live query, per CLAUDE.md's own carve-out for
+this task** — not a `COUNT(*)`, a row fetch over currently-open, ungated,
+overdue journeys, which is naturally a fraction of the journey table.
+`delayedByDays` cannot live in SQL: it is ceiling working days through
+`WorkingCalendarRepository`/`WorkingHoursService`, so the repository hands
+back `expectedCompletionAt` as a plain instant and the service converts,
+filters on `minDelayDays`, sorts and paginates in Java — the same split
+`ObDashboardStatsRepository.refreshBlockedHours` makes for `blocked_hours`,
+for the identical reason.
+
+**`currentStep` and the row's `responsible` can name different steps.** The
+overdue step (earliest due, `OVERDUE_SERVICE`) is what put the journey on the
+grid and is always who `responsible` names; the in-flight step
+(lowest-sequence `IN_PROGRESS`/`WAITING_ON_CLIENT`) is `currentStep`, and is
+null exactly when the contract says it should be — "every step blocked or not
+yet activated". `ObDashboardStepDot.rag` is always null on this route: computing
+it for real would be a second per-row calendar call through
+`ObJourneyStepRagService` for a chip plan §9 does not ask this grid to show.
+Named as a decision, not discovered as a gap.
+
+**Implementor workload never leaves `ob_implementor_daily_stats`** — B-120's
+table, read straight through, `isActive` joined against
+`user_module_access`. `performanceScore` is derived in
+`ObImplementorWorkloadService`, never stored, from the four inputs A-108
+names: quality from the three completion counters (an early finish weighted
+above an on-time one, a late one weighted to zero), a capped penalty from
+`blockedHours` converted to working days through the same calendar. Null for
+zero completions, per the contract's own words.
+
+**OB_SALES is denied on the workload route, not shown everyone's** —
+`ob_implementor_daily_stats` carries no client-creator column, the identical
+gap `ObDashboardScope`'s own header names for the summary board, restated for
+a table keyed by person. OB_STEP_OWNER narrows to exactly their own row,
+which this table's grain answers exactly, unlike the journey- and
+client-scoped routes elsewhere in this module.
+
+**The reports hub's Owner filter is narrowed by this route**, per the note it
+carried since B-122 — `frontend/src/features/onboarding/reports/ObReportFilterBar.tsx`
+now reads `listObImplementorWorkload` instead of the full user directory.
+`features/onboarding/reports/` is this stream's own path.
+
+- *`api/feature/onboarding/dashboard/` — `ObDelayedProjectsRepository`,
+  `ObDelayedProjectsService`, `ObImplementorWorkloadRepository`,
+  `ObImplementorWorkloadService`, the `ObDashboardDtos` additions and
+  `ObDashboardScope.implementorPredicate`. Unit tests in
+  `ObDelayedProjectsServiceTest`, `ObImplementorWorkloadServiceTest` and the
+  `ObDashboardScopeTest` additions (mocked calendar/repository — the ceiling
+  conversion, `minDelayDays`, the descending sort, the cursor, the
+  `performanceScore` formula pinned to exact figures, and the
+  sums-to-`clientsOpen` arithmetic asserted on a row read through the
+  service); `ObDelayedProjectsIT` and `ObImplementorWorkloadIT` against real
+  MySQL, including the Friday-due/Monday-open example CLAUDE.md itself names,
+  run against the real `WorkingHoursService`.*
+- *`frontend/src/features/onboarding/dashboard/ObDelayedProjectsGrid.tsx` and
+  `ObImplementorWorkloadGrid.tsx` — wired into `ObDashboardPage.tsx` below the
+  card board, in plan §9's order. `ObDashboardPage`'s `openCard` state became
+  `drill: { cardKey, ownerUserId?, title? }` so the one `ObDashboardDrillPanel`
+  instance serves both the card tiles and the workload grid's cells, exactly
+  what B-127 built the panel's `title`/`ownerUserId` props for.*

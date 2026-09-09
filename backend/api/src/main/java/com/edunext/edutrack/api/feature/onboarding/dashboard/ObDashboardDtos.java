@@ -1,6 +1,10 @@
 package com.edunext.edutrack.api.feature.onboarding.dashboard;
 
+import com.edunext.edutrack.common.pagination.PageMeta;
+
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -86,5 +90,147 @@ final class ObDashboardDtos {
         static ObDashboardCard unavailable(ObDashboardCardKey key, String reason) {
             return new ObDashboardCard(key, 0L, null, false, reason);
         }
+    }
+
+    // ── B-127 · the slide-over behind one card ──────────────────────────────
+
+    /** Mirrors {@code ObDashboardItemType} in the contract. */
+    enum ObDashboardItemType {
+        SERVICE, PREREQUISITE
+    }
+
+    /**
+     * {@code ObProductRef}, restated locally rather than imported — the same
+     * three-field mirror every onboarding package keeps of its own, per
+     * {@code ObClientDtos.ObProductRef}'s own precedent, so that a change to
+     * one package's response shape is never a silent change to another's.
+     */
+    record ObProductRef(long id, String code, String name) {
+    }
+
+    /** {@code UserRef}, restated locally — see {@link ObProductRef}'s own note. */
+    record UserRef(long id, String displayName) {
+    }
+
+    /**
+     * One row of the slide-over — mirrors {@code ObDashboardItem}.
+     *
+     * @param itemId    an {@code ob_journey_steps} id when {@code itemType} is
+     *                  {@code SERVICE}, an {@code ob_client_prereq_tasks} id
+     *                  when it is {@code PREREQUISITE}. Two id spaces behind
+     *                  one field, exactly as the contract states.
+     * @param journeyId null on a prerequisite.
+     * @param product   null on a prerequisite.
+     * @param owner     null on a prerequisite, whose counterparty is the
+     *                  client rather than an implementor.
+     * @param status    an {@code ObJourneyStepStatus} or an
+     *                  {@code ObPrereqTaskStatus} depending on
+     *                  {@code itemType} — a plain string, per the contract's
+     *                  own reasoning: a display column gains nothing from a
+     *                  generated client forced to discriminate two enums to
+     *                  render a chip.
+     */
+    record ObDashboardItem(ObDashboardItemType itemType, long itemId, long obClientId, String obClientName,
+                           Long journeyId, ObProductRef product, String title, UserRef owner, String status,
+                           Instant dueAt, boolean isOverdue) {
+
+        static ObDashboardItem of(ObDashboardCardItemsRepository.ItemRow row) {
+            ObProductRef product = row.productId() == null ? null
+                    : new ObProductRef(row.productId(), row.productCode(), row.productName());
+            UserRef owner = row.ownerUserId() == null ? null
+                    : new UserRef(row.ownerUserId(), row.ownerName());
+            return new ObDashboardItem(
+                    ObDashboardItemType.valueOf(row.itemType()), row.itemId(), row.obClientId(), row.obClientName(),
+                    row.journeyId(), product, row.title(), owner, row.status(), row.dueAt(), row.isOverdue());
+        }
+    }
+
+    /**
+     * {@code meta} for {@code ObDashboardItemListResponse} — {@code Meta}
+     * (A-053's {@code nextCursor}/{@code hasMore}) plus {@code computedAt},
+     * repeating the card's own so a screen can say which number these rows
+     * belong to.
+     *
+     * <p>Not {@link com.edunext.edutrack.common.pagination.PageMeta} alone —
+     * that type deliberately carries no third field, and the contract's own
+     * {@code allOf} extension is what B-127 added to hold this one; see the
+     * commit that fixed it.
+     */
+    record ObDashboardItemListMeta(String nextCursor, boolean hasMore, Instant computedAt) {
+
+        static ObDashboardItemListMeta of(PageMeta page, Instant computedAt) {
+            return new ObDashboardItemListMeta(page.nextCursor(), page.hasMore(), computedAt);
+        }
+    }
+
+    record ObDashboardItemListResponse(List<ObDashboardItem> data, ObDashboardItemListMeta meta) {
+    }
+
+    // ── B-128 · the Delayed Projects grid ───────────────────────────────────
+
+    /**
+     * {@code ObStepDot}, restated locally — {@link ObProductRef}'s own note on
+     * why a package keeps its own mirror rather than importing another
+     * package's DTO. {@code rag} is always {@code null} on this route: see
+     * {@code ObDelayedProjectsRepository}'s class note for why this grid does
+     * not compute it.
+     */
+    record ObDashboardStepDot(long id, int sequence, String name, String status,
+                              String rag, Long dependsOnStepId) {
+    }
+
+    /**
+     * One row of plan §9's Delayed Projects grid — mirrors {@code ObDelayedProject}.
+     *
+     * @param productsBought every product this client has bought, not only
+     *                       this journey's — the contract's own note, and a
+     *                       fact about the client rather than the journey.
+     * @param product        this row's own journey's product.
+     * @param currentStep    null on a journey whose every step is blocked or
+     *                       not yet activated — see
+     *                       {@code ObDelayedProjectsRepository}.
+     * @param responsible    the owner (falling back to the backup owner) of
+     *                       the step that put this journey on the grid — the
+     *                       earliest-due overdue step, which may or may not
+     *                       be {@code currentStep}.
+     * @param delayedByDays  working days, through {@code WorkingCalendar} —
+     *                       never a naive calendar-day subtraction.
+     */
+    record ObDelayedProject(long journeyId, long obClientId, String obClientName, Instant startedAt,
+                            List<ObProductRef> productsBought, ObProductRef product,
+                            ObDashboardStepDot currentStep, UserRef responsible,
+                            Instant expectedCompletionAt, int delayedByDays) {
+    }
+
+    record ObDelayedProjectListResponse(List<ObDelayedProject> data, PageMeta meta) {
+    }
+
+    // ── B-128 · the Implementor workload & performance grid ────────────────
+
+    /**
+     * One row of plan §9's Implementor workload & performance grid — mirrors
+     * {@code ObImplementorWorkload}. Sourced from B-120's
+     * {@code ob_implementor_daily_stats}, never a live aggregate.
+     *
+     * @param isActive         whether this implementor still holds a live
+     *                         {@code OB_STEP_OWNER} grant.
+     * @param clientsOpen      partitioned exactly by the six counters that
+     *                         follow — an arithmetic contract the schema
+     *                         states and nothing at runtime enforces; see
+     *                         {@code ObImplementorWorkloadServiceTest}'s sum
+     *                         assertion.
+     * @param performanceScore derived on read, 0–100, or null for an
+     *                         implementor with zero completions — see
+     *                         {@code ObImplementorWorkloadService#performanceScore}.
+     * @param statDate         which day's stats this row is.
+     */
+    record ObImplementorWorkload(UserRef user, boolean isActive, int clientsOpen,
+                                 int onTrack, int notStarted, int delayed, int atRisk,
+                                 int blockedWaiting, int aheadOfSchedule,
+                                 int completedOnTime, int completedEarly, int completedLate,
+                                 int blockedHours, BigDecimal performanceScore, LocalDate statDate) {
+    }
+
+    record ObImplementorWorkloadListResponse(List<ObImplementorWorkload> data, PageMeta meta) {
     }
 }

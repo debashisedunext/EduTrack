@@ -1,7 +1,6 @@
 import { useSearchParams } from 'react-router-dom'
-import { useListObClients } from '@/api/generated/onboarding/onboarding'
+import { useListObClients, useListObImplementorWorkload } from '@/api/generated/onboarding/onboarding'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
-import { useListUsers } from '@/api/generated/users/users'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import type { ObReportFilterKind } from '@/api/generated/model'
 
@@ -22,17 +21,17 @@ import type { ObReportFilterKind } from '@/api/generated/model'
  * ticketing hub learned this one module over: two dropdowns nobody could use
  * were costing two master-list fetches on every load.
  *
- * <h2>🔴 The Owner list is every user, not every implementor</h2>
+ * <h2>The Owner list is every implementor, bench included — B-128</h2>
  *
- * `useListUsers` is the whole directory, and the population this control wants
- * is the users holding an `OB_STEP_OWNER` grant — picking a colleague from
- * finance narrows TAT compliance to nothing and looks like a broken report
- * rather than an empty one. The right source is
- * `listObImplementorWorkload`, which is exactly "a row per implementor
- * including the bench" — and it is **B-128's** route with no implementation
- * behind it yet. Wiring this control to an endpoint that 404s would be worse
- * than a list that is too wide, so it takes the directory for now and B-128
- * narrows it. Named here rather than left to be noticed.
+ * Was `useListUsers`, the whole directory: picking a colleague from finance
+ * narrowed TAT compliance to nothing and looked like a broken report rather
+ * than an empty one. Now `listObImplementorWorkload`, which is exactly "a row
+ * per implementor including the bench" — B-128's route, narrowing this
+ * control the way this comment used to say it eventually would. Each row's
+ * `user` is what the dropdown reads; the workload counters that come with it
+ * are simply unused here, on the same "fetch what the control needs, ignore
+ * the rest" precedent {@link ObReportFilterBar}'s product list already
+ * follows for `isActive`.
  */
 export function ObReportFilterBar({ filters }: { filters: ObReportFilterKind[] }) {
   const [params, setParams] = useSearchParams()
@@ -53,11 +52,11 @@ export function ObReportFilterBar({ filters }: { filters: ObReportFilterKind[] }
     somebody asks about a client who was put on hold last month.
   */
   const clients = useListObClients(undefined, { query: { enabled: wantsClient } })
-  const users = useListUsers(undefined, { query: { enabled: wantsOwner } })
+  const implementors = useListObImplementorWorkload({ limit: 200 }, { query: { enabled: wantsOwner } })
 
   const productList = products.data?.data ?? []
   const clientList = clients.data?.data ?? []
-  const userList = users.data?.data ?? []
+  const userList = (implementors.data?.data ?? []).map((w) => w.user)
 
   function set(key: string, value: string | undefined) {
     const next = new URLSearchParams(params)

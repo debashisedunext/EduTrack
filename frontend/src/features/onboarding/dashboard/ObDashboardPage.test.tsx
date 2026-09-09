@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 
@@ -79,16 +80,37 @@ describe('ObDashboardPage', () => {
   })
 
   /**
-   * No card opens anything yet: the slide-over behind them is B-127. The tiles
-   * must therefore not render as buttons — a control that does nothing when
-   * pressed teaches the user the board is broken.
+   * B-127 · every card is now a real control — `ObDashboardCardTile`'s own
+   * rule is that a tile renders as a button only once it is given `onOpen`,
+   * so this is the test that proves the wiring landed rather than merely
+   * compiled.
+   *
+   * <p>Scoped to the card list itself, not the whole page: B-128 added two
+   * grids below the board whose own rows and cells are legitimately buttons
+   * too (a client name, a workload count), and this test is about the seven
+   * cards, not a count of every control on the screen.
    */
-  it('renders no dead controls while the slide-over is unbuilt', async () => {
+  it('every card is a real button now that the slide-over exists', async () => {
     renderBoard()
 
     await screen.findByText('Ongoing projects', undefined, SLOW)
 
-    expect(screen.queryAllByRole('button')).toHaveLength(0)
-    expect(screen.getAllByRole('group')).toHaveLength(7)
+    const cardList = screen.getByRole('list', { name: 'Onboarding summary' })
+    expect(within(cardList).getAllByRole('button')).toHaveLength(7)
+    expect(within(cardList).queryAllByRole('group')).toHaveLength(0)
+  })
+
+  /**
+   * The click-through: a card names its own key, and the panel that opens
+   * reads that exact card — never a card the screen guesses at.
+   */
+  it('opens the slide-over for the card that was clicked', async () => {
+    renderBoard()
+
+    await screen.findByText('Ongoing projects', undefined, SLOW)
+    await userEvent.click(screen.getByRole('button', { name: /This week's deadlines/ }))
+
+    expect(await screen.findByRole('heading', { name: "This week's deadlines" }, SLOW))
+      .toBeInTheDocument()
   })
 })
