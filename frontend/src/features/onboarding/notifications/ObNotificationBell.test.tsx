@@ -66,7 +66,7 @@ describe('ObNotificationBell', () => {
   it('shows at most the last few and points at the page for the rest', async () => {
     await (renderBell(), openBell())
 
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
     expect(screen.getByRole('link', { name: 'See all notifications' })).toHaveAttribute(
       'href',
       '/onboarding/notifications',
@@ -77,23 +77,23 @@ describe('ObNotificationBell', () => {
     renderBell()
     await openBell()
 
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
-    expect(screen.queryByText('Northwind Technologies Pvt Ltd is live')).not.toBeInTheDocument()
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
+    expect(screen.queryByText('GreenValley International School is live')).not.toBeInTheDocument()
   })
 
   it('links an entry at the client it is about', async () => {
     renderBell()
     await openBell()
 
-    const entry = await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
-    expect(entry.closest('a')).toHaveAttribute('href', '/onboarding/clients/3')
+    const entry = await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
+    expect(entry.closest('a')).toHaveAttribute('href', '/onboarding/clients/2')
   })
 
   it('marks one read when it is opened', async () => {
     renderBell()
     await openBell()
 
-    fireEvent.click(await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW))
+    fireEvent.click(await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW))
 
     await waitFor(() => expect(getDb().obNotifications.find((n) => n.id === 6)?.isRead).toBe(true), SLOW)
     await screen.findByRole('button', { name: 'Onboarding notifications (2 unread)' }, SLOW)
@@ -115,7 +115,7 @@ describe('ObNotificationBell', () => {
     renderBell()
     await openBell()
 
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
     expect(screen.queryByRole('button', { name: 'Mark all read' })).not.toBeInTheDocument()
   })
 
@@ -136,7 +136,7 @@ describe('ObNotificationBell', () => {
     renderBell()
     await openBell()
 
-    const entry = (await screen.findByText('Overdue by 2 days: Data Migration', undefined, SLOW)).closest('a')!
+    const entry = (await screen.findByText('Overdue by 2 days: Data migration', undefined, SLOW)).closest('a')!
     expect(within(entry).getByText('Escalation')).toBeInTheDocument()
     // Unread is stated, not only tinted — WCAG 1.4.1.
     expect(within(entry).getByText('Unread')).toBeInTheDocument()

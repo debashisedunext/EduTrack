@@ -12,12 +12,15 @@ import { ObClientDetailPage } from './ObClientDetailPage'
  * The seeded clients are the fixture, deliberately, because they are the ones
  * the rest of the module was built against:
  *
- * - **Client 1 (Northwind)** — gate cleared, two journeys, one of them
- *   `OPEN` and running with a BLOCKED step, the other `OPEN` but held behind
- *   its sibling. Every state the accordion strip has to tell apart.
- * - **Client 2 (Acme)** — gate `LOCKED` with one SUBMITTED and three PENDING
- *   mandatory tasks. The verifier's queue, and the only client where the
- *   actions on this page do anything.
+ * - **Client 1 (GreenValley)** — LIVE, gate cleared, two finished journeys.
+ *   The quiet baseline for the header and the collapsed prerequisites strip.
+ * - **Client 3 (Horizon)** — gate cleared, two journeys, one running and one
+ *   `OPEN` but held behind its sibling — the sibling-hold case.
+ * - **Client 7 (Little Scholars)** — gate `LOCKED` with one SUBMITTED, one
+ *   VERIFIED and three PENDING tasks. The verifier's queue, and the only
+ *   client where the prerequisite actions on this page do anything.
+ * - **Client 8 (Trinity)** — a running journey with a BLOCKED step, which is
+ *   what the ribbon centres on and the dots have to colour.
  */
 function renderClient(id: number) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -39,7 +42,7 @@ describe('ObClientDetailPage', () => {
   describe('the header', () => {
     it('names the client and its gate without putting identity data on screen', async () => {
       renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      await screen.findByText('GreenValley International School', undefined, SLOW)
 
       /**
        * §9's OB-05 row opens with this: "**PAN is not shown in the header**".
@@ -48,8 +51,8 @@ describe('ObClientDetailPage', () => {
        * It is what keeps a masked identity string off a screen that gets
        * shared and screenshotted all day.
        */
-      expect(screen.queryByText(/AABCN/)).not.toBeInTheDocument()
-      expect(screen.queryByText(/\*\*\*\*/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/AAGCG/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/••••/)).not.toBeInTheDocument()
     })
 
     /**
@@ -58,19 +61,19 @@ describe('ObClientDetailPage', () => {
      */
     it('has no payments card', async () => {
       renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      await screen.findByText('GreenValley International School', undefined, SLOW)
       expect(screen.queryByText(/payment/i)).not.toBeInTheDocument()
     })
   })
 
   describe('the prerequisites accordion', () => {
     /**
-     * §9: "defaults open until the gate clears, collapsed after". Acme's gate
-     * is locked, and the tasks are the only thing on the page anybody can act
-     * on while it stays that way.
+     * §9: "defaults open until the gate clears, collapsed after". Little
+     * Scholars' gate is locked, and the tasks are the only thing on the page
+     * anybody can act on while it stays that way.
      */
     it('opens itself on a client whose gate is still locked', async () => {
-      renderClient(2)
+      renderClient(7)
       const trigger = await screen.findByRole(
         'button',
         { name: /Prerequisites — \d of \d mandatory tasks verified/ },
@@ -91,7 +94,7 @@ describe('ObClientDetailPage', () => {
      * it — `ObClientPrereqs.optionalOutstanding`'s whole reason for existing.
      */
     it('reports mandatory progress as a meter in words, not only as a bar', async () => {
-      renderClient(2)
+      renderClient(7)
       const meter = await screen.findByRole('meter', { name: 'Mandatory prerequisites verified' }, SLOW)
       expect(meter).toHaveAttribute('aria-valuetext', expect.stringMatching(/^\d of \d verified$/))
     })
@@ -103,7 +106,7 @@ describe('ObClientDetailPage', () => {
      * that does not exist.
      */
     it('offers no waiver on a mandatory task', async () => {
-      renderClient(2)
+      renderClient(7)
       await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
 
       const rows = await screen.findAllByRole('listitem', undefined, SLOW)
@@ -120,7 +123,7 @@ describe('ObClientDetailPage', () => {
      * B-121's line about a dead control teaching the user the board is broken.
      */
     it('offers verify and return only on a submitted task', async () => {
-      renderClient(2)
+      renderClient(7)
       await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
 
       const verifyButtons = await screen.findAllByRole('button', { name: 'Verify' }, SLOW)
@@ -137,7 +140,7 @@ describe('ObClientDetailPage', () => {
      */
     it('will not send a return with no reason', async () => {
       const user = userEvent.setup()
-      renderClient(2)
+      renderClient(7)
       await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
 
       await user.click(await screen.findByRole('button', { name: 'Return' }, SLOW))
@@ -151,7 +154,7 @@ describe('ObClientDetailPage', () => {
 
     it('sends a submission back and the task returns to pending', async () => {
       const user = userEvent.setup()
-      renderClient(2)
+      renderClient(7)
       await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
 
       await user.click(await screen.findByRole('button', { name: 'Return' }, SLOW))
@@ -169,13 +172,13 @@ describe('ObClientDetailPage', () => {
   describe('the journey accordions', () => {
     it('draws one per purchased product, with its own step dots', async () => {
       renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      await screen.findByText('GreenValley International School', undefined, SLOW)
 
       const dotStrips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
       expect(dotStrips).toHaveLength(2)
-      // The ERP journey seeds five services, the attendance one two.
-      expect(within(dotStrips[0]).getAllByRole('img')).toHaveLength(5)
-      expect(within(dotStrips[1]).getAllByRole('img')).toHaveLength(2)
+      // The ERP journey seeds eight services, the attendance one five.
+      expect(within(dotStrips[0]).getAllByRole('img')).toHaveLength(8)
+      expect(within(dotStrips[1]).getAllByRole('img')).toHaveLength(5)
     })
 
     /**
@@ -183,13 +186,13 @@ describe('ObClientDetailPage', () => {
      * three colours is exactly the chart CLAUDE.md's WCAG line exists to stop.
      */
     it('names every dot rather than leaving colour to carry it', async () => {
-      renderClient(1)
+      renderClient(8)
       const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
       const labels = within(strips[0])
         .getAllByRole('img')
         .map((dot) => dot.getAttribute('aria-label'))
-      expect(labels).toContain('3. Data Migration — Blocked · red')
-      expect(labels[0]).toMatch(/^1\. Kickoff & Requirement Sign-off — Done/)
+      expect(labels).toContain('5. Configuration & branding — Blocked · red')
+      expect(labels[0]).toMatch(/^1\. Kickoff call — Done/)
     })
 
     /**
@@ -198,16 +201,16 @@ describe('ObClientDetailPage', () => {
      * clears prerequisites that were already cleared.
      */
     it('tells a sibling hold apart from a locked gate, and names the sibling', async () => {
-      renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      renderClient(3)
+      await screen.findByText('Horizon Academy', undefined, SLOW)
 
       expect(await screen.findByText(/^Held for /, undefined, SLOW)).toBeInTheDocument()
       expect(screen.queryByText('Prerequisites pending')).not.toBeInTheDocument()
     })
 
     it('shows a locked journey as prerequisites pending rather than as held', async () => {
-      renderClient(2)
-      await screen.findByText('Acme Private Limited', undefined, SLOW)
+      renderClient(7)
+      await screen.findByText('Little Scholars Preschool', undefined, SLOW)
 
       expect(await screen.findAllByText('Prerequisites pending', undefined, SLOW)).not.toHaveLength(0)
       expect(screen.queryByText(/^Held for /)).not.toBeInTheDocument()
@@ -222,11 +225,11 @@ describe('ObClientDetailPage', () => {
     it('does not fetch a ribbon until its accordion is expanded', async () => {
       const user = userEvent.setup()
       renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      await screen.findByText('GreenValley International School', undefined, SLOW)
 
       expect(screen.queryByRole('list', { name: 'Journey steps' })).not.toBeInTheDocument()
 
-      await user.click(screen.getByRole('button', { name: /^ERP Suite —/ }))
+      await user.click(screen.getByRole('button', { name: /^EduTrack ERP —/ }))
       expect(await screen.findByRole('list', { name: 'Journey steps' }, SLOW)).toBeInTheDocument()
     }, 15000)
 
@@ -237,15 +240,15 @@ describe('ObClientDetailPage', () => {
      */
     it('opens the step panel on the journey it is already showing', async () => {
       const user = userEvent.setup()
-      renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      renderClient(8)
+      await screen.findByText('Trinity College of Commerce', undefined, SLOW)
 
-      await user.click(screen.getByRole('button', { name: /^ERP Suite —/ }))
+      await user.click(screen.getByRole('button', { name: /^EduTrack ERP —/ }))
 
       const panel = await screen.findByTestId('journey-step-panel', undefined, SLOW)
-      // Data Migration is the ERP journey's BLOCKED step and the one the
-      // ribbon centres on, so it is the one the panel should already be on.
-      expect(within(panel).getByText('3. Data Migration')).toBeInTheDocument()
+      // Configuration & branding is the ERP journey's BLOCKED step and the one
+      // the ribbon centres on, so it is the one the panel should already be on.
+      expect(within(panel).getByText('5. Configuration & branding')).toBeInTheDocument()
     }, 15000)
   })
 
@@ -270,7 +273,7 @@ describe('ObClientDetailPage', () => {
 
       try {
         renderClient(1)
-        await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+        await screen.findByText('GreenValley International School', undefined, SLOW)
 
         const triggers = screen.getAllByRole('button', { name: /complete/ })
         await user.click(triggers[0])

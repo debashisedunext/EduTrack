@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import * as React from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
-import { toQueryParams, useObClientFilters } from './useObClientFilters'
+import { isContradictory, toQueryParams, useObClientFilters } from './useObClientFilters'
 
 /**
  * B-108 · OB-03's filter state, which lives in the URL.
@@ -122,5 +122,35 @@ describe('useObClientFilters', () => {
     const { result } = renderFilters('/onboarding/clients?q=%20%20north%20%20')
 
     expect(toQueryParams(result.current.filters).q).toBe('north')
+  })
+
+  /**
+   * The mockup's Health select offers "Live", which is a status in the
+   * contract, not a colour. The hook accepts it as a health value and
+   * `toQueryParams` translates on the way out, so the server never sees a
+   * fourth RAG.
+   */
+  it('translates Health "Live" to status=LIVE and sends no rag', () => {
+    const { result } = renderFilters('/onboarding/clients?rag=LIVE')
+
+    expect(result.current.filters.rag).toBe('LIVE')
+    const params = toQueryParams(result.current.filters)
+    expect(params.status).toBe('LIVE')
+    expect(params.rag).toBeUndefined()
+  })
+
+  it('flags Health "Live" under an explicit non-Live status as contradictory, never overriding it', () => {
+    const { result } = renderFilters('/onboarding/clients?status=ONBOARDING&rag=LIVE')
+
+    expect(isContradictory(result.current.filters)).toBe(true)
+    // Redundant rather than contradictory: both say LIVE.
+    const agreeing = renderFilters('/onboarding/clients?status=LIVE&rag=LIVE')
+    expect(isContradictory(agreeing.result.current.filters)).toBe(false)
+  })
+
+  it('flags a colour on a locked gate as contradictory', () => {
+    const { result } = renderFilters('/onboarding/clients?gateStatus=LOCKED&rag=RED')
+
+    expect(isContradictory(result.current.filters)).toBe(true)
   })
 })

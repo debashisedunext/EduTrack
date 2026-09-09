@@ -8,10 +8,15 @@ import {
 import type { ObNotificationTemplate } from '@/api/generated/model/obNotificationTemplate';
 import http, { ApiError } from '@/api/http';
 import { Button } from '@/components/ui/button';
+import { Chip } from '@/components/ui/chip';
 import { Input } from '@/components/ui/input';
 
 /**
- * OB-12 — email templates. B-113.
+ * OB-12 — notification templates. B-113.
+ *
+ * Layout follows the prototype's `vMsgTpl()` in `docs/prototype/onboarding.html`:
+ * one card per template — name, a channel chip, an approval chip, and the body
+ * in a monospace block on the subtle background.
  *
  * ## Three things the screen has to say that the row does not
  *
@@ -21,9 +26,12 @@ import { Input } from '@/components/ui/input';
  * "Always sent" and no switch at all. A disabled checkbox still invites a click.
  *
  * **Not deliverable.** Phase 2 sends email only; a `WHATSAPP` template can be
- * authored and stored and nothing will dispatch it. Saying so on the row is the
- * whole reason `isDeliverable` exists — otherwise the admin configures something
- * that queues forever looking correct.
+ * authored and stored and nothing will dispatch it. The prototype renders that
+ * as the amber "Pending approval" chip — WhatsApp business templates wait on
+ * provider approval, and until an adapter exists nothing sends them — where a
+ * deliverable channel wears the green "Approved" chip. Saying so on the row is
+ * the whole reason `isDeliverable` exists; otherwise the admin configures
+ * something that queues forever looking correct.
  *
  * **The merge tags.** Served by the vocabulary rather than held here, because a
  * client with its own copy is a second copy of the server's list and a new event
@@ -53,11 +61,14 @@ export function ObTemplatesPage() {
   const [editing, setEditing] = React.useState<number | null>(null);
 
   if (templates.isPending) {
-    return <p className="p-6 text-sm text-slate-500">Loading…</p>;
+    return <p className="p-6 text-sm text-content-muted">Loading…</p>;
   }
   if (templates.isError) {
     return (
-      <p role="alert" className="m-6 rounded-md bg-red-50 p-3 text-sm text-red-800">
+      <p
+        role="alert"
+        className="m-6 rounded-card bg-level-critical-soft p-3 text-sm text-danger-text"
+      >
         {templates.error instanceof ApiError && templates.error.status === 403
           ? 'Notification templates are OB Admin only.'
           : 'These templates could not be loaded.'}
@@ -68,16 +79,22 @@ export function ObTemplatesPage() {
   const rows = templates.data?.data ?? [];
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold text-slate-900">Email templates</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        The wording of every notification this module sends. Escalation and sign-off mail
-        cannot be switched off.
-      </p>
+    <div className="mx-auto w-full max-w-4xl p-6">
+      <header>
+        <h1 className="text-h1 text-content">Notification templates</h1>
+        <p className="mt-0.5 text-sm text-content-muted">
+          WhatsApp business templates need provider approval — submit them early;
+          approval takes days to weeks. Escalation and sign-off mail cannot be switched
+          off.
+        </p>
+      </header>
 
-      <ul className="mt-6 space-y-3">
+      <ul className="mt-6 flex flex-col gap-3">
         {rows.map((template) => (
-          <li key={template.id} className="rounded-lg border border-slate-200 p-4">
+          <li
+            key={template.id}
+            className="rounded-card border border-border bg-surface p-4 shadow-rest sm:px-5"
+          >
             <TemplateRow
               template={template}
               mergeTags={vocabulary.data?.data.mergeTags ?? []}
@@ -93,6 +110,25 @@ export function ObTemplatesPage() {
       </ul>
     </div>
   );
+}
+
+/** The prototype's channel chips — WhatsApp green, Email blue, in-app neutral. */
+function ChannelChip({ channel }: { channel: ObNotificationTemplate['channel'] }) {
+  if (channel === 'WHATSAPP') {
+    return (
+      <Chip variant="success">
+        <span aria-hidden="true">💬</span> WhatsApp
+      </Chip>
+    );
+  }
+  if (channel === 'EMAIL') {
+    return (
+      <Chip variant="info">
+        <span aria-hidden="true">✉</span> Email
+      </Chip>
+    );
+  }
+  return <Chip variant="neutral">In-app</Chip>;
 }
 
 function TemplateRow({
@@ -131,31 +167,46 @@ function TemplateRow({
 
   return (
     <>
-      <div className="flex items-baseline justify-between gap-4">
-        <div>
-          <p className="font-mono text-sm text-slate-900">{template.eventCode}</p>
-          <p className="text-xs text-slate-500">
-            {template.category} · {template.channel} · to {template.recipients?.join(', ')}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-mono text-sm font-semibold text-content">
+          {template.eventCode}
+        </h2>
+        <ChannelChip channel={template.channel} />
+        {template.isDeliverable ? (
+          <Chip variant="success">
+            <span aria-hidden="true">✓</span> Approved
+          </Chip>
+        ) : (
+          <Chip
+            variant="warning"
+            title="Authored, not yet sending — no adapter dispatches this channel in this deployment"
+          >
+            <span aria-hidden="true">⏳</span> Pending approval
+          </Chip>
+        )}
+        <span className="flex-1" />
+        <span className="flex items-center gap-3 text-xs">
           {template.isMandatory ? (
             // A locked statement, not a disabled control — a greyed switch
             // still invites a click, and its only outcome would be a 409.
-            <span className="rounded bg-slate-100 px-2 py-1 text-slate-700">Always sent</span>
+            <Chip variant="neutral">Always sent</Chip>
           ) : (
-            <span className="text-slate-500">{template.isActive ? 'On' : 'Off'}</span>
+            <span className="text-content-muted">{template.isActive ? 'On' : 'Off'}</span>
           )}
-          {!template.isDeliverable ? (
-            <span className="rounded bg-amber-50 px-2 py-1 text-amber-900">
-              Authored, not yet sending
-            </span>
-          ) : null}
           {!isEditing ? (
-            <Button variant="secondary" onClick={onEdit}>Edit wording</Button>
+            <Button variant="secondary" size="sm" onClick={onEdit}>Edit wording</Button>
           ) : null}
-        </div>
+        </span>
       </div>
+      <p className="mt-1 text-caption text-content-muted">
+        {template.category} · to {template.recipients?.join(', ')}
+      </p>
+
+      {!isEditing ? (
+        <p className="mt-2.5 whitespace-pre-wrap rounded-control bg-subtle px-3 py-2.5 font-mono text-caption text-content">
+          {template.bodyTemplate}
+        </p>
+      ) : null}
 
       {isEditing ? (
         <form
@@ -167,14 +218,20 @@ function TemplateRow({
           }}
         >
           {error ? (
-            <p role="alert" className="mb-3 rounded-md bg-red-50 p-3 text-sm text-red-800">
+            <p
+              role="alert"
+              className="mb-3 rounded-card bg-level-critical-soft p-3 text-sm text-danger-text"
+            >
               {error}
             </p>
           ) : null}
 
           {template.channel === 'EMAIL' ? (
             <>
-              <label htmlFor={`subject-${template.id}`} className="block text-sm font-medium text-slate-700">
+              <label
+                htmlFor={`subject-${template.id}`}
+                className="block text-sm font-medium text-content"
+              >
                 Subject
               </label>
               <Input
@@ -187,12 +244,15 @@ function TemplateRow({
             </>
           ) : null}
 
-          <label htmlFor={`body-${template.id}`} className="mt-3 block text-sm font-medium text-slate-700">
+          <label
+            htmlFor={`body-${template.id}`}
+            className="mt-3 block text-sm font-medium text-content"
+          >
             Body
           </label>
           <textarea
             id={`body-${template.id}`}
-            className="mt-1 w-full rounded-md border border-slate-300 p-2 font-mono text-sm"
+            className="mt-1 w-full rounded-control border border-border bg-surface p-3 font-mono text-sm text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
             rows={6}
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -200,16 +260,16 @@ function TemplateRow({
             required
           />
 
-          <p className="mt-2 text-xs text-slate-500">
-            Merge tags — click to insert. A tag that is not on this list is refused when you
-            save, because it would reach the client as literal braces.
+          <p className="mt-2 text-caption text-content-muted">
+            Merge tags — click to insert. A tag that is not on this list is refused when
+            you save, because it would reach the client as literal braces.
           </p>
           <div className="mt-1 flex flex-wrap gap-1">
             {mergeTags.map((tag) => (
               <button
                 key={tag}
                 type="button"
-                className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
+                className="rounded-control bg-subtle px-2 py-1 font-mono text-xs text-content-muted transition-colors hover:bg-primary-soft hover:text-primary"
                 onClick={() => setBody((current) => current + tag)}
               >
                 {tag}

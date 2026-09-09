@@ -44,16 +44,34 @@ describe('healthChip', () => {
     )
   })
 
-  it('uses the module’s own colour vocabulary, not GREEN/AMBER/RED', () => {
+  it('uses the mockup’s vocabulary, not GREEN/AMBER/RED', () => {
     expect(healthChip(client({ rag: 'GREEN' })).label).toBe('On track')
     expect(healthChip(client({ rag: 'AMBER' })).label).toBe('At risk')
-    expect(healthChip(client({ rag: 'RED' })).label).toBe('Breached')
+    // One chip for breached and blocked — the mockup's RED label.
+    expect(healthChip(client({ rag: 'RED' })).label).toBe('Breached / blocked')
   })
 
   it('maps each colour to the chip variant the rest of the module uses', () => {
     expect(healthChip(client({ rag: 'GREEN' })).variant).toBe('success')
     expect(healthChip(client({ rag: 'AMBER' })).variant).toBe('warning')
     expect(healthChip(client({ rag: 'RED' })).variant).toBe('danger')
+  })
+
+  /**
+   * The mockup's `clientRag` puts LIVE first: a live client's health chip is
+   * "● Live" whatever colour a post-go-live journey carries — the list has no
+   * Status column, so the chip is where liveness reads.
+   */
+  it('folds LIVE into the chip and lets it win over a colour', () => {
+    const chip = healthChip(client({ status: 'LIVE', rag: 'AMBER' }))
+    expect(chip.label).toBe('Live')
+    expect(chip.variant).toBe('success')
+    expect(chip.glyph).toBe('●')
+  })
+
+  it('keeps the glyph out of the label so screen readers hear only the words', () => {
+    expect(healthChip(client({ rag: 'GREEN' })).label).not.toMatch(/[✓⚠●⏸🔒]/u)
+    expect(healthChip(client({ gateStatus: 'LOCKED', rag: null })).glyph).toBe('🔒')
   })
 
   /**
@@ -88,7 +106,9 @@ describe('statusChip', () => {
 
 describe('journeyProgress', () => {
   it('reads complete over bought', () => {
-    expect(journeyProgress(client({ journeyCount: 5, journeysComplete: 2 })).label).toBe('2 / 5')
+    expect(journeyProgress(client({ journeyCount: 5, journeysComplete: 2 })).label).toBe(
+      '2 / 5 complete',
+    )
   })
 
   /**
@@ -98,7 +118,7 @@ describe('journeyProgress', () => {
    */
   it('reads an absent journeysComplete as none complete, not as unknown', () => {
     expect(journeyProgress(client({ journeyCount: 3, journeysComplete: undefined })).label).toBe(
-      '0 / 3',
+      '0 / 3 complete',
     )
   })
 
@@ -106,10 +126,11 @@ describe('journeyProgress', () => {
     expect(journeyProgress(client({ journeyCount: 0 })).label).toBe('No products')
   })
 
-  it('does not pluralise a single journey in the hint', () => {
-    expect(journeyProgress(client({ journeyCount: 1, journeysComplete: 1 })).hint).toContain(
-      '1 journey complete',
-    )
+  /** The mockup's Current step column says "Journeys complete" when every journey is done. */
+  it('uses the mockup’s copy when everything is finished', () => {
+    const done = journeyProgress(client({ journeyCount: 1, journeysComplete: 1 }))
+    expect(done.label).toBe('Journeys complete')
+    expect(done.complete).toBe(true)
   })
 })
 

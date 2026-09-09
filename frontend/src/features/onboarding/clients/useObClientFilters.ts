@@ -36,10 +36,22 @@ import type { ObRag } from '@/api/generated/model/obRag'
  * control on this screen, because "my clients" is what an implementor opens it
  * for, and it is why the row itself carries no owner column to sort by.
  */
+/**
+ * The Health select's vocabulary — the three colours plus the mockup's `LIVE`.
+ *
+ * `LIVE` is not an `ObRag`: the contract's health filter knows only colours,
+ * and a live client is a *status*. The mockup's Health select nonetheless
+ * offers "Live", because its chip column folds the two (a live client's chip
+ * is "● Live", never a colour). So the UI value exists here and
+ * `toQueryParams` translates it to `status=LIVE` on the way out — the server
+ * never sees a fourth colour.
+ */
+export type ObHealthFilter = ObRag | 'LIVE'
+
 export interface ObClientFilters {
   q: string
   status: ObClientStatus | null
-  rag: ObRag | null
+  rag: ObHealthFilter | null
   gateStatus: ObGateStatus | null
   productId: number | null
   salesPersonId: number | null
@@ -68,7 +80,7 @@ const NUMERIC_KEYS = ['productId', 'salesPersonId', 'ownerId'] as const
  * dropped here, where the chip and the request both read the same parsed state.
  */
 const STATUSES: readonly ObClientStatus[] = ['ONBOARDING', 'LIVE', 'ON_HOLD', 'DROPPED']
-const RAGS: readonly ObRag[] = ['GREEN', 'AMBER', 'RED']
+const RAGS: readonly ObHealthFilter[] = ['GREEN', 'AMBER', 'RED', 'LIVE']
 const GATES: readonly ObGateStatus[] = ['LOCKED', 'OPEN']
 
 function oneOf<T extends string>(allowed: readonly T[], raw: string | null): T | null {
@@ -148,12 +160,25 @@ export function useObClientFilters() {
   return { filters, setFilter, resetFilters, activeCount }
 }
 
+/**
+ * The one Health value with no server-side counterpart: `LIVE` combined with
+ * an explicit non-LIVE status asks for a client that is both live and not.
+ * The page skips the request and explains, rather than letting
+ * `toQueryParams`' translation quietly override the status the user chose.
+ */
+export function isContradictory(filters: ObClientFilters): boolean {
+  if (filters.gateStatus === 'LOCKED' && filters.rag != null) return true
+  if (filters.rag === 'LIVE' && filters.status != null && filters.status !== 'LIVE') return true
+  return false
+}
+
 /** The filters as `listObClients`' query parameters. */
 export function toQueryParams(filters: ObClientFilters): ListObClientsParams {
+  const healthAsStatus = filters.rag === 'LIVE'
   return {
     q: filters.q.trim() || undefined,
-    status: filters.status ?? undefined,
-    rag: filters.rag ?? undefined,
+    status: healthAsStatus ? 'LIVE' : (filters.status ?? undefined),
+    rag: healthAsStatus ? undefined : ((filters.rag as ObRag | null) ?? undefined),
     gateStatus: filters.gateStatus ?? undefined,
     productId: filters.productId ?? undefined,
     salesPersonId: filters.salesPersonId ?? undefined,

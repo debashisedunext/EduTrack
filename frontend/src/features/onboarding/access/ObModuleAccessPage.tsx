@@ -206,7 +206,22 @@ export function ObModuleAccessPage() {
               return (
                 <tr key={user.id} className="border-b border-border last:border-0">
                   <th scope="row" className="px-4 py-2 text-left font-normal text-content">
-                    {user.displayName}
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-bold text-primary"
+                      >
+                        {initialsOf(user.displayName)}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold">{user.displayName}</span>
+                        {user.email && (
+                          <span className="block truncate text-caption text-content-muted">
+                            {user.email}
+                          </span>
+                        )}
+                      </span>
+                    </span>
                   </th>
 
                   <td className="px-4 py-2">
@@ -286,6 +301,16 @@ export function ObModuleAccessPage() {
       </p>
     </div>
   )
+}
+
+function initialsOf(name: string | undefined | null): string {
+  if (!name) return '?'
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
 }
 
 /** Who last opened or closed this person's access, from the grant itself. */

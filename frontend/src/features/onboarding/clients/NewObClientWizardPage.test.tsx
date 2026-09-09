@@ -10,7 +10,10 @@ import { getDb } from '@/mocks/db'
 import { NewObClientWizardPage } from './NewObClientWizardPage'
 
 /**
- * B-109 · OB-04 against the mock server.
+ * B-109 · OB-04 against the mock server, on the mockup's flow: "Client
+ * basics" → "SPOC contacts" → "Commercials" → "Requirements & journeys",
+ * with a Continue button that answers an invalid step with a banner rather
+ * than sitting disabled.
  *
  * Mounted through `Routes`, on `ObClientListPage.test.tsx`'s precedent, but
  * for a different reason here: the assertion that matters most —
@@ -25,6 +28,7 @@ function renderWizard() {
         <Routes>
           <Route path="/onboarding/clients/new" element={<NewObClientWizardPage />} />
           <Route path="/onboarding/clients/:obClientId" element={<p>client detail</p>} />
+          <Route path="/onboarding/clients" element={<p>client list</p>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -38,52 +42,77 @@ vi.setConfig({ testTimeout: 20000 })
 
 const SLOW = { timeout: 8000 }
 
-async function fillStep1(name: string) {
+/** PAN is required on step 1 now (the mockup's own guard), so each test brings its own. */
+async function fillStep1(name: string, pan: string) {
   fireEvent.change(await screen.findByLabelText(/Client name/), { target: { value: name } })
-  fireEvent.change(screen.getByLabelText(/Onboarding date/), { target: { value: '2026-09-09' } })
+  fireEvent.change(screen.getByLabelText(/^PAN/), { target: { value: pan } })
+  fireEvent.change(screen.getByLabelText(/Date of onboarding/), { target: { value: '2026-09-09' } })
 }
 
 function goNext() {
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Continue →' }))
 }
 
 async function fillStep2() {
-  await waitFor(() => expect(screen.getByRole('heading', { name: 'Contacts' })).toBeTruthy())
-  fireEvent.change(screen.getByLabelText('Contact name'), { target: { value: 'A Person' } })
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'SPOC contacts' })).toBeTruthy())
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'A Person' } })
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@example.com' } })
 }
 
-/** The first product whose template checkbox is not disabled. */
-async function selectAProduct() {
-  await waitFor(() => expect(screen.getByRole('heading', { name: 'Products' })).toBeTruthy())
-  const boxes = (await screen.findAllByRole('checkbox', undefined, SLOW)) as HTMLInputElement[]
-  const selectable = boxes.find((b) => !b.disabled)
-  expect(selectable).toBeTruthy()
-  fireEvent.click(selectable!)
+/** Commercials — one application row, which is also step 4's checked product. */
+async function addAnApplication() {
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Commercials' })).toBeTruthy())
+  // Disabled until the product catalogue has loaded — wait it out, or the
+  // click lands on a button that cannot add anything yet.
+  const add = await screen.findByRole('button', { name: '+ Add application' }, SLOW)
+  await waitFor(() => expect(add).not.toBeDisabled(), SLOW)
+  fireEvent.click(add)
+  await screen.findByLabelText('Application', undefined, SLOW)
+}
+
+async function fillStep4() {
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Requirements & journeys' })).toBeTruthy())
+  fireEvent.change(screen.getByLabelText(/Client requirements/), {
+    target: { value: 'Migrate data and train the office staff.' },
+  })
+}
+
+function clickCreate() {
+  fireEvent.click(screen.getByRole('button', { name: /Create client — journeys instantiate/ }))
 }
 
 describe('NewObClientWizardPage', () => {
-  it('keeps Next disabled until the required fields on the current step are filled', async () => {
+  it('answers an invalid Continue with the mockup’s error banner, naming the first problem', async () => {
     renderWizard()
     await screen.findByLabelText(/Client name/, undefined, SLOW)
 
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    goNext()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Client name is required.')
 
-    await fillStep1('Wizard Smoke Academy')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).not.toBeDisabled())
+    // Name alone is not enough — the mockup requires a well-formed PAN too.
+    fireEvent.change(screen.getByLabelText(/Client name/), {
+      target: { value: 'Wizard Smoke Academy' },
+    })
+    goNext()
+    expect(await screen.findByRole('alert')).toHaveTextContent('PAN must look like ABCDE1234F.')
+
+    await fillStep1('Wizard Smoke Academy', 'AAAAA1111A')
+    goNext()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'SPOC contacts' })).toBeTruthy())
   })
 
   it('boards a client end to end and lands on its detail page', async () => {
     renderWizard()
-    await fillStep1('Wizard Happy Path Academy')
+    await fillStep1('Wizard Happy Path Academy', 'BBBBB2222B')
     goNext()
     await fillStep2()
     goNext()
-    await selectAProduct()
+    await addAnApplication()
     goNext()
-
-    await screen.findByRole('heading', { name: 'Review & create' })
-    fireEvent.click(screen.getByRole('button', { name: 'Create client' }))
+    await fillStep4()
+    clickCreate()
 
     await screen.findByText('client detail', undefined, SLOW)
 
@@ -94,6 +123,25 @@ describe('NewObClientWizardPage', () => {
     // journeys and no checklist is exactly the half-state the create is
     // supposed to refuse to leave behind.
     expect(getDb().obClientPrereqs.some((h) => h.obClientId === created!.id)).toBe(true)
+  })
+
+  it('refuses to finish without requirements — the mockup marks them required', async () => {
+    renderWizard()
+    await fillStep1('Wizard Requirements Academy', 'EEEEE5555E')
+    goNext()
+    await fillStep2()
+    goNext()
+    await addAnApplication()
+    goNext()
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Requirements & journeys' })).toBeTruthy())
+    clickCreate()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Capture at least one line of client requirements.',
+    )
+    expect(getDb().obClients.some((c) => c.name === 'Wizard Requirements Academy')).toBe(false)
   })
 
   /**
@@ -119,16 +167,16 @@ describe('NewObClientWizardPage', () => {
     )
 
     renderWizard()
-    await fillStep1('Wizard Portal Login Academy')
+    await fillStep1('Wizard Portal Login Academy', 'CCCCC3333C')
     goNext()
     await fillStep2()
     goNext()
-    await selectAProduct()
+    await addAnApplication()
     goNext()
+    await fillStep4()
 
-    await screen.findByRole('heading', { name: 'Review & create' })
     fireEvent.click(screen.getByLabelText('Create client portal login now'))
-    fireEvent.click(screen.getByRole('button', { name: 'Create client' }))
+    clickCreate()
 
     await screen.findByText(/Portal logins are not available from this screen yet/, undefined, SLOW)
     expect(screen.getByLabelText('Create client portal login now')).not.toBeChecked()
@@ -136,21 +184,20 @@ describe('NewObClientWizardPage', () => {
 
   it('offers to create anyway when only a similar name stops the create, and does not lose the rest of the form', async () => {
     renderWizard()
-    await fillStep1('Acme Private Limited')
+    await fillStep1('Sunrise EdTech Pvt Ltd', 'DDDDD4444D')
     goNext()
     await fillStep2()
     goNext()
-    await selectAProduct()
+    await addAnApplication()
     goNext()
-
-    await screen.findByRole('heading', { name: 'Review & create' })
-    fireEvent.click(screen.getByRole('button', { name: 'Create client' }))
+    await fillStep4()
+    clickCreate()
 
     await screen.findByText(/very similar name already exists/, undefined, SLOW)
     fireEvent.click(screen.getByRole('button', { name: /create anyway/i }))
 
     await screen.findByText('client detail', undefined, SLOW)
-    expect(getDb().obClients.filter((c) => c.name === 'Acme Private Limited')).toHaveLength(2)
+    expect(getDb().obClients.filter((c) => c.name === 'Sunrise EdTech Pvt Ltd')).toHaveLength(2)
   })
 
   it('refuses to board anyone while nothing is published on OB-14, and writes nothing', async () => {
@@ -158,15 +205,14 @@ describe('NewObClientWizardPage', () => {
     for (const version of db.obPrereqVersions) version.isActive = false
 
     renderWizard()
-    await fillStep1('Wizard No Checklist Academy')
+    await fillStep1('Wizard No Checklist Academy', 'FFFFF6666F')
     goNext()
     await fillStep2()
     goNext()
-    await selectAProduct()
+    await addAnApplication()
     goNext()
-
-    await screen.findByRole('heading', { name: 'Review & create' })
-    fireEvent.click(screen.getByRole('button', { name: 'Create client' }))
+    await fillStep4()
+    clickCreate()
 
     await screen.findByText(/no prerequisites checklist is published yet/i, undefined, SLOW)
     expect(screen.queryByText('client detail')).toBeNull()

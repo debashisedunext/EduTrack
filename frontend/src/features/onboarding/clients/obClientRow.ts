@@ -1,11 +1,17 @@
 import type { ObClient } from '@/api/generated/model/obClient'
 import type { ObClientStatus } from '@/api/generated/model/obClientStatus'
 
-import { ragLabel, ragVariant } from '../journey/clientDetail/journeyStrip'
+import { ragVariant } from '../journey/clientDetail/journeyStrip'
 
 export type ChipVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 
 export interface RowChip {
+  /**
+   * The mockup's glyph — ● ✓ ⚠ ⏸ 🔒 — rendered `aria-hidden` beside the label,
+   * never inside it, so a screen reader hears the words and a test can match
+   * the label alone.
+   */
+  glyph: string
   label: string
   variant: ChipVariant
   /** The tooltip and the accessible description — why the chip says what it says. */
@@ -34,28 +40,52 @@ export interface RowChip {
  *    whose journeys are all complete or archived. Neutral, because a client
  *    with nothing running is not a problem.
  *
- * `LIVE` is deliberately *not* folded in. It is `ObClientStatus`, it has its
- * own column, and a client can be live and amber on a journey bought after
- * go-live — collapsing the two would hide the second.
+ * `LIVE` *is* folded in, which reverses this file's earlier position: the
+ * OB-03 mockup (`docs/prototype/onboarding.html`, `clientRag`) has no Status
+ * column at all — a live client's health chip **is** "● Live", and it wins
+ * over any colour a post-go-live journey may carry. The colour is still on
+ * the detail page; the list shows the mockup's six-chip vocabulary.
  */
-export function healthChip(client: Pick<ObClient, 'gateStatus' | 'rag'>): RowChip {
+export function healthChip(client: Pick<ObClient, 'gateStatus' | 'rag' | 'status'>): RowChip {
+  if (client.status === 'LIVE') {
+    return {
+      glyph: '●',
+      label: 'Live',
+      variant: 'success',
+      hint: 'This client has gone live.',
+    }
+  }
   if (client.gateStatus === 'LOCKED') {
     return {
+      glyph: '🔒',
       label: 'Prerequisites pending',
-      variant: 'info',
+      variant: 'neutral',
       hint: 'No journey has started — the prerequisite gate is still closed, so nothing is running to colour.',
     }
   }
   const rag = client.rag ?? null
   if (rag == null) {
     return {
+      glyph: '⏸',
       label: 'Not started',
       variant: 'neutral',
       hint: 'The gate is open and no service is running — every journey is finished or archived.',
     }
   }
+  if (rag === 'RED') {
+    // The mockup's copy: RED is one chip for breached *and* blocked, because
+    // both are "our clock ran out or cannot run" — the detail page separates
+    // them.
+    return {
+      glyph: '⚠',
+      label: 'Breached / blocked',
+      variant: 'danger',
+      hint: 'Worst health across this client’s open journeys.',
+    }
+  }
   return {
-    label: ragLabel(rag),
+    glyph: rag === 'GREEN' ? '✓' : '⚠',
+    label: rag === 'GREEN' ? 'On track' : 'At risk',
     variant: ragVariant(rag),
     hint: 'Worst health across this client’s open journeys.',
   }
@@ -87,6 +117,8 @@ export function statusChip(status: ObClientStatus): { label: string; variant: Ch
 export function journeyProgress(client: Pick<ObClient, 'journeyCount' | 'journeysComplete'>): {
   label: string
   hint: string
+  /** Every journey done — the mockup's "Journeys complete" state for the Current step column. */
+  complete: boolean
 } {
   const total = client.journeyCount ?? 0
   const done = client.journeysComplete ?? 0
@@ -94,11 +126,20 @@ export function journeyProgress(client: Pick<ObClient, 'journeyCount' | 'journey
     return {
       label: 'No products',
       hint: 'This client has bought nothing yet, so there is no journey to run.',
+      complete: false,
+    }
+  }
+  if (done >= total) {
+    return {
+      label: 'Journeys complete',
+      hint: `All ${total} ${total === 1 ? 'journey is' : 'journeys are'} complete.`,
+      complete: true,
     }
   }
   return {
-    label: `${done} / ${total}`,
+    label: `${done} / ${total} complete`,
     hint: `${done} of ${total} ${total === 1 ? 'journey' : 'journeys'} complete.`,
+    complete: false,
   }
 }
 

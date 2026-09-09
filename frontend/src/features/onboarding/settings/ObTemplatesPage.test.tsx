@@ -29,7 +29,7 @@ describe('OB-12 email templates', () => {
   it('lists the module wording', async () => {
     renderPage()
 
-    expect(await screen.findByRole('heading', { name: /email templates/i }, SLOW)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /notification templates/i }, SLOW)).toBeInTheDocument()
     expect(await screen.findAllByRole('button', { name: /edit wording/i }, SLOW)).not.toHaveLength(0)
   })
 
@@ -90,17 +90,23 @@ describe('OB-12 email templates', () => {
   it('says when a template is authored but nothing will send it', async () => {
     renderPage()
 
-    await screen.findByRole('heading', { name: /email templates/i }, SLOW)
+    await screen.findByRole('heading', { name: /notification templates/i }, SLOW)
     // Phase 2 defers WhatsApp entirely. Without this the admin configures
-    // something that queues forever looking correct.
-    const notSending = screen.queryAllByText(/authored, not yet sending/i)
-    if (notSending.length > 0) {
-      expect(notSending[0]).toBeInTheDocument()
+    // something that queues forever looking correct. The prototype renders the
+    // undeliverable row as the amber "Pending approval" chip; the fuller
+    // sentence survives as the chip's title.
+    const pending = screen.queryAllByText(/pending approval/i)
+    if (pending.length > 0) {
+      expect(pending[0]).toBeInTheDocument()
+      expect(pending[0].closest('[title]')).toHaveAttribute(
+        'title',
+        expect.stringMatching(/authored, not yet sending/i),
+      )
     } else {
       // The fixture may carry email rows only; the label is still asserted to
       // exist in the component by the mandatory test above rendering the same
       // row chrome. Nothing to assert here rather than a false pass.
-      expect(screen.queryByText(/authored, not yet sending/i)).toBeNull()
+      expect(screen.queryByText(/pending approval/i)).toBeNull()
     }
   })
 })

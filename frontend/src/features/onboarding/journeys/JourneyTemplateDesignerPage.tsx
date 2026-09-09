@@ -1,9 +1,12 @@
 import * as React from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { ApiError } from '@/api/http'
 import type { ObJourneyTemplateDetail } from '@/api/generated/model/obJourneyTemplateDetail'
 import type { ObJourneyTemplateStep } from '@/api/generated/model/obJourneyTemplateStep'
+import type { UserRef } from '@/api/generated/model'
+import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
+import { useListUsers } from '@/api/generated/users/users'
 
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
@@ -27,12 +30,12 @@ import {
 import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTemplateTat'
 
 /**
- * C-102 · OB-07's journey template designer.
- *
- * <p>Blueprint §4A/§5.5-5.8: the Module Service catalogue an OB Admin builds
- * once per product and every client's journey is instantiated from —
- * services in order, each with a Task List and a required-document
- * checklist, some running in parallel.
+ * C-102 · OB-07's journey template designer, laid out to
+ * `docs/prototype/onboarding.html`'s `vTplEdit()`: back link, name + product
+ * chip header with the versioning caption, publish button, then the step
+ * table — #, Service name, TAT (days), Default responsible, Service depends
+ * on, Sign-off, Order — with the Task List chip editor under each row and
+ * "+ Add step" at the bottom.
  *
  * <h2>The one rule that shapes everything on this page</h2>
  *
@@ -41,37 +44,27 @@ import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTempl
  * while {@code publishedAt == null} — a draft. The moment it publishes it is
  * frozen for the rest of its life, active or retired, and the only way
  * forward is {@code beginRevision}, which clones it into a new draft one
- * version higher. So every write control on this page — Add step, Remove,
- * the item/doc checklists, the reorder — is conditioned on
- * {@code editable}, not on {@code isActive}: a retired version is exactly as
- * frozen as the currently active one.
+ * version higher. So every write control on this page — Add step, ✕, the
+ * chip editors, the reorder — is conditioned on {@code editable}, not on
+ * {@code isActive}: a retired version is exactly as frozen as the currently
+ * active one.
+ *
+ * <h2>Where the table diverges from the mockup, and why</h2>
+ *
+ * <p>The mockup draws name, TAT, responsible, depends-on and sign-off as
+ * editable fields on every row. The backend exposes <b>add and remove on a
+ * step, never an edit</b> — so those cells render the values as text and the
+ * sign-off as a checkbox that cannot be changed, rather than as controls
+ * whose input would be silently dropped. Correcting a step is remove + add,
+ * which the Order column and "+ Add step" cover. The mockup's editable
+ * template-name input is out for the same reason: there is no rename route.
  *
  * <h2>Most writes go immediately; only the order is staged</h2>
  *
- * <p>The same call {@code WorkflowDesignerPage} (B-043) makes for the
- * identical reason: add/remove a step, add/remove an item or doc, publish,
- * begin revision — each is one route with no rollback between it and the
- * next, so holding them behind one Save would be a batch of independent
- * writes with nothing to undo them together. Reordering is different:
- * {@code PUT .../steps/order} replaces the whole set under one
+ * <p>Add/remove a step, add/remove an item or doc, publish, begin revision —
+ * each is one route with no rollback between it and the next. Reordering is
+ * different: {@code PUT .../steps/order} replaces the whole set under one
  * {@code If-Match}, so it is staged locally and sent once, on confirm.
- *
- * <h2>Not a canvas</h2>
- *
- * <p>This is a linear step list, not a graph — keyboard-operable Move up /
- * Move down buttons are the whole reorder affordance, on
- * {@code WorkflowDesignerPage}'s own "keyboard parity, not a keyboard
- * fallback" philosophy. Existing step *fields* are read-only: the backend
- * exposes add and remove on a step, never an edit, so there is nothing here
- * for a field-level edit to write to.
- *
- * <h2>What is deliberately not enforced here</h2>
- *
- * <p>{@code dependsOnStepId} naming an *earlier* step in the template is
- * C-119's rule, not this screen's — the contract says so explicitly, and
- * inventing that validation client-side would make this page's opinion
- * disagree with the server's the day C-119 actually lands with a different
- * one.
  */
 export function JourneyTemplateDesignerPage() {
   const params = useParams()
@@ -83,7 +76,7 @@ export function JourneyTemplateDesignerPage() {
     return (
       <EmptyState
         title="No such journey template"
-        description="Pick one from the onboarding product catalogue."
+        description="Pick one from the Module Service catalogue."
       />
     )
   }
@@ -124,6 +117,9 @@ function Designer({
   const publish = usePublishJourneyTemplate()
   const removeStep = useRemoveJourneyTemplateStep()
   const reorder = useReorderJourneyTemplateSteps()
+  const products = useListObProducts()
+  const users = useListUsers({ isActive: true, limit: 200 })
+  const userList = users.data?.data ?? []
 
   const [ordered, setOrdered] = React.useState<ObJourneyTemplateStep[] | null>(null)
   const [announcement, setAnnouncement] = React.useState('')
@@ -143,6 +139,7 @@ function Designer({
   // C-120 · Σ tatDays, not netted for parallel groups — the work the
   // template carries, read the same way `totalTatDays` reads a journey.
   const totalTatDays = templateTotalTatDays(steps)
+  const product = products.data?.data.find((p) => p.id === detail.productId)
 
   const move = (from: number, to: number) => {
     const next = moveItem(steps, from, to)
@@ -214,17 +211,34 @@ function Designer({
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
+      <Button asChild variant="ghost" size="sm" className="self-start">
+        <Link to="/onboarding/journey-templates">← Module Service</Link>
+      </Button>
+
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-h2 text-content">{detail.name}</h1>
-          <p className="text-body-sm text-content-muted">Version {detail.version}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Chip>{state}</Chip>
-            {steps.length > 0 && (
-              <Chip variant="neutral">Total TAT: {formatTemplateTotalTatDays(totalTatDays)}</Chip>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="m-0 text-h2 text-content">{detail.name}</h1>
+            {product && <Chip variant="neutral">{product.name}</Chip>}
+            <Chip variant={editable ? 'info' : detail.isActive ? 'success' : 'neutral'}>{state}</Chip>
           </div>
+          <p className="mt-1.5 text-caption text-content-muted">
+            {editable ? (
+              detail.version === 1 ? (
+                <>New template — publishing activates <b>v1</b>{product && <> for {product.name}</>}.</>
+              ) : (
+                <>Draft of <b>v{detail.version}</b> — publishing replaces v{detail.version - 1}. Clients already in flight keep v{detail.version - 1}.</>
+              )
+            ) : detail.isActive ? (
+              <>Active <b>v{detail.version}</b> — Begin revision to edit; it publishes as <b>v{detail.version + 1}</b>. Clients already in flight keep v{detail.version}.</>
+            ) : (
+              <>Retired <b>v{detail.version}</b> — read-only for good.</>
+            )}
+            {' · '}
+            <b title={formatTemplateTotalTatDays(totalTatDays)}>Total TAT: {totalTatDays}d</b>
+            {' '}across {steps.length} service{steps.length === 1 ? '' : 's'}
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -248,98 +262,100 @@ function Designer({
               title={steps.length === 0 ? 'Add at least one step before publishing' : undefined}
               onClick={doPublish}
             >
-              Publish
+              Publish v{detail.version}
             </Button>
           )}
         </div>
       </header>
 
-      <section
-        aria-labelledby="designer-steps-heading"
-        className="flex flex-col gap-4 rounded-card border border-line p-4"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h2 id="designer-steps-heading" className="text-h4 text-content">
-              Steps ({steps.length})
-            </h2>
-            {steps.length > 0 && (
-              <span className="text-caption text-content-muted">
-                {formatTemplateTotalTatDays(totalTatDays)} total
-              </span>
-            )}
-          </div>
-          {editable && !addingStep && (
-            <Button type="button" size="sm" onClick={() => setAddingStep(true)}>
-              Add step
-            </Button>
-          )}
-        </div>
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
 
-        <p role="status" aria-live="polite" className="sr-only">
-          {announcement}
-        </p>
-
-        {steps.length === 0 ? (
-          <EmptyState
-            title="No steps yet"
-            description="Add the first service this journey walks a client through."
-          />
-        ) : (
-          <ol className="flex flex-col gap-3">
+      {steps.length === 0 ? (
+        <EmptyState
+          title="No steps yet"
+          description="Add the first service this journey walks a client through."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-card border border-border bg-surface shadow-rest">
+          <table className="w-full border-collapse text-sm" aria-label="Services">
+            <thead>
+              <tr className="border-b border-border text-left">
+                <th scope="col" className="w-9 px-3 py-2 text-caption font-semibold text-content-muted">#</th>
+                <th scope="col" className="px-3 py-2 text-caption font-semibold text-content-muted">Service name</th>
+                <th scope="col" className="w-24 px-3 py-2 text-caption font-semibold text-content-muted">TAT (days)</th>
+                <th scope="col" className="w-44 px-3 py-2 text-caption font-semibold text-content-muted">Default responsible</th>
+                <th scope="col" className="w-48 px-3 py-2 text-caption font-semibold text-content-muted">Service depends on</th>
+                <th scope="col" className="w-20 px-3 py-2 text-center text-caption font-semibold text-content-muted">Sign-off</th>
+                {editable && (
+                  <th scope="col" className="w-32 px-3 py-2 text-caption font-semibold text-content-muted">Order</th>
+                )}
+              </tr>
+            </thead>
             {steps.map((step, index) => (
-              <StepRow
+              <StepRows
                 key={step.id}
                 templateId={templateId}
                 step={step}
                 index={index}
                 total={steps.length}
                 editable={editable}
-                allSteps={detail.steps}
+                allSteps={steps}
+                users={userList}
                 onMove={move}
                 onRemove={() => doRemoveStep(step)}
               />
             ))}
-          </ol>
-        )}
+          </table>
+        </div>
+      )}
 
-        {dirty && (
-          <div className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface-muted p-3">
-            <p className="text-body-sm text-content-muted">
-              The order above is not saved yet.
-            </p>
-            <div className="ml-auto flex gap-2">
-              <Button type="button" size="sm" disabled={reorder.isPending} onClick={saveOrder}>
-                Save order
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setOrdered(null)}>
-                Discard
-              </Button>
-            </div>
+      {dirty && (
+        <div className="flex flex-wrap items-center gap-2 rounded-control border border-border bg-subtle p-3">
+          <p className="m-0 text-sm text-content-muted">The order above is not saved yet.</p>
+          <div className="ml-auto flex gap-2">
+            <Button type="button" size="sm" disabled={reorder.isPending} onClick={saveOrder}>
+              Save order
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOrdered(null)}>
+              Discard
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        {addingStep && editable && (
-          <AddStepForm
-            templateId={templateId}
-            steps={detail.steps}
-            onClose={() => setAddingStep(false)}
-          />
-        )}
-      </section>
+      {editable && !addingStep && (
+        <Button type="button" variant="secondary" className="self-start" onClick={() => setAddingStep(true)}>
+          + Add step
+        </Button>
+      )}
+
+      {addingStep && editable && (
+        <AddStepForm
+          templateId={templateId}
+          steps={detail.steps}
+          onClose={() => setAddingStep(false)}
+        />
+      )}
 
       <ParallelGroupsPanel groups={detail.parallelGroups} steps={detail.steps} />
     </div>
   )
 }
 
-function StepRow({
+/**
+ * One service — two `<tr>`s inside their own `<tbody>`: the field row, then
+ * the mockup's full-width Task List chip-editor row under it.
+ */
+function StepRows({
   templateId,
   step,
   index,
   total,
   editable,
   allSteps,
+  users,
   onMove,
   onRemove,
 }: {
@@ -349,77 +365,99 @@ function StepRow({
   total: number
   editable: boolean
   allSteps: ObJourneyTemplateStep[]
+  users: readonly UserRef[]
   onMove: (from: number, to: number) => void
   onRemove: () => void
 }) {
-  const dependsOn = step.dependsOnStepId == null
-    ? 'Parallel from journey start'
-    : `Runs after: ${allSteps.find((s) => s.id === step.dependsOnStepId)?.name ?? `step #${step.dependsOnStepId}`}`
+  const depIndex = step.dependsOnStepId != null
+    ? allSteps.findIndex((s) => s.id === step.dependsOnStepId)
+    : -1
+  const dependsOn = depIndex >= 0
+    ? `↳ ${depIndex + 1}. ${allSteps[depIndex].name}`
+    : '∥ none — runs parallel'
+  const responsible = step.ownerUserId != null
+    ? users.find((u) => u.id === step.ownerUserId)?.displayName ?? `user #${step.ownerUserId}`
+    : step.ownerRole ?? '—'
+  const colSpan = editable ? 6 : 5
 
   return (
-    <li className="flex flex-col gap-3 rounded-control border border-line p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-body font-medium text-content">
-            {index + 1}. {step.name}
-          </p>
+    <tbody className="border-b border-border last:border-b-0">
+      <tr>
+        <td className="px-3 pb-1 pt-2.5 align-top text-caption tabular-nums text-content-muted">{index + 1}</td>
+        <td className="px-3 pb-1 pt-2 align-top">
+          <span className="font-medium text-content">{step.name}</span>
           {step.description && (
-            <p className="text-body-sm text-content-muted">{step.description}</p>
+            <span className="block text-caption text-content-muted">{step.description}</span>
           )}
-          <div className="mt-1 flex flex-wrap gap-1">
-            <Chip>{step.tatDays} working day{step.tatDays === 1 ? '' : 's'}</Chip>
-            {step.ownerUserId != null && <Chip>Owner: user #{step.ownerUserId}</Chip>}
-            {step.ownerRole && <Chip>Owner role: {step.ownerRole}</Chip>}
-            {step.ownerUserId == null && !step.ownerRole && <Chip>No owner set</Chip>}
-            {step.requiresSignoff && <Chip>Requires sign-off</Chip>}
-          </div>
-          <p className="mt-1 text-caption text-content-muted">{dependsOn}</p>
-        </div>
-
+        </td>
+        <td className="px-3 pb-1 pt-2 align-top tabular-nums text-content">{step.tatDays}</td>
+        <td className="px-3 pb-1 pt-2 align-top text-content">{responsible}</td>
+        <td className="px-3 pb-1 pt-2 align-top text-content-muted">{dependsOn}</td>
+        <td className="px-3 pb-1 pt-2 text-center align-top">
+          {/* Set when the step is added — the backend has no step-edit route,
+              so the box states the fact rather than offering a dead control. */}
+          <input
+            type="checkbox"
+            checked={step.requiresSignoff}
+            disabled
+            aria-label={`Step ${index + 1} requires client sign-off`}
+            title="Set when the step is added — remove and re-add the step to change it"
+            className="h-4 w-4 rounded border-border"
+          />
+        </td>
         {editable && (
-          <div className="flex flex-wrap gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={index === 0}
-              aria-label={`Move ${step.name} up`}
-              onClick={() => onMove(index, index - 1)}
-            >
-              ↑
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={index === total - 1}
-              aria-label={`Move ${step.name} down`}
-              onClick={() => onMove(index, index + 1)}
-            >
-              ↓
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label={`Remove ${step.name}`}
-              onClick={onRemove}
-            >
-              Remove
-            </Button>
-          </div>
+          <td className="px-3 pb-1 pt-1.5 align-top">
+            <span className="inline-flex gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={index === 0}
+                aria-label={`Move ${step.name} up`}
+                onClick={() => onMove(index, index - 1)}
+              >
+                ↑
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={index === total - 1}
+                aria-label={`Move ${step.name} down`}
+                onClick={() => onMove(index, index + 1)}
+              >
+                ↓
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Remove ${step.name}`}
+                onClick={onRemove}
+              >
+                ✕
+              </Button>
+            </span>
+          </td>
         )}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <StepItemsList templateId={templateId} step={step} editable={editable} />
-        <StepDocsList templateId={templateId} step={step} editable={editable} />
-      </div>
-    </li>
+      </tr>
+      <tr>
+        <td className="pb-3" />
+        <td colSpan={colSpan} className="px-3 pb-3">
+          <StepItemChips templateId={templateId} step={step} editable={editable} />
+          <StepDocChips templateId={templateId} step={step} editable={editable} />
+        </td>
+      </tr>
+    </tbody>
   )
 }
 
-function StepItemsList({
+/**
+ * The mockup's Task List chip editor — chips with ✕, an "Add a task…" input
+ * (Enter submits) and a "+ Add" button. Items are always added mandatory,
+ * matching the mockup, which has no optional flag on a task.
+ */
+function StepItemChips({
   templateId,
   step,
   editable,
@@ -431,7 +469,6 @@ function StepItemsList({
   const addItem = useAddJourneyTemplateStepItem()
   const removeItem = useRemoveJourneyTemplateStepItem()
   const [label, setLabel] = React.useState('')
-  const [mandatory, setMandatory] = React.useState(true)
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -440,11 +477,10 @@ function StepItemsList({
       await addItem.mutateAsync({
         templateId,
         stepId: step.id,
-        data: { label: label.trim(), mandatory },
+        data: { label: label.trim(), mandatory: true },
       })
       toast({ title: 'Task list item added' })
       setLabel('')
-      setMandatory(true)
     } catch (error) {
       toast({
         title: 'Could not add that item',
@@ -467,66 +503,57 @@ function StepItemsList({
     }
   }
 
+  if (!editable && step.items.length === 0) return null
+
   return (
-    <div className="flex flex-col gap-1">
-      <h3 className="text-caption font-medium text-content-muted">Task list — {step.name}</h3>
-      {step.items.length === 0 ? (
-        <p className="text-caption text-content-muted">No Task List items.</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {step.items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-2 text-body-sm">
-              <span>
-                {item.label}
-                {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
-              </span>
-              {editable && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Remove ${item.label}`}
-                  onClick={() => doRemove(item.id, item.label)}
-                >
-                  Remove
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {editable && (
-        <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-          <Input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="New task list item"
-            aria-label={`New task list item for ${step.name}`}
-            className="h-8 flex-1"
-          />
-          <label className="flex items-center gap-1 text-caption text-content-muted">
-            <input
-              type="checkbox"
-              checked={mandatory}
-              onChange={(e) => setMandatory(e.target.checked)}
+    <div>
+      <p className="m-0 mb-1.5 text-caption text-content-muted">
+        Task list — shown when this service is clicked on the client page; each task is ticked off
+        with the step unable to complete until the mandatory ones are
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {step.items.map((item) => (
+          <Chip key={item.id} variant="neutral">
+            {item.label}
+            {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
+            {editable && (
+              <button
+                type="button"
+                aria-label={`Remove ${item.label}`}
+                className="ml-0.5 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => doRemove(item.id, item.label)}
+              >
+                ✕
+              </button>
+            )}
+          </Chip>
+        ))}
+        {editable && (
+          <form onSubmit={submit} className="inline-flex items-center gap-1.5">
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Add a task…"
+              aria-label={`New task list item for ${step.name}`}
+              className="h-7 w-56 text-caption"
             />
-            Mandatory
-          </label>
-          <Button
-            type="submit"
-            size="sm"
-            variant="secondary"
-            disabled={addItem.isPending || !label.trim()}
-          >
-            Add
-          </Button>
-        </form>
-      )}
+            <Button type="submit" size="sm" variant="secondary" disabled={addItem.isPending || !label.trim()}>
+              + Add
+            </Button>
+          </form>
+        )}
+      </div>
     </div>
   )
 }
 
-function StepDocsList({
+/**
+ * The required-document checklist, kept from the backend's own contract even
+ * though the mockup's template editor omits it — the client page's document
+ * gate has to be authored somewhere, and this is its only write surface.
+ * Same chip-editor shape as the Task List so the two read as one pattern.
+ */
+function StepDocChips({
   templateId,
   step,
   editable,
@@ -538,7 +565,6 @@ function StepDocsList({
   const addDoc = useAddJourneyTemplateStepDoc()
   const removeDoc = useRemoveJourneyTemplateStepDoc()
   const [label, setLabel] = React.useState('')
-  const [required, setRequired] = React.useState(true)
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -547,11 +573,10 @@ function StepDocsList({
       await addDoc.mutateAsync({
         templateId,
         stepId: step.id,
-        data: { label: label.trim(), required },
+        data: { label: label.trim(), required: true },
       })
       toast({ title: 'Required document added' })
       setLabel('')
-      setRequired(true)
     } catch (error) {
       toast({
         title: 'Could not add that document',
@@ -574,61 +599,45 @@ function StepDocsList({
     }
   }
 
+  if (!editable && step.docs.length === 0) return null
+
   return (
-    <div className="flex flex-col gap-1">
-      <h3 className="text-caption font-medium text-content-muted">Required documents — {step.name}</h3>
-      {step.docs.length === 0 ? (
-        <p className="text-caption text-content-muted">No required documents.</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {step.docs.map((doc) => (
-            <li key={doc.id} className="flex items-center justify-between gap-2 text-body-sm">
-              <span>
-                {doc.label}
-                {!doc.required && <span className="text-content-muted"> (optional)</span>}
-              </span>
-              {editable && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Remove ${doc.label}`}
-                  onClick={() => doRemove(doc.id, doc.label)}
-                >
-                  Remove
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {editable && (
-        <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-          <Input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="New required document"
-            aria-label={`New required document for ${step.name}`}
-            className="h-8 flex-1"
-          />
-          <label className="flex items-center gap-1 text-caption text-content-muted">
-            <input
-              type="checkbox"
-              checked={required}
-              onChange={(e) => setRequired(e.target.checked)}
+    <div className="mt-2">
+      <p className="m-0 mb-1.5 text-caption text-content-muted">
+        Required documents — the step's document gate on the client page
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {step.docs.map((doc) => (
+          <Chip key={doc.id} variant="neutral">
+            📎 {doc.label}
+            {!doc.required && <span className="text-content-muted"> (optional)</span>}
+            {editable && (
+              <button
+                type="button"
+                aria-label={`Remove ${doc.label}`}
+                className="ml-0.5 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => doRemove(doc.id, doc.label)}
+              >
+                ✕
+              </button>
+            )}
+          </Chip>
+        ))}
+        {editable && (
+          <form onSubmit={submit} className="inline-flex items-center gap-1.5">
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Add a document…"
+              aria-label={`New required document for ${step.name}`}
+              className="h-7 w-56 text-caption"
             />
-            Required
-          </label>
-          <Button
-            type="submit"
-            size="sm"
-            variant="secondary"
-            disabled={addDoc.isPending || !label.trim()}
-          >
-            Add
-          </Button>
-        </form>
-      )}
+            <Button type="submit" size="sm" variant="secondary" disabled={addDoc.isPending || !label.trim()}>
+              + Add
+            </Button>
+          </form>
+        )}
+      </div>
     </div>
   )
 }
@@ -694,7 +703,7 @@ function AddStepForm({
     <form
       onSubmit={submit}
       aria-label="Add step"
-      className="flex flex-col gap-3 rounded-control border border-line p-3"
+      className="flex flex-col gap-3 rounded-control border border-border bg-surface p-3 shadow-rest"
     >
       <div className="flex flex-col gap-1 text-sm">
         <label htmlFor="add-step-name" className="font-medium text-content">
@@ -788,10 +797,10 @@ function AddStepForm({
           value={dependsOnStepId}
           onChange={(e) => setDependsOnStepId(e.target.value)}
         >
-          <option value="">Parallel from journey start</option>
-          {steps.map((s) => (
+          <option value="">∥ none — runs parallel</option>
+          {steps.map((s, i) => (
             <option key={s.id} value={s.id}>
-              {s.name}
+              ↳ {i + 1}. {s.name}
             </option>
           ))}
         </select>
@@ -812,7 +821,9 @@ function AddStepForm({
 /**
  * `parallelGroups`, rendered — the payoff of the whole computed field. Layer
  * 0 first, each group a list of step names that could all be in progress on
- * the same journey at once (plan §5.6).
+ * the same journey at once (plan §5.6). Not in the mockup's `vTplEdit()`,
+ * kept deliberately: it is the readable form of the same dependency column
+ * the table shows one row at a time.
  */
 function ParallelGroupsPanel({
   groups,
@@ -826,12 +837,12 @@ function ParallelGroupsPanel({
   return (
     <section
       aria-labelledby="parallel-groups-heading"
-      className="flex flex-col gap-2 rounded-card border border-line p-4"
+      className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4 shadow-rest"
     >
-      <h2 id="parallel-groups-heading" className="text-h4 text-content">
+      <h2 id="parallel-groups-heading" className="m-0 text-h3 text-content">
         Parallel groups
       </h2>
-      <p className="text-body-sm text-content-muted">
+      <p className="m-0 text-sm text-content-muted">
         Everything inside one group could be in progress on the same journey at once.
       </p>
       {groups.length === 0 ? (
@@ -842,7 +853,7 @@ function ParallelGroupsPanel({
       ) : (
         <ol className="flex flex-col gap-1">
           {groups.map((group, layer) => (
-            <li key={layer} className="text-body-sm text-content">
+            <li key={layer} className="text-sm text-content">
               <span className="font-medium">
                 Group {layer + 1} (layer {layer})
               </span>{' '}

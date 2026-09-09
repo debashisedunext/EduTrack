@@ -36,8 +36,9 @@ describe('OB-11 TAT settings', () => {
   it('shows the seeded values as the starting point', async () => {
     renderPage()
 
-    expect(await screen.findByLabelText(/amber threshold/i, {}, SLOW)).toHaveValue(75)
-    expect(screen.getByLabelText(/scanner interval/i)).toHaveValue(5)
+    expect(await screen.findByLabelText(/amber warning threshold/i, {}, SLOW)).toHaveValue(75)
+    // The cadence is the prototype's select, so its value is the option string.
+    expect(screen.getByLabelText(/scanner cadence/i)).toHaveValue('5')
     expect(screen.getByLabelText(/L1 after working hours/i)).toHaveValue(0)
     expect(screen.getByLabelText(/L3 after working hours/i)).toHaveValue(8)
   })
@@ -67,7 +68,7 @@ describe('OB-11 TAT settings', () => {
     const user = userEvent.setup()
     renderPage()
 
-    const amber = await screen.findByLabelText(/amber threshold/i, {}, SLOW)
+    const amber = await screen.findByLabelText(/amber warning threshold/i, {}, SLOW)
     await user.clear(amber)
     await user.type(amber, '60')
     await user.click(screen.getByRole('button', { name: /save/i }))

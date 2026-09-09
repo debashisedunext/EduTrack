@@ -12,10 +12,11 @@ import { PublicSignoffPage } from './PublicSignoffPage'
  * anywhere on it, deliberately — so mounting a router here would be scaffolding
  * that proves nothing.
  *
- * Fixture note — `db.ts`'s `OB_SIGNOFFS`: row 1 is `PENDING` on Northwind's step 3
- * with token `ob-signoff-demo-token-1`, expiring 2026-09-30. Row 2 is already
- * `SIGNED` with an expired token, which is what makes the refusal assertions
- * below real rather than a made-up value the mock could satisfy by accident.
+ * Fixture note — `db.ts`'s `OB_SIGNOFFS`: row 1 is `PENDING` on Cambridge
+ * Heights School's "UAT & issue closure" step (step 617, sent to Sana Qureshi)
+ * with token `ob-signoff-demo-token-1`. Row 2 is already `SIGNED`, which is
+ * what makes the refusal assertions below real rather than a made-up value
+ * the mock could satisfy by accident.
  * The mock's OTP is always `123456` once requested.
  */
 const TOKEN = 'ob-signoff-demo-token-1'
@@ -43,7 +44,7 @@ describe('OB-09 public sign-off page', () => {
     expect(await screen.findByRole('heading', { name: /confirm it is you/i })).toBeInTheDocument()
     // Nothing about the sign-off is fetched before the OTP is proved, so the
     // client's name cannot be on screen at this point however the page is built.
-    expect(screen.queryByText(/northwind/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/cambridge/i)).not.toBeInTheDocument()
   })
 
   it('renders the client, the service and its checklist once the code is proved', async () => {
@@ -53,7 +54,7 @@ describe('OB-09 public sign-off page', () => {
     await identify(user)
 
     expect(await screen.findByLabelText(/your full name/i)).toBeInTheDocument()
-    expect(screen.getByText(/northwind/i)).toBeInTheDocument()
+    expect(screen.getByText(/cambridge/i)).toBeInTheDocument()
   })
 
   it('takes the token out of the address bar as soon as it is read', async () => {

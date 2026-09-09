@@ -106,9 +106,11 @@ export function ObReportsHubPage() {
 function Header() {
   return (
     <header className="mb-6">
-      <h1 className="text-h2 font-semibold text-content">Onboarding reports</h1>
+      <h1 className="text-h2 font-semibold text-content">Reports</h1>
+      {/* The mockup's caption, verbatim — it is a promise about how the figures
+          are computed, and the never-live-counts rule is CLAUDE.md's own. */}
       <p className="mt-1 text-sm text-content-muted">
-        Every onboarding report this deployment can run. Open one to set filters and export it.
+        All figures from pre-aggregated summaries — dashboards never run live counts.
       </p>
     </header>
   )

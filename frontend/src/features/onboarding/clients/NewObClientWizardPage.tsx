@@ -5,14 +5,11 @@ import { useCreateObClient } from '@/api/generated/onboarding/onboarding'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
 import { useListUsers } from '@/api/generated/users/users'
 import type { ObClientCreateRequest } from '@/api/generated/model/obClientCreateRequest'
-import { ObConsentSource } from '@/api/generated/model/obConsentSource'
 import { ApiError } from '@/api/http'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
-import { isRichTextEmpty } from '@/components/ui/rich-text'
 
 import { FormField } from '@/features/masters/resources/FormField'
 
@@ -26,39 +23,39 @@ import {
 
 const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/
 
+/** The mockup's four steps, verbatim — `vWizard()` in `docs/prototype/onboarding.html`. */
 const STEPS = [
-  { number: 1, label: 'Client details' },
-  { number: 2, label: 'Contacts' },
-  { number: 3, label: 'Products & requirements' },
-  { number: 4, label: 'Review & create' },
+  { number: 1, label: 'Client basics' },
+  { number: 2, label: 'SPOC contacts' },
+  { number: 3, label: 'Commercials' },
+  { number: 4, label: 'Requirements & journeys' },
 ] as const
 
 type Step = (typeof STEPS)[number]['number']
 
+/** The mockup's client-level license select. `licenseType` is a free string in the contract; these are its offered values. */
+const CLIENT_LICENSE_TYPES = [
+  'Starter · Annual',
+  'Professional · Annual',
+  'Enterprise · Annual',
+  'Enterprise · 3-year',
+] as const
+
+/** The mockup's per-application license select. */
+const APPLICATION_LICENSE_TYPES = ['Starter', 'Professional', 'Enterprise', 'Add-on'] as const
+
 interface ContactDraft {
   key: string
   name: string
-  designation: string
   email: string
   phone: string
-  whatsappOptIn: boolean
-  /** A closed vocabulary, not free text — `ObConsentSource`'s own reason: this is what a challenged consent is defended with. */
-  whatsappOptInSource: ObConsentSource | ''
-  isPrimary: boolean
-}
-
-interface RequirementDraft {
-  key: string
-  title: string
-  bodyHtml: string
 }
 
 interface ApplicationDraft {
+  key: string
   productId: number
   licenseType: string
   units: string
-  licenseStart: string
-  licenseEnd: string
 }
 
 let draftKeySeq = 0
@@ -67,71 +64,88 @@ function draftKey(): string {
   return `draft-${draftKeySeq}`
 }
 
-function blankContact(isPrimary: boolean): ContactDraft {
-  return {
-    key: draftKey(), name: '', designation: '', email: '', phone: '',
-    whatsappOptIn: false, whatsappOptInSource: '', isPrimary,
-  }
-}
-
-function blankRequirement(): RequirementDraft {
-  return { key: draftKey(), title: '', bodyHtml: '' }
+function blankContact(): ContactDraft {
+  return { key: draftKey(), name: '', email: '', phone: '' }
 }
 
 /** Which step a server-reported field belongs to, so a 400/409 can jump the wizard there. */
 function stepForField(field: string): Step {
   if (field.startsWith('contacts')) return 2
-  if (field.startsWith('applications') || field.startsWith('requirements')) return 3
-  if (field === 'name' || field === 'onboardingDate' || field === 'pan'
-    || field === 'address' || field === 'salesPersonId' || field === 'licenseType') return 1
-  return 4
+  if (field.startsWith('applications')) return 3
+  if (field.startsWith('requirements') || field === 'createPortalLogin') return 4
+  return 1
+}
+
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
 }
 
 /**
- * B-109 · OB-04, the four-step new client wizard — `/onboarding/clients/new`.
+ * The mockup's requirements capture is one plain textarea; the contract's is
+ * rich-text HTML run through the server's sanitiser. Plain text goes out as
+ * escaped paragraphs — never interpolated raw, because a requirement
+ * containing `<script>` is user input like any other.
+ */
+function textToHtml(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${line.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])}</p>`)
+    .join('')
+}
+
+/**
+ * B-109 · OB-04, the four-step new client wizard — `/onboarding/clients/new`,
+ * aligned to the authoritative mockup (`docs/prototype/onboarding.html`,
+ * `vWizard()`).
  *
- * ## What already existed and what this closes
+ * ## The mockup's four steps over the contract's one call
  *
- * `ObClientWriteService.create` (B-102) already accepts everything one screen
- * needs: identity, contacts, the product multi-select, requirements, the
- * duplicate guards and the portal-login checkbox, all in one atomic call that
- * instantiates a locked journey per product. This page is the first caller —
- * `ObClientListPage`'s own note has said since B-108 that a "New client"
- * button pointing nowhere is worse than none, and this is where it now
- * points. The service-side gap this branch also closes — the create was
- * never actually snapshotting a prerequisites checklist, despite its own
- * javadoc saying B-109 would call it — is `ObClientWriteService`'s, not this
- * page's; see that class for the fix. This page is also where the module's
- * navigation entry is added (`Sidebar.tsx`) — every other onboarding route's
- * comment has deferred it here since B-112.
+ * "Client basics", "SPOC contacts", "Commercials", "Requirements & journeys".
+ * Nothing is written until the finish button — the first three steps are
+ * local form state with nothing to resume, so the current step is an explicit
+ * index rather than derived from anything server-side.
  *
- * ## Four steps, one submit
+ * ## Commercials and the step-4 checkboxes share one state
  *
- * Nothing is written until step 4. There is no server round-trip between
- * steps — unlike `ImportWizardPage`, whose steps are the state of a batch
- * that genuinely exists server-side by the time the second step renders, this
- * wizard's first three steps are local form state with nothing to resume, so
- * the current step is an explicit index rather than derived from what the
- * server has recorded.
+ * The mockup keeps an applications table (step 3) and a products-bought
+ * checkbox list (step 4) as two structures. The contract has one:
+ * `applications[]`, each of which **is** a purchased product and instantiates
+ * a locked journey. So both screens edit the same `applications` draft — a
+ * row added on Commercials shows checked on step 4, and unchecking there
+ * removes the row. Two views, one truth, no way to submit a purchase the
+ * commercials step never saw.
  *
- * ## The duplicate-PAN guard is "inline" by where the error lands, not by a
- * live check
+ * ## Validation is the mockup's: a banner on Continue, not a disabled button
  *
- * There is no standalone "does this PAN exist" endpoint, and B-109's backlog
- * line does not ask for one — `ObClientExceptionHandler`'s own note is that
- * the wizard shows this 409 *on the same screen* as the forceable name
- * warning, both keyed to `errors.pan` / `errors.name`. "Inline" here means
- * the field-keyed error lands on step 1's PAN input rather than a toast, via
- * `stepForField`, which is the whole mechanism.
+ * The mockup's Continue is always pressable and answers an invalid step with
+ * a `role="alert"` banner naming the first problem. A disabled button tells a
+ * keyboard or screen-reader user nothing about *why*.
+ *
+ * ## What the mockup shows that the contract cannot (reported, not faked)
+ *
+ * - **City** — no such field on `ObClientCreateRequest`.
+ * - **Attachments on step 4** — attachments are per-client endpoints that
+ *   exist only after the client does.
+ * - **Template name/version/step-count captions** per product — the product
+ *   read carries `hasActiveTemplate` and `totalTatDays` only.
+ *
+ * ## The duplicate-PAN guard is "inline" by where the error lands
+ *
+ * There is no standalone "does this PAN exist" endpoint. The 409's
+ * field-keyed error lands on step 1's PAN input via `stepForField`.
  *
  * ## `createPortalLogin` is real UI over a refusal that is still real
  *
- * `PortalLoginUnavailableException`'s own javadoc says B-126 deletes it. Until
- * then the checkbox is shown — the plan names it as part of this screen and a
- * hidden checkbox is not what "explicit" means — but checking it and
- * submitting today comes back `409 ob-client-portal-login-unavailable` before
- * anything is written. `handleSubmit` below unchecks it and explains, rather
- * than pretending the box does nothing.
+ * Until B-126 lands, checking it and submitting comes back
+ * `409 ob-client-portal-login-unavailable` before anything is written.
+ * `handleSubmit` unchecks it and explains, rather than pretending the box
+ * does nothing.
  */
 export function NewObClientWizardPage() {
   const navigate = useNavigate()
@@ -139,30 +153,31 @@ export function NewObClientWizardPage() {
   const [step, setStep] = React.useState<Step>(1)
   const [furthestStep, setFurthestStep] = React.useState<Step>(1)
 
-  // ── step 1 ──────────────────────────────────────────────────────────────
+  // ── step 1 · client basics ──────────────────────────────────────────────
   const [name, setName] = React.useState('')
-  const [description, setDescription] = React.useState('')
-  const [onboardingDate, setOnboardingDate] = React.useState('')
   const [pan, setPan] = React.useState('')
+  const [onboardingDate, setOnboardingDate] = React.useState('')
+  const [licenseType, setLicenseType] = React.useState('')
   const [address, setAddress] = React.useState('')
   const [salesPersonId, setSalesPersonId] = React.useState<number | null>(null)
-  const [licenseType, setLicenseType] = React.useState('')
+  const [description, setDescription] = React.useState('')
 
-  // ── step 2 ──────────────────────────────────────────────────────────────
-  const [contacts, setContacts] = React.useState<ContactDraft[]>(() => [blankContact(true)])
+  // ── step 2 · SPOC contacts ──────────────────────────────────────────────
+  const [contacts, setContacts] = React.useState<ContactDraft[]>(() => [blankContact()])
 
-  // ── step 3 ──────────────────────────────────────────────────────────────
+  // ── steps 3+4 · one purchase list behind two views ──────────────────────
   const [applications, setApplications] = React.useState<ApplicationDraft[]>([])
-  const [requirements, setRequirements] = React.useState<RequirementDraft[]>([])
 
-  // ── step 4 ──────────────────────────────────────────────────────────────
+  // ── step 4 · requirements & journeys ────────────────────────────────────
+  const [requirements, setRequirements] = React.useState('')
   const [createPortalLogin, setCreatePortalLogin] = React.useState(false)
   const [acknowledgeSimilarNames, setAcknowledgeSimilarNames] = React.useState(false)
   const [similarNameCandidates, setSimilarNameCandidates] =
     React.useState<{ id: number; name: string }[] | null>(null)
   const [portalLoginNotice, setPortalLoginNotice] = React.useState(false)
 
-  const [blockingError, setBlockingError] = React.useState<string | null>(null)
+  /** The mockup's one `w.err` banner — validation and server refusals both land here. */
+  const [bannerError, setBannerError] = React.useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string[]>>({})
 
   const { data: productsData } = useListObProducts({ isActive: true })
@@ -178,66 +193,68 @@ export function NewObClientWizardPage() {
     setFurthestStep((current) => (target > current ? target : current))
   }
 
-  // ── step 1 validation ──────────────────────────────────────────────────
-  function step1Errors(): string[] {
+  /** The mockup's per-step guards, its copy included. */
+  function stepErrors(target: Step): string[] {
     const errors: string[] = []
-    if (!name.trim()) errors.push('A client needs a name.')
-    if (!onboardingDate) errors.push('The onboarding date is required.')
-    if (pan.trim() && !PAN_PATTERN.test(pan.trim().toUpperCase())) {
-      errors.push('PAN must be five letters, four digits, one letter — e.g. ABCDE1234F.')
+    if (target === 1) {
+      if (!name.trim()) errors.push('Client name is required.')
+      if (!PAN_PATTERN.test(pan.trim().toUpperCase())) errors.push('PAN must look like ABCDE1234F.')
+      if (!onboardingDate) errors.push('The onboarding date is required.')
+    }
+    if (target === 2) {
+      const primary = contacts[0]
+      if (!primary || !primary.name.trim() || !primary.email.trim()) {
+        errors.push('At least one SPOC with name and email is required.')
+      }
     }
     return errors
   }
 
-  // ── step 2 validation ──────────────────────────────────────────────────
-  function step2Errors(): string[] {
+  function finishErrors(): string[] {
     const errors: string[] = []
-    if (contacts.length === 0) errors.push('At least one SPOC is required.')
-    const primaries = contacts.filter((c) => c.isPrimary).length
-    if (contacts.length > 0 && primaries !== 1) {
-      errors.push('Exactly one contact must be marked primary.')
+    if (!requirements.trim()) errors.push('Capture at least one line of client requirements.')
+    if (applications.length === 0) {
+      errors.push('Select at least one product — each product gets its own journey.')
     }
-    contacts.forEach((c, i) => {
-      if (!c.name.trim() || !c.email.trim()) {
-        errors.push(`Contact ${i + 1} needs a name and an email.`)
-      }
-      if (c.whatsappOptIn && !c.whatsappOptInSource.trim()) {
-        errors.push(`Contact ${i + 1}: say where WhatsApp consent came from.`)
-      }
-    })
     return errors
   }
 
-  // ── step 3 validation ──────────────────────────────────────────────────
-  function step3Errors(): string[] {
-    const errors: string[] = []
-    if (applications.length === 0) errors.push('Select at least one product.')
-    return errors
-  }
-
-  const stepErrors: Record<Step, string[]> = {
-    1: step1Errors(), 2: step2Errors(), 3: step3Errors(), 4: [],
-  }
-
-  function handleNext() {
-    if (step === 4) return
-    const errors = stepErrors[step]
-    if (errors.length > 0) return
+  function handleContinue() {
+    const errors = stepErrors(step)
+    if (errors.length > 0) {
+      setBannerError(errors[0])
+      return
+    }
+    setBannerError(null)
     goTo((step + 1) as Step)
+  }
+
+  function handleBack() {
+    setBannerError(null)
+    goTo((step - 1) as Step)
+  }
+
+  const selectable = products.filter((p) => p.hasActiveTemplate !== false)
+
+  function addApplication() {
+    const next = selectable.find((p) => !applications.some((a) => a.productId === p.id))
+    if (!next) return
+    setApplications((current) => [
+      ...current,
+      { key: draftKey(), productId: next.id, licenseType: '', units: '' },
+    ])
   }
 
   function toggleProduct(productId: number, selected: boolean) {
     setApplications((current) =>
       selected
-        ? [...current, { productId, licenseType: '', units: '', licenseStart: '', licenseEnd: '' }]
+        ? [...current, { key: draftKey(), productId, licenseType: '', units: '' }]
         : current.filter((a) => a.productId !== productId),
     )
   }
 
-  function updateApplication(productId: number, patch: Partial<ApplicationDraft>) {
-    setApplications((current) =>
-      current.map((a) => (a.productId === productId ? { ...a, ...patch } : a)),
-    )
+  function updateApplication(key: string, patch: Partial<ApplicationDraft>) {
+    setApplications((current) => current.map((a) => (a.key === key ? { ...a, ...patch } : a)))
   }
 
   function buildRequestBody(overrides?: Partial<ObClientCreateRequest>): ObClientCreateRequest {
@@ -245,29 +262,27 @@ export function NewObClientWizardPage() {
       name: name.trim(),
       description: description.trim() || undefined,
       onboardingDate,
-      pan: pan.trim() ? pan.trim().toUpperCase() : undefined,
+      pan: pan.trim().toUpperCase(),
       address: address.trim() || undefined,
       salesPersonId: salesPersonId ?? undefined,
-      licenseType: licenseType.trim() || undefined,
-      contacts: contacts.map((c) => ({
-        name: c.name.trim(),
-        designation: c.designation.trim() || undefined,
-        email: c.email.trim(),
-        phone: c.phone.trim() || undefined,
-        whatsappOptIn: c.whatsappOptIn,
-        whatsappOptInSource: c.whatsappOptIn && c.whatsappOptInSource ? c.whatsappOptInSource : undefined,
-        isPrimary: c.isPrimary,
-      })),
+      licenseType: licenseType || undefined,
+      contacts: contacts
+        // An untouched "Additional contact" fieldset is not a contact.
+        .filter((c, i) => i === 0 || c.name.trim() || c.email.trim())
+        .map((c, i) => ({
+          name: c.name.trim(),
+          email: c.email.trim(),
+          phone: c.phone.trim() || undefined,
+          // The first fieldset is the mockup's "Primary SPOC *" — position is
+          // the declaration, exactly one by construction.
+          isPrimary: i === 0,
+        })),
       applications: applications.map((a) => ({
         productId: a.productId,
-        licenseType: a.licenseType.trim() || undefined,
+        licenseType: a.licenseType || undefined,
         units: a.units.trim() ? Number(a.units) : undefined,
-        licenseStart: a.licenseStart || undefined,
-        licenseEnd: a.licenseEnd || undefined,
       })),
-      requirements: requirements
-        .filter((r) => !isRichTextEmpty(r.bodyHtml))
-        .map((r) => ({ title: r.title.trim() || undefined, bodyHtml: r.bodyHtml })),
+      requirements: requirements.trim() ? [{ bodyHtml: textToHtml(requirements) }] : [],
       createPortalLogin,
       acknowledgeSimilarNames,
       ...overrides,
@@ -283,7 +298,13 @@ export function NewObClientWizardPage() {
    * *previous* `false` and repeat the same 409 forever.
    */
   async function handleSubmit(overrides?: { acknowledgeSimilarNames?: boolean }) {
-    setBlockingError(null)
+    const errors = finishErrors()
+    if (errors.length > 0) {
+      setBannerError(errors[0])
+      return
+    }
+
+    setBannerError(null)
     setFieldErrors({})
     setSimilarNameCandidates(null)
     setPortalLoginNotice(false)
@@ -293,7 +314,7 @@ export function NewObClientWizardPage() {
       navigate(`/onboarding/clients/${created.data.id}`)
     } catch (error) {
       if (!(error instanceof ApiError)) {
-        setBlockingError('Something went wrong. Try again.')
+        setBannerError('Something went wrong. Try again.')
         return
       }
 
@@ -311,355 +332,422 @@ export function NewObClientWizardPage() {
         // Deliberately not `goTo(1)`. The confirmation this needs — "these
         // are different companies, create anyway" — is a decision made about
         // the submit that just happened, not a field to go back and retype,
-        // so it renders on step 4 beside the button that triggered it. Only
-        // reachable from step 4 in the first place: it is the one guard that
-        // fires on `Create client`, never on `Next`.
+        // so it renders on step 4 beside the button that triggered it.
         const candidates = (error.problem as { candidates?: { id: number; name: string }[] }).candidates ?? []
         setSimilarNameCandidates(candidates)
         return
       }
 
       if (error.is(OB_CLIENT_NO_PREREQ_MASTER)) {
-        setBlockingError(
+        setBannerError(
           'No prerequisites checklist is published yet. An onboarding admin needs to publish '
           + 'one on the Prerequisites master (OB-14) before a client can be boarded.',
         )
         return
       }
 
-      if (error.is(OB_CLIENT_PAN_DUPLICATE) || error.is(OB_PRODUCT_NO_TEMPLATE)) {
+      if (
+        error.is(OB_CLIENT_PAN_DUPLICATE)
+        || error.is(OB_PRODUCT_NO_TEMPLATE)
+        || Object.keys(error.fieldErrors).length > 0
+      ) {
         setFieldErrors(error.fieldErrors)
         const [firstField] = Object.keys(error.fieldErrors)
         goTo(firstField ? stepForField(firstField) : 1)
         return
       }
 
-      if (Object.keys(error.fieldErrors).length > 0) {
-        setFieldErrors(error.fieldErrors)
-        const [firstField] = Object.keys(error.fieldErrors)
-        goTo(firstField ? stepForField(firstField) : 1)
-        return
-      }
-
-      setBlockingError(error.problem.detail ?? error.message)
+      setBannerError(error.problem.detail ?? error.message)
     }
   }
 
+  const inputClassName =
+    'rounded-control border border-border bg-surface px-3 py-2 text-sm text-content ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-6 p-6">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-5 p-6">
+      {/* ── page head — h1 + the steps indicator row ───────────────────── */}
       <div>
-        <h1 className="text-h1 text-content">New client</h1>
-        <p className="text-caption text-content-muted">
-          OB-04 · one journey per product bought, locked until the prerequisites checklist clears.
-        </p>
+        <h1 className="text-h1 text-content">Board a new client</h1>
+        <StepsIndicator current={step} furthest={furthestStep} onSelect={goTo} />
       </div>
 
-      <StepRail current={step} furthest={furthestStep} onSelect={goTo} />
-
-      {blockingError && (
-        <div role="alert" className="rounded-card border border-danger bg-danger-soft p-4 text-sm text-danger-text">
-          {blockingError}
+      {/* ── the mockup's one error banner ──────────────────────────────── */}
+      {bannerError && (
+        <div role="alert" className="rounded-control bg-danger-soft px-3 py-2 text-sm text-danger-text">
+          {bannerError}
         </div>
       )}
 
-      {step === 1 && (
-        <section aria-labelledby="step-1-heading" className="flex flex-col gap-5">
-          <h2 id="step-1-heading" className="sr-only">Client details</h2>
+      <div className="rounded-card border border-border bg-surface p-5">
+        {step === 1 && (
+          <section aria-labelledby="step-1-heading" className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
+            <h2 id="step-1-heading" className="sr-only">Client basics</h2>
 
-          <FormField id="wizard-name" label="Client name" required error={fieldErrors.name?.[0]}>
-            {(aria) => <Input {...aria} value={name} onChange={(e) => setName(e.target.value)} />}
-          </FormField>
+            <div className="sm:col-span-2">
+              <FormField id="wizard-name" label="Client name" required error={fieldErrors.name?.[0]}>
+                {(aria) => (
+                  <Input {...aria} value={name} placeholder="e.g. Meadowbrook High School"
+                    onChange={(e) => setName(e.target.value)} />
+                )}
+              </FormField>
+            </div>
 
-          <FormField id="wizard-onboarding-date" label="Onboarding date" required
-            error={fieldErrors.onboardingDate?.[0]}>
-            {(aria) => (
-              <Input {...aria} type="date" value={onboardingDate}
-                onChange={(e) => setOnboardingDate(e.target.value)} />
+            <FormField
+              id="wizard-pan"
+              label="PAN"
+              required
+              hint="Checked for duplicates · encrypted at rest · masked for non-finance roles"
+              error={fieldErrors.pan?.[0]}
+            >
+              {(aria) => (
+                <Input {...aria} value={pan} className="uppercase"
+                  onChange={(e) => setPan(e.target.value.toUpperCase())}
+                  placeholder="ABCDE1234F" maxLength={10} />
+              )}
+            </FormField>
+
+            <FormField id="wizard-onboarding-date" label="Date of onboarding" required
+              error={fieldErrors.onboardingDate?.[0]}>
+              {(aria) => (
+                <Input {...aria} type="date" value={onboardingDate}
+                  onChange={(e) => setOnboardingDate(e.target.value)} />
+              )}
+            </FormField>
+
+            {/* The mockup also has a City input here. `ObClientCreateRequest`
+                carries no such field — a contract gap, reported rather than
+                sent to be dropped. */}
+
+            <FormField id="wizard-license-type" label="License type">
+              {(aria) => (
+                <select {...aria} value={licenseType} className={inputClassName + ' w-full'}
+                  onChange={(e) => setLicenseType(e.target.value)}>
+                  <option value="">Select…</option>
+                  {CLIENT_LICENSE_TYPES.map((o) => (
+                    <option key={o} value={o}>{o}</option>
+                  ))}
+                </select>
+              )}
+            </FormField>
+
+            <FormField id="wizard-sales-person" label="Sales person" error={fieldErrors.salesPersonId?.[0]}>
+              {(aria) => (
+                <SearchableDropdown
+                  {...aria}
+                  options={users}
+                  value={users.find((u) => u.id === salesPersonId) ?? null}
+                  onChange={(u) => setSalesPersonId(u.id)}
+                  getKey={(u) => String(u.id)}
+                  getLabel={(u) => u.displayName}
+                  getSearchable={(u) => [u.email ?? '']}
+                  placeholder="Search people…"
+                />
+              )}
+            </FormField>
+
+            <div className="sm:col-span-2">
+              <FormField id="wizard-address" label="Registered address">
+                {(aria) => <Input {...aria} value={address} onChange={(e) => setAddress(e.target.value)} />}
+              </FormField>
+            </div>
+
+            <div className="sm:col-span-2">
+              <FormField id="wizard-description" label="Client description">
+                {(aria) => (
+                  <Input {...aria} value={description} placeholder="One line about the client"
+                    onChange={(e) => setDescription(e.target.value)} />
+                )}
+              </FormField>
+            </div>
+          </section>
+        )}
+
+        {step === 2 && (
+          <section aria-labelledby="step-2-heading" className="flex flex-col gap-4">
+            <h2 id="step-2-heading" className="sr-only">SPOC contacts</h2>
+            {fieldErrors.contacts && (
+              <p role="alert" className="text-caption text-danger-text">{fieldErrors.contacts[0]}</p>
             )}
-          </FormField>
+            {contacts.map((contact, index) => (
+              <fieldset key={contact.key} className="rounded-card border border-border p-4">
+                <legend className="px-1.5 text-caption font-semibold uppercase tracking-wide text-content-muted">
+                  {index === 0 ? 'Primary SPOC *' : 'Additional contact'}
+                </legend>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">Name</span>
+                    <Input
+                      value={contact.name}
+                      onChange={(e) =>
+                        setContacts((current) =>
+                          current.map((c, i) => (i === index ? { ...c, name: e.target.value } : c)))
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">Email</span>
+                    <Input
+                      type="email"
+                      value={contact.email}
+                      onChange={(e) =>
+                        setContacts((current) =>
+                          current.map((c, i) => (i === index ? { ...c, email: e.target.value } : c)))
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">Phone / WhatsApp</span>
+                    <Input
+                      value={contact.phone}
+                      placeholder="+91 …"
+                      onChange={(e) =>
+                        setContacts((current) =>
+                          current.map((c, i) => (i === index ? { ...c, phone: e.target.value } : c)))
+                      }
+                    />
+                    <span className="text-caption text-content-muted">
+                      WhatsApp opt-in is recorded at first send
+                    </span>
+                  </label>
+                </div>
+                {index > 0 && (
+                  <Button
+                    type="button" variant="ghost" size="sm" className="mt-2"
+                    onClick={() => setContacts((current) => current.filter((_, i) => i !== index))}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </fieldset>
+            ))}
+            <Button
+              type="button" variant="secondary" size="sm" className="self-start"
+              onClick={() => setContacts((current) => [...current, blankContact()])}
+            >
+              + Add another contact
+            </Button>
+          </section>
+        )}
 
-          <FormField id="wizard-pan" label="PAN" hint="Identity only — never a financial field."
-            error={fieldErrors.pan?.[0]}>
-            {(aria) => (
-              <Input {...aria} value={pan}
-                onChange={(e) => setPan(e.target.value.toUpperCase())}
-                placeholder="ABCDE1234F" maxLength={10} />
-            )}
-          </FormField>
-
-          <FormField id="wizard-address" label="Address">
-            {(aria) => <Input {...aria} value={address} onChange={(e) => setAddress(e.target.value)} />}
-          </FormField>
-
-          <FormField id="wizard-sales-person" label="Sales person" error={fieldErrors.salesPersonId?.[0]}>
-            {(aria) => (
-              <SearchableDropdown
-                {...aria}
-                options={users}
-                value={users.find((u) => u.id === salesPersonId) ?? null}
-                onChange={(u) => setSalesPersonId(u.id)}
-                getKey={(u) => String(u.id)}
-                getLabel={(u) => u.displayName}
-                getSearchable={(u) => [u.email ?? '']}
-                placeholder="Search people…"
-              />
-            )}
-          </FormField>
-
-          <FormField id="wizard-license-type" label="License type">
-            {(aria) => <Input {...aria} value={licenseType} onChange={(e) => setLicenseType(e.target.value)} />}
-          </FormField>
-
-          <FormField id="wizard-description" label="Description">
-            {(aria) => (
-              <textarea {...aria} value={description} onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="rounded-control border border-border bg-surface px-3 py-2 text-sm text-content" />
-            )}
-          </FormField>
-
-          <ErrorList errors={step1Errors()} />
-        </section>
-      )}
-
-      {step === 2 && (
-        <section aria-labelledby="step-2-heading" className="flex flex-col gap-4">
-          <h2 id="step-2-heading" className="sr-only">Contacts</h2>
-          {fieldErrors.contacts && (
-            <p role="alert" className="text-caption text-danger-text">{fieldErrors.contacts[0]}</p>
-          )}
-          {contacts.map((contact, index) => (
-            <ContactRow
-              key={contact.key}
-              contact={contact}
-              canRemove={contacts.length > 1}
-              onChange={(patch) =>
-                setContacts((current) => current.map((c, i) => (i === index ? { ...c, ...patch } : c)))
-              }
-              onMakePrimary={() =>
-                setContacts((current) => current.map((c, i) => ({ ...c, isPrimary: i === index })))
-              }
-              onRemove={() =>
-                setContacts((current) => current.filter((_, i) => i !== index))
-              }
-            />
-          ))}
-          <Button
-            type="button" variant="secondary" size="sm" className="self-start"
-            onClick={() => setContacts((current) => [...current, blankContact(current.length === 0)])}
-          >
-            Add contact
-          </Button>
-          <ErrorList errors={step2Errors()} />
-        </section>
-      )}
-
-      {step === 3 && (
-        <section aria-labelledby="step-3-heading" className="flex flex-col gap-6">
-          <div>
-            <h2 id="step-3-heading" className="mb-2 text-h3 text-content">Products</h2>
+        {step === 3 && (
+          <section aria-labelledby="step-3-heading" className="flex flex-col gap-3">
+            <h2 id="step-3-heading" className="sr-only">Commercials</h2>
             {fieldErrors.applications && (
-              <p role="alert" className="mb-2 text-caption text-danger-text">{fieldErrors.applications[0]}</p>
+              <p role="alert" className="text-caption text-danger-text">{fieldErrors.applications[0]}</p>
             )}
-            <div className="flex flex-col gap-2">
-              {products.map((product) => {
-                const selected = applications.some((a) => a.productId === product.id)
-                const application = applications.find((a) => a.productId === product.id)
-                const disabled = product.hasActiveTemplate === false
-                return (
-                  <div key={product.id} className="rounded-card border border-border p-3">
-                    <label className="flex items-start gap-2.5">
+            {applications.map((application) => {
+              const chosen = products.find((p) => p.id === application.productId)
+              // The row keeps its own product and offers the unused rest — two
+              // rows for one product would be two journeys from one purchase.
+              const options = selectable.filter(
+                (p) => p.id === application.productId
+                  || !applications.some((a) => a.productId === p.id),
+              )
+              return (
+                <div key={application.key} className="grid items-end gap-3 sm:grid-cols-[2fr_1fr_1fr_auto]">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">Application</span>
+                    <select
+                      className={inputClassName}
+                      value={application.productId}
+                      onChange={(e) => updateApplication(application.key, { productId: Number(e.target.value) })}
+                    >
+                      {options.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">License</span>
+                    <select
+                      className={inputClassName}
+                      value={application.licenseType}
+                      onChange={(e) => updateApplication(application.key, { licenseType: e.target.value })}
+                    >
+                      <option value="">Select…</option>
+                      {APPLICATION_LICENSE_TYPES.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-caption font-medium text-content-muted">Units / seats</span>
+                    <Input
+                      type="number" min={1}
+                      value={application.units}
+                      onChange={(e) => updateApplication(application.key, { units: e.target.value })}
+                    />
+                  </label>
+                  <Button
+                    type="button" variant="ghost" size="sm"
+                    aria-label={`Remove ${chosen?.name ?? 'application'}`}
+                    onClick={() => toggleProduct(application.productId, false)}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              )
+            })}
+            <Button
+              type="button" variant="secondary" size="sm" className="self-start"
+              onClick={addApplication}
+              disabled={selectable.every((p) => applications.some((a) => a.productId === p.id))}
+            >
+              + Add application
+            </Button>
+            <p className="text-caption text-content-muted">
+              No financial capture here by design — commercials live in the sales/billing system,
+              not the onboarding module.
+            </p>
+          </section>
+        )}
+
+        {step === 4 && (
+          <section aria-labelledby="step-4-heading" className="flex flex-col gap-5">
+            <h2 id="step-4-heading" className="sr-only">Requirements &amp; journeys</h2>
+
+            {similarNameCandidates && similarNameCandidates.length > 0 && (
+              <div role="alert" className="rounded-card border border-warning bg-warning-soft p-4 text-sm">
+                <p className="font-medium text-content">
+                  A client with a very similar name already exists:
+                </p>
+                <ul className="ml-4 mt-1 list-disc text-content-muted">
+                  {similarNameCandidates.map((c) => (
+                    <li key={c.id}>{c.name}</li>
+                  ))}
+                </ul>
+                <Button
+                  type="button" size="sm" className="mt-3"
+                  onClick={() => {
+                    setAcknowledgeSimilarNames(true)
+                    setSimilarNameCandidates(null)
+                    void handleSubmit({ acknowledgeSimilarNames: true })
+                  }}
+                >
+                  These are different companies — create anyway
+                </Button>
+              </div>
+            )}
+
+            <FormField id="wizard-requirements" label="Client requirements" required
+              error={fieldErrors.requirements?.[0]}>
+              {(aria) => (
+                <textarea
+                  {...aria}
+                  rows={4}
+                  value={requirements}
+                  placeholder="What did we promise? Migration scope, integrations, languages, timelines…"
+                  onChange={(e) => setRequirements(e.target.value)}
+                  className={inputClassName + ' w-full'}
+                />
+              )}
+            </FormField>
+
+            <div>
+              <p className="mb-1 text-sm font-medium text-content">
+                Products bought — one journey per product
+              </p>
+              {fieldErrors.applications && (
+                <p role="alert" className="mb-1 text-caption text-danger-text">
+                  {fieldErrors.applications[0]}
+                </p>
+              )}
+              <div className="flex flex-col gap-1.5">
+                {products.map((product) => {
+                  const selected = applications.some((a) => a.productId === product.id)
+                  const disabled = product.hasActiveTemplate === false
+                  return (
+                    <label key={product.id} className="flex items-center gap-2 text-sm font-medium text-content">
                       <input
                         type="checkbox"
-                        className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary disabled:opacity-50"
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary disabled:opacity-50"
                         checked={selected}
                         disabled={disabled}
                         onChange={(e) => toggleProduct(product.id, e.target.checked)}
                       />
-                      <span className="flex flex-col">
-                        <span className="text-sm font-medium text-content">
-                          {product.name} <span className="text-content-muted">({product.code})</span>
-                        </span>
-                        {disabled && (
-                          <span className="text-caption text-warning-text">
-                            No published journey template yet — cannot be bought.
-                          </span>
-                        )}
+                      {product.name}
+                      <span className="text-caption font-normal text-content-muted">
+                        {disabled
+                          ? 'no active template — define one first'
+                          : product.totalTatDays != null
+                            ? `→ active template · ${product.totalTatDays} working-day TAT`
+                            : ''}
                       </span>
                     </label>
-                    {selected && application && (
-                      <div className="mt-3 grid gap-3 pl-6 sm:grid-cols-2">
-                        <Input
-                          aria-label={`${product.name} license type`}
-                          placeholder="License type"
-                          value={application.licenseType}
-                          onChange={(e) => updateApplication(product.id, { licenseType: e.target.value })}
-                        />
-                        <Input
-                          aria-label={`${product.name} units`}
-                          type="number" min={1} placeholder="Units"
-                          value={application.units}
-                          onChange={(e) => updateApplication(product.id, { units: e.target.value })}
-                        />
-                        <Input
-                          aria-label={`${product.name} license start`}
-                          type="date"
-                          value={application.licenseStart}
-                          onChange={(e) => updateApplication(product.id, { licenseStart: e.target.value })}
-                        />
-                        <Input
-                          aria-label={`${product.name} license end`}
-                          type="date"
-                          value={application.licenseEnd}
-                          onChange={(e) => updateApplication(product.id, { licenseEnd: e.target.value })}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              {products.length === 0 && (
-                <p className="text-caption text-content-muted">No active products in the catalogue.</p>
-              )}
-            </div>
-            <ErrorList errors={step3Errors()} />
-          </div>
-
-          <div>
-            <h2 className="mb-2 text-h3 text-content">Requirements</h2>
-            <p className="mb-3 text-caption text-content-muted">
-              Optional. Anything the client has already told you they need.
-            </p>
-            <div className="flex flex-col gap-4">
-              {requirements.map((requirement, index) => (
-                <div key={requirement.key} className="rounded-card border border-border p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Input
-                      aria-label="Requirement title"
-                      placeholder="Title (optional)"
-                      value={requirement.title}
-                      onChange={(e) =>
-                        setRequirements((current) =>
-                          current.map((r, i) => (i === index ? { ...r, title: e.target.value } : r)))
-                      }
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button" variant="ghost" size="sm"
-                      onClick={() => setRequirements((current) => current.filter((_, i) => i !== index))}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  <RichTextEditor
-                    aria-label="Requirement detail"
-                    value={requirement.bodyHtml}
-                    onChange={(html) =>
-                      setRequirements((current) =>
-                        current.map((r, i) => (i === index ? { ...r, bodyHtml: html } : r)))
-                    }
-                    rows={3}
-                  />
-                </div>
-              ))}
-              <Button
-                type="button" variant="secondary" size="sm" className="self-start"
-                onClick={() => setRequirements((current) => [...current, blankRequirement()])}
-              >
-                Add requirement
-              </Button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {step === 4 && (
-        <section aria-labelledby="step-4-heading" className="flex flex-col gap-5">
-          <h2 id="step-4-heading" className="sr-only">Review &amp; create</h2>
-
-          {similarNameCandidates && similarNameCandidates.length > 0 && (
-            <div role="alert" className="rounded-card border border-warning bg-warning-soft p-4 text-sm">
-              <p className="font-medium text-content">
-                A client with a very similar name already exists:
+                  )
+                })}
+                {products.length === 0 && (
+                  <p className="text-caption text-content-muted">No active products in the catalogue.</p>
+                )}
+              </div>
+              <p className="mt-1.5 text-caption text-content-muted">
+                Each product instantiates its own journey (locked until prerequisites clear);
+                templates pin their version.
               </p>
-              <ul className="ml-4 mt-1 list-disc text-content-muted">
-                {similarNameCandidates.map((c) => (
-                  <li key={c.id}>{c.name}</li>
-                ))}
-              </ul>
-              <Button
-                type="button" size="sm" className="mt-3"
-                onClick={() => {
-                  setAcknowledgeSimilarNames(true)
-                  setSimilarNameCandidates(null)
-                  void handleSubmit({ acknowledgeSimilarNames: true })
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <input
+                id="wizard-portal-login"
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary"
+                checked={createPortalLogin}
+                onChange={(e) => {
+                  setCreatePortalLogin(e.target.checked)
+                  setPortalLoginNotice(false)
                 }}
-              >
-                These are different companies — create anyway
-              </Button>
-            </div>
-          )}
-
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-card border border-border p-4 text-sm">
-            <dt className="text-content-muted">Name</dt>
-            <dd className="text-content">{name || '—'}</dd>
-            <dt className="text-content-muted">Onboarding date</dt>
-            <dd className="text-content">{onboardingDate || '—'}</dd>
-            <dt className="text-content-muted">Contacts</dt>
-            <dd className="text-content">{contacts.length}</dd>
-            <dt className="text-content-muted">Products (locked journeys)</dt>
-            <dd className="text-content">
-              {applications
-                .map((a) => products.find((p) => p.id === a.productId)?.name ?? `#${a.productId}`)
-                .join(', ') || '—'}
-            </dd>
-            <dt className="text-content-muted">Requirements</dt>
-            <dd className="text-content">
-              {requirements.filter((r) => !isRichTextEmpty(r.bodyHtml)).length}
-            </dd>
-          </dl>
-
-          <div className="flex items-start gap-2.5">
-            <input
-              id="wizard-portal-login"
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary"
-              checked={createPortalLogin}
-              onChange={(e) => {
-                setCreatePortalLogin(e.target.checked)
-                setPortalLoginNotice(false)
-              }}
-            />
-            <div className="flex flex-col">
-              <label htmlFor="wizard-portal-login" className="text-sm text-content">
-                Create client portal login now
-              </label>
-              <span className="text-caption text-content-muted">
-                A one-time password goes to the primary SPOC. Never automatic — this is the only way it happens.
-              </span>
-              {portalLoginNotice && (
-                <span role="alert" className="mt-1 text-caption text-warning-text">
-                  Portal logins are not available from this screen yet — unchecked. The client can still be
-                  created without one; add a login later from the client page once it ships.
+              />
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-content">
+                  {/* The glyph sits outside the <label> so the label's text —
+                      what assistive tech and tests match on — is the words. */}
+                  <span aria-hidden>🔑 </span>
+                  <label htmlFor="wizard-portal-login">Create client portal login now</label>
                 </span>
-              )}
+                <span className="text-caption text-content-muted">
+                  Username auto-generated; one-time password emailed to the primary SPOC — can also
+                  be done later from the client page.
+                </span>
+                {portalLoginNotice && (
+                  <span role="alert" className="mt-1 text-caption text-warning-text">
+                    Portal logins are not available from this screen yet — unchecked. The client can still be
+                    created without one; add a login later from the client page once it ships.
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
 
-          <Button onClick={() => void handleSubmit()} disabled={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create client'}
+            {/* The mockup also has an Attachments box here. There is no
+                attachment field on the create call — files are per-client
+                endpoints that exist only after the client does. Contract gap,
+                reported. */}
+          </section>
+        )}
+      </div>
+
+      {/* ── the mockup's footer: Back/Cancel · spacer · Continue/finish ── */}
+      <div className="mt-auto flex items-center gap-2.5 border-t border-border pt-4">
+        {step > 1 ? (
+          <Button type="button" variant="secondary" onClick={handleBack}>
+            ← Back
           </Button>
-        </section>
-      )}
-
-      <div className="mt-auto flex items-center justify-between border-t border-border pt-4">
-        <Button type="button" variant="secondary" disabled={step === 1}
-          onClick={() => goTo((step - 1) as Step)}>
-          Back
-        </Button>
-        {step < 4 && (
-          <Button type="button" onClick={handleNext} disabled={stepErrors[step].length > 0}>
-            Next
+        ) : (
+          <Button type="button" variant="secondary" onClick={() => navigate('/onboarding/clients')}>
+            Cancel
+          </Button>
+        )}
+        <span className="flex-1" />
+        {step < 4 ? (
+          <Button type="button" onClick={handleContinue}>
+            Continue →
+          </Button>
+        ) : (
+          <Button type="button" onClick={() => void handleSubmit()} disabled={create.isPending}>
+            {create.isPending
+              ? 'Creating…'
+              : 'Create client — journeys instantiate locked + login issued'}
           </Button>
         )}
       </div>
@@ -667,15 +755,22 @@ export function NewObClientWizardPage() {
   )
 }
 
-function StepRail({ current, furthest, onSelect }:
+/**
+ * The mockup's `steps-ind` row: "✓ 1. Client basics → **2. SPOC contacts** →
+ * 3. Commercials → 4. Requirements & journeys". Reached steps are buttons so
+ * the keyboard can go back without hunting for Back; unreached ones are inert
+ * text, because jumping forward would skip the step guards.
+ */
+function StepsIndicator({ current, furthest, onSelect }:
   { current: Step; furthest: Step; onSelect: (step: Step) => void }) {
   return (
-    <ol className="flex items-center gap-2" aria-label="Wizard progress">
+    <ol aria-label="Wizard progress" className="mt-1.5 flex flex-wrap items-center gap-2 text-caption text-content-muted">
       {STEPS.map(({ number, label }, index) => {
         const reached = number <= furthest
+        const done = number < current
         return (
           <React.Fragment key={number}>
-            {index > 0 && <span aria-hidden className="h-px flex-1 bg-border" />}
+            {index > 0 && <span aria-hidden>→</span>}
             <li>
               <button
                 type="button"
@@ -683,94 +778,21 @@ function StepRail({ current, furthest, onSelect }:
                 aria-current={current === number ? 'step' : undefined}
                 onClick={() => reached && onSelect(number)}
                 className={
-                  'flex items-center gap-1.5 rounded-control px-2 py-1 text-caption font-medium '
+                  'rounded-control px-1 py-0.5 '
                   + (current === number
-                    ? 'bg-primary-soft text-primary'
+                    ? 'font-semibold text-primary'
                     : reached
                       ? 'text-content hover:bg-subtle'
                       : 'text-content-muted')
                 }
               >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-xs">
-                  {number}
-                </span>
-                {label}
+                {done && <span aria-hidden>✓ </span>}
+                {number}. {label}
               </button>
             </li>
           </React.Fragment>
         )
       })}
     </ol>
-  )
-}
-
-function ErrorList({ errors }: { errors: string[] }) {
-  if (errors.length === 0) return null
-  return (
-    <ul className="list-disc rounded-card bg-subtle p-3 pl-8 text-caption text-content-muted">
-      {errors.map((error) => (
-        <li key={error}>{error}</li>
-      ))}
-    </ul>
-  )
-}
-
-function ContactRow({ contact, canRemove, onChange, onMakePrimary, onRemove }: {
-  contact: ContactDraft
-  canRemove: boolean
-  onChange: (patch: Partial<ContactDraft>) => void
-  onMakePrimary: () => void
-  onRemove: () => void
-}) {
-  return (
-    <div className="rounded-card border border-border p-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input aria-label="Contact name" placeholder="Name" value={contact.name}
-          onChange={(e) => onChange({ name: e.target.value })} />
-        <Input aria-label="Designation" placeholder="Designation" value={contact.designation}
-          onChange={(e) => onChange({ designation: e.target.value })} />
-        <Input aria-label="Email" type="email" placeholder="Email" value={contact.email}
-          onChange={(e) => onChange({ email: e.target.value })} />
-        <Input aria-label="Phone" placeholder="Phone" value={contact.phone}
-          onChange={(e) => onChange({ phone: e.target.value })} />
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-1.5 text-sm text-content">
-          <input type="radio" name="primary-contact" checked={contact.isPrimary} onChange={onMakePrimary}
-            className="h-4 w-4 border-border text-primary focus:ring-2 focus:ring-primary" />
-          Primary SPOC
-        </label>
-
-        <label className="flex items-center gap-1.5 text-sm text-content">
-          <input type="checkbox" checked={contact.whatsappOptIn}
-            onChange={(e) => onChange({ whatsappOptIn: e.target.checked })}
-            className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary" />
-          WhatsApp opt-in
-        </label>
-
-        {contact.whatsappOptIn && (
-          <select
-            aria-label="Where this consent came from"
-            value={contact.whatsappOptInSource}
-            onChange={(e) => onChange({ whatsappOptInSource: e.target.value as ObConsentSource | '' })}
-            className="min-w-[12rem] flex-1 rounded-control border border-border bg-surface px-3 py-2 text-sm text-content"
-          >
-            <option value="">Consent basis…</option>
-            <option value={ObConsentSource.VERBAL}>Verbal</option>
-            <option value={ObConsentSource.EMAIL}>Email</option>
-            <option value={ObConsentSource.WRITTEN}>Written</option>
-            <option value={ObConsentSource.CONTRACT}>Contract</option>
-            <option value={ObConsentSource.CLIENT_PORTAL}>Client portal</option>
-          </select>
-        )}
-
-        {canRemove && (
-          <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={onRemove}>
-            Remove
-          </Button>
-        )}
-      </div>
-    </div>
   )
 }

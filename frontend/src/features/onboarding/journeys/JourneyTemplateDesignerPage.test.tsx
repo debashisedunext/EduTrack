@@ -9,7 +9,9 @@ import { Toaster } from '@/components/ui/toaster'
 import { JourneyTemplateDesignerPage } from './JourneyTemplateDesignerPage'
 
 /**
- * C-102 · OB-07's template designer against the mock server.
+ * C-102 · OB-07's template designer against the mock server, laid out to the
+ * prototype's `vTplEdit()` — back link, versioned header, the step table
+ * with the Task List chip editor under each row, "+ Add step" at the bottom.
  *
  * <p>Mounted through `Routes`, not called as a component with a prop —
  * `WorkflowDesignerPage.test.tsx`'s own reason: the template id arrives
@@ -49,20 +51,27 @@ const SLOW = { timeout: 5000 }
 
 async function openDesigner(templateId = 2) {
   renderDesigner(templateId)
-  await screen.findByRole('heading', { name: /^Steps \(/ }, SLOW)
+  await screen.findByRole('table', { name: 'Services' }, SLOW)
 }
 
-const stepsRegion = () => screen.getByRole('heading', { name: /^Steps \(/ }).closest('section')!
+const stepsTable = () => screen.getByRole('table', { name: 'Services' })
 
-/** The step's own row, found by the numbered heading text it renders as `"1. Name"`. */
-const stepRow = (name: string) =>
-  within(stepsRegion())
-    .getAllByRole('listitem')
-    .find((li) => within(li).queryByText(new RegExp(`\\. ${escapeRegExp(name)}$`)))!
+/**
+ * The step's own `<tbody>` — each service renders as its own rowgroup (field
+ * row + Task List row), so a step's controls are scoped by its group. The
+ * thead is a rowgroup too; it never contains a step name.
+ */
+const stepGroup = (name: string) =>
+  within(stepsTable())
+    .getAllByRole('rowgroup')
+    .find((group) => within(group).queryByText(name))!
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+/** The step names in displayed table order — the first cell of each body row. */
+const displayedStepNames = () =>
+  within(stepsTable())
+    .getAllByRole('rowgroup')
+    .slice(1) // drop the thead
+    .map((group) => within(group).getAllByRole('cell')[1].textContent ?? '')
 
 const savedStepNames = (templateId: number) =>
   getDb()
@@ -74,28 +83,30 @@ describe('the step list renders a draft template', () => {
   it('renders every step in sequence order', async () => {
     await openDesigner(2)
     expect(savedStepNames(2)).toEqual(['Device Rollout', 'Attendance Policy Mapping'])
-    expect(screen.getByText(/1\. Device Rollout/)).toBeInTheDocument()
-    expect(screen.getByText(/2\. Attendance Policy Mapping/)).toBeInTheDocument()
+    const names = displayedStepNames()
+    expect(names[0]).toContain('Device Rollout')
+    expect(names[1]).toContain('Attendance Policy Mapping')
   })
 
-  it('shows the draft state and the Add step control', async () => {
+  it('shows the draft state, the back link and the Add step control', async () => {
     await openDesigner(2)
     expect(screen.getByText('Draft')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add step' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '← Module Service' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add step' })).toBeInTheDocument()
   })
 
-  it('totals TAT in the header and the steps heading — C-120', async () => {
+  it('totals TAT in the header caption — C-120', async () => {
     // Device Rollout (6) + Attendance Policy Mapping (3) = 9.
     await openDesigner(2)
-    expect(screen.getByText('Total TAT: 9 working days')).toBeInTheDocument()
-    expect(within(stepsRegion()).getByText('9 working days total')).toBeInTheDocument()
+    expect(screen.getByText('Total TAT: 9d')).toBeInTheDocument()
+    expect(screen.getByText(/across 2 services/)).toBeInTheDocument()
   })
 
   it('names what a step depends on, and calls out a parallel one', async () => {
     await openDesigner(2)
-    expect(within(stepRow('Device Rollout')).getByText('Parallel from journey start')).toBeInTheDocument()
+    expect(within(stepGroup('Device Rollout')).getByText('∥ none — runs parallel')).toBeInTheDocument()
     expect(
-      within(stepRow('Attendance Policy Mapping')).getByText('Runs after: Device Rollout'),
+      within(stepGroup('Attendance Policy Mapping')).getByText('↳ 1. Device Rollout'),
     ).toBeInTheDocument()
   })
 })
@@ -105,8 +116,8 @@ describe('a published, active version is read-only', () => {
     await openDesigner(1)
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Begin revision' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Add step' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '+ Add step' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Publish/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Move .* up$/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Remove /u })).toBeNull()
   })
@@ -115,14 +126,14 @@ describe('a published, active version is read-only', () => {
     // 3 + 4 + 8 + 5 + 4 = 24, same figure a client's own journey would show
     // on OB-05's strip once instantiated from this exact template.
     await openDesigner(1)
-    expect(screen.getByText('Total TAT: 24 working days')).toBeInTheDocument()
+    expect(screen.getByText('Total TAT: 24d')).toBeInTheDocument()
   })
 })
 
 describe('adding a step', () => {
   it('writes immediately and appears at the end of the list', async () => {
     await openDesigner(2)
-    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ Add step' }))
 
     const form = screen.getByRole('form', { name: 'Add step' })
     fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Go-live Sign-off' } })
@@ -137,7 +148,7 @@ describe('adding a step', () => {
 
   it('refuses an empty name before the request', async () => {
     await openDesigner(2)
-    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ Add step' }))
     const form = screen.getByRole('form', { name: 'Add step' })
     fireEvent.change(within(form).getByLabelText('TAT (working days)'), { target: { value: '2' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Add step' }))
@@ -151,16 +162,16 @@ describe('removing a step', () => {
   it('removes a step nothing depends on', async () => {
     await openDesigner(2)
     // Remove the dependent first so Device Rollout has none left.
-    fireEvent.click(within(stepRow('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
+    fireEvent.click(within(stepGroup('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
     await waitFor(() => expect(savedStepNames(2)).toEqual(['Device Rollout']), SLOW)
 
-    fireEvent.click(within(stepRow('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
     await waitFor(() => expect(savedStepNames(2)).toEqual([]), SLOW)
   })
 
   it('names the dependents rather than a bare conflict', async () => {
     await openDesigner(2)
-    fireEvent.click(within(stepRow('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
 
     expect(
       await screen.findByText('Device Rollout still has dependents', undefined, SLOW),
@@ -176,8 +187,9 @@ describe('reordering is staged, then saved in one request with If-Match', () => 
     await openDesigner(2)
     fireEvent.click(screen.getByRole('button', { name: 'Move Attendance Policy Mapping up' }))
 
-    expect(screen.getByText(/1\. Attendance Policy Mapping/)).toBeInTheDocument()
-    expect(screen.getByText(/2\. Device Rollout/)).toBeInTheDocument()
+    const names = displayedStepNames()
+    expect(names[0]).toContain('Attendance Policy Mapping')
+    expect(names[1]).toContain('Device Rollout')
     expect(screen.getByRole('button', { name: 'Save order' })).toBeInTheDocument()
     // Not written yet.
     expect(savedStepNames(2)).toEqual(['Device Rollout', 'Attendance Policy Mapping'])
@@ -205,13 +217,13 @@ describe('reordering is staged, then saved in one request with If-Match', () => 
   })
 })
 
-describe('the Task List', () => {
+describe('the Task List chip editor', () => {
   it('adds a mandatory item and removes an existing one', async () => {
     await openDesigner(2)
-    const row = stepRow('Device Rollout')
-    const itemForm = within(row).getByLabelText('New task list item for Device Rollout')
-    fireEvent.change(itemForm, { target: { value: 'Confirm power backup' } })
-    fireEvent.click(within(row).getAllByRole('button', { name: 'Add' })[0])
+    const row = stepGroup('Device Rollout')
+    const itemInput = within(row).getByLabelText('New task list item for Device Rollout')
+    fireEvent.change(itemInput, { target: { value: 'Confirm power backup' } })
+    fireEvent.click(within(row).getAllByRole('button', { name: '+ Add' })[0])
 
     await waitFor(() => {
       const item = getDb().obJourneyTemplateStepItems.find((i) => i.label === 'Confirm power backup')
@@ -227,13 +239,13 @@ describe('the Task List', () => {
   })
 })
 
-describe('the required-document checklist', () => {
+describe('the required-document chip editor', () => {
   it('adds a required doc and removes an existing one', async () => {
     await openDesigner(2)
-    const row = stepRow('Device Rollout')
-    const docForm = within(row).getByLabelText('New required document for Device Rollout')
-    fireEvent.change(docForm, { target: { value: 'Insurance certificate' } })
-    fireEvent.click(within(row).getAllByRole('button', { name: 'Add' })[1])
+    const row = stepGroup('Device Rollout')
+    const docInput = within(row).getByLabelText('New required document for Device Rollout')
+    fireEvent.change(docInput, { target: { value: 'Insurance certificate' } })
+    fireEvent.click(within(row).getAllByRole('button', { name: '+ Add' })[1])
 
     await waitFor(() => {
       const doc = getDb().obJourneyTemplateStepDocs.find((d) => d.label === 'Insurance certificate')
@@ -262,24 +274,24 @@ describe('the parallel groups panel', () => {
 })
 
 describe('the Publish button, by template state', () => {
-  it('is offered on an editable draft with at least one step', async () => {
+  it('is offered on an editable draft with at least one step, naming the version', async () => {
     await openDesigner(2)
-    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Publish v1' })).toBeEnabled()
   })
 
   it('is hidden on a published, active version', async () => {
     await openDesigner(1)
-    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Publish/ })).toBeNull()
   })
 
   it('is disabled once a draft has no steps left', async () => {
     await openDesigner(2)
-    fireEvent.click(within(stepRow('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
+    fireEvent.click(within(stepGroup('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
     await waitFor(() => expect(savedStepNames(2)).toEqual(['Device Rollout']), SLOW)
-    fireEvent.click(within(stepRow('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
     await waitFor(() => expect(savedStepNames(2)).toEqual([]), SLOW)
 
     expect(await screen.findByText('No steps yet', undefined, SLOW)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Publish/ })).toBeDisabled()
   })
 })

@@ -9,11 +9,13 @@ import { Toaster } from '@/components/ui/toaster'
 import { ModuleServiceCataloguePage } from './ModuleServiceCataloguePage'
 
 /**
- * C-123 · the Module Service catalogue against the mock server.
+ * C-123 · the Module Service catalogue against the mock server, laid out to
+ * the prototype's `vTemplates()`: create card, "Show services for" filter,
+ * then the card grid.
  *
- * <p>Fixture note — `db.ts`'s `OB_PRODUCTS`/`OB_JOURNEY_TEMPLATES`: ERP
- * (product 1, template 1) is active, sequence 1. LMS (product 3, template 3)
- * is a *retired* product with its own active, published template —
+ * <p>Fixture note — `db.ts`'s `OB_PRODUCTS`/`OB_JOURNEY_TEMPLATES`: EduTrack
+ * ERP (product 1, template 1) is active, sequence 1. LMS (product 3, template
+ * 3) is a *retired* product with its own active, published template —
  * sequence 2, `dependsOnTemplateId: 1` — added by this task specifically so
  * the ↑/↓ control and the depends-on picker have a second real row to act
  * on. Biometric (product 2) has a draft template only, and is the
@@ -36,23 +38,33 @@ const SLOW = { timeout: 5000 }
 
 async function openCatalogue() {
   renderCatalogue()
-  await screen.findByRole('heading', { name: 'Module Service' })
-  // Wait for the product list itself, not just the header. A link, not
-  // plain text: LMS's own "Service depends on" picker also offers "ERP
-  // Suite" as an <option>, so a bare findByText matches both.
-  await screen.findByRole('link', { name: 'ERP Suite' }, SLOW)
+  await screen.findByRole('heading', { name: 'Module Service' }, SLOW)
+  // Wait for the card grid itself, not just the header — the ERP card's own
+  // heading, which only renders once the product list has arrived.
+  await screen.findByRole('heading', { name: 'EduTrack ERP' }, SLOW)
 }
 
 const productCard = (name: string) =>
-  screen.getAllByRole('listitem').find((li) => within(li).queryByText(name))!
+  screen.getAllByRole('listitem').find((li) => within(li).queryByRole('heading', { name }))!
 
 describe('the catalogue lists every product', () => {
-  it('shows an active service with its total TAT and journey count', async () => {
+  it('shows an active service with its total TAT, active chip and edit link', async () => {
     await openCatalogue()
 
-    const card = productCard('ERP Suite')
+    const card = productCard('EduTrack ERP')
     expect(within(card).getByText('ERP')).toBeInTheDocument()
-    expect(within(card).getByText(/working days? total/)).toBeInTheDocument()
+    expect(within(card).getByText(/d total TAT/)).toBeInTheDocument()
+    expect(within(card).getByText('Active for product')).toBeInTheDocument()
+    // The version chip and the edit label both come off the template detail.
+    await within(card).findByRole('link', { name: /✎ Edit \(publishes v\d+\)/ }, SLOW)
+  })
+
+  it('lists the services with TAT, owner and dependency markers', async () => {
+    await openCatalogue()
+
+    const card = productCard('EduTrack ERP')
+    // The active ERP template's first step, drawn as the mockup's step line.
+    await within(card).findByText(/∥ parallel|↳ after step \d+/, undefined, SLOW)
   })
 
   it('shows a product with no active service as a dead end, not a broken card', async () => {
@@ -63,17 +75,42 @@ describe('the catalogue lists every product', () => {
     expect(within(card).queryByLabelText('Service depends on')).not.toBeInTheDocument()
   })
 
-  it('the product filter narrows the list to one card', async () => {
+  it('the "Show services for" filter narrows the grid to one card', async () => {
     await openCatalogue()
 
-    fireEvent.click(screen.getByRole('button', { name: /Product/ }))
-    const listbox = await screen.findByRole('listbox')
-    fireEvent.click(within(listbox).getByRole('option', { name: 'ERP Suite' }))
+    fireEvent.change(screen.getByLabelText('Show services for'), { target: { value: '1' } })
+
+    // Card headings, not bare text — the create and filter selects still
+    // offer every product as an <option>, which is not a card.
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Biometric Attendance' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('heading', { name: 'EduTrack ERP' })).toBeInTheDocument()
+  })
+})
+
+describe('creating a module service', () => {
+  it('creates a draft for the chosen product and navigates to its designer', async () => {
+    await openCatalogue()
+
+    fireEvent.change(screen.getByLabelText('Create a new module service'), {
+      target: { value: 'RFID Card Rollout' },
+    })
+    // Product 4 (HRMS) is the one fixture product with no template row yet —
+    // the mock answers 409 for any product already holding one, draft included.
+    fireEvent.change(screen.getByLabelText('For product'), { target: { value: '4' } })
+    fireEvent.click(screen.getByRole('button', { name: '+ Create module service' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('Biometric Attendance')).not.toBeInTheDocument()
-    })
-    expect(screen.getByRole('link', { name: 'ERP Suite' })).toBeInTheDocument()
+      const created = getDb().obJourneyTemplates.find((t) => t.name === 'RFID Card Rollout')
+      expect(created).toBeDefined()
+      expect(created!.productId).toBe(4)
+    }, SLOW)
+  })
+
+  it('refuses to submit without a name and a product', async () => {
+    await openCatalogue()
+    expect(screen.getByRole('button', { name: '+ Create module service' })).toBeDisabled()
   })
 })
 
@@ -81,8 +118,8 @@ describe('reordering the catalogue', () => {
   it('moves a service down and persists the new sequence', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('ERP Suite')
-    fireEvent.click(within(erpCard).getByRole('button', { name: 'Move ERP Suite down' }))
+    const erpCard = productCard('EduTrack ERP')
+    fireEvent.click(within(erpCard).getByRole('button', { name: 'Move EduTrack ERP down' }))
 
     await waitFor(() => {
       const templates = getDb().obJourneyTemplates
@@ -94,22 +131,25 @@ describe('reordering the catalogue', () => {
   it('the topmost service cannot move up, the bottommost cannot move down', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('ERP Suite')
+    const erpCard = productCard('EduTrack ERP')
     const lmsCard = productCard('Learning Management')
-    expect(within(erpCard).getByRole('button', { name: 'Move ERP Suite up' })).toBeDisabled()
+    expect(within(erpCard).getByRole('button', { name: 'Move EduTrack ERP up' })).toBeDisabled()
     expect(within(lmsCard).getByRole('button', { name: 'Move Learning Management down' })).toBeDisabled()
   })
 
-  it('reorder controls are hidden once a product filter narrows the list', async () => {
+  it('reorder still acts on the whole catalogue order while a filter narrows the view', async () => {
+    // The mockup's `msMove` reorders the full `TEMPLATES` sequence whatever
+    // the filter shows; the ↑/↓ buttons therefore stay, and their disabled
+    // state reflects the card's place in the *unfiltered* order.
     await openCatalogue()
 
-    fireEvent.click(screen.getByRole('button', { name: /Product/ }))
-    const listbox = await screen.findByRole('listbox')
-    fireEvent.click(within(listbox).getByRole('option', { name: 'ERP Suite' }))
-
+    fireEvent.change(screen.getByLabelText('Show services for'), { target: { value: '1' } })
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Move ERP Suite up' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Biometric Attendance' })).not.toBeInTheDocument()
     })
+
+    expect(screen.getByRole('button', { name: 'Move EduTrack ERP up' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move EduTrack ERP down' })).toBeEnabled()
   })
 })
 
@@ -126,7 +166,7 @@ describe('the depends-on picker', () => {
   it('does not offer the service depending on it, or itself', async () => {
     await openCatalogue()
 
-    const erpCard = productCard('ERP Suite')
+    const erpCard = productCard('EduTrack ERP')
     const select = within(erpCard).getByLabelText('Service depends on') as HTMLSelectElement
     await waitFor(() => expect(select).not.toBeDisabled(), SLOW)
 
