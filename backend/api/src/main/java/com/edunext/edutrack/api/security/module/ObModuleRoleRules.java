@@ -125,6 +125,7 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/products", ADMIN_ONLY);
         put(m, "PATCH", "/api/v1/onboarding/products/{obProductId}", ADMIN_ONLY);
 
+        put(m, "GET", "/api/v1/onboarding/journey-templates", EVERY_ROLE);
         put(m, "GET", "/api/v1/onboarding/journey-templates/{templateId}", EVERY_ROLE);
         put(m, "POST", "/api/v1/onboarding/journey-templates", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions", ADMIN_ONLY);

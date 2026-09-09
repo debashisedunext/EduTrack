@@ -1,0 +1,79 @@
+-- =====================================================================
+-- Version numbers belong to a service, not to a product.
+--
+-- Source:  docs/prototype/onboarding.html — TEMPLATES t1 "Standard SaaS
+--            Onboarding" (v3, active) and t2 "Enterprise (with data
+--            migration audit)" (v1) are BOTH product p1, and the OB-07
+--            catalogue draws a card for each.
+--          V20260903_1420__ob_journey_templates.sql — the table this
+--            corrects, whose own header calls the rule "one active
+--            version per product".
+--
+-- WHAT WAS WRONG, AND IT IS A MODELLING BUG RATHER THAN A MISSING FEATURE.
+--
+-- `uq_ob_journey_templates_version (product_id, version)` reads the rows
+-- for one product as a single revision chain: v1 → v2 → v3, one service
+-- being edited over time. The design has always been the other shape —
+-- a product sells several *named* services ("Standard SaaS Onboarding",
+-- "Enterprise (with data migration audit)"), each with its own version
+-- history, one of them active at a time.
+--
+-- The two models agree on "one active per product", which is why
+-- `uq_ob_journey_templates_active` is untouched below. They disagree on
+-- what a version number counts.
+--
+-- HOW THE OLD KEY BLOCKED IT, EXACTLY.
+--
+-- `ObJourneyTemplateService.createTemplate` sets `version = 1` on every
+-- new service and therefore *had* to refuse a product that already held
+-- any row — a second service starting at v1 collides with the first
+-- service's own v1, which is still there because retired versions are
+-- kept deliberately. That refusal is
+-- `TemplateAlreadyExistsException`, and it is the error an admin meets
+-- when they try to add a second service to a product. The exception was
+-- the symptom; this index was the cause.
+--
+-- `beginRevision` worked around it by numbering from
+-- `MAX(version)` across the whole *product*, so revising "Enterprise"
+-- while "Standard SaaS Onboarding" sits at v4 would produce "Enterprise
+-- v5" — a version number counting somebody else's edits.
+--
+-- WHY `name` AND NOT A `family_id` COLUMN.
+--
+-- A surrogate family key is the more orthodox answer and it was the first
+-- draft. It is rejected here because it buys robustness against exactly
+-- one event — renaming a service mid-chain — and pays for it with a
+-- nullable self-referencing column, a two-statement insert to point a
+-- fresh row at itself, and a backfill over history whose correctness
+-- nobody can check by reading a row.
+--
+-- Against that: a rename in the designer is not a version of the same
+-- service, it is a different service. "Standard SaaS Onboarding" becoming
+-- "Standard SaaS Onboarding (2027)" starting a fresh v1 is defensible;
+-- silently continuing at v5 under a name nobody recognises is not. So the
+-- name IS the service identity, and the index says so.
+--
+-- SAFE ON THE DATA THAT EXISTS. Verified before writing, against the
+-- fixture corpus:
+--
+--   product 1 · Enterprise (with data migration audit) · v1
+--   product 1 · Standard SaaS Onboarding               · v3  (active)
+--   product 1 · Standard SaaS Onboarding               · v4
+--   product 2 · Biometric Device Rollout               · v2  (active)
+--
+-- Every row is already unique on (product_id, name, version) — the old
+-- key was the stricter of the two, so nothing can conflict on the way in.
+-- No row is written, no column is added, and no value changes.
+--
+-- THE FOREIGN KEY KEEPS ITS INDEX. MySQL requires an index whose leading
+-- column is the referencing column; `fk_ob_journey_templates_product` is
+-- satisfied by `uq_ob_journey_templates_active (product_id, active_key)`
+-- both before and after this, and by the replacement key as well. The
+-- drop cannot orphan it.
+--
+-- None of the four protected tables is touched.
+-- ---------------------------------------------------------------------
+
+ALTER TABLE ob_journey_templates
+  DROP INDEX uq_ob_journey_templates_version,
+  ADD UNIQUE KEY uq_ob_journey_templates_version (product_id, name, version);

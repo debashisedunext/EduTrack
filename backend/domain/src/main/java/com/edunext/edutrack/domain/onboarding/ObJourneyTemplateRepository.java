@@ -17,6 +17,20 @@ public interface ObJourneyTemplateRepository extends JpaRepository<ObJourneyTemp
     /** Next version number for a product is this row's {@code version + 1}. */
     Optional<ObJourneyTemplate> findTopByProductIdOrderByVersionDesc(Long productId);
 
+    /**
+     * The head of one <em>service's</em> version chain.
+     *
+     * <p>{@code beginRevision} numbers from this rather than from
+     * {@link #findTopByProductIdOrderByVersionDesc}: a product sells several
+     * named services, and a version counts the edits to one of them. Keyed on
+     * name because {@code uq_ob_journey_templates_version (product_id, name,
+     * version)} is — see {@code V20260909_1900}.
+     */
+    Optional<ObJourneyTemplate> findTopByProductIdAndNameOrderByVersionDesc(Long productId, String name);
+
+    /** Every version of every service a product sells, newest first. */
+    List<ObJourneyTemplate> findByProductIdOrderByNameAscVersionDesc(Long productId);
+
     /** C-123 · the whole Module Service catalogue — one row per product with an active version. */
     List<ObJourneyTemplate> findByIsActiveTrueOrderBySequenceAsc();
 
