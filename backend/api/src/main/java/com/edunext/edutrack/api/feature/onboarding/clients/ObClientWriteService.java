@@ -37,11 +37,19 @@ import java.util.Set;
  * silent</h2>
  *
  * <ul>
+ *   <li><b>No prerequisites instance.</b> There is no {@code ob_prereq_*} table
+ *       on {@code develop} — B-124 brings the master and B-125 the per-client
+ *       instances. Every journey is still created {@code LOCKED}, which is the
+ *       state the gate exists to hold; what is missing is the checklist that
+ *       opens it, not the hold.</li>
  *   <li><b>Portal login: built.</b> {@code createPortalLogin: true} was refused
  *       rather than ignored until B-126; it is now honoured, through
  *       {@code ClientAccountAdminService} rather than a second implementation
  *       here. {@code PortalLoginUnavailableException} and its handler branch are
  *       deleted, as that exception's own javadoc said they would be.</li>
+ *   <li><b>No portal login.</b> {@code createPortalLogin: true} is refused
+ *       rather than ignored — see {@link PortalLoginUnavailableException} for
+ *       why refusing is the safer of the two.</li>
  * </ul>
  *
  * <h2>B-109 · the prerequisites instance</h2>
@@ -116,6 +124,10 @@ class ObClientWriteService {
                          ObRequirementBody requirementBodies,
                          ObClientService details,
                          ObJourneyInstantiationService journeys,
+                         PanService pan,
+                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
+        this(clients, reads, children, requirements, requirementBodies, details, journeys, pan,
+                portalAccounts, Clock.systemUTC());
                          ObClientPrereqService prereqs,
                          PanService pan,
                          com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
@@ -201,6 +213,15 @@ class ObClientWriteService {
             journeys.instantiate(clientId, application.productId());
         }
 
+        // B-126 · the wizard's "create client login" checkbox, honoured rather
+        // than refused. Last, and deliberately so: the account is minted from
+        // the client's name and its primary SPOC, so both rows have to exist,
+        // and the credential mail is queued through B-110's outbox inside this
+        // same transaction — a login created against a client that then rolls
+        // back would be a credential for nothing.
+        if (request.wantsPortalLogin()) {
+            portalAccounts.create(scope, clientId, callerId);
+        }
         // B-109 · the checklist behind the gate. See ObClientPrereqService's
         // own javadoc: idempotent by refusal, so this must run exactly once,
         // which "a client just created" already guarantees.
