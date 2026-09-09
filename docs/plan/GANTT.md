@@ -373,7 +373,7 @@ gantt
 |  | `B-116` | Acceptance PDF | 2 | `B-115` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | ✅ done |
 | 🔴 | `B-117` | The objection path | 1 | `B-115` ᶦ | Wed 09 Sep | Wed 09 Sep | 0 | ▫️ to do |
 |  | `B-118` | Go-live flip | 1 | `B-116` ᶦ | Thu 10 Sep | Thu 10 Sep | 0 | ▫️ to do |
-|  | `B-119` | CSAT — a public one-question page, storage, and a summary | 2 | `B-118` ᶦ | Fri 11 Sep | Sat 12 Sep | 0 | ▫️ to do |
+| 🔴 | `B-119` | CSAT — a public one-question page, storage, and a summary | 2 | `B-118` ᶦ | Fri 11 Sep | Sat 12 Sep | 0 | ▫️ to do |
 |  | `B-120` | ob_dashboard_summary refresh job | 2 | `A-108` ᶦ | Sat 05 Sep | Sat 05 Sep | 3 | ✅ done |
 |  | `B-121` | OB-02 | 3 | `B-120` ᶦ | Sun 06 Sep | Sun 06 Sep | 0 | ✅ done |
 |  | `B-122` | OB-10 | 3 | `B-120` ᶦ | Mon 07 Sep | Mon 07 Sep | 0 | ✅ done |
