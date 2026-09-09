@@ -1,17 +1,18 @@
 import * as React from 'react'
 
-import type { ObJourneyStrip, UserRef } from '@/api/generated/model'
+import type { ObJourneyStepView, ObJourneyStrip, UserRef } from '@/api/generated/model'
 import { useGetObJourney } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
 
 import { JourneyRibbonStrip } from '../ribbon/JourneyRibbonStrip'
 import { ObAccordion } from './ObAccordion'
 import { JourneyStepPanel } from './JourneyStepPanel'
+import { SignoffPanel } from './SignoffPanel'
 import { StepDotStrip } from './StepDotStrip'
 import { formatTatUsage, journeyHold, ragLabel, ragVariant, tatUsage } from './journeyStrip'
+import { productIcon } from './productIcon'
 import { focusStepId, toRibbonSteps, type ResolveUser } from './ribbonSteps'
 
 /**
@@ -58,6 +59,19 @@ export interface JourneyAccordionProps {
   openEscalationStepIds?: ReadonlySet<number>
 }
 
+/**
+ * Whether every service is settled, which is what
+ * `ob-signoff-journey-incomplete` tests server-side.
+ *
+ * Undefined steps answer **false**: the detail read is still in flight, and a
+ * go-live panel that flickered into existence before the ribbon arrived would
+ * offer the request on a journey nobody has seen the state of yet.
+ */
+function journeyComplete(steps: readonly ObJourneyStepView[] | undefined): boolean {
+  return steps != null && steps.length > 0
+    && steps.every((s) => s.status === 'DONE' || s.status === 'SKIPPED')
+}
+
 export function JourneyAccordion({
   journey,
   isOpen,
@@ -102,8 +116,11 @@ export function JourneyAccordion({
       label={`${productName} — ${journey.percentComplete}% complete, ${ragLabel(journey.rag).toLowerCase()}`}
       summary={
         <>
-          {/* The mockup's `jstrip` order: name, the template caption, the
-              status chip, TAT, then dots and percent pushed to the right. */}
+          {/* The mockup's `jstrip` order: icon, name, the template caption,
+              the status chip, TAT, then dots and percent pushed to the right. */}
+          <span className="shrink-0 text-lg leading-none" aria-hidden="true">
+            {productIcon(journey.product?.code)}
+          </span>
           <span className="min-w-0 truncate text-sm font-semibold text-content">{productName}</span>
 
           {/* `ObJourneyStrip` carries no template name or pinned version —
@@ -128,18 +145,13 @@ export function JourneyAccordion({
             parts" rule read the other way round.
           */}
           {usage ? (
-            <span
-              className={cn(
-                'shrink-0 text-caption tabular-nums',
-                usage.band === 'over'
-                  ? 'font-semibold text-danger-text'
-                  : usage.band === 'amber'
-                    ? 'font-semibold text-warning-text'
-                    : 'text-content-muted',
-              )}
+            <Chip
+              className="shrink-0 tabular-nums"
+              variant={usage.band === 'over' ? 'danger' : usage.band === 'amber' ? 'warning' : 'neutral'}
             >
+              <span aria-hidden="true">⏱</span>
               {formatTatUsage(usage)}
-            </span>
+            </Chip>
           ) : (
             <span className="shrink-0 text-caption text-content-muted">No TAT budget</span>
           )}
@@ -194,6 +206,20 @@ export function JourneyAccordion({
               hold={hold}
               obClientId={obClientId}
             />
+          )}
+
+          {/*
+            §8 · the journey's go-live sign-off, offered only once every
+            service is settled.
+            `ob-signoff-journey-incomplete` is the server's 422 for asking
+            earlier, and the steps that decide it are in hand right here — so
+            the gate lives at this call site rather than inside the panel,
+            which has no journey to inspect. `SKIPPED` counts as settled
+            because the server's own check does: a waived service is a
+            finished one for this purpose.
+          */}
+          {journeyComplete(steps) && (
+            <SignoffPanel kind="GO_LIVE" journeyId={journey.id} obClientId={obClientId} />
           )}
         </>
       )}

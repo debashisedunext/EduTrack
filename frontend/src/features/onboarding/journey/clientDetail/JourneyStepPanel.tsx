@@ -7,6 +7,7 @@ import { Chip } from '@/components/ui/chip'
 import { StepCommunicationsPanel } from '../communications/StepCommunicationsPanel'
 import { ragLabel, ragVariant, type JourneyHold } from './journeyStrip'
 import type { ResolveUser } from './ribbonSteps'
+import { SignoffPanel } from './SignoffPanel'
 import { StepActionBar } from './StepActionBar'
 import { StepTaskList } from './StepTaskList'
 import { completionGate, mayActOnStep } from './stepActions'
@@ -247,6 +248,21 @@ export function JourneyStepPanel({
       />
 
       <StepActionBar step={step} hold={hold} gate={gate} canAct={canAct} />
+
+      {/*
+        §8 · the step's own sign-off, for the steps whose template asks for
+        one. Rendered for every reader rather than only the owner: "has the
+        client accepted this yet" is the question anybody looking at the step
+        has, and the panel's own controls are the only part that acts.
+      */}
+      {step.requiresSignoff && obClientId != null && (
+        <SignoffPanel
+          kind="STEP"
+          journeyId={step.journeyId}
+          stepId={step.id}
+          obClientId={obClientId}
+        />
+      )}
 
       {/*
         Whose step it is, for everybody who cannot act on it. The action bar
