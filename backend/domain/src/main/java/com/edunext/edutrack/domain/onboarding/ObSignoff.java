@@ -129,8 +129,19 @@ public class ObSignoff {
      * answered, and for every {@code STEP} row, which is never offered one.
      * {@code ck_ob_signoffs_csat} binds it to {@link #csatSubmittedAt}: both
      * set or neither.
+     *
+     * <p><b>{@code columnDefinition} is load-bearing, not decoration.</b>
+     * V20260909_1830 declares the column {@code TINYINT} — right for a value
+     * the CHECK holds between 1 and 5 — while Hibernate maps a bare
+     * {@code Integer} to {@code INTEGER}. With {@code ddl-auto: validate} on
+     * every profile, that mismatch fails schema validation at startup, which
+     * takes down the whole application rather than this one feature:
+     * "wrong column type encountered in column [csat_score]". Naming the
+     * declared type here makes the mapping agree with the migration and keeps
+     * the Java type an {@code Integer}, which is what the DTO and the contract
+     * both carry.
      */
-    @Column(name = "csat_score")
+    @Column(name = "csat_score", columnDefinition = "TINYINT")
     private Integer csatScore;
 
     /** B-119 · the optional remark beside the score. Not bound into the CHECK — a rating needs no comment. */
