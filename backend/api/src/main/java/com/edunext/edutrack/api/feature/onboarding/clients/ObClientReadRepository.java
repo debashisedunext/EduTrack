@@ -295,6 +295,66 @@ class ObClientReadRepository {
     }
 
     /**
+     * Where each client's <b>primary journey</b> stands — the row behind
+     * {@code ObClientCurrentStep}, keyed by {@code ob_client_id}.
+     *
+     * <p>One statement for the whole page, on {@link #productsOf}'s shape, and
+     * the detail read reuses it with a singleton list rather than growing a
+     * near-identical second query.
+     *
+     * <p>The primary journey is the client's non-archived journey with the
+     * smallest id — the earliest instantiated live one, which is the wizard's
+     * first purchase. <b>A client simply has no row here</b> when that journey
+     * is gate-locked, held behind a sibling, or has no unsettled step left
+     * (finished, or every step skipped): the contract's own null cases, decided
+     * by the {@code WHERE} rather than re-derived in Java. Note the order of
+     * decisions — {@code MIN(id)} picks the journey over the non-archived set
+     * <em>first</em>, so a locked primary journey yields no row rather than
+     * quietly promoting an open sibling to "primary".
+     *
+     * <p>{@code stepIndex} is the step's 1-based <b>ordinal</b> by
+     * {@code (sequence, id)}, not the raw {@code sequence} value — the
+     * template's ordering key is neither promised contiguous nor promised to
+     * start at 1, and "step 4/8" has to count steps, not read a label. The
+     * {@code id} tiebreak matches {@link #stepDotsOf}'s ordering; today
+     * {@code uq_ob_journey_steps_seq} makes it unreachable, but a query that
+     * agrees with its siblings survives that index changing.
+     */
+    List<CurrentStepRow> currentStepsOf(Collection<Long> clientIds) {
+        if (clientIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                SELECT j.ob_client_id AS obClientId,
+                       p.id           AS productId,
+                       p.code         AS productCode,
+                       p.name         AS productName,
+                       s.name         AS stepName,
+                       (SELECT COUNT(*) FROM ob_journey_steps x
+                         WHERE x.journey_id = s.journey_id
+                           AND (x.sequence < s.sequence
+                                OR (x.sequence = s.sequence AND x.id <= s.id))) AS stepIndex,
+                       (SELECT COUNT(*) FROM ob_journey_steps t
+                         WHERE t.journey_id = j.id) AS stepTotal
+                  FROM ob_journeys j
+                  JOIN ob_products p ON p.id = j.product_id
+                  JOIN ob_journey_steps s
+                    ON s.id = (SELECT cs.id FROM ob_journey_steps cs
+                                WHERE cs.journey_id = j.id
+                                  AND cs.status NOT IN ('DONE', 'SKIPPED')
+                                ORDER BY cs.sequence, cs.id
+                                LIMIT 1)
+                 WHERE j.ob_client_id IN (:ids)
+                   AND j.archived_at IS NULL
+                   AND j.id = (SELECT MIN(pj.id) FROM ob_journeys pj
+                                WHERE pj.ob_client_id = j.ob_client_id
+                                  AND pj.archived_at IS NULL)
+                   AND j.gate_status = 'OPEN'
+                   AND j.held_by_journey_id IS NULL
+                """).param("ids", clientIds).query(CURRENT_STEP_MAPPER).list();
+    }
+
+    /**
      * The primary SPOC of each client on the page.
      *
      * <p>{@code is_primary_key} rather than {@code is_primary = 1}: the
@@ -608,6 +668,11 @@ class ObClientReadRepository {
     record ProductRow(long obClientId, long id, String code, String name) {
     }
 
+    /** One client's primary-journey position — {@link #currentStepsOf}'s projection. */
+    record CurrentStepRow(long obClientId, long productId, String productCode, String productName,
+                          String stepName, int stepIndex, int stepTotal) {
+    }
+
     /**
      * @param whatsappOptInAt     B-103 · non-null exactly when {@code whatsappOptIn}
      *                            — {@code ck_ob_client_contacts_consent} makes the
@@ -753,6 +818,11 @@ class ObClientReadRepository {
 
     private static final RowMapper<ProductRow> PRODUCT_MAPPER = (rs, n) -> new ProductRow(
             rs.getLong("obClientId"), rs.getLong("id"), rs.getString("code"), rs.getString("name"));
+
+    private static final RowMapper<CurrentStepRow> CURRENT_STEP_MAPPER = (rs, n) -> new CurrentStepRow(
+            rs.getLong("obClientId"), rs.getLong("productId"), rs.getString("productCode"),
+            rs.getString("productName"), rs.getString("stepName"),
+            rs.getInt("stepIndex"), rs.getInt("stepTotal"));
 
     private static final RowMapper<ContactRow> CONTACT_MAPPER = (rs, n) -> new ContactRow(
             rs.getLong("obClientId"), rs.getLong("id"), rs.getString("name"), rs.getString("designation"),

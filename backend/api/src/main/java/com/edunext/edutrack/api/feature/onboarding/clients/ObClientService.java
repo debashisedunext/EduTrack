@@ -71,12 +71,14 @@ class ObClientService {
         List<Long> ids = page.data().stream().map(ObClientReadRepository.ListRow::id).toList();
         Map<Long, List<ObClientDtos.ObProductRef>> products = productsByClient(ids);
         Map<Long, ObClientDtos.ObContact> primaries = primaryContactsByClient(ids);
+        Map<Long, ObClientDtos.ObClientCurrentStep> currentSteps = currentStepsByClient(ids);
 
         return new ObClientDtos.ObClientListResponse(
                 page.data().stream()
                         .map(row -> summary(row,
                                 products.getOrDefault(row.id(), List.of()),
-                                primaries.get(row.id())))
+                                primaries.get(row.id()),
+                                currentSteps.get(row.id())))
                         .toList(),
                 page.meta());
     }
@@ -123,6 +125,9 @@ class ObClientService {
                 row.summary().gateStatus(),
                 row.summary().journeyCount(),
                 row.summary().journeysComplete(),
+                // The same batch read the list uses, asked about one client —
+                // one row or none, and none is the contract's null.
+                currentStepsByClient(List.of(id)).get(id),
                 products,
                 ObClientDtos.UserRef.of(row.summary().salesPersonId(), row.summary().salesPersonName()),
                 contacts.stream().filter(ObClientDtos.ObContact::isPrimary).findFirst().orElse(null),
@@ -247,6 +252,26 @@ class ObClientService {
         return byClient;
     }
 
+    /**
+     * Where each client's primary journey stands, keyed by client id.
+     *
+     * <p>A client absent from the map has nothing running to name — the
+     * journey is gate-locked, held behind a sibling, finished, or not there at
+     * all. {@code ObClientReadRepository.currentStepsOf} decides that in SQL,
+     * so this method only reshapes rows; the null the contract asks for is
+     * simply {@code Map.get}'s answer for a missing key.
+     */
+    private Map<Long, ObClientDtos.ObClientCurrentStep> currentStepsByClient(List<Long> ids) {
+        Map<Long, ObClientDtos.ObClientCurrentStep> byClient = new LinkedHashMap<>();
+        for (ObClientReadRepository.CurrentStepRow row : reads.currentStepsOf(ids)) {
+            byClient.put(row.obClientId(), new ObClientDtos.ObClientCurrentStep(
+                    new ObClientDtos.ObProductRef(row.productId(), row.productCode(),
+                            row.productName()),
+                    row.stepName(), row.stepIndex(), row.stepTotal()));
+        }
+        return byClient;
+    }
+
     private Map<Long, ObClientDtos.ObContact> primaryContactsByClient(List<Long> ids) {
         Map<Long, ObClientDtos.ObContact> byClient = new LinkedHashMap<>();
         for (ObClientReadRepository.ContactRow row : reads.primaryContactsOf(ids)) {
@@ -257,10 +282,11 @@ class ObClientService {
 
     private static ObClientDtos.ObClientSummary summary(ObClientReadRepository.ListRow row,
                                                         List<ObClientDtos.ObProductRef> products,
-                                                        ObClientDtos.ObContact primary) {
+                                                        ObClientDtos.ObContact primary,
+                                                        ObClientDtos.ObClientCurrentStep currentStep) {
         return new ObClientDtos.ObClientSummary(
                 row.id(), row.name(), row.onboardingDate(), row.status(), row.rag(), row.gateStatus(),
-                row.journeyCount(), row.journeysComplete(), products,
+                row.journeyCount(), row.journeysComplete(), currentStep, products,
                 ObClientDtos.UserRef.of(row.salesPersonId(), row.salesPersonName()),
                 primary, row.liveAt(), row.hasPortalLogin());
     }

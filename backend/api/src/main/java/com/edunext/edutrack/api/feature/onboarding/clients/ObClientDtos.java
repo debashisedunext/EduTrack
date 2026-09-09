@@ -126,14 +126,36 @@ final class ObClientDtos {
     }
 
     /**
+     * {@code ObClientCurrentStep} — where the client's first (primary) journey
+     * stands: OB-03's caption "ERP step 4/8 · Data migration".
+     *
+     * @param product   the primary journey's product, so the caption can name
+     *                  it; optional in the contract
+     * @param name      the current service's name
+     * @param stepIndex <b>1-based position</b> of this service within its
+     *                  journey's step sequence — the {@code 4} of "step 4/8".
+     *                  Deliberately not {@code ObStepDot.sequence}, which is the
+     *                  template's ordering key and is neither promised
+     *                  contiguous nor promised to start at 1
+     * @param stepTotal how many services the journey has
+     */
+    record ObClientCurrentStep(ObProductRef product, String name, int stepIndex, int stepTotal) {
+    }
+
+    /**
      * {@code ObClient} — the OB-03 list row.
      *
      * <p>No PAN and no address, and that is the contract's own line: "identity
      * data belongs to the detail read, where the masking rule and its audit
      * apply, and a list is the wrong place to leak it a page at a time".
+     *
+     * @param currentStep where the primary journey stands, or null while that
+     *                    journey is gate-locked, held behind a sibling, or
+     *                    finished — OB-03 already has words for those states
      */
     record ObClientSummary(long id, String name, LocalDate onboardingDate, String status,
                            String rag, String gateStatus, int journeyCount, int journeysComplete,
+                           ObClientCurrentStep currentStep,
                            List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
                            Instant liveAt, boolean hasPortalLogin) {
     }
@@ -148,6 +170,7 @@ final class ObClientDtos {
      */
     record ObClientDetail(long id, String name, LocalDate onboardingDate, String status,
                           String rag, String gateStatus, int journeyCount, int journeysComplete,
+                          ObClientCurrentStep currentStep,
                           List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
                           Instant liveAt, boolean hasPortalLogin,
                           String description, String address, String licenseType, String pan,

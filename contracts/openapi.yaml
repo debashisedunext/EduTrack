@@ -18602,6 +18602,34 @@ components:
         TAT internals are **absent by construction, not hidden client-side** —
         the client portal renders this same strip, and a field the portal must
         never show is a field that must not be in the schema it receives.
+    ObClientCurrentStep:
+      type: object
+      required: [name, stepIndex, stepTotal]
+      properties:
+        product:
+          $ref: '#/components/schemas/ObProductRef'
+          description: The primary journey's product, so the caption can name it.
+        name: { type: string }
+        stepIndex:
+          type: integer
+          minimum: 1
+          description: |
+            **1-based position** of this service within its journey's
+            sequence — the `4` of "step 4/8". Deliberately not
+            `ObStepDot.sequence`, which is the template's ordering key and is
+            neither promised contiguous nor promised to start at 1.
+        stepTotal:
+          type: integer
+          minimum: 1
+          description: How many services the journey has — the `8` of "step 4/8".
+      description: |
+        The OB-02/OB-03 caption "2 journeys · ERP step 4/8 · Data migration",
+        as data: where the client's **first (primary) journey** currently
+        stands. Follows `ObStepDot`'s idiom rather than reusing it — the dot
+        carries `sequence`, which cannot honestly render as "step i of n"
+        without the total, and adding the total to the dot would put a
+        journey-level fact on every dot of every strip. Like the dot, it
+        carries nothing the client portal must not see.
     ObClient:
       type: object
       required: [id, name, onboardingDate, status, journeyCount, gateStatus]
@@ -18621,6 +18649,22 @@ components:
         gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
         journeyCount: { type: integer, description: 'One per purchased product.' }
         journeysComplete: { type: integer }
+        currentStep:
+          oneOf:
+            - { $ref: '#/components/schemas/ObClientCurrentStep' }
+            - { type: 'null' }
+          description: |
+            Where the client's **first (primary) journey** stands — the OB-02
+            RAG columns' and OB-03's caption "2 journeys · ERP step 4/8 ·
+            Data migration". The first journey is the earliest instantiated
+            live one, which is the wizard's first purchase and, in every
+            deployment so far, the ERP journey the others depend on.
+
+            **Null while that journey is gate-locked, held behind a sibling,
+            or finished** — nothing is running to name, and OB-03 already has
+            words for those states ("Prerequisites pending", "Journeys
+            complete"). Added as an optional field — CONVENTIONS.md §1, not
+            breaking.
         products:
           type: array
           items: { $ref: '#/components/schemas/ObProductRef' }
@@ -19960,6 +20004,20 @@ components:
             this is a display column on a slide-over, and a generated client
             forced to discriminate between two enums to render a chip would
             gain nothing it could act on.
+        blockedReason:
+          type: [string, 'null']
+          description: |
+            The reason recorded when the service was blocked — the note the
+            owner typed, falling back to the reason code's label when no note
+            was given. **Non-null only when `status` is `BLOCKED`**; absent on
+            every other status and on every prerequisite. The "Where it's
+            stuck" table's Reason column reads it; `WAITING_ON_CLIENT` rows
+            render the fixed copy "Waiting on client input" instead, because a
+            client-attributed pause has a counterparty, not a culprit.
+
+            Safe here where `ObStepDot` must not carry it: these rows are a
+            staff-only read behind the OB-02 board, never the portal's. Added
+            as an optional field — CONVENTIONS.md §1, not breaking.
         dueAt: { type: string, format: date-time }
         isOverdue: { type: boolean }
       description: |

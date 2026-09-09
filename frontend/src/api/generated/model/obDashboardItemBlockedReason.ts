@@ -46,48 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObDashboardItemType } from './obDashboardItemType';
-import type { ObDashboardItemJourneyId } from './obDashboardItemJourneyId';
-import type { ObDashboardItemProduct } from './obDashboardItemProduct';
-import type { ObDashboardItemOwner } from './obDashboardItemOwner';
-import type { ObDashboardItemBlockedReason } from './obDashboardItemBlockedReason';
 
 /**
- * One row of an OB-02 slide-over. Deliberately a union across services
-and prerequisites — see `ObDashboardItemType`.
-
- */
-export interface ObDashboardItem {
-  itemType: ObDashboardItemType;
-  /** An `ob_journey_steps` id when `itemType` is `SERVICE`, an
-`ob_client_prereq_tasks` id when it is `PREREQUISITE`. **Two id
-spaces behind one field**, which is why `itemType` is required and
-why a row cannot be acted on without reading it first.
- */
-  itemId: number;
-  obClientId: number;
-  obClientName: string;
-  /** Null on a prerequisite — the gate sits in front of every journey, not inside one. */
-  journeyId?: ObDashboardItemJourneyId;
-  /** Null on a prerequisite, for the same reason `journeyId` is. */
-  product?: ObDashboardItemProduct;
-  /** The service name or the prerequisite task title — plan §9's "item" column. */
-  title: string;
-  /** Null on a prerequisite, whose counterparty is the client rather
-than an implementor. The grid's "owner" column is empty on those
-rows rather than filled with whoever will verify it — verification
-is not ownership, and naming a verifier here would make the
-workload grid double-count them.
- */
-  owner?: ObDashboardItemOwner;
-  /** An `ObJourneyStepStatus` or an `ObPrereqTaskStatus` depending on
-`itemType`. A plain string rather than a union of the two enums:
-this is a display column on a slide-over, and a generated client
-forced to discriminate between two enums to render a chip would
-gain nothing it could act on.
- */
-  status: string;
-  /** The reason recorded when the service was blocked — the note the
+ * The reason recorded when the service was blocked — the note the
 owner typed, falling back to the reason code's label when no note
 was given. **Non-null only when `status` is `BLOCKED`**; absent on
 every other status and on every prerequisite. The "Where it's
@@ -98,8 +59,6 @@ client-attributed pause has a counterparty, not a culprit.
 Safe here where `ObStepDot` must not carry it: these rows are a
 staff-only read behind the OB-02 board, never the portal's. Added
 as an optional field — CONVENTIONS.md §1, not breaking.
+
  */
-  blockedReason?: ObDashboardItemBlockedReason;
-  dueAt: string;
-  isOverdue?: boolean;
-}
+export type ObDashboardItemBlockedReason = string | null;
