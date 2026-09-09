@@ -7,6 +7,8 @@ import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,10 +58,13 @@ import java.util.OptionalLong;
 @Service
 public class ObSignoffAcceptService {
 
+    private static final Logger log = LoggerFactory.getLogger(ObSignoffAcceptService.class);
+
     private final ObSignoffRepository signoffs;
     private final ObSignoffSessions sessions;
     private final ObSignoffContactReader contacts;
     private final ObJourneyStepLifecycleService stepLifecycle;
+    private final ObSignoffCertificateService certificates;
     private final Clock clock;
 
     /**
@@ -75,8 +80,9 @@ public class ObSignoffAcceptService {
     ObSignoffAcceptService(ObSignoffRepository signoffs,
                            ObSignoffSessions sessions,
                            ObSignoffContactReader contacts,
-                           ObJourneyStepLifecycleService stepLifecycle) {
-        this(signoffs, sessions, contacts, stepLifecycle, Clock.systemUTC());
+                           ObJourneyStepLifecycleService stepLifecycle,
+                           ObSignoffCertificateService certificates) {
+        this(signoffs, sessions, contacts, stepLifecycle, certificates, Clock.systemUTC());
     }
 
     /**
@@ -88,11 +94,13 @@ public class ObSignoffAcceptService {
                            ObSignoffSessions sessions,
                            ObSignoffContactReader contacts,
                            ObJourneyStepLifecycleService stepLifecycle,
+                           ObSignoffCertificateService certificates,
                            Clock clock) {
         this.signoffs = signoffs;
         this.sessions = sessions;
         this.contacts = contacts;
         this.stepLifecycle = stepLifecycle;
+        this.certificates = certificates;
         this.clock = clock;
     }
 
@@ -123,6 +131,14 @@ public class ObSignoffAcceptService {
 
         recordAcceptance(signoff, acceptedName, note, http);
         signoffs.save(signoff);
+
+        // B-116 · archived once the row is SIGNED and saved, never before —
+        // the same "the acceptance is not a hostage to something downstream"
+        // reasoning the completion gate below is built on. A rendering or
+        // storage fault leaves pdfStorageKey null rather than losing the
+        // signature; the certificate can be regenerated later, an
+        // accepted-but-uncertified sign-off cannot be un-lost.
+        signoff.setPdfStorageKey(archiveCertificateQuietly(signoff));
 
         List<String> gateFailures = completeStepIfAny(signoff);
         boolean stepCompleted = signoff.getKind() == ObSignoffKind.STEP && gateFailures.isEmpty();
@@ -186,6 +202,22 @@ public class ObSignoffAcceptService {
             return List.of();
         }
         return stepLifecycle.completeOnClientAcceptance(signoff.getStepId());
+    }
+
+    /**
+     * {@link ObSignoffCertificateService#archive}, with every failure caught
+     * rather than left to unwind this transaction. See the call site: a
+     * signature the client just gave us is not something a PDF renderer or an
+     * object-storage outage gets to take back.
+     */
+    private String archiveCertificateQuietly(ObSignoff signoff) {
+        try {
+            return certificates.archive(signoff);
+        } catch (RuntimeException certificateFailed) {
+            log.warn("ob-signoff {}: acceptance recorded, but the certificate could not be archived",
+                    signoff.getId(), certificateFailed);
+            return null;
+        }
     }
 
     /**

@@ -2602,6 +2602,15 @@ final class PermissionMatrix {
             everyRole("DELETE",
                     "/api/v1/onboarding/clients/{obClientId}/attachments/{attachmentId}"),
 
+            // ── B-116 · OB-05's archived acceptance PDF ────────────────────────
+            //
+            // Every role, on the block above's own reasoning: who may see a
+            // sign-off's certificate is an *onboarding* role question, and none
+            // of the six ticketing-role fixtures here carries onboarding
+            // standing at all. Each gets 404 — the scoped read runs before
+            // anything else in ObSignoffCertificateService and finds nothing.
+            everyRole("GET", "/api/v1/onboarding/signoffs/{signoffId}/certificate"),
+
             // ── B-122 · OB-10, the onboarding reports hub ─────────────────────
             //
             // Every role, and for the reason the routes above are: which
