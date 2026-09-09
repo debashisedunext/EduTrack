@@ -107,7 +107,20 @@ class RouteAuthorizationTest {
             // What authenticates here is the session ObSignoffSessions minted
             // when that caller proved the OTP — not the link token, and not a
             // principal.
-            "POST /api/v1/public/onboarding/signoff/accept");
+            "POST /api/v1/public/onboarding/signoff/accept",
+            // A-130 · the client portal's way in, and the same argument as the
+            // three above: the caller holds no account, so a 401 from the chain
+            // would refuse the only caller these exist for. What authenticates
+            // is the credential token in the path on two of them — 256-bit,
+            // SHA-256 at rest, single-use, checked by PortalCredentialService —
+            // and the password on the third.
+            //
+            // They live under /api/v1/portal/, which PortalRouteFilter still
+            // polices: a *staff* token is 404ed here, which is correct rather
+            // than incidental, and is PortalRouteFilterTest's subject.
+            "POST /api/v1/portal/auth/login",
+            "GET /api/v1/portal/auth/credential/{token}",
+            "POST /api/v1/portal/auth/credential/{token}");
 
     /**
      * By name: actuator contributes a second

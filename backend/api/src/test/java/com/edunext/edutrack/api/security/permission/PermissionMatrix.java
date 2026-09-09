@@ -743,6 +743,24 @@ final class PermissionMatrix {
             {"token":"matrix-fixture-token"}""";
 
     /**
+     * A-130 · {@code PortalAuthDtos.LoginRequest}. Shaped like {@link #LOGIN}
+     * and for its reason: a body that fails Bean Validation is rejected at
+     * argument resolution with a 400, before {@code @PreAuthorize} is consulted,
+     * so a row carrying one asserts nothing about authorisation.
+     */
+    private static final String PORTAL_LOGIN = """
+            {"username":"MATRIX.fixture","password":"Correct-Horse-1!"}""";
+
+    /**
+     * A-130 · {@code PortalAuthDtos.RedeemRequest}. Long enough to clear the
+     * {@code @Size} bound on the field — the strength rules themselves live in
+     * {@code PortalPasswordRules} and run in the service, which this row never
+     * reaches.
+     */
+    private static final String PORTAL_REDEEM = """
+            {"password":"Correct-Horse-Battery-1!"}""";
+
+    /**
      * A-121 · {@code ObSignoffOtpVerifyRequest}: {@code token} is
      * {@code @NotBlank} and {@code otp} must be six digits. Unlike the request
      * above this one refuses with 401, which is a refusal only a caller who got
@@ -2664,7 +2682,28 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/portal/tickets"),
             everyRole("GET", "/api/v1/portal/tickets/{ticketId}"),
             everyRole("GET", "/api/v1/portal/tickets/{ticketId}/comments"),
-            everyRole("GET", "/api/v1/portal/tickets/{ticketId}/attachments"));
+            everyRole("GET", "/api/v1/portal/tickets/{ticketId}/attachments"),
+
+            // ── A-130 · how a client gets a session ──────────────────────────
+            //
+            // permitAll, like /auth/login and the public sign-off surface above,
+            // so every signed-in role reaches them too and every row is
+            // "everyRole". The unauthenticated question -- the only one that
+            // matters on these three -- is RouteAuthorizationTest's.
+            //
+            // What stands in for authentication is the credential token in the
+            // path on two of them and the password in the body on the third,
+            // and neither is anything this matrix speaks: its vocabulary is
+            // blueprint §2's six platform roles, and the caller these routes
+            // exist for holds none of them because they have no account yet.
+            //
+            // A staff token is still 404ed here by PortalRouteFilter, which is
+            // correct rather than incidental -- a staff member has no business
+            // redeeming a client's link -- and is PortalRouteFilterTest's
+            // subject, not this file's.
+            everyRole("POST", "/api/v1/portal/auth/login", PORTAL_LOGIN),
+            everyRole("GET", "/api/v1/portal/auth/credential/{token}"),
+            everyRole("POST", "/api/v1/portal/auth/credential/{token}", PORTAL_REDEEM));
 
     /**
      * One route and what each role may do with it.
