@@ -114,7 +114,9 @@ import java.util.stream.Collectors;
 
         Routing it through ScopedJourneys would also be worse than redundant         here: this method takes a callerId, not an Authentication, so it would         need a second principal shape threaded through five transitions to         re-answer a question requireOwnership has already answered — and a         scope miss would surface as the IllegalStateException below, a 500,         where the whole point of the guard is a 404.
 
-        C-107's own skip() reads the same repository the same way, for a         sixth transition — a plain findById for obClientId, to put on the         ob_step_history row it builds. The FOR UPDATE lock that append needs         is ObStepJournal's own, taken inside domain/journal/ where         ScopeGuardRulesTest does not reach; this class never calls         findByIdForUpdate itself.""")
+        C-107's own skip() reads the same repository the same way, for a         sixth transition — a plain findById for obClientId, to put on the         ob_step_history row it builds. The FOR UPDATE lock that append needs         is ObStepJournal's own, taken inside domain/journal/ where         ScopeGuardRulesTest does not reach; this class never calls         findByIdForUpdate itself.
+
+        C-123's settleJourney reads the same parent once more, for         completed_at — again the step's own journey, again after the         caller has proven they may act on that step.""")
 public class ObJourneyStepLifecycleService {
 
     /** Plan §3's "override steps with logged reason" — {@link #skip}'s own capability. */
@@ -161,13 +163,15 @@ public class ObJourneyStepLifecycleService {
     private final WorkingCalendarRepository workingCalendars;
     private final ObStepClockEventRepository clockEvents;
     private final ObStepClockRecorder clockRecorder;
+    private final ObJourneyDependencyRelease dependencyRelease;
 
     public ObJourneyStepLifecycleService(ObJourneyStepRepository journeySteps, ObJourneyRepository journeys,
             ObJourneyStepItemRepository stepItems, ObJourneyTemplateStepItemRepository templateStepItems,
             ObJourneyTemplateStepDocRepository templateStepDocs, ObAttachmentRepository attachments,
             ObSignoffRepository signoffs, ObStepJournal stepJournal, WorkingHoursService workingHours,
             WorkingCalendarRepository workingCalendars, ObStepClockEventRepository clockEvents,
-            ObStepClockRecorder clockRecorder) {
+            ObStepClockRecorder clockRecorder, ObJourneyDependencyRelease dependencyRelease) {
+        this.dependencyRelease = dependencyRelease;
         this.journeySteps = journeySteps;
         this.journeys = journeys;
         this.stepItems = stepItems;
@@ -248,6 +252,7 @@ public class ObJourneyStepLifecycleService {
         step.setStatus(ObJourneyStepStatus.DONE);
         step.setFinishedAt(Instant.now());
         activateEligibleSteps(step.getJourneyId());
+        settleJourney(step.getJourneyId());
         return step;
     }
 
@@ -386,6 +391,7 @@ public class ObJourneyStepLifecycleService {
         step.setStatus(ObJourneyStepStatus.DONE);
         step.setFinishedAt(Instant.now());
         activateEligibleSteps(step.getJourneyId());
+        settleJourney(step.getJourneyId());
         return List.of();
     }
 
@@ -573,6 +579,7 @@ public class ObJourneyStepLifecycleService {
 
         appendSkippedHistory(journey, step, previousStatus, callerId, reason);
         activateEligibleSteps(step.getJourneyId());
+        settleJourney(step.getJourneyId());
         return step;
     }
 
@@ -949,6 +956,44 @@ public class ObJourneyStepLifecycleService {
             candidate.setStatus(ObJourneyStepStatus.IN_PROGRESS);
             candidate.setStartedAt(activatedAt);
             candidate.setDueAt(computeDueAt(activatedAt, candidate.getTatDays()));
+        }
+    }
+
+    /**
+     * C-123 · the journey completes when <b>all</b> steps have landed —
+     * {@code DONE} or {@code SKIPPED}, "parallel branches must all land, not
+     * just the longest chain" (plan §5 item 6) — and its completion is what
+     * releases every journey held behind it (§5 item 5). Called after
+     * {@link #activateEligibleSteps} from the two transitions that can settle
+     * a step, so a journey whose last step was skipped completes exactly as
+     * one whose last step was done.
+     *
+     * <p>Idempotent on {@code completed_at}: a second settle after completion
+     * (nothing can transition a settled step, but defence in depth is cheap
+     * here) neither re-stamps the journey nor releases anything twice —
+     * {@link ObJourneyDependencyRelease#release} clears the hold, so the
+     * second call finds no held journeys.
+     */
+    private void settleJourney(long journeyId) {
+        ObJourney journey = journeys.findById(journeyId)
+                .orElseThrow(() -> new IllegalStateException("journey " + journeyId + " does not exist"));
+        if (journey.getCompletedAt() != null) {
+            return;
+        }
+        boolean allLanded = journeySteps.findByJourneyIdOrderBySequenceAsc(journeyId).stream()
+                .allMatch(s -> s.getStatus() == ObJourneyStepStatus.DONE
+                        || s.getStatus() == ObJourneyStepStatus.SKIPPED);
+        if (!allLanded) {
+            return;
+        }
+        journey.setCompletedAt(Instant.now());
+
+        for (long released : dependencyRelease.release(journeyId)) {
+            // The hold is gone; the gate decides the rest. A released journey
+            // whose client has not cleared prerequisites stays PENDING here
+            // and starts when C-118's gate opens it, exactly like any other.
+            activateEligibleSteps(released);
+            dependencyRelease.notifyUnblocked(released, journeyId);
         }
     }
 

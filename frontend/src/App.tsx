@@ -46,6 +46,9 @@ const ForgotPasswordPage = lazy(() =>
 const JourneyTemplateDesignerPage = lazy(() =>
   import('./features/onboarding/journeys/JourneyTemplateDesignerPage').then((m) => ({ default: m.JourneyTemplateDesignerPage })),
 )
+const ModuleServiceCataloguePage = lazy(() =>
+  import('./features/onboarding/journeys/ModuleServiceCataloguePage').then((m) => ({ default: m.ModuleServiceCataloguePage })),
+)
 const MastersIndexPage = lazy(() =>
   import('./features/masters/MastersIndexPage').then((m) => ({ default: m.MastersIndexPage })),
 )
@@ -430,6 +433,16 @@ export default function App() {
             <Route
               path="/onboarding/journey-templates/:templateId"
               element={withSuspense(<JourneyTemplateDesignerPage />)}
+            />
+            {/*
+              C-123 · the Module Service catalogue — one card per product,
+              feeding the designer route above. Same "no onboarding nav yet"
+              situation as that route: reached by a direct link until this
+              module gets one.
+            */}
+            <Route
+              path="/onboarding/journey-templates"
+              element={withSuspense(<ModuleServiceCataloguePage />)}
             />
             {/*
               B-112 · OB-13's full page. Beside the designer route above and for

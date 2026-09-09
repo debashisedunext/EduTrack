@@ -85,7 +85,10 @@ export const listObProductsResponse = zod.object({
   "isActive": zod.boolean().describe('`false` retires the product from the OB-04 picker and changes\nnothing else — in-flight journeys keep running.\n'),
   "hasActiveTemplate": zod.boolean().optional().describe('Whether an active `ob_journey_templates` row exists for this\nproduct. \*\*The OB-04 picker requires it\*\*: a purchase with no\ntemplate to instantiate would board a client into nothing.\n'),
   "totalTatDays": zod.number().nullish().describe('Σ of the active template\'s service TATs, in working days — what a\njourney for this product \*costs\*, shown on the OB-07 card. Null\nwhen there is no active template.\n'),
-  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n')
+  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
+  "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
+  "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
+  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.'))
 })
 
@@ -152,7 +155,10 @@ export const getObProductResponse = zod.object({
   "isActive": zod.boolean().describe('`false` retires the product from the OB-04 picker and changes\nnothing else — in-flight journeys keep running.\n'),
   "hasActiveTemplate": zod.boolean().optional().describe('Whether an active `ob_journey_templates` row exists for this\nproduct. \*\*The OB-04 picker requires it\*\*: a purchase with no\ntemplate to instantiate would board a client into nothing.\n'),
   "totalTatDays": zod.number().nullish().describe('Σ of the active template\'s service TATs, in working days — what a\njourney for this product \*costs\*, shown on the OB-07 card. Null\nwhen there is no active template.\n'),
-  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n')
+  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
+  "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
+  "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
+  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.')
 })
 
@@ -207,7 +213,10 @@ export const updateObProductResponse = zod.object({
   "isActive": zod.boolean().describe('`false` retires the product from the OB-04 picker and changes\nnothing else — in-flight journeys keep running.\n'),
   "hasActiveTemplate": zod.boolean().optional().describe('Whether an active `ob_journey_templates` row exists for this\nproduct. \*\*The OB-04 picker requires it\*\*: a purchase with no\ntemplate to instantiate would board a client into nothing.\n'),
   "totalTatDays": zod.number().nullish().describe('Σ of the active template\'s service TATs, in working days — what a\njourney for this product \*costs\*, shown on the OB-07 card. Null\nwhen there is no active template.\n'),
-  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n')
+  "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
+  "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
+  "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
+  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.')
 })
 

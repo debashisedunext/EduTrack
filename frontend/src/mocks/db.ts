@@ -2240,6 +2240,18 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
     sequence: 1, dependsOnTemplateId: null,
     publishedBy: null, publishedAt: null,
   },
+  // C-123 · LMS (OB_PRODUCTS[2]) is a *retired* product with a real,
+  // published template — retiring the product does not unpublish what it
+  // already had, and the Module Service catalogue's own second active row
+  // (`sequence: 2`) is what makes the ↑/↓ control and the depends-on picker
+  // reachable at all against this fixture. No steps: the catalogue page
+  // reads sequence/dependsOnTemplateId/totalTatDays only, none of which
+  // needs one.
+  {
+    id: 3, productId: 3, name: 'LMS onboarding', version: 1, isActive: true,
+    sequence: 2, dependsOnTemplateId: 1,
+    publishedBy: 1, publishedAt: iso('2026-07-01T09:00:00'),
+  },
 ];
 
 const OB_JOURNEY_TEMPLATE_STEPS: ObJourneyTemplateStepRow[] = [

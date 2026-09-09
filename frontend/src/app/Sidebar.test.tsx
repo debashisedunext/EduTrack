@@ -176,14 +176,14 @@ describe('Sidebar · onboarding module', () => {
   })
 
   /**
-   * Every row must lead somewhere that exists. Four entries in the design point
-   * at screens no task has built (Module Service's list, Prerequisites master,
-   * Roles & module access) — a row that 404s reads as a broken product.
+   * Every row must lead somewhere that exists. One entry in the design still
+   * points at a screen no task has built (Prerequisites master) — a row that
+   * 404s reads as a broken product.
    */
   it('offers no row for a screen that is not built yet', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Prerequisites master', 'Module Service']) {
+    for (const label of ['Prerequisites master']) {
       expect(within(obNav()).queryByRole('link', { name: label })).not.toBeInTheDocument()
     }
   })
@@ -193,5 +193,12 @@ describe('Sidebar · onboarding module', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
     expect(within(obNav()).getByRole('link', { name: 'Roles & module access' })).toBeInTheDocument()
+  })
+
+  it('offers Module Service now that C-123 built its list page', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    expect(within(obNav()).getByRole('link', { name: 'Module Service' }))
+        .toHaveAttribute('href', '/onboarding/journey-templates')
   })
 })

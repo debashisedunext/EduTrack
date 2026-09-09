@@ -1,5 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.products;
 
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObProduct;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository;
 import org.springframework.stereotype.Service;
@@ -36,9 +38,11 @@ import java.util.stream.Collectors;
 public class ObProductService {
 
     private final ObProductRepository products;
+    private final ObJourneyTemplateRepository templates;
 
-    ObProductService(ObProductRepository products) {
+    ObProductService(ObProductRepository products, ObJourneyTemplateRepository templates) {
         this.products = products;
+        this.templates = templates;
     }
 
     @Transactional(readOnly = true)
@@ -107,10 +111,16 @@ public class ObProductService {
         Set<Long> withTemplate = Set.copyOf(products.findProductIdsWithAnActiveTemplate(ids));
         Map<Long, Long> tatDays = tally(products.sumActiveTemplateTatDays(ids));
         Map<Long, Long> journeys = tally(products.countJourneysByProduct(ids));
+        // C-123 · one more batched read for the catalogue's own three fields —
+        // ObJourneyTemplateRepository, not a fourth ObProductRepository query,
+        // since sequence and dependsOnTemplateId live on the template row.
+        Map<Long, ObJourneyTemplate> activeTemplates = templates.findByProductIdInAndIsActiveTrue(ids).stream()
+                .collect(Collectors.toMap(ObJourneyTemplate::getProductId, t -> t));
 
         return rows.stream()
                 .map(row -> {
                     boolean hasTemplate = withTemplate.contains(row.getId());
+                    ObJourneyTemplate active = activeTemplates.get(row.getId());
                     return new ObProductDtos.Product(
                             row.getId(),
                             row.getCode(),
@@ -118,7 +128,10 @@ public class ObProductService {
                             row.isActive(),
                             hasTemplate,
                             hasTemplate ? Math.toIntExact(tatDays.getOrDefault(row.getId(), 0L)) : null,
-                            Math.toIntExact(journeys.getOrDefault(row.getId(), 0L)));
+                            Math.toIntExact(journeys.getOrDefault(row.getId(), 0L)),
+                            active == null ? null : active.getId(),
+                            active == null ? null : active.getSequence(),
+                            active == null ? null : active.getDependsOnTemplateId());
                 })
                 .toList();
     }

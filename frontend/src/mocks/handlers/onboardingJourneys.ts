@@ -395,6 +395,82 @@ export const onboardingJourneyHandlers = [
     return noContent();
   }),
 
+  // C-123 · the Module Service catalogue's ↑/↓, spanning every active
+  // template — no `editabilityConflict`/`If-Match` here, on the same
+  // reasoning the real route's own contract note gives: catalogue metadata,
+  // not draft content, and no single row for a precondition to protect.
+  http.put(url('/onboarding/journey-templates/order'), async ({ request }) => {
+    const db = getDb();
+    const body = (await request.json()) as { templateIds?: number[] };
+    const templateIds = body.templateIds ?? [];
+    const active = db.obJourneyTemplates.filter((t) => t.isActive);
+    const activeIds = new Set(active.map((t) => t.id));
+    const requestedIds = new Set(templateIds);
+    if (requestedIds.size !== templateIds.length) {
+      return problem(400, 'validation', "Reorder list does not match the catalogue's active templates", {
+        detail: 'The same template id appears more than once.',
+      });
+    }
+    if (requestedIds.size !== activeIds.size || [...requestedIds].some((id) => !activeIds.has(id))) {
+      return problem(400, 'validation', "Reorder list does not match the catalogue's active templates", {
+        detail: "The given ids are not exactly the catalogue's current active templates.",
+      });
+    }
+    templateIds.forEach((id, index) => {
+      const template = active.find((t) => t.id === id);
+      if (template) template.sequence = index;
+    });
+    return noContent();
+  }),
+
+  // C-123 · the "Service depends on" picker — works on a draft or the
+  // active version alike, unlike a step's own fields, so no
+  // `editabilityConflict` guard here either.
+  http.put(url('/onboarding/journey-templates/:templateId/depends-on'), async ({ params, request }) => {
+    const db = getDb();
+    const templateId = Number(params.templateId);
+    const template = db.obJourneyTemplates.find((t) => t.id === templateId);
+    if (!template) return notFound('Journey template');
+
+    const currentDetail = detailDto(templateId, db);
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch || !ifMatch.trim()) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the template first and send back its ETag.');
+    }
+    if (!ifMatchSatisfied(ifMatch, etagOf(currentDetail))) {
+      return problem(412, 'precondition-failed',
+        'This template changed since you read it. Reload and reapply the change.');
+    }
+
+    const body = (await request.json()) as { dependsOnTemplateId?: number | null };
+    const dependsOnTemplateId = body.dependsOnTemplateId ?? null;
+    if (dependsOnTemplateId != null) {
+      if (dependsOnTemplateId === templateId) {
+        return problem(409, 'conflict', 'That dependency would close a cycle', {
+          detail: `Journey template ${templateId} cannot depend on itself.`,
+        });
+      }
+      // Walk the candidate's own chain — ObJourneyTemplateService#updateDependsOn's exact check.
+      const seen = new Set<number>();
+      let cursor: number | null = dependsOnTemplateId;
+      while (cursor != null) {
+        if (cursor === templateId || seen.has(cursor)) {
+          return problem(409, 'conflict', 'That dependency would close a cycle', {
+            detail: `Journey template ${dependsOnTemplateId} already depends, directly or `
+              + `transitively, on template ${templateId}.`,
+          });
+        }
+        seen.add(cursor);
+        const next: ObJourneyTemplateRow | undefined = db.obJourneyTemplates.find((t) => t.id === cursor);
+        cursor = next?.dependsOnTemplateId ?? null;
+      }
+    }
+
+    template.dependsOnTemplateId = dependsOnTemplateId;
+    return ok(templateDto(template));
+  }),
+
   http.delete(url('/onboarding/journey-template-steps/:stepId'), ({ params }) => {
     const db = getDb();
     const stepId = Number(params.stepId);

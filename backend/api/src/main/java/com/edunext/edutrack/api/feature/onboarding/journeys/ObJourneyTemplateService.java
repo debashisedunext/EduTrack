@@ -498,6 +498,113 @@ public class ObJourneyTemplateService {
         return stepDocs.findByStepIdOrderBySequenceAsc(stepId);
     }
 
+    /**
+     * C-123 · the Module Service catalogue's own "Service depends on" picker,
+     * settable at any time — unlike a step's fields, {@code
+     * dependsOnTemplateId} is catalogue metadata, not journey content an
+     * in-flight instantiation has pinned, so {@link #requireEditable}'s
+     * publish guard does not apply to it. Works on a draft or the active row
+     * alike, on the same reasoning {@link #reorderCatalogue} states for
+     * {@code sequence}.
+     *
+     * @throws TemplateDependencyCycleException the named template already
+     *                                           depends, directly or
+     *                                           transitively, on this one
+     */
+    @Transactional
+    public ObJourneyTemplate updateDependsOn(long templateId, Long dependsOnTemplateId) {
+        ObJourneyTemplate template = templates.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+
+        if (dependsOnTemplateId != null) {
+            if (dependsOnTemplateId == templateId) {
+                throw new TemplateDependencyCycleException(templateId, dependsOnTemplateId);
+            }
+            ObJourneyTemplate dependency = templates.findById(dependsOnTemplateId)
+                    .orElseThrow(() -> new TemplateNotFoundException(dependsOnTemplateId));
+
+            // Walk the candidate's own chain forward. Reaching `templateId`
+            // means the candidate already depends on this template, directly
+            // or transitively — pointing this one back at it would close the
+            // cycle plan §5 item 5 says the picker must exclude.
+            Set<Long> visited = new LinkedHashSet<>();
+            ObJourneyTemplate cursor = dependency;
+            while (cursor.getDependsOnTemplateId() != null) {
+                long nextId = cursor.getDependsOnTemplateId();
+                if (nextId == templateId || !visited.add(nextId)) {
+                    throw new TemplateDependencyCycleException(templateId, dependsOnTemplateId);
+                }
+                cursor = templates.findById(nextId)
+                        .orElseThrow(() -> new TemplateNotFoundException(nextId));
+            }
+        }
+
+        template.setDependsOnTemplateId(dependsOnTemplateId);
+        return templates.save(template);
+    }
+
+    /**
+     * C-123 · the OB-07 catalogue's own ↑/↓ control, {@code reorderSteps}'
+     * two-pass shape applied one level up: every active template renumbered
+     * 1..N in the caller's order. {@code sequence} "drives instantiation and
+     * display order" (plan §5 item 5) for every client from here on — it is
+     * not journey content, so this writes the active row directly rather
+     * than routing through a draft the way step edits do.
+     *
+     * <p>No {@code If-Match} here, unlike {@code reorderSteps}: that
+     * precondition protects one editor's view of one template's step list
+     * from a second editor's concurrent write to the <em>same</em> row: this
+     * call spans every active template at once, and two admins reordering
+     * the catalogue seconds apart is a "whoever saved last wins" property of
+     * a full-list replace, not a lost-update race over a single resource —
+     * named here rather than a precondition invented to look complete.
+     *
+     * @param orderedTemplateIds every currently-active template's id, named exactly once
+     * @throws CatalogueReorderMismatchException a duplicate, or a set that does
+     *                                           not match every active template
+     */
+    @Transactional
+    public void reorderCatalogue(List<Long> orderedTemplateIds) {
+        List<ObJourneyTemplate> current = templates.findByIsActiveTrueOrderBySequenceAsc();
+
+        Set<Long> currentIds = new LinkedHashSet<>();
+        for (ObJourneyTemplate template : current) {
+            currentIds.add(template.getId());
+        }
+        Set<Long> requestedIds = new LinkedHashSet<>(orderedTemplateIds);
+        if (requestedIds.size() != orderedTemplateIds.size()) {
+            throw new CatalogueReorderMismatchException("the same template id appears more than once");
+        }
+        if (!requestedIds.equals(currentIds)) {
+            throw new CatalogueReorderMismatchException(
+                    "the given ids are not exactly the catalogue's current active templates");
+        }
+
+        Map<Long, ObJourneyTemplate> byId = new HashMap<>();
+        for (ObJourneyTemplate template : current) {
+            byId.put(template.getId(), template);
+        }
+
+        // Pass 1: negative, distinct placeholders — reorderSteps' own reason:
+        // keeps pass 2 collision-free against uq-style reads mid-loop.
+        int placeholder = 1;
+        for (Long templateId : orderedTemplateIds) {
+            ObJourneyTemplate template = byId.get(templateId);
+            template.setSequence(-placeholder);
+            templates.save(template);
+            placeholder++;
+        }
+        templates.flush();
+
+        int sequence = 0;
+        for (Long templateId : orderedTemplateIds) {
+            ObJourneyTemplate template = byId.get(templateId);
+            template.setSequence(sequence);
+            templates.save(template);
+            sequence++;
+        }
+    }
+
     /** @throws TemplateNotEditableException if the template has ever been published. */
     private ObJourneyTemplate requireEditable(long templateId) {
         ObJourneyTemplate template = templates.findById(templateId)

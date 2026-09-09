@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -33,9 +34,10 @@ import java.util.Map;
  * than a half-finished implementation to untangle:
  *
  * <ul>
- *   <li><b>No service-level dependency.</b> {@link ObJourney#getHeldByJourneyId()}
- *       is always left {@code null}. Resolving it against the template's
- *       service-dependency graph is C-123's job.</li>
+ *   <li><b>Service-level dependency (C-123) is resolved here, released
+ *       elsewhere.</b> {@link ObJourney#getHeldByJourneyId()} is set from the
+ *       template's {@code depends_on_template_id} at birth; clearing it when
+ *       the holder completes is {@link ObJourneyDependencyRelease}'s.</li>
  *   <li><b>No role→user resolution.</b> A template step's {@code ownerRole}
  *       is never consulted — there is no per-client role→user resolver
  *       anywhere yet (OB-08's "Responsibility" admin, not built). Only a
@@ -126,6 +128,13 @@ public class ObJourneyInstantiationService {
             journey.setGateStatus(ObGateStatus.LOCKED);
         }
 
+        // C-123 · plan §5.5: a service that depends on another module service
+        // instantiates normally but stays held — no step activates, no clock
+        // runs — until this client's journey from the dependency completes.
+        // Vacuous when the client never bought the dependency's product, or
+        // already finished it: the journey starts as if it had no dependency.
+        journey.setHeldByJourneyId(holdingJourneyFor(obClientId, template));
+
         ObJourney saved = journeys.save(journey);
         cloneSteps(template.getId(), saved.getId());
         if (saved.getGateStatus() == ObGateStatus.OPEN) {
@@ -145,7 +154,38 @@ public class ObJourneyInstantiationService {
      */
     @Transactional
     public List<ObJourney> instantiateAll(long obClientId, List<Long> productIds) {
-        return productIds.stream().map(productId -> instantiate(obClientId, productId)).toList();
+        // C-123 · plan §5.5: the Module Service sequence "drives the order
+        // journeys instantiate and display". Sorted here rather than trusted
+        // from the wizard's multi-select, so a dependency journey always
+        // exists before the journey that has to be held behind it.
+        List<Long> ordered = productIds.stream()
+                .sorted(Comparator.comparingInt(productId -> templates
+                        .findByProductIdAndIsActiveTrue(productId)
+                        .map(ObJourneyTemplate::getSequence)
+                        .orElse(Integer.MAX_VALUE)))
+                .toList();
+        return ordered.stream().map(productId -> instantiate(obClientId, productId)).toList();
+    }
+
+    /**
+     * The journey this one waits behind, or {@code null}.
+     *
+     * <p>The dependency is declared between <em>templates</em>
+     * ({@code depends_on_template_id}) but held between <em>journeys</em>: the
+     * dependency template's product is what the client either bought or did
+     * not, and its live, unfinished journey — if there is one — is the holder.
+     */
+    private Long holdingJourneyFor(long obClientId, ObJourneyTemplate template) {
+        Long dependsOn = template.getDependsOnTemplateId();
+        if (dependsOn == null) {
+            return null;
+        }
+        return templates.findById(dependsOn)
+                .flatMap(dependency -> journeys.findFirstByObClientIdAndProductIdAndArchivedAtIsNullOrderByIdDesc(
+                        obClientId, dependency.getProductId()))
+                .filter(holder -> holder.getCompletedAt() == null)
+                .map(ObJourney::getId)
+                .orElse(null);
     }
 
     /**

@@ -7498,6 +7498,81 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /onboarding/journey-templates/order:
+    put:
+      tags: [onboarding-journeys]
+      operationId: reorderObJourneyTemplateCatalogue
+      summary: The Module Service catalogue's ↑/↓ control (C-123)
+      description: |
+        `templateIds` is every currently-active template, in the caller's
+        desired order — not a delta, and not the same list as
+        `.../steps/order`, which reorders one template's own steps.
+        Persisted as `sequence` 0..N-1, the order every client's journeys
+        from here on instantiate and display in (plan §5 item 5).
+
+        No `If-Match`: this spans every active template at once rather than
+        one row, so two admins reordering seconds apart is a
+        whoever-saved-last-wins replace, not a lost update over a single
+        resource a precondition would protect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyTemplateCatalogueOrderRequest' }
+      responses:
+        '204': { description: Reordered. }
+        '400':
+          description: |
+            The given ids are not exactly the catalogue's current active
+            templates — one missing, one named twice, or one belonging to a
+            retired or draft version.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journey-templates/{templateId}/depends-on:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+    put:
+      tags: [onboarding-journeys]
+      operationId: updateObJourneyTemplateDependsOn
+      summary: The catalogue's "Service depends on" picker (C-123)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        `dependsOnTemplateId: null` clears the dependency — the service runs
+        unheld from journey start. Cross-product is allowed; a cycle is
+        not — `409` if the chosen dependency already depends, directly or
+        transitively, on this template. Works on a draft or the active
+        version alike: unlike a step's fields, this is catalogue metadata,
+        not journey content an in-flight instantiation has pinned.
+
+        `If-Match` is required, not optional — `428` without one, `412` if
+        it does not match the template's current tag. Read the tag from
+        `GET /onboarding/journey-templates/{templateId}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyTemplateDependsOnRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyTemplateResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: That dependency already depends, directly or transitively, on this template.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: '`If-Match` absent. GET the template first and send back its `ETag`.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /onboarding/journey-templates/{templateId}/steps/order:
     parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
     put:
@@ -17634,6 +17709,30 @@ components:
           description: |
             Journeys instantiated from this product, across all clients. Inside
             the `ETag`, because it is what a retire decision is made against.
+        activeTemplateId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            C-123 · the active template's own id, null when there is none —
+            the OB-07 card's link into the designer, and the id
+            `PUT /onboarding/journey-templates/order` and
+            `PUT /onboarding/journey-templates/{templateId}/depends-on` take.
+            The product id itself is never the argument to either.
+        templateSequence:
+          type: [integer, 'null']
+          description: |
+            C-123 · the active template's own `sequence` — what
+            `/journey-templates/order` writes, driving instantiation and
+            display order (plan §5 item 5). Null when there is no active
+            template.
+        dependsOnTemplateId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            C-123 · the active template's `dependsOnTemplateId` — the other
+            Module Service this one is held behind (plan §5 item 5), or null
+            for one that runs unheld. Also null when there is no active
+            template to have declared one.
       description: '`ob_products` — the catalogue journey templates bind to.'
     ObProductRef:
       type: object
@@ -17812,6 +17911,23 @@ components:
           items: { type: integer, format: int64 }
           minItems: 1
           description: The template's full step set, in the caller's desired order — not a delta.
+    ObJourneyTemplateCatalogueOrderRequest:
+      type: object
+      required: [templateIds]
+      properties:
+        templateIds:
+          type: array
+          items: { type: integer, format: int64 }
+          minItems: 1
+          description: Every currently-active template, in the caller's desired order — not a delta.
+    ObJourneyTemplateDependsOnRequest:
+      type: object
+      required: [dependsOnTemplateId]
+      properties:
+        dependsOnTemplateId:
+          type: [integer, 'null']
+          format: int64
+          description: 'Null clears the dependency: the service runs unheld from journey start.'
 
     ObJourneyTemplateDetail:
       allOf:
