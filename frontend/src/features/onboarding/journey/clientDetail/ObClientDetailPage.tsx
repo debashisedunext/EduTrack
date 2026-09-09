@@ -8,9 +8,11 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
 import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
+import { EscalationBanner } from './EscalationBanner'
 import { JourneyAccordion } from './JourneyAccordion'
 import { PrereqAccordion } from './PrereqAccordion'
 import { ragLabel, ragVariant } from './journeyStrip'
+import { useOpenEscalations } from './useOpenEscalations'
 
 /**
  * C-110 · OB-05, the onboarding client detail page — `/onboarding/clients/:obClientId`.
@@ -99,6 +101,10 @@ export function ObClientDetailPage() {
   const journeys = detail?.journeys ?? []
   const gate = prereqs.data?.data
 
+  // C-126 · this client's open escalations — the banner below and the red
+  // ring on each journey's step dots both read from the one call.
+  const { escalations, openEscalationStepIds } = useOpenEscalations(obClientId)
+
   /**
    * Which accordions are open, as a set of keys.
    *
@@ -181,6 +187,9 @@ export function ObClientDetailPage() {
             </p>
           </header>
 
+          {/* C-126 · absent when there are none — see the component's own note. */}
+          <EscalationBanner obClientId={obClientId} escalations={escalations} />
+
           {/*
             The gate accordion is absent rather than empty while its own read is
             in flight or has failed. A "Gate locked" strip drawn from no data
@@ -217,6 +226,7 @@ export function ObClientDetailPage() {
                 siblings={journeys}
                 users={userList}
                 obClientId={obClientId}
+                openEscalationStepIds={openEscalationStepIds}
                 isOpen={open.has(`journey-${journey.id}`)}
                 onToggle={() => toggle(`journey-${journey.id}`)}
               />

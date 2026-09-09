@@ -240,3 +240,524 @@ export const listPortalTicketAttachmentsResponse = zod.object({
 }).optional()
 })
 
+/**
+ * Ordinary sign-in, for an account that has already chosen its own
+password via `redeemPortalCredentialLink`. A newly created or reset
+account has no password to type yet — that's what the credential
+link is for.
+
+Failures are deliberately indistinguishable, exactly as `login` is
+for staff: wrong username, wrong password and unknown username all
+answer `invalid-credentials`. Lockout is reported only once the
+password is correct.
+
+ * @summary Sign in to the client portal
+ */
+export const portalLoginBodyUsernameMax = 150;
+
+
+
+
+export const portalLoginBody = zod.object({
+  "username": zod.string().min(1).max(portalLoginBodyUsernameMax).describe('The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.'),
+  "password": zod.string().min(1).describe('Plain password. Verified against an Argon2id hash; never logged or stored.')
+})
+
+export const portalLoginResponse = zod.object({
+  "data": zod.object({
+  "accessToken": zod.string(),
+  "expiresIn": zod.number(),
+  "client": zod.object({
+  "username": zod.string(),
+  "displayName": zod.string(),
+  "hasTicketing": zod.boolean().describe('A Ticketing card renders when true.'),
+  "hasOnboarding": zod.boolean().describe('An Onboarding card renders when true. At least one of\n`hasTicketing`\/`hasOnboarding` is always true — a `client_accounts`\nrow with neither is unreachable (`ck_client_accounts_has_a_master`).\n')
+}).describe('The signed-in client, as the portal shell renders it. Two ids are\nderivable from these booleans — a null id means that tree is empty —\nso the shell decides which module cards to draw without a second\nvocabulary for the same fact. CP-02\'s whole source of truth for the\nmodule chooser: read straight off the login response, no extra call.\n')
+}).describe('No refresh token: a portal session lasts one access-token lifetime,\nand expiry means signing in again. `expiresIn` is seconds, not an\nabsolute time, so a client whose clock disagrees with ours cannot\ncompute the wrong deadline from a timestamp.\n')
+})
+
+/**
+ * Changes nothing, so a page can validate a link on load — or a mail
+client can prefetch the URL — without spending it. That's what makes
+redemption below a `POST` rather than this verb.
+
+ * @summary Whether a credential link is still valid, and the username it is for
+ */
+export const describePortalCredentialLinkParams = zod.object({
+  "token": zod.string().describe('The 256-bit random value from the credential mail. Single-use, seven-day TTL.')
+})
+
+export const describePortalCredentialLinkResponse = zod.object({
+  "data": zod.object({
+  "username": zod.string(),
+  "displayName": zod.string(),
+  "expiresAt": zod.string().datetime({})
+}).describe('What the redemption page needs before it can ask for a password.\nNothing else about the account: no email, no client name beyond the\ndisplay name, no ids. Anybody holding the link can read this, and the\nlink is a bearer credential in an inbox we do not control.\n')
+})
+
+/**
+ * Spends the link and sets the password, both in one transaction. `204`
+rather than a session: redeeming is not signing in — handing back a
+token here would make a link sitting in an inbox directly
+exchangeable for a session. The client redeems, then calls
+`portalLogin` separately with the password just chosen.
+
+ * @summary Choose a password and activate the portal login
+ */
+export const redeemPortalCredentialLinkParams = zod.object({
+  "token": zod.string().describe('The 256-bit random value from the credential mail. Single-use, seven-day TTL.')
+})
+
+export const redeemPortalCredentialLinkBodyPasswordMax = 200;
+
+
+
+export const redeemPortalCredentialLinkBody = zod.object({
+  "password": zod.string().min(1).max(redeemPortalCredentialLinkBodyPasswordMax).describe('The password the client is choosing. Bean Validation on\n`RedeemRequest` only bounds the length (`@Size(max=200)`); the\n12-character-plus-complexity rule (`PortalPasswordRules`) is\nenforced afterwards as a business rule — a failure there is the\n`weak-password` 400 below, not a `ValidationFailed` one.\n')
+}).describe('The token travels in the path, not here, so the page can validate a\nlink on load with a GET and reuse the same shape for the POST.\n')
+
+/**
+ * The prerequisites are the full staff wire shape (`ObClientPrereqs`) —
+plan §9/§11's never-visible list is about journeys, and none of it is
+on a prerequisite row. The journeys are `PortalJourneyStrip`, plan
+§9's own narrower CP-03 row: step status only, no owner names, no
+internal comms, no block reasons, no TAT internals.
+
+ * @summary Interactive prerequisites above read-only journey accordions (CP-03)
+ */
+export const getPortalOnboardingHomeResponseDataPrereqsTasksItemTitleMax = 200;
+
+export const getPortalOnboardingHomeResponseDataPrereqsTasksItemDescriptionMax = 4000;
+
+export const getPortalOnboardingHomeResponseDataPrereqsTasksItemSkipReasonMax = 2000;
+
+export const getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMin = 0;
+export const getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMax = 100;
+
+export const getPortalOnboardingHomeResponseDataJourneysItemStepsItemOpenEscalationCommentMax = 2000;
+
+
+
+export const getPortalOnboardingHomeResponse = zod.object({
+  "data": zod.object({
+  "obClientId": zod.number(),
+  "clientName": zod.string().nullish(),
+  "prereqs": zod.object({
+  "obClientId": zod.number(),
+  "templateVersion": zod.number().describe('The master version this instance was snapshotted from. Pinned:\npublishing a newer master leaves every boarded client on the\nchecklist they were actually given — plan §1.1 #2.\n'),
+  "status": zod.enum(['IN_PROGRESS', 'CLEARED']).describe('`ob_client_prereqs.status`. `CLEARED` is the header\'s record that\nthe gate condition was met, and it is not a second opinion about\n`gateStatus` — the two move in the same transaction.\n'),
+  "clearedAt": zod.string().datetime({}).nullish(),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "mandatoryTotal": zod.number().describe('The denominator of the strip\'s progress bar.'),
+  "mandatoryVerified": zod.number(),
+  "optionalOutstanding": zod.number().optional().describe('Non-mandatory tasks neither verified nor skipped. These hold the\ngate too — plan §5.3 requires every non-mandatory task be\n`VERIFIED` \*\*or\*\* `SKIPPED` — and the progress bar counts only\nmandatory ones, so without this number a screen showing 4\/4\nmandatory beside a locked gate looks broken.\n'),
+  "tasks": zod.array(zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(getPortalOnboardingHomeResponseDataPrereqsTasksItemTitleMax),
+  "description": zod.string().max(getPortalOnboardingHomeResponseDataPrereqsTasksItemDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(getPortalOnboardingHomeResponseDataPrereqsTasksItemSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.'))
+}).describe('`ob_client_prereqs` and its tasks — the accordion above the journeys\non OB-05, and the interactive half of CP-03.\n'),
+  "journeys": zod.array(zod.object({
+  "id": zod.number(),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']),zod.null()]).optional(),
+  "percentComplete": zod.number().min(getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMin).max(getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMax),
+  "heldByJourneyId": zod.number().nullish().describe('Plan §5.5\'s service-level dependency — which sibling journey has\nto finish first. Kept because it answers \"why is nothing moving\nyet\" without naming an internal block reason.\n'),
+  "steps": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
+  "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']),zod.null()]).optional(),
+  "dependsOnStepId": zod.number().nullish(),
+  "openEscalation": zod.union([zod.object({
+  "id": zod.number(),
+  "comment": zod.string().max(getPortalOnboardingHomeResponseDataJourneysItemStepsItemOpenEscalationCommentMax),
+  "raisedAt": zod.string().datetime({})
+}).describe('`ob_client_escalations`, the client\'s own narrow view of it —\n`PortalOnboardingDtos.PortalStepDot`\'s own note on why this carries\nneither who it was sent to nor who will resolve it.\n'),zod.null()]).optional().describe('C-126\'s own slot, filled. One open escalation for this service,\nraised by this client, if any — shown as a red chip until staff\nresolve it. `null` while none is open, including immediately\nafter `resolveObClientEscalation` runs.\n')
+}).describe('Step status only — plan §9\'s CP-03 row: \"no owner names, internal\ncomms, or block reasons\". No TAT figures either (plan §11\'s\nnever-visible list names \"TAT internals\" for the client explicitly).\n'))
+}).describe('One product\'s journey, read-only — CP-03\'s accordion. No\n`totalTatDays`\/`utilizedHours`, unlike OB-05\'s own `ObJourneyStrip`:\nplan §11\'s never-visible rule, one level up from the step dot.\n'))
+})
+})
+
+/**
+ * The client's own half of `ob_client_escalations` — not declared on
+`/onboarding/client-escalations` (see that route's own comment), and
+not the same principal type or the same response shape.
+
+**Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+validated against this account's own `obClientId` first — a step on
+another client's journey answers `404`, never `403`, on the
+no-existence-leak rule every portal route follows.
+
+**Only a step currently `IN_PROGRESS` may be escalated.** The button
+this fronts is disabled everywhere else in CP-03; this is the
+server-side half of that rule, since a disabled control in one
+client is not an authorization check.
+
+**One open escalation per service.** `uq_ob_client_escalations_open`
+(A-128) makes a second raise on the same step, while one is still
+open, answer with the *existing* open escalation rather than an
+error — `isNew: false` on the response says which happened. A client
+tapping the control twice on a slow connection gets one escalation
+and one notification, not two.
+
+Raising notifies the onboarding manager and the step's owner
+immediately, by email and WhatsApp (plan §7), and mirrors the
+comment into the service's communication timeline as an
+`ESCALATION` entry (plan §4) — visible to the client, since they
+just said it. Staff see it, and resolve it, on
+`resolveObClientEscalation`.
+
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const raisePortalEscalationParams = zod.object({
+  "stepId": zod.number()
+})
+
+export const raisePortalEscalationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const raisePortalEscalationBodyCommentMax = 2000;
+
+
+
+export const raisePortalEscalationBody = zod.object({
+  "comment": zod.string().min(1).max(raisePortalEscalationBodyCommentMax).describe('Mandatory — plan §4\/§9\'s own rule for CP-03\'s Escalate control.')
+})
+
+export const raisePortalEscalationResponseDataCommentMax = 2000;
+
+
+
+export const raisePortalEscalationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "comment": zod.string().max(raisePortalEscalationResponseDataCommentMax),
+  "raisedAt": zod.string().datetime({}),
+  "isNew": zod.boolean().describe('`false` when this service already carried an open escalation and\nthat one was returned unchanged, rather than a second one being\nraised — see the operation\'s own description.\n')
+}).describe('What `raisePortalEscalation` hands back — not the staff-shaped\n`ObClientEscalation` (no contact card to echo back to the contact\nwho is reading it, no resolution fields that cannot yet be set).\n')
+})
+
+/**
+ * Every sign-off this client's onboarding has ever had raised, pending
+and past together — the screen sorts. Plan §8: "the portal adds a
+sign-off list (pending + past) deep-linking into the same flow; the
+link+OTP path still works without a portal login and remains the
+legal record."
+
+**"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+`sentToEmail`, not a link carrying a live token.**
+`ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+own reasoning: "our own database must not be able to yield a working
+link"), so no read — this one included — can ever hand back the
+plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+the link went to, so a client who has mislaid the email knows where to
+look. A self-service resend would produce a real deep link but needs
+the mint-and-mail path `resendObSignoff` names in this contract and no
+controller implements yet; out of scope for a list screen and flagged
+rather than built ad hoc.
+
+No token, hash, OTP state, IP or user agent on the wire — see
+`PortalSignoff`'s own note.
+
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+export const listPortalSignoffsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "productName": zod.string().nullish(),
+  "stepTitle": zod.string().nullish(),
+  "requestedAt": zod.string().datetime({}),
+  "tokenExpiresAt": zod.string().datetime({}).nullish(),
+  "sentToEmail": zod.string().nullish(),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "signedName": zod.string().nullish(),
+  "acceptanceNote": zod.string().nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "objectionNote": zod.string().nullish(),
+  "hasCertificate": zod.boolean()
+}).describe('C-122 · one row of CP-05\'s list. `stepTitle` and `productName` are\nboth `null` exactly when `kind` is `GO_LIVE` — a go-live sign-off\nnames the journey, not one product\'s step.\n\n\*\*No `token`, `tokenHash`, OTP state, `signedIp` or\n`signedUserAgent`.\*\* `sentToEmail` is the one contact detail served,\nand it is this client\'s own contact, not a colleague\'s — named so a\nclient who has mislaid the email knows which inbox to check.\n\n`hasCertificate` is `false` for every row today: `pdfStorageKey` is\nnever written until the acceptance PDF (plan §8, B-116) is built.\nThat is the accurate answer rather than a placeholder, on\n`ObSignoffAcceptResult.clientWentLive`\'s own precedent for the same\nsituation one field over.\n'))
+})
+
+/**
+ * `ObClientPrereqTaskDetail`, unchanged — "one schema for both
+principals". 404 for a task on another client, the same 404 for one
+that does not exist, and the same 404 again when this account's token
+carries no onboarding client at all.
+
+ * @summary One prerequisite task in full (CP-04)
+ */
+export const getPortalPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number()
+})
+
+export const getPortalPrereqTaskHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getPortalPrereqTaskResponseDataTitleMax = 200;
+
+export const getPortalPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const getPortalPrereqTaskResponseDataSkipReasonMax = 2000;
+
+export const getPortalPrereqTaskResponseDataReferenceDocsItemLabelMax = 200;
+
+
+
+export const getPortalPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(getPortalPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(getPortalPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(getPortalPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.').and(zod.object({
+  "referenceDocs": zod.array(zod.object({
+  "id": zod.number(),
+  "templateTaskId": zod.number(),
+  "label": zod.string().max(getPortalPrereqTaskResponseDataReferenceDocsItemLabelMax),
+  "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
+  "fileName": zod.string().optional(),
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
+}).describe('`ob_prereq_template_task_docs` — a reference document on a master task.')).describe('The Admin\'s documents, carried through from the master task at\nsnapshot time. Empty on an ad-hoc task unless one was attached\nto it directly.\n'),
+  "submissions": zod.array(zod.object({
+  "attachmentId": zod.number(),
+  "fileName": zod.string(),
+  "sizeBytes": zod.number(),
+  "uploadedByType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
+  "uploadedAt": zod.string().datetime({}),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nfile. Added by C-121 for CP-04\'s own read; additive to this\nschema, so the OB-05 reader is unaffected by its absence.\n')
+})).describe('What the client sent back — `ob_attachments` with `kind:\nSUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an\nimplementor recorded a document that arrived by email.\n')
+})).describe('CP-04 and the OB-05 task row expanded. One schema for both principals\n— see `getObClientPrereqTask` for why a prerequisite is the one object\nin this module that needs no separate portal serializer.\n')
+})
+
+/**
+ * `submitObClientPrereqTask`'s own portal path, finally wired: staff
+wrote the transition to accept a `contactId` from the start, this
+task is the first caller to send one. Attributed to the client's
+current active primary contact — see `PortalPrimaryContactReader`'s
+own note on why, since `client_accounts` carries no live link to one.
+
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const submitPortalPrereqTaskParams = zod.object({
+  "prereqTaskId": zod.number()
+})
+
+export const submitPortalPrereqTaskBodyNoteMax = 4000;
+
+
+
+export const submitPortalPrereqTaskBody = zod.object({
+  "note": zod.string().max(submitPortalPrereqTaskBodyNoteMax).nullish()
+}).describe('`ObPrereqSubmitRequest` narrowed to `note` — CP-04 has its own upload\nroute (`uploadPortalPrereqAttachment`) for evidence, so there is no\n`attachmentIds` field naming files the portal already has a separate,\nscanned upload path for.\n')
+
+export const submitPortalPrereqTaskResponseDataTitleMax = 200;
+
+export const submitPortalPrereqTaskResponseDataDescriptionMax = 4000;
+
+export const submitPortalPrereqTaskResponseDataSkipReasonMax = 2000;
+
+
+
+export const submitPortalPrereqTaskResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "obClientId": zod.number(),
+  "templateTaskId": zod.number().nullish().describe('The master task this was snapshotted from, or null for an ad-hoc\none added to this client alone. Kept so a waiver can be read back\nagainst the wording that was actually in force.\n'),
+  "sequence": zod.number(),
+  "title": zod.string().max(submitPortalPrereqTaskResponseDataTitleMax),
+  "description": zod.string().max(submitPortalPrereqTaskResponseDataDescriptionMax).nullish(),
+  "isMandatory": zod.boolean(),
+  "isAdHoc": zod.boolean().describe('Added for this client rather than snapshotted (plan §4). Worth a\nfield of its own rather than leaving the screen to infer it from\n`templateTaskId` being null: OB-05 marks these, because \"why is\nthis client being asked for something the others are not\" is the\nfirst question about one.\n'),
+  "status": zod.enum(['PENDING', 'SUBMITTED', 'VERIFIED', 'SKIPPED']).describe('A-118 · plan §4\'s four, and the whole of the gate arithmetic is stated\nover them: every mandatory task `VERIFIED`, every non-mandatory one\n`VERIFIED` or `SKIPPED`.\n\nThere is no `RETURNED`. A returned submission is `PENDING` again —\nthat is what the client has to act on, and a fifth value would split\n\"the client owes us this\" across two states that every count, every\nreminder and every progress bar would then have to remember to add\ntogether. What was returned, by whom and why is in the task\'s history\nand in its comment thread, which is where the \*event\* belongs; the\nstatus says whose move it is.\n\nNo `EXPIRED` either. A prerequisite past its `dueAt` is overdue rather\nthan closed — plan §5.4 scans it as client-attributed time and sends\nreminders, and a task that timed itself out would clear nothing while\nmaking the gate look permanently unopenable.\n'),
+  "dueAt": zod.string().datetime({}).describe('Working-calendar derived from `tatDays`, never a naive addition —\nCLAUDE.md\'s rule, and the reason a Friday task with a two-day TAT\nis not overdue on Sunday.\n'),
+  "isOverdue": zod.boolean().optional().describe('Past `dueAt` and not settled. Derived on read rather than stored,\nso it cannot disagree with the timestamp beside it — the argument\n`ob_implementor_daily_stats` makes for not storing its performance\nscore.\n'),
+  "submittedAt": zod.string().datetime({}).nullish(),
+  "submittedVia": zod.union([zod.enum(['PORTAL', 'STAFF']).describe('A-118 · `ob_client_prereq_tasks.submitted_via`. Which path the\nsubmission came in by — the client did it themselves, or a member of\nstaff recorded it on their behalf after it arrived by email.\n\nWorth keeping rather than inferring from the submitter\'s type, because\nthe question it answers is about the \*client\'s\* engagement with the\nportal, and that is what decides whether the portal is working.\n'),zod.null()]).optional(),
+  "verifiedAt": zod.string().datetime({}).nullish(),
+  "verifiedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skippedAt": zod.string().datetime({}).nullish(),
+  "skippedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "skipReason": zod.string().max(submitPortalPrereqTaskResponseDataSkipReasonMax).nullish().describe('Mandatory whenever `status` is `SKIPPED`, and the only field on\nthis row that a later dispute is likely to turn on. Never null on\na skipped task.\n'),
+  "commentCount": zod.number().optional(),
+  "attachmentCount": zod.number().optional()
+}).describe('`ob_client_prereq_tasks` — one task on one client\'s checklist.')
+})
+
+/**
+ * Narrowed from `ObPrereqComment` — see `PortalPrereqComment`'s own
+note on why `clientAuthor` is a lean ref here rather than the full
+`ObContact`.
+
+ * @summary The task's comment thread, oldest first (CP-04)
+ */
+export const listPortalPrereqCommentsParams = zod.object({
+  "prereqTaskId": zod.number()
+})
+
+export const listPortalPrereqCommentsQueryLimitDefault = 50;
+export const listPortalPrereqCommentsQueryLimitMax = 200;
+
+
+
+export const listPortalPrereqCommentsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listPortalPrereqCommentsQueryLimitMax).default(listPortalPrereqCommentsQueryLimitDefault)
+})
+
+export const listPortalPrereqCommentsResponseDataItemBodyMax = 4000;
+
+
+
+export const listPortalPrereqCommentsResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "prereqTaskId": zod.number(),
+  "authorType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
+  "staffAuthor": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "clientAuthor": zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string()
+}),zod.null()]).optional(),
+  "body": zod.string().max(listPortalPrereqCommentsResponseDataItemBodyMax),
+  "isSystem": zod.boolean(),
+  "createdAt": zod.string().datetime({})
+}).describe('`ObPrereqComment`\'s shape narrowed to what CP-04\'s thread render\nneeds — the one place the portal\'s prerequisite wire shapes depart\nfrom the staff ones. `ObPrereqComment.clientAuthor` is typed as the\nfull `ObContact` (designation, WhatsApp consent and all), which would\ncost an extra join per comment for fields a comment bubble never\nrenders; `clientAuthor` here is the three fields CP-04 actually shows.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+})
+})
+
+/**
+ * Written through `ObPrereqTaskService#addComment` — the one door into
+`ob_prereq_comments` — as `CLIENT`, attributed to the client's
+current active primary contact.
+
+ * @summary Say something about this task (CP-04)
+ */
+export const addPortalPrereqCommentParams = zod.object({
+  "prereqTaskId": zod.number()
+})
+
+export const addPortalPrereqCommentHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const addPortalPrereqCommentBodyBodyMax = 4000;
+
+
+
+export const addPortalPrereqCommentBody = zod.object({
+  "body": zod.string().min(1).max(addPortalPrereqCommentBodyBodyMax)
+})
+
+/**
+ * `ObAttachmentPipeline.Uploader.client` — anticipated by B-126, first
+called here. Owner arm `PREREQ_TASK`, this task's own addition to
+`ObAttachmentOwner`. Same pipeline, same caps, same AV scan as every
+other onboarding upload; `downloadUrl` is absent until the scan
+clears.
+
+ * @summary Attach evidence to a prerequisite task (CP-04)
+ */
+export const uploadPortalPrereqAttachmentParams = zod.object({
+  "prereqTaskId": zod.number()
+})
+
+export const uploadPortalPrereqAttachmentHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const uploadPortalPrereqAttachmentBody = zod.object({
+  "file": zod.instanceof(File)
+})
+

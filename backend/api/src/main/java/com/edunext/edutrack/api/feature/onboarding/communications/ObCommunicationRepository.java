@@ -180,6 +180,23 @@ class ObCommunicationRepository {
                     :authorType, :authorUserId, :isClientVisible, :occurredAt)
             """;
 
+    /**
+     * C-126 · the escalation mirror's own insert. {@code entry_type} is
+     * fixed to {@code ESCALATION} and the row is always client-visible —
+     * unlike {@link #INSERT} above, whose caller ({@link
+     * ObCommunicationService#record}) is staff-only and defaults to
+     * internal. The author may be a client contact (a raise) or a staff
+     * user (a resolution), so both author columns are bound rather than
+     * {@link #INSERT}'s fixed {@code STAFF}.
+     */
+    private static final String INSERT_ESCALATION = """
+            INSERT INTO ob_step_communications
+                   (step_id, journey_id, ob_client_id, entry_type, body,
+                    author_type, author_user_id, author_contact_id, is_client_visible, occurred_at)
+            VALUES (:stepId, :journeyId, :obClientId, 'ESCALATION', :body,
+                    :authorType, :authorUserId, :authorContactId, 1, :occurredAt)
+            """;
+
     private final JdbcClient jdbc;
 
     ObCommunicationRepository(JdbcClient jdbc) {
@@ -239,6 +256,36 @@ class ObCommunicationRepository {
                 .param("authorType", ObCommunicationDtos.AUTHOR_STAFF)
                 .param("authorUserId", authorUserId)
                 .param("isClientVisible", isClientVisible ? 1 : 0)
+                .param("occurredAt", Timestamp.from(occurredAt))
+                .update(keys);
+        Number generated = keys.getKey();
+        if (generated == null) {
+            throw new IllegalStateException("ob_step_communications insert returned no generated id");
+        }
+        return generated.longValue();
+    }
+
+    /**
+     * Appends one {@code ESCALATION}-typed entry — C-126's mirror of a
+     * client escalation raise or resolution (plan §4). Insert only, on the
+     * same door as {@link #insert} above; see {@link #INSERT_ESCALATION}'s
+     * own note on the two differences from that method.
+     *
+     * @param authorType      {@code CLIENT} for a raise, {@code STAFF} for a resolution
+     * @param authorUserId    set for a {@code STAFF} author, {@code null} otherwise
+     * @param authorContactId set for a {@code CLIENT} author, {@code null} otherwise
+     */
+    long insertEscalationEntry(StepContext context, String body, String authorType,
+                               Long authorUserId, Long authorContactId, Instant occurredAt) {
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql(INSERT_ESCALATION)
+                .param("stepId", context.stepId())
+                .param("journeyId", context.journeyId())
+                .param("obClientId", context.obClientId())
+                .param("body", body)
+                .param("authorType", authorType)
+                .param("authorUserId", authorUserId)
+                .param("authorContactId", authorContactId)
                 .param("occurredAt", Timestamp.from(occurredAt))
                 .update(keys);
         Number generated = keys.getKey();

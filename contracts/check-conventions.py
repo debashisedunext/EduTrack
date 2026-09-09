@@ -29,6 +29,7 @@ VERBS = ("get", "post", "put", "patch", "delete")
 NO_IF_MATCH = {
     "/onboarding/journey-step-items/{itemId}": "A-118 — ticking a checklist entry. Two people ticking two DIFFERENT items on the same service is the normal case, and the only tag available is the step's, from getObJourneyStep: honouring it would fail the second person for touching a sibling item. The race this leaves open is both ticking the SAME item, which has no loser — the outcome is identical either way. The same argument as /projects/{id}/members/{userId}, where the tag would have to come from a collection with none of its own",
     "/me/password":                        "currentPassword already proves current state",
+    "/portal/auth/password":               "C-121 — the portal's own version of /me/password, deliberately without currentPassword: a newly-issued client_accounts row has a password of 32 random bytes nobody knows, so there is nothing to prove by re-typing it. The CLIENT access token minted by portalRedeemCredential or an earlier portalLogin is the proof; the body names the state it wants rather than a delta, /users/{userId}/status's own idiom",
     "/users/{userId}/status":              "idempotent setter, last write wins is correct",
     "/clients/{clientId}/status":          "idempotent setter, last write wins is correct",
     "/clients/bulk-status":                "idempotent setter, like the single-client route it batches — and one If-Match cannot speak for 200 rows, while per-row tags would fail the whole batch because somebody touched one unrelated client",
@@ -48,6 +49,11 @@ NO_IF_MATCH = {
     "/onboarding/journey-templates/order": "C-123 — the Module Service catalogue's ↑/↓, every active template renumbered in one call. As with /clients/bulk-status and /tickets/bulk-level, one If-Match cannot speak for the whole catalogue, and per-template tags would fail the write because somebody touched an unrelated product's service. Unlike those two this genuinely is last-write-wins rather than idempotent, but the loser's only loss is a card position — nothing else on the row is touched, nothing is deleted, and the next reorder corrects it. The picker at .../{templateId}/depends-on, which does touch a single row with a real tag, is NOT exempt and requires If-Match",
 }
 
+# §5 — a detail-shaped GET with no lost-update race to precondition.
+NO_ETAG = {
+    "/portal/auth/credential/{token}": "A-130/C-121 — the path segment is a single-use credential token, not a resource id with a lifetime worth preconditioning. The GET changes nothing and the POST on the same path that spends the token takes no If-Match either (see NO_IF_MATCH), so there is no write this read stands in front of",
+}
+
 # §6 — bounded by a constraint the product already enforces.
 NO_PAGINATION = {
     "/masters/task-types":               "11 rows",
@@ -64,6 +70,7 @@ NO_PAGINATION = {
     "/clients/{clientId}/contacts":      "a short list per client",
     "/tickets/{ticketId}/attachments":   "capped at 20 per ticket",
     "/onboarding/clients/{obClientId}/attachments": "B-107 — the documents filed against one client. Bounded the way /clients/{clientId}/contacts is: a short list per client, and the card that draws it shows the whole set because a document nobody scrolled to is a signed contract nobody knows is missing. Worth naming the ceiling that is NOT enforced, because this one is an upload rather than a row somebody types: there is a per-file cap and deliberately no per-client total (the onboarding plan publishes none, and inventing one would refuse a legitimate twenty-first document), so a client accumulating hundreds of files over years would grow this list. The fix then is a real cursor, plus the per-client cap plan section 11 owes CP-04 — not a wider exemption",
+    "/portal/onboarding/signoffs":        "C-122 — one client's sign-offs, pending and past together. Bounded by the journey template that produced them: one row per requiresSignoff step plus one go-live, so the ceiling is the step count of the products this client bought — a handful, on /clients/{clientId}/contacts' own reasoning. CP-05 shows pending and past as two sections of one screen, which needs the whole set on one read the way the attachments card above does",
     "/onboarding/products":              "A-118 — the catalogue of what the organisation sells, on the /masters/task-types argument. A handful of rows, read whole by the OB-04 wizard's multi-select and by OB-07's product filter, both of which need the set to render at all. Worth naming the ceiling that is not enforced: nothing caps this server-side, so an organisation selling hundreds of products would grow it — but that is a different company, and the fix would be a real cursor rather than a wider exemption",
     "/notifications/pending":            "a queue drained by acknowledging, not paged; a cursor would outlive the rows it points past",
     "/me/notification-preferences":      "one row per NotificationEvent — 25, and bounded by the enum",
@@ -282,7 +289,7 @@ def main():
                 fail.append("%s: takes If-Match but never answers 412" % opid)
 
         # §5 — detail reads carry ETag
-        if m == "get" and (p.rstrip("/").endswith("}") or p.endswith("/full")):
+        if m == "get" and (p.rstrip("/").endswith("}") or p.endswith("/full")) and p not in NO_ETAG:
             if "ETag" not in str(o.get("responses", {}).get("200", {})):
                 fail.append("%s: detail read without ETag" % opid)
 

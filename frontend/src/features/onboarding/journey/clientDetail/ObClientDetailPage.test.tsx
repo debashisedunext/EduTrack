@@ -184,6 +184,11 @@ describe('ObClientDetailPage', () => {
     /**
      * Every dot names its service, its state and its colour. Nine dots in
      * three colours is exactly the chart CLAUDE.md's WCAG line exists to stop.
+     *
+     * Client 1's "Data Migration" step (`OB_CLIENT_ESCALATIONS` in the mock
+     * db) carries an open C-126 escalation, so its label carries that too —
+     * colour is never the only signal, and a red ring on a dot means nothing
+     * to a screen-reader user unless the name says why.
      */
     it('names every dot rather than leaving colour to carry it', async () => {
       renderClient(8)
@@ -192,6 +197,26 @@ describe('ObClientDetailPage', () => {
         .getAllByRole('img')
         .map((dot) => dot.getAttribute('aria-label'))
       expect(labels).toContain('5. Configuration & branding — Blocked · red')
+      expect(labels[0]).toMatch(/^1\. Kickoff call — Done/)
+    })
+
+    /**
+     * C-126 · Sunrise's "Data migration" step (journey 21, step 214) carries
+     * the fixture's one open `OB_CLIENT_ESCALATIONS` row — raised from the
+     * portal against the same breach `OB_ESCALATIONS`' L1/L2 rungs already
+     * fire on. Colour is never the only signal (the class-level note above),
+     * so an escalated dot's name has to say so too, not just ring red.
+     */
+    it('names an escalated step rather than leaving the red ring to carry it', async () => {
+      renderClient(2)
+      const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
+      const labels = await waitFor(() => {
+        const found = within(strips[0])
+          .getAllByRole('img')
+          .map((dot) => dot.getAttribute('aria-label'))
+        expect(found).toContain('4. Data migration — In progress · red — escalated, awaiting staff')
+        return found
+      }, SLOW)
       expect(labels[0]).toMatch(/^1\. Kickoff call — Done/)
     })
 
@@ -288,6 +313,52 @@ describe('ObClientDetailPage', () => {
       } finally {
         Element.prototype.scrollIntoView = original
       }
+    })
+  })
+
+  /**
+   * C-126 · Sunrise's "Data migration" step (journey 21, step 214) carries
+   * the fixture's one seeded open escalation (`OB_CLIENT_ESCALATIONS` in the
+   * mock db) — the banner plan §4/§9 ask for, and resolve-and-acknowledge.
+   */
+  describe('escalations', () => {
+    it('shows the open escalation in a banner, and resolving it clears the banner and the dot', async () => {
+      const user = userEvent.setup()
+      renderClient(2)
+      await screen.findByText('Sunrise EdTech Pvt Ltd', undefined, SLOW)
+
+      const banner = screen.getByRole('alert', { name: 'Open client escalations' })
+      expect(within(banner).getByText('Data migration')).toBeInTheDocument()
+      expect(
+        within(banner).getByText('Migration delay is holding our launch date — please expedite.'),
+      ).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Resolve' }))
+      const dialog = await screen.findByRole('dialog', undefined, SLOW)
+      await user.type(within(dialog).getByLabelText('Resolution note'), 'Ran the migration overnight; verified with the client.')
+      await user.click(within(dialog).getByRole('button', { name: 'Resolve' }))
+
+      await waitFor(
+        () => expect(screen.queryByRole('alert', { name: 'Open client escalations' })).not.toBeInTheDocument(),
+        SLOW,
+      )
+
+      const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
+      const labels = within(strips[0])
+        .getAllByRole('img')
+        .map((dot) => dot.getAttribute('aria-label'))
+      expect(labels).toContain('4. Data migration — In progress · red')
+      expect(labels).not.toContain('4. Data migration — In progress · red — escalated, awaiting staff')
+    })
+
+    it('will not resolve with no note', async () => {
+      const user = userEvent.setup()
+      renderClient(2)
+      await screen.findByRole('alert', { name: 'Open client escalations' }, SLOW)
+
+      await user.click(screen.getByRole('button', { name: 'Resolve' }))
+      const dialog = await screen.findByRole('dialog', undefined, SLOW)
+      expect(within(dialog).getByRole('button', { name: 'Resolve' })).toBeDisabled()
     })
   })
 

@@ -11744,6 +11744,399 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ══════════════════════════════════════════════════ client portal · auth ═══
+  # A-130 · /portal/auth/**: login and the credential-link redemption that
+  # activates a newly issued or reset client account. C-121 originally built
+  # a duplicate of this exact surface (login/redeem/refresh/logout/password)
+  # before A-130 landed on develop as the authoritative implementation of the
+  # same mechanism — this stream's duplicate was deleted and these three
+  # entries were written against A-130's actual shipped Java
+  # (PortalAuthController/PortalAuthDtos on develop@55803bb7), since A-130's
+  # own commit named the contract as its one outstanding DoD item. Stream A
+  # should confirm these schemas match at review.
+  #
+  # No refresh token, no logout route, no forced-password-change-after-login
+  # gate: a portal session lasts one access-token lifetime, and a login only
+  # ever succeeds once a real password has been chosen via redemption below —
+  # there is no separate must-change state to clear afterwards.
+  /portal/auth/login:
+    post:
+      tags: [portal]
+      operationId: portalLogin
+      summary: Sign in to the client portal
+      security: []
+      description: |
+        Ordinary sign-in, for an account that has already chosen its own
+        password via `redeemPortalCredentialLink`. A newly created or reset
+        account has no password to type yet — that's what the credential
+        link is for.
+
+        Failures are deliberately indistinguishable, exactly as `login` is
+        for staff: wrong username, wrong password and unknown username all
+        answer `invalid-credentials`. Lockout is reported only once the
+        password is correct.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalLoginRequest' }
+      responses:
+        '200':
+          description: Credentials accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalLoginResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Invalid credentials — one body for wrong username, wrong password and unknown user.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: Account locked after repeated failures. Reported only once the password is correct.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/auth/credential/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema: { type: string }
+        description: The 256-bit random value from the credential mail. Single-use, seven-day TTL.
+    get:
+      tags: [portal]
+      operationId: describePortalCredentialLink
+      summary: Whether a credential link is still valid, and the username it is for
+      security: []
+      description: |
+        Changes nothing, so a page can validate a link on load — or a mail
+        client can prefetch the URL — without spending it. That's what makes
+        redemption below a `POST` rather than this verb.
+      responses:
+        '200':
+          description: Still valid.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalCredentialLinkResponse' }
+        '410':
+          description: Unknown, expired or already-used link — one refusal for all three, so a caller holding a random string cannot tell which it was.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    post:
+      tags: [portal]
+      operationId: redeemPortalCredentialLink
+      summary: Choose a password and activate the portal login
+      security: []
+      description: |
+        Spends the link and sets the password, both in one transaction. `204`
+        rather than a session: redeeming is not signing in — handing back a
+        token here would make a link sitting in an inbox directly
+        exchangeable for a session. The client redeems, then calls
+        `portalLogin` separately with the password just chosen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalCredentialRedeemRequest' }
+      responses:
+        '204': { description: Password set; the link is now spent. }
+        # Two distinct causes share this status, `/me/password`'s own
+        # password-reuse case one level over: ordinary Bean Validation
+        # (blank, over 200 chars) shaped as ValidationFailed below, and
+        # `PortalAuthExceptions.WeakPortalPassword` — the 12-char/
+        # upper/lower/digit/symbol policy — as a plain `weak-password`
+        # Problem naming the one failed rule in `detail`.
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '410':
+          description: Unknown, expired or already-used link — same one refusal the GET above uses.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ══════════════════════════════════════════════ client portal · onboarding ═══
+  # C-121 · CP-03/CP-04 — /portal/onboarding/**. No obClientId path segment
+  # anywhere: ClientPrincipal.obClientId, read from the caller's own verified
+  # token, IS the client, so there is no id a caller could widen. C-126 adds
+  # the escalation raise route (raisePortalEscalation, below) under this same
+  # tree — PortalStepDot.openEscalation is the slot it fills.
+  /portal/onboarding/home:
+    get:
+      tags: [portal]
+      operationId: getPortalOnboardingHome
+      summary: Interactive prerequisites above read-only journey accordions (CP-03)
+      description: |
+        The prerequisites are the full staff wire shape (`ObClientPrereqs`) —
+        plan §9/§11's never-visible list is about journeys, and none of it is
+        on a prerequisite row. The journeys are `PortalJourneyStrip`, plan
+        §9's own narrower CP-03 row: step status only, no owner names, no
+        internal comms, no block reasons, no TAT internals.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalOnboardingHomeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /portal/onboarding/steps/{stepId}/escalate:
+    parameters:
+      - { name: stepId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: raisePortalEscalation
+      summary: Escalate a running service to staff (CP-03)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The client's own half of `ob_client_escalations` — not declared on
+        `/onboarding/client-escalations` (see that route's own comment), and
+        not the same principal type or the same response shape.
+
+        **Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+        validated against this account's own `obClientId` first — a step on
+        another client's journey answers `404`, never `403`, on the
+        no-existence-leak rule every portal route follows.
+
+        **Only a step currently `IN_PROGRESS` may be escalated.** The button
+        this fronts is disabled everywhere else in CP-03; this is the
+        server-side half of that rule, since a disabled control in one
+        client is not an authorization check.
+
+        **One open escalation per service.** `uq_ob_client_escalations_open`
+        (A-128) makes a second raise on the same step, while one is still
+        open, answer with the *existing* open escalation rather than an
+        error — `isNew: false` on the response says which happened. A client
+        tapping the control twice on a slow connection gets one escalation
+        and one notification, not two.
+
+        Raising notifies the onboarding manager and the step's owner
+        immediately, by email and WhatsApp (plan §7), and mirrors the
+        comment into the service's communication timeline as an
+        `ESCALATION` entry (plan §4) — visible to the client, since they
+        just said it. Staff see it, and resolve it, on
+        `resolveObClientEscalation`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalEscalationRaiseRequest' }
+      responses:
+        '200':
+          description: An escalation was already open on this service; that one is returned unchanged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalClientEscalationResponse' }
+        '201':
+          description: Raised.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalClientEscalationResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: This service is not currently running and cannot be escalated.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/onboarding/signoffs:
+    get:
+      tags: [portal]
+      operationId: listPortalSignoffs
+      summary: Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+      description: |
+        Every sign-off this client's onboarding has ever had raised, pending
+        and past together — the screen sorts. Plan §8: "the portal adds a
+        sign-off list (pending + past) deep-linking into the same flow; the
+        link+OTP path still works without a portal login and remains the
+        legal record."
+
+        **"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+        `sentToEmail`, not a link carrying a live token.**
+        `ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+        own reasoning: "our own database must not be able to yield a working
+        link"), so no read — this one included — can ever hand back the
+        plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+        the link went to, so a client who has mislaid the email knows where to
+        look. A self-service resend would produce a real deep link but needs
+        the mint-and-mail path `resendObSignoff` names in this contract and no
+        controller implements yet; out of scope for a list screen and flagged
+        rather than built ad hoc.
+
+        No token, hash, OTP state, IP or user agent on the wire — see
+        `PortalSignoff`'s own note.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSignoffListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /portal/onboarding/prereq-tasks/{prereqTaskId}:
+    parameters:
+      - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [portal]
+      operationId: getPortalPrereqTask
+      summary: One prerequisite task in full (CP-04)
+      description: |
+        `ObClientPrereqTaskDetail`, unchanged — "one schema for both
+        principals". 404 for a task on another client, the same 404 for one
+        that does not exist, and the same 404 again when this account's token
+        carries no onboarding client at all.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskDetailResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /portal/onboarding/prereq-tasks/{prereqTaskId}/submit:
+    parameters:
+      - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: submitPortalPrereqTask
+      summary: Mark a task done and send it for verification (CP-04)
+      description: |
+        `submitObClientPrereqTask`'s own portal path, finally wired: staff
+        wrote the transition to accept a `contactId` from the start, this
+        task is the first caller to send one. Attributed to the client's
+        current active primary contact — see `PortalPrimaryContactReader`'s
+        own note on why, since `client_accounts` carries no live link to one.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalPrereqSubmitRequest' }
+      responses:
+        '200':
+          description: Submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObClientPrereqTaskResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            The client has no active primary contact to attribute this
+            action to, or the task is not `PENDING` and so cannot be submitted.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/onboarding/prereq-tasks/{prereqTaskId}/comments:
+    parameters:
+      - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [portal]
+      operationId: listPortalPrereqComments
+      summary: The task's comment thread, oldest first (CP-04)
+      description: |
+        Narrowed from `ObPrereqComment` — see `PortalPrereqComment`'s own
+        note on why `clientAuthor` is a lean ref here rather than the full
+        `ObContact`.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalPrereqCommentListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [portal]
+      operationId: addPortalPrereqComment
+      summary: Say something about this task (CP-04)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Written through `ObPrereqTaskService#addComment` — the one door into
+        `ob_prereq_comments` — as `CLIENT`, attributed to the client's
+        current active primary contact.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObPrereqCommentCreateRequest' }
+      responses:
+        '201':
+          description: Posted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalPrereqCommentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: The client has no active primary contact to attribute this comment to.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/onboarding/prereq-tasks/{prereqTaskId}/attachments:
+    parameters:
+      - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: uploadPortalPrereqAttachment
+      summary: Attach evidence to a prerequisite task (CP-04)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        `ObAttachmentPipeline.Uploader.client` — anticipated by B-126, first
+        called here. Owner arm `PREREQ_TASK`, this task's own addition to
+        `ObAttachmentOwner`. Same pipeline, same caps, same AV scan as every
+        other onboarding upload; `downloadUrl` is absent until the scan
+        clears.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: |
+            Filed — `scanStatus` PENDING and no `downloadUrl` yet, exactly as
+            `uploadObClientAttachment` describes for the same reason.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalAttachmentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Over the per-file cap.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '415':
+          description: Extension or sniffed type not on the allow-list.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The client has no active primary contact to attribute this upload to.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
 # ══════════════════════════════════════════════════════════ components ═══════
 components:
 
@@ -19320,6 +19713,13 @@ components:
             `SUBMISSION` and hangs off the instance task, not off this.
         fileName: { type: string }
         sizeBytes: { type: integer, format: int64 }
+        downloadUrl:
+          type: [string, 'null']
+          description: |
+            Short-lived signed URL, present only for a CLEAN, non-tombstoned
+            attachment. Added by C-121 for CP-04's own read; additive to
+            this schema, so the staff OB-05 reader is unaffected by its
+            absence.
       description: '`ob_prereq_template_task_docs` — a reference document on a master task.'
     ObPrereqTemplateTaskDocWriteRequest:
       type: object
@@ -19558,6 +19958,12 @@ components:
         sizeBytes: { type: integer, format: int64 }
         uploadedByType: { $ref: '#/components/schemas/ObPrereqAuthorType' }
         uploadedAt: { type: string, format: date-time }
+        downloadUrl:
+          type: [string, 'null']
+          description: |
+            Short-lived signed URL, present only for a CLEAN, non-tombstoned
+            file. Added by C-121 for CP-04's own read; additive to this
+            schema, so the OB-05 reader is unaffected by its absence.
     ObClientPrereqTaskCreateRequest:
       type: object
       required: [title, tatDays, isMandatory]
@@ -21105,4 +21511,323 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/PortalAttachment' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ── A-130 · /portal/auth/** — sign-in and credential-link redemption ──
+    #
+    # Both routes are `security: []` — the caller holds no bearer token by
+    # definition, exactly LoginRequest's own case one principal type over.
+    # Mirrors PortalAuthDtos on develop@55803bb7 exactly; see this stream's
+    # note above the /portal/auth/** paths for why these entries exist here
+    # rather than having shipped with A-130 itself.
+    #
+    # Prerequisite schemas below (CP-03/CP-04) are the SAME wire shape as the
+    # staff ObClientPrereqTask family (see ObClientPrereqTaskDetail's own
+    # note: "one schema for both principals... needs no separate portal
+    # serializer") — declared as $ref to those existing schemas rather than
+    # duplicated, except the comment thread, which is narrowed on purpose
+    # (see PortalPrereqComment below).
+    PortalLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.
+        password:
+          type: string
+          minLength: 1
+          description: Plain password. Verified against an Argon2id hash; never logged or stored.
+    PortalClient:
+      type: object
+      required: [username, displayName, hasTicketing, hasOnboarding]
+      description: |
+        The signed-in client, as the portal shell renders it. Two ids are
+        derivable from these booleans — a null id means that tree is empty —
+        so the shell decides which module cards to draw without a second
+        vocabulary for the same fact. CP-02's whole source of truth for the
+        module chooser: read straight off the login response, no extra call.
+      properties:
+        username: { type: string }
+        displayName: { type: string }
+        hasTicketing:
+          type: boolean
+          description: A Ticketing card renders when true.
+        hasOnboarding:
+          type: boolean
+          description: |
+            An Onboarding card renders when true. At least one of
+            `hasTicketing`/`hasOnboarding` is always true — a `client_accounts`
+            row with neither is unreachable (`ck_client_accounts_has_a_master`).
+    PortalLoginResult:
+      type: object
+      required: [accessToken, expiresIn, client]
+      description: |
+        No refresh token: a portal session lasts one access-token lifetime,
+        and expiry means signing in again. `expiresIn` is seconds, not an
+        absolute time, so a client whose clock disagrees with ours cannot
+        compute the wrong deadline from a timestamp.
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer, examples: [900] }
+        client: { $ref: '#/components/schemas/PortalClient' }
+    PortalLoginResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalLoginResult' }
+    PortalCredentialLink:
+      type: object
+      required: [username, displayName, expiresAt]
+      description: |
+        What the redemption page needs before it can ask for a password.
+        Nothing else about the account: no email, no client name beyond the
+        display name, no ids. Anybody holding the link can read this, and the
+        link is a bearer credential in an inbox we do not control.
+      properties:
+        username: { type: string }
+        displayName: { type: string }
+        expiresAt: { type: string, format: date-time }
+    PortalCredentialLinkResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalCredentialLink' }
+    PortalCredentialRedeemRequest:
+      type: object
+      required: [password]
+      description: |
+        The token travels in the path, not here, so the page can validate a
+        link on load with a GET and reuse the same shape for the POST.
+      properties:
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            The password the client is choosing. Bean Validation on
+            `RedeemRequest` only bounds the length (`@Size(max=200)`); the
+            12-character-plus-complexity rule (`PortalPasswordRules`) is
+            enforced afterwards as a business rule — a failure there is the
+            `weak-password` 400 below, not a `ValidationFailed` one.
+
+    PortalProductRef:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+    PortalStepDot:
+      type: object
+      required: [id, sequence, name, status]
+      description: |
+        Step status only — plan §9's CP-03 row: "no owner names, internal
+        comms, or block reasons". No TAT figures either (plan §11's
+        never-visible list names "TAT internals" for the client explicitly).
+      properties:
+        id: { type: integer, format: int64 }
+        sequence: { type: integer }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/ObStepStatus' }
+        rag:
+          oneOf:
+            - { type: string, enum: [GREEN, AMBER, RED] }
+            - { type: 'null' }
+        dependsOnStepId: { type: [integer, 'null'], format: int64 }
+        openEscalation:
+          oneOf:
+            - { $ref: '#/components/schemas/PortalOpenEscalation' }
+            - { type: 'null' }
+          description: |
+            C-126's own slot, filled. One open escalation for this service,
+            raised by this client, if any — shown as a red chip until staff
+            resolve it. `null` while none is open, including immediately
+            after `resolveObClientEscalation` runs.
+    PortalOpenEscalation:
+      type: object
+      required: [id, comment, raisedAt]
+      description: |
+        `ob_client_escalations`, the client's own narrow view of it —
+        `PortalOnboardingDtos.PortalStepDot`'s own note on why this carries
+        neither who it was sent to nor who will resolve it.
+      properties:
+        id: { type: integer, format: int64 }
+        comment: { type: string, maxLength: 2000 }
+        raisedAt: { type: string, format: date-time }
+    PortalEscalationRaiseRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Mandatory — plan §4/§9's own rule for CP-03's Escalate control.
+    PortalClientEscalation:
+      type: object
+      required: [id, comment, raisedAt, isNew]
+      description: |
+        What `raisePortalEscalation` hands back — not the staff-shaped
+        `ObClientEscalation` (no contact card to echo back to the contact
+        who is reading it, no resolution fields that cannot yet be set).
+      properties:
+        id: { type: integer, format: int64 }
+        comment: { type: string, maxLength: 2000 }
+        raisedAt: { type: string, format: date-time }
+        isNew:
+          type: boolean
+          description: |
+            `false` when this service already carried an open escalation and
+            that one was returned unchanged, rather than a second one being
+            raised — see the operation's own description.
+    PortalClientEscalationResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalClientEscalation' }
+    PortalJourneyStrip:
+      type: object
+      required: [id, product, gateStatus, percentComplete, steps]
+      description: |
+        One product's journey, read-only — CP-03's accordion. No
+        `totalTatDays`/`utilizedHours`, unlike OB-05's own `ObJourneyStrip`:
+        plan §11's never-visible rule, one level up from the step dot.
+      properties:
+        id: { type: integer, format: int64 }
+        product: { $ref: '#/components/schemas/PortalProductRef' }
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        rag:
+          oneOf:
+            - { type: string, enum: [GREEN, AMBER, RED] }
+            - { type: 'null' }
+        percentComplete: { type: integer, minimum: 0, maximum: 100 }
+        heldByJourneyId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            Plan §5.5's service-level dependency — which sibling journey has
+            to finish first. Kept because it answers "why is nothing moving
+            yet" without naming an internal block reason.
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/PortalStepDot' }
+    PortalOnboardingHome:
+      type: object
+      required: [obClientId, prereqs, journeys]
+      properties:
+        obClientId: { type: integer, format: int64 }
+        clientName: { type: [string, 'null'] }
+        prereqs: { $ref: '#/components/schemas/ObClientPrereqs' }
+        journeys:
+          type: array
+          items: { $ref: '#/components/schemas/PortalJourneyStrip' }
+    PortalOnboardingHomeResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalOnboardingHome' }
+
+    PortalSignoff:
+      type: object
+      required: [id, kind, status, requestedAt, hasCertificate]
+      description: |
+        C-122 · one row of CP-05's list. `stepTitle` and `productName` are
+        both `null` exactly when `kind` is `GO_LIVE` — a go-live sign-off
+        names the journey, not one product's step.
+
+        **No `token`, `tokenHash`, OTP state, `signedIp` or
+        `signedUserAgent`.** `sentToEmail` is the one contact detail served,
+        and it is this client's own contact, not a colleague's — named so a
+        client who has mislaid the email knows which inbox to check.
+
+        `hasCertificate` is `false` for every row today: `pdfStorageKey` is
+        never written until the acceptance PDF (plan §8, B-116) is built.
+        That is the accurate answer rather than a placeholder, on
+        `ObSignoffAcceptResult.clientWentLive`'s own precedent for the same
+        situation one field over.
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        status: { $ref: '#/components/schemas/ObSignoffStatus' }
+        productName: { type: [string, 'null'] }
+        stepTitle: { type: [string, 'null'] }
+        requestedAt: { type: string, format: date-time }
+        tokenExpiresAt: { type: [string, 'null'], format: date-time }
+        sentToEmail: { type: [string, 'null'] }
+        signedAt: { type: [string, 'null'], format: date-time }
+        signedName: { type: [string, 'null'] }
+        acceptanceNote: { type: [string, 'null'] }
+        objectedAt: { type: [string, 'null'], format: date-time }
+        objectionNote: { type: [string, 'null'] }
+        hasCertificate: { type: boolean }
+    PortalSignoffListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PortalSignoff' }
+
+    PortalPrereqSubmitRequest:
+      type: object
+      description: |
+        `ObPrereqSubmitRequest` narrowed to `note` — CP-04 has its own upload
+        route (`uploadPortalPrereqAttachment`) for evidence, so there is no
+        `attachmentIds` field naming files the portal already has a separate,
+        scanned upload path for.
+      properties:
+        note: { type: [string, 'null'], maxLength: 4000 }
+    PortalAttachmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObPrereqSubmissionFile' }
+
+    PortalPrereqComment:
+      type: object
+      required: [id, prereqTaskId, authorType, body, isSystem, createdAt]
+      description: |
+        `ObPrereqComment`'s shape narrowed to what CP-04's thread render
+        needs — the one place the portal's prerequisite wire shapes depart
+        from the staff ones. `ObPrereqComment.clientAuthor` is typed as the
+        full `ObContact` (designation, WhatsApp consent and all), which would
+        cost an extra join per comment for fields a comment bubble never
+        renders; `clientAuthor` here is the three fields CP-04 actually shows.
+      properties:
+        id: { type: integer, format: int64 }
+        prereqTaskId: { type: integer, format: int64 }
+        authorType: { $ref: '#/components/schemas/ObPrereqAuthorType' }
+        staffAuthor:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        clientAuthor:
+          oneOf:
+            - { $ref: '#/components/schemas/PortalContactRef' }
+            - { type: 'null' }
+        body: { type: string, maxLength: 4000 }
+        isSystem: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    PortalContactRef:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        email: { type: string }
+    PortalPrereqCommentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalPrereqComment' }
+    PortalPrereqCommentListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PortalPrereqComment' }
         meta: { $ref: '#/components/schemas/Meta' }

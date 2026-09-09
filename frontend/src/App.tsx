@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { LauncherPage } from './features/launcher/LauncherPage'
@@ -12,6 +12,8 @@ import {
   TICKET_ROUTE,
 } from './features/tickets/detail/entityLinks'
 import { RequireAuth } from './features/auth/RequireAuth'
+import { PortalAuthProvider } from './features/portal/auth/PortalAuthProvider'
+import { PortalRequireAuth } from './features/portal/auth/PortalRequireAuth'
 
 const AuditLogPage = lazy(() =>
   import('./features/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })),
@@ -98,6 +100,43 @@ const PublicSignoffPage = lazy(() =>
 )
 const PriorityListPage = lazy(() =>
   import('./features/masters/priorities/PriorityListPage').then((m) => ({ default: m.PriorityListPage })),
+)
+const PortalLoginPage = lazy(() =>
+  import('./features/portal/auth/PortalLoginPage').then((m) => ({ default: m.PortalLoginPage })),
+)
+const PortalSetPasswordPage = lazy(() =>
+  import('./features/portal/auth/PortalSetPasswordPage').then((m) => ({ default: m.PortalSetPasswordPage })),
+)
+const PortalModuleChooserPage = lazy(() =>
+  import('./features/portal/PortalModuleChooserPage').then((m) => ({ default: m.PortalModuleChooserPage })),
+)
+const PortalShell = lazy(() =>
+  import('./features/portal/PortalShell').then((m) => ({ default: m.PortalShell })),
+)
+const PortalOnboardingHomePage = lazy(() =>
+  import('./features/portal/onboarding/PortalOnboardingHomePage').then((m) => ({
+    default: m.PortalOnboardingHomePage,
+  })),
+)
+const PortalPrereqTaskDetailPage = lazy(() =>
+  import('./features/portal/onboarding/PortalPrereqTaskDetailPage').then((m) => ({
+    default: m.PortalPrereqTaskDetailPage,
+  })),
+)
+const PortalSignoffListPage = lazy(() =>
+  import('./features/portal/onboarding/PortalSignoffListPage').then((m) => ({
+    default: m.PortalSignoffListPage,
+  })),
+)
+const PortalTicketListPage = lazy(() =>
+  import('./features/portal/tickets/PortalTicketListPage').then((m) => ({
+    default: m.PortalTicketListPage,
+  })),
+)
+const PortalTicketDetailPage = lazy(() =>
+  import('./features/portal/tickets/PortalTicketDetailPage').then((m) => ({
+    default: m.PortalTicketDetailPage,
+  })),
 )
 const ProjectDashboardPage = lazy(() =>
   import('./features/projects/ProjectDashboardPage').then((m) => ({ default: m.ProjectDashboardPage })),
@@ -234,6 +273,70 @@ export default function App() {
           at the rest of the application".
         */}
         <Route path="/signoff" element={withSuspense(<PublicSignoffPage />)} />
+
+        {/*
+          C-121 · CP-01..CP-04 — the client portal's own route subtree, plan
+          §2.3: "Portal routes live in their own trees ... a CLIENT principal
+          on any staff route → 404, and vice versa: the fork is at the route
+          tree, not per-endpoint conditionals." This mirrors that fork on the
+          client: entirely outside `RequireAuth` (which reads the *staff*
+          session store) and outside `AppShell`, with its own guard reading
+          its own store.
+
+          `PortalAuthProvider` wraps the whole subtree, login included, rather
+          than sitting above the router the way the staff `AuthProvider` does
+          in `main.tsx` — mounting it only when a browser actually navigates
+          under `/portal/**` means a staff page never mounts portal-only
+          session state it has no reason to hold. `main.tsx` is Stream D's
+          file and this task was not asked to widen it.
+
+          A-130 issues a single access token with no refresh cycle, so this
+          provider does not restore or renew anything (see its own note) —
+          it only ends the session locally once that token's lifetime is up.
+        */}
+        <Route
+          path="/portal"
+          element={withSuspense(
+            <PortalAuthProvider>
+              <Outlet />
+            </PortalAuthProvider>,
+          )}
+        >
+          <Route path="login" element={withSuspense(<PortalLoginPage />)} />
+          {/* CP-01's other half — the credential-link landing page,
+              redemption only (see its own docstring on why there is no
+              forced-change branch here). No `RequireAuth`: an unauthenticated
+              visitor with `?token=` is the only caller. */}
+          <Route path="set-password" element={withSuspense(<PortalSetPasswordPage />)} />
+
+          <Route element={<PortalRequireAuth />}>
+            {/* CP-02. Shell-less, like the staff launcher and for the same
+                reason: a screen about picking a module framed by one
+                module's chrome is a menu of dead ends. */}
+            <Route path="choose" element={withSuspense(<PortalModuleChooserPage />)} />
+
+            <Route element={withSuspense(<PortalShell />)}>
+              {/* CP-03/CP-04. */}
+              <Route path="onboarding" element={withSuspense(<PortalOnboardingHomePage />)} />
+              <Route
+                path="onboarding/prereq-tasks/:prereqTaskId"
+                element={withSuspense(<PortalPrereqTaskDetailPage />)}
+              />
+              {/* CP-05 — C-122. Reads `/portal/onboarding/signoffs`, on the
+                  same tree as CP-03/CP-04 since `ClientPrincipal.obClientId`
+                  scopes it the same way. */}
+              <Route path="onboarding/signoffs" element={withSuspense(<PortalSignoffListPage />)} />
+
+              {/* CP-06/CP-07 — C-122. The chooser's Ticketing card has linked
+                  here since C-121; this is the task that resolves it. */}
+              <Route path="tickets" element={withSuspense(<PortalTicketListPage />)} />
+              <Route path="tickets/:ticketId" element={withSuspense(<PortalTicketDetailPage />)} />
+            </Route>
+          </Route>
+
+          <Route index element={<Navigate to="/portal/choose" replace />} />
+          <Route path="*" element={<Navigate to="/portal/login" replace />} />
+        </Route>
 
         <Route element={<RequireAuth />}>
           {/*

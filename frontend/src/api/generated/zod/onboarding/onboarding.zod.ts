@@ -2411,14 +2411,16 @@ export const getObClientPrereqTaskResponse = zod.object({
   "label": zod.string().max(getObClientPrereqTaskResponseDataReferenceDocsItemLabelMax),
   "attachmentId": zod.number().describe('An `ob_attachments` row with `kind: REFERENCE` — the Admin\'s own\ndocument, shown to the client. What comes back the other way is\n`SUBMISSION` and hangs off the instance task, not off this.\n'),
   "fileName": zod.string().optional(),
-  "sizeBytes": zod.number().optional()
+  "sizeBytes": zod.number().optional(),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nattachment. Added by C-121 for CP-04\'s own read; additive to\nthis schema, so the staff OB-05 reader is unaffected by its\nabsence.\n')
 }).describe('`ob_prereq_template_task_docs` — a reference document on a master task.')).describe('The Admin\'s documents, carried through from the master task at\nsnapshot time. Empty on an ad-hoc task unless one was attached\nto it directly.\n'),
   "submissions": zod.array(zod.object({
   "attachmentId": zod.number(),
   "fileName": zod.string(),
   "sizeBytes": zod.number(),
   "uploadedByType": zod.enum(['STAFF', 'CLIENT']).describe('A-118 · which of `ob_prereq_comments`\' two author columns is set. The\ntable carries a `users` id and an `ob_client_contacts` id and fills\nexactly one, the same shape `ob_step_communications` uses and for the\nsame reason: a staff member and a client contact are rows in different\ntables, and a single polymorphic id would need a discriminator anyway.\n'),
-  "uploadedAt": zod.string().datetime({})
+  "uploadedAt": zod.string().datetime({}),
+  "downloadUrl": zod.string().nullish().describe('Short-lived signed URL, present only for a CLEAN, non-tombstoned\nfile. Added by C-121 for CP-04\'s own read; additive to this\nschema, so the OB-05 reader is unaffected by its absence.\n')
 })).describe('What the client sent back — `ob_attachments` with `kind:\nSUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an\nimplementor recorded a document that arrived by email.\n')
 })).describe('CP-04 and the OB-05 task row expanded. One schema for both principals\n— see `getObClientPrereqTask` for why a prerequisite is the one object\nin this module that needs no separate portal serializer.\n')
 })

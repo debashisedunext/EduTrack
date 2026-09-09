@@ -47,6 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObPrereqAuthorType } from './obPrereqAuthorType';
+import type { ObPrereqSubmissionFileDownloadUrl } from './obPrereqSubmissionFileDownloadUrl';
 
 export interface ObPrereqSubmissionFile {
   attachmentId: number;
@@ -54,4 +55,9 @@ export interface ObPrereqSubmissionFile {
   sizeBytes: number;
   uploadedByType: ObPrereqAuthorType;
   uploadedAt: string;
+  /** Short-lived signed URL, present only for a CLEAN, non-tombstoned
+file. Added by C-121 for CP-04's own read; additive to this
+schema, so the OB-05 reader is unaffected by its absence.
+ */
+  downloadUrl?: ObPrereqSubmissionFileDownloadUrl;
 }

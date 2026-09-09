@@ -54,6 +54,8 @@ export interface JourneyAccordionProps {
    * view when an entry is recorded. Passed down rather than re-fetched.
    */
   obClientId: number
+  /** C-126 · forwarded to {@link StepDotStrip} verbatim — see that prop's own note. */
+  openEscalationStepIds?: ReadonlySet<number>
 }
 
 export function JourneyAccordion({
@@ -63,6 +65,7 @@ export function JourneyAccordion({
   siblings,
   users,
   obClientId,
+  openEscalationStepIds,
 }: JourneyAccordionProps) {
   const [selectedStepId, setSelectedStepId] = React.useState<string | null>(null)
 
@@ -143,7 +146,7 @@ export function JourneyAccordion({
 
           <span className="min-w-0 flex-1" aria-hidden="true" />
 
-          <StepDotStrip steps={journey.steps ?? []} />
+          <StepDotStrip steps={journey.steps ?? []} openEscalationStepIds={openEscalationStepIds} />
 
           <span className="shrink-0 text-sm tabular-nums text-content-muted">
             {journey.percentComplete}%

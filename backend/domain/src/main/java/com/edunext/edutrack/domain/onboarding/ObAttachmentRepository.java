@@ -43,4 +43,18 @@ public interface ObAttachmentRepository extends JpaRepository<ObAttachment, Long
      * leave by the same line and stay indistinguishable.
      */
     Optional<ObAttachment> findByIdAndObClientId(Long id, Long obClientId);
+
+    /**
+     * C-121 · every file filed against one prerequisite task instance,
+     * tombstones included — {@code findByObClientIdOrderByIdAsc}'s shape, one
+     * owner arm over, for CP-04's submission list.
+     */
+    List<ObAttachment> findByPrereqTaskIdOrderByIdAsc(Long prereqTaskId);
+
+    /**
+     * C-121 · one file, resolved by both ids — {@code findByIdAndObClientId}'s
+     * reasoning verbatim, so a submission id under the wrong task answers
+     * "not found" rather than leaking whether it exists elsewhere.
+     */
+    Optional<ObAttachment> findByIdAndPrereqTaskId(Long id, Long prereqTaskId);
 }

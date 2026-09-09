@@ -112,6 +112,7 @@ each other:**
 | Endpoint | Why not |
 |---|---|
 | `PATCH /me/password` | `currentPassword` already proves you hold the current state |
+| `PATCH /portal/auth/password` | C-121 — the portal's own version of the row above, and deliberately without `currentPassword`: a newly-issued `client_accounts` row has a password of 32 random bytes nobody knows, so there is nothing the caller could prove by re-typing it. What proves the right to set a new one is the CLIENT access token minted by `portalRedeemCredential` or an earlier `portalLogin` — the same idiom `PATCH /users/{id}/status` uses for an idempotent setter: the body names the state it wants rather than a delta |
 | `PATCH /users/{id}/status`, `/clients/{id}/status` | Idempotent setters — last write wins is the correct semantic |
 | `PATCH /notifications/{id}/read`, `/read-all` | Idempotent; a race is harmless |
 | `PATCH /tickets/{id}/priority` | Reason is mandatory and every change is logged, so concurrent changes are visible rather than lost |
@@ -139,6 +140,17 @@ its path ends in a literal segment, so neither the detail-read rule nor the
 collection rule has anything to say about it. **Pair the tag with the
 precondition by hand — a `PUT` or `PATCH` whose `If-Match` has no read to come
 from is not a strict endpoint, it is a broken one.**
+
+**A detail-shaped `GET` can also deliberately carry no `ETag` at all, and that is
+different from the pair above** — those two are missing the rule's *check*
+because of how the path is shaped; the one below has no *use* for the tag in the
+first place:
+
+| Endpoint | Why not |
+|---|---|
+| `GET /portal/auth/credential/{token}` | A-130/C-121 — the path segment is a single-use, 256-bit credential token, not a resource id with a lifetime worth preconditioning. Nothing about this read participates in a lost-update race: it changes nothing, is safe to call repeatedly while a redemption page loads, and the `POST` on the same path that spends the token takes no `If-Match` either (see the row above on why) — there is no write this `GET` could stand in front of. Minting a tag would describe a version of *the link*, and the only state transition a link has is spent-or-not, which the `POST`'s own 200/409 already reports directly |
+
+`check-conventions.py`'s `NO_ETAG` set is this table.
 
 ## 6 · Cursor pagination, never offset
 

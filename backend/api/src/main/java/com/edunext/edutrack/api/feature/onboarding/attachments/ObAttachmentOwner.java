@@ -42,7 +42,15 @@ public enum ObAttachmentOwner {
      * {@code ob_attachments.prereq_template_task_id} — B-124's admin reference
      * documents on the org-wide prerequisites master (OB-14).
      */
-    PREREQ_TEMPLATE_TASK("prereq-template-tasks");
+    PREREQ_TEMPLATE_TASK("prereq-template-tasks"),
+
+    /**
+     * {@code ob_attachments.prereq_task_id} — what a client submits against
+     * their own prerequisite task instance (CP-04), or what staff file back
+     * onto it. The column and its CHECK arm were B-125's; this task (C-121)
+     * is the first caller to write it, via {@link ObAttachmentPipeline.Uploader#client}.
+     */
+    PREREQ_TASK("prereq-tasks");
 
     private final String segment;
 

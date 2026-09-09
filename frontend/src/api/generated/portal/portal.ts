@@ -47,30 +47,53 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
 
 import type {
+  ListPortalPrereqCommentsParams,
   ListPortalTicketAttachmentsParams,
   ListPortalTicketCommentsParams,
   ListPortalTicketsParams,
   NotFoundResponse,
+  ObClientPrereqTaskDetailResponse,
+  ObClientPrereqTaskResponse,
+  ObPrereqCommentCreateRequest,
   PortalAttachmentListResponse,
+  PortalAttachmentResponse,
+  PortalClientEscalationResponse,
   PortalCommentListResponse,
+  PortalCredentialLinkResponse,
+  PortalCredentialRedeemRequest,
+  PortalEscalationRaiseRequest,
+  PortalLoginRequest,
+  PortalLoginResponse,
+  PortalOnboardingHomeResponse,
+  PortalPrereqCommentListResponse,
+  PortalPrereqCommentResponse,
+  PortalPrereqSubmitRequest,
+  PortalSignoffListResponse,
   PortalTicketListResponse,
   PortalTicketResponse,
-  UnauthorizedResponse
+  Problem,
+  UnauthorizedResponse,
+  UploadPortalPrereqAttachmentBody,
+  ValidationFailedResponse
 } from '.././model';
 
 import { http } from '../../http';
@@ -509,3 +532,963 @@ export function useListPortalTicketAttachments<TData = Awaited<ReturnType<typeof
 
 
 
+/**
+ * Ordinary sign-in, for an account that has already chosen its own
+password via `redeemPortalCredentialLink`. A newly created or reset
+account has no password to type yet — that's what the credential
+link is for.
+
+Failures are deliberately indistinguishable, exactly as `login` is
+for staff: wrong username, wrong password and unknown username all
+answer `invalid-credentials`. Lockout is reported only once the
+password is correct.
+
+ * @summary Sign in to the client portal
+ */
+export const portalLogin = (
+    portalLoginRequest: PortalLoginRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalLoginResponse>(
+      {url: `/portal/auth/login`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalLoginRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getPortalLoginMutationOptions = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalLogin>>, TError,{data: PortalLoginRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof portalLogin>>, TError,{data: PortalLoginRequest}, TContext> => {
+
+const mutationKey = ['portalLogin'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof portalLogin>>, {data: PortalLoginRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  portalLogin(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PortalLoginMutationResult = NonNullable<Awaited<ReturnType<typeof portalLogin>>>
+    export type PortalLoginMutationBody = PortalLoginRequest
+    export type PortalLoginMutationError = ValidationFailedResponse | Problem
+
+    /**
+ * @summary Sign in to the client portal
+ */
+export const usePortalLogin = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof portalLogin>>, TError,{data: PortalLoginRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof portalLogin>>,
+        TError,
+        {data: PortalLoginRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getPortalLoginMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Changes nothing, so a page can validate a link on load — or a mail
+client can prefetch the URL — without spending it. That's what makes
+redemption below a `POST` rather than this verb.
+
+ * @summary Whether a credential link is still valid, and the username it is for
+ */
+export const describePortalCredentialLink = (
+    token: string,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalCredentialLinkResponse>(
+      {url: `/portal/auth/credential/${token}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getDescribePortalCredentialLinkQueryKey = (token?: string,) => {
+    return [
+    `/portal/auth/credential/${token}`
+    ] as const;
+    }
+
+    
+export const getDescribePortalCredentialLinkQueryOptions = <TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDescribePortalCredentialLinkQueryKey(token);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof describePortalCredentialLink>>> = ({ signal }) => describePortalCredentialLink(token, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(token), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DescribePortalCredentialLinkQueryResult = NonNullable<Awaited<ReturnType<typeof describePortalCredentialLink>>>
+export type DescribePortalCredentialLinkQueryError = Problem
+
+
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describePortalCredentialLink>>,
+          TError,
+          Awaited<ReturnType<typeof describePortalCredentialLink>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof describePortalCredentialLink>>,
+          TError,
+          Awaited<ReturnType<typeof describePortalCredentialLink>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Whether a credential link is still valid, and the username it is for
+ */
+
+export function useDescribePortalCredentialLink<TData = Awaited<ReturnType<typeof describePortalCredentialLink>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof describePortalCredentialLink>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDescribePortalCredentialLinkQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Spends the link and sets the password, both in one transaction. `204`
+rather than a session: redeeming is not signing in — handing back a
+token here would make a link sitting in an inbox directly
+exchangeable for a session. The client redeems, then calls
+`portalLogin` separately with the password just chosen.
+
+ * @summary Choose a password and activate the portal login
+ */
+export const redeemPortalCredentialLink = (
+    token: string,
+    portalCredentialRedeemRequest: PortalCredentialRedeemRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/portal/auth/credential/${token}`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalCredentialRedeemRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRedeemPortalCredentialLinkMutationOptions = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext> => {
+
+const mutationKey = ['redeemPortalCredentialLink'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, {token: string;data: PortalCredentialRedeemRequest}> = (props) => {
+          const {token,data} = props ?? {};
+
+          return  redeemPortalCredentialLink(token,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RedeemPortalCredentialLinkMutationResult = NonNullable<Awaited<ReturnType<typeof redeemPortalCredentialLink>>>
+    export type RedeemPortalCredentialLinkMutationBody = PortalCredentialRedeemRequest
+    export type RedeemPortalCredentialLinkMutationError = ValidationFailedResponse | Problem
+
+    /**
+ * @summary Choose a password and activate the portal login
+ */
+export const useRedeemPortalCredentialLink = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redeemPortalCredentialLink>>, TError,{token: string;data: PortalCredentialRedeemRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof redeemPortalCredentialLink>>,
+        TError,
+        {token: string;data: PortalCredentialRedeemRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRedeemPortalCredentialLinkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The prerequisites are the full staff wire shape (`ObClientPrereqs`) —
+plan §9/§11's never-visible list is about journeys, and none of it is
+on a prerequisite row. The journeys are `PortalJourneyStrip`, plan
+§9's own narrower CP-03 row: step status only, no owner names, no
+internal comms, no block reasons, no TAT internals.
+
+ * @summary Interactive prerequisites above read-only journey accordions (CP-03)
+ */
+export const getPortalOnboardingHome = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalOnboardingHomeResponse>(
+      {url: `/portal/onboarding/home`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetPortalOnboardingHomeQueryKey = () => {
+    return [
+    `/portal/onboarding/home`
+    ] as const;
+    }
+
+    
+export const getGetPortalOnboardingHomeQueryOptions = <TData = Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalOnboardingHomeQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalOnboardingHome>>> = ({ signal }) => getPortalOnboardingHome(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalOnboardingHomeQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalOnboardingHome>>>
+export type GetPortalOnboardingHomeQueryError = UnauthorizedResponse
+
+
+export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalOnboardingHome>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalOnboardingHome>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalOnboardingHome>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalOnboardingHome>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Interactive prerequisites above read-only journey accordions (CP-03)
+ */
+
+export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOnboardingHome>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalOnboardingHomeQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The client's own half of `ob_client_escalations` — not declared on
+`/onboarding/client-escalations` (see that route's own comment), and
+not the same principal type or the same response shape.
+
+**Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+validated against this account's own `obClientId` first — a step on
+another client's journey answers `404`, never `403`, on the
+no-existence-leak rule every portal route follows.
+
+**Only a step currently `IN_PROGRESS` may be escalated.** The button
+this fronts is disabled everywhere else in CP-03; this is the
+server-side half of that rule, since a disabled control in one
+client is not an authorization check.
+
+**One open escalation per service.** `uq_ob_client_escalations_open`
+(A-128) makes a second raise on the same step, while one is still
+open, answer with the *existing* open escalation rather than an
+error — `isNew: false` on the response says which happened. A client
+tapping the control twice on a slow connection gets one escalation
+and one notification, not two.
+
+Raising notifies the onboarding manager and the step's owner
+immediately, by email and WhatsApp (plan §7), and mirrors the
+comment into the service's communication timeline as an
+`ESCALATION` entry (plan §4) — visible to the client, since they
+just said it. Staff see it, and resolve it, on
+`resolveObClientEscalation`.
+
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const raisePortalEscalation = (
+    stepId: number,
+    portalEscalationRaiseRequest: PortalEscalationRaiseRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalClientEscalationResponse | PortalClientEscalationResponse>(
+      {url: `/portal/onboarding/steps/${stepId}/escalate`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalEscalationRaiseRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRaisePortalEscalationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext> => {
+
+const mutationKey = ['raisePortalEscalation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof raisePortalEscalation>>, {stepId: number;data: PortalEscalationRaiseRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  raisePortalEscalation(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RaisePortalEscalationMutationResult = NonNullable<Awaited<ReturnType<typeof raisePortalEscalation>>>
+    export type RaisePortalEscalationMutationBody = PortalEscalationRaiseRequest
+    export type RaisePortalEscalationMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const useRaisePortalEscalation = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof raisePortalEscalation>>,
+        TError,
+        {stepId: number;data: PortalEscalationRaiseRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRaisePortalEscalationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Every sign-off this client's onboarding has ever had raised, pending
+and past together — the screen sorts. Plan §8: "the portal adds a
+sign-off list (pending + past) deep-linking into the same flow; the
+link+OTP path still works without a portal login and remains the
+legal record."
+
+**"Deep-linking" is a route to `/signoff` (OB-09, unchanged) plus
+`sentToEmail`, not a link carrying a live token.**
+`ob_signoffs.token_hash` is a one-way hash by design (`ObSignoffTokens`'
+own reasoning: "our own database must not be able to yield a working
+link"), so no read — this one included — can ever hand back the
+plaintext a PENDING row's email carries. `sentToEmail` names the inbox
+the link went to, so a client who has mislaid the email knows where to
+look. A self-service resend would produce a real deep link but needs
+the mint-and-mail path `resendObSignoff` names in this contract and no
+controller implements yet; out of scope for a list screen and flagged
+rather than built ad hoc.
+
+No token, hash, OTP state, IP or user agent on the wire — see
+`PortalSignoff`'s own note.
+
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+export const listPortalSignoffs = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalSignoffListResponse>(
+      {url: `/portal/onboarding/signoffs`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getListPortalSignoffsQueryKey = () => {
+    return [
+    `/portal/onboarding/signoffs`
+    ] as const;
+    }
+
+    
+export const getListPortalSignoffsQueryOptions = <TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPortalSignoffsQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPortalSignoffs>>> = ({ signal }) => listPortalSignoffs(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPortalSignoffsQueryResult = NonNullable<Awaited<ReturnType<typeof listPortalSignoffs>>>
+export type ListPortalSignoffsQueryError = UnauthorizedResponse
+
+
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalSignoffs>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalSignoffs>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Pending and past sign-offs, deep-linking into the §8 flow (CP-05)
+ */
+
+export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPortalSignoffs>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalSignoffs>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPortalSignoffsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * `ObClientPrereqTaskDetail`, unchanged — "one schema for both
+principals". 404 for a task on another client, the same 404 for one
+that does not exist, and the same 404 again when this account's token
+carries no onboarding client at all.
+
+ * @summary One prerequisite task in full (CP-04)
+ */
+export const getPortalPrereqTask = (
+    prereqTaskId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskDetailResponse>(
+      {url: `/portal/onboarding/prereq-tasks/${prereqTaskId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetPortalPrereqTaskQueryKey = (prereqTaskId?: number,) => {
+    return [
+    `/portal/onboarding/prereq-tasks/${prereqTaskId}`
+    ] as const;
+    }
+
+    
+export const getGetPortalPrereqTaskQueryOptions = <TData = Awaited<ReturnType<typeof getPortalPrereqTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalPrereqTaskQueryKey(prereqTaskId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalPrereqTask>>> = ({ signal }) => getPortalPrereqTask(prereqTaskId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(prereqTaskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalPrereqTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalPrereqTask>>>
+export type GetPortalPrereqTaskQueryError = void | UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetPortalPrereqTask<TData = Awaited<ReturnType<typeof getPortalPrereqTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalPrereqTask>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalPrereqTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalPrereqTask<TData = Awaited<ReturnType<typeof getPortalPrereqTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalPrereqTask>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalPrereqTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalPrereqTask<TData = Awaited<ReturnType<typeof getPortalPrereqTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One prerequisite task in full (CP-04)
+ */
+
+export function useGetPortalPrereqTask<TData = Awaited<ReturnType<typeof getPortalPrereqTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalPrereqTask>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalPrereqTaskQueryOptions(prereqTaskId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * `submitObClientPrereqTask`'s own portal path, finally wired: staff
+wrote the transition to accept a `contactId` from the start, this
+task is the first caller to send one. Attributed to the client's
+current active primary contact — see `PortalPrimaryContactReader`'s
+own note on why, since `client_accounts` carries no live link to one.
+
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const submitPortalPrereqTask = (
+    prereqTaskId: number,
+    portalPrereqSubmitRequest?: PortalPrereqSubmitRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObClientPrereqTaskResponse>(
+      {url: `/portal/onboarding/prereq-tasks/${prereqTaskId}/submit`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalPrereqSubmitRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitPortalPrereqTaskMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPortalPrereqTask>>, TError,{prereqTaskId: number;data: PortalPrereqSubmitRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitPortalPrereqTask>>, TError,{prereqTaskId: number;data: PortalPrereqSubmitRequest}, TContext> => {
+
+const mutationKey = ['submitPortalPrereqTask'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitPortalPrereqTask>>, {prereqTaskId: number;data: PortalPrereqSubmitRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  submitPortalPrereqTask(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitPortalPrereqTaskMutationResult = NonNullable<Awaited<ReturnType<typeof submitPortalPrereqTask>>>
+    export type SubmitPortalPrereqTaskMutationBody = PortalPrereqSubmitRequest
+    export type SubmitPortalPrereqTaskMutationError = UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Mark a task done and send it for verification (CP-04)
+ */
+export const useSubmitPortalPrereqTask = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPortalPrereqTask>>, TError,{prereqTaskId: number;data: PortalPrereqSubmitRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitPortalPrereqTask>>,
+        TError,
+        {prereqTaskId: number;data: PortalPrereqSubmitRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitPortalPrereqTaskMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Narrowed from `ObPrereqComment` — see `PortalPrereqComment`'s own
+note on why `clientAuthor` is a lean ref here rather than the full
+`ObContact`.
+
+ * @summary The task's comment thread, oldest first (CP-04)
+ */
+export const listPortalPrereqComments = (
+    prereqTaskId: number,
+    params?: ListPortalPrereqCommentsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalPrereqCommentListResponse>(
+      {url: `/portal/onboarding/prereq-tasks/${prereqTaskId}/comments`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListPortalPrereqCommentsQueryKey = (prereqTaskId?: number,
+    params?: ListPortalPrereqCommentsParams,) => {
+    return [
+    `/portal/onboarding/prereq-tasks/${prereqTaskId}/comments`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListPortalPrereqCommentsQueryOptions = <TData = Awaited<ReturnType<typeof listPortalPrereqComments>>, TError = UnauthorizedResponse | NotFoundResponse>(prereqTaskId: number,
+    params?: ListPortalPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPortalPrereqCommentsQueryKey(prereqTaskId,params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPortalPrereqComments>>> = ({ signal }) => listPortalPrereqComments(prereqTaskId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(prereqTaskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPortalPrereqCommentsQueryResult = NonNullable<Awaited<ReturnType<typeof listPortalPrereqComments>>>
+export type ListPortalPrereqCommentsQueryError = UnauthorizedResponse | NotFoundResponse
+
+
+export function useListPortalPrereqComments<TData = Awaited<ReturnType<typeof listPortalPrereqComments>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number,
+    params: undefined |  ListPortalPrereqCommentsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalPrereqComments>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalPrereqComments>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalPrereqComments<TData = Awaited<ReturnType<typeof listPortalPrereqComments>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number,
+    params?: ListPortalPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPortalPrereqComments>>,
+          TError,
+          Awaited<ReturnType<typeof listPortalPrereqComments>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPortalPrereqComments<TData = Awaited<ReturnType<typeof listPortalPrereqComments>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number,
+    params?: ListPortalPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The task's comment thread, oldest first (CP-04)
+ */
+
+export function useListPortalPrereqComments<TData = Awaited<ReturnType<typeof listPortalPrereqComments>>, TError = UnauthorizedResponse | NotFoundResponse>(
+ prereqTaskId: number,
+    params?: ListPortalPrereqCommentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPortalPrereqComments>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPortalPrereqCommentsQueryOptions(prereqTaskId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Written through `ObPrereqTaskService#addComment` — the one door into
+`ob_prereq_comments` — as `CLIENT`, attributed to the client's
+current active primary contact.
+
+ * @summary Say something about this task (CP-04)
+ */
+export const addPortalPrereqComment = (
+    prereqTaskId: number,
+    obPrereqCommentCreateRequest: ObPrereqCommentCreateRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalPrereqCommentResponse>(
+      {url: `/portal/onboarding/prereq-tasks/${prereqTaskId}/comments`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obPrereqCommentCreateRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAddPortalPrereqCommentMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPortalPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addPortalPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext> => {
+
+const mutationKey = ['addPortalPrereqComment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addPortalPrereqComment>>, {prereqTaskId: number;data: ObPrereqCommentCreateRequest}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  addPortalPrereqComment(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddPortalPrereqCommentMutationResult = NonNullable<Awaited<ReturnType<typeof addPortalPrereqComment>>>
+    export type AddPortalPrereqCommentMutationBody = ObPrereqCommentCreateRequest
+    export type AddPortalPrereqCommentMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Say something about this task (CP-04)
+ */
+export const useAddPortalPrereqComment = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPortalPrereqComment>>, TError,{prereqTaskId: number;data: ObPrereqCommentCreateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addPortalPrereqComment>>,
+        TError,
+        {prereqTaskId: number;data: ObPrereqCommentCreateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAddPortalPrereqCommentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ObAttachmentPipeline.Uploader.client` — anticipated by B-126, first
+called here. Owner arm `PREREQ_TASK`, this task's own addition to
+`ObAttachmentOwner`. Same pipeline, same caps, same AV scan as every
+other onboarding upload; `downloadUrl` is absent until the scan
+clears.
+
+ * @summary Attach evidence to a prerequisite task (CP-04)
+ */
+export const uploadPortalPrereqAttachment = (
+    prereqTaskId: number,
+    uploadPortalPrereqAttachmentBody: UploadPortalPrereqAttachmentBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, uploadPortalPrereqAttachmentBody.file)
+
+      return http<PortalAttachmentResponse>(
+      {url: `/portal/onboarding/prereq-tasks/${prereqTaskId}/attachments`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getUploadPortalPrereqAttachmentMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>, TError,{prereqTaskId: number;data: UploadPortalPrereqAttachmentBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>, TError,{prereqTaskId: number;data: UploadPortalPrereqAttachmentBody}, TContext> => {
+
+const mutationKey = ['uploadPortalPrereqAttachment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>, {prereqTaskId: number;data: UploadPortalPrereqAttachmentBody}> = (props) => {
+          const {prereqTaskId,data} = props ?? {};
+
+          return  uploadPortalPrereqAttachment(prereqTaskId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadPortalPrereqAttachmentMutationResult = NonNullable<Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>>
+    export type UploadPortalPrereqAttachmentMutationBody = UploadPortalPrereqAttachmentBody
+    export type UploadPortalPrereqAttachmentMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Attach evidence to a prerequisite task (CP-04)
+ */
+export const useUploadPortalPrereqAttachment = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>, TError,{prereqTaskId: number;data: UploadPortalPrereqAttachmentBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadPortalPrereqAttachment>>,
+        TError,
+        {prereqTaskId: number;data: UploadPortalPrereqAttachmentBody},
+        TContext
+      > => {
+
+      const mutationOptions = getUploadPortalPrereqAttachmentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
