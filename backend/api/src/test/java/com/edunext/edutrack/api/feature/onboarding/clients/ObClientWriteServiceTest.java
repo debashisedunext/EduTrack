@@ -77,8 +77,6 @@ class ObClientWriteServiceTest {
         service = new ObClientWriteService(clients, reads, children, requirements,
                 new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan,
                 portalAccounts);
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, pan, portalAccounts);
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan);
 
         // The happy defaults: one product, on sale, with a published template,
         // and a published prerequisites master (B-109).
