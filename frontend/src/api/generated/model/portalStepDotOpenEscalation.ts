@@ -46,15 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { PortalOpenEscalation } from './portalOpenEscalation';
 
 /**
- * Always `null` today. The named slot C-126 fills: one open
-escalation for this service, if any, shown as a red chip until
-staff resolve it. Left on the wire now, unshaped, so C-126 widens
-this field rather than introducing a new one — and so the CP-03
-row already has somewhere to read from and an obvious place to
-put its own Escalate control.
+ * C-126's own slot, filled. One open escalation for this service,
+raised by this client, if any — shown as a red chip until staff
+resolve it. `null` while none is open, including immediately
+after `resolveObClientEscalation` runs.
 
- * @nullable
  */
-export type PortalStepDotOpenEscalation = unknown | null;
+export type PortalStepDotOpenEscalation = PortalOpenEscalation | null;

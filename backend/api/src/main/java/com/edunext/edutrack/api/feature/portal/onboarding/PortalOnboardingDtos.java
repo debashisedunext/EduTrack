@@ -48,6 +48,17 @@ public final class PortalOnboardingDtos {
     public record PortalContactRef(long id, String name, String email) {
     }
 
+    /**
+     * C-126 · one open escalation on this step, or {@code null} — the shape
+     * {@link PortalStepDot#openEscalation()}'s own slot named ahead of time.
+     * Deliberately three fields: enough for CP-03 to say "you raised this" and
+     * disable the control, nothing about who it went to or who will resolve it
+     * — the same narrowing plan §9's row already applies to the rest of this
+     * dot.
+     */
+    public record PortalOpenEscalation(long id, String comment, Instant raisedAt) {
+    }
+
     // ── CP-03 · the read-only journey accordions (this is the part plan §9/§11 narrows) ──
 
     /**
@@ -57,17 +68,18 @@ public final class PortalOnboardingDtos {
      * block reasons". No TAT figures either: plan §11's never-visible list
      * names "TAT internals" for the client explicitly.
      *
-     * @param openEscalation always {@code null} today. The named slot C-126
-     *                       fills — see this task's own summary. Left on the
-     *                       wire now rather than added later so C-126 widens
-     *                       a contract field instead of introducing one.
+     * @param openEscalation C-126's own slot, filled: the client's own open
+     *                       escalation on this step, if any, or {@code null}.
+     *                       Was always {@code null} and untyped ({@code
+     *                       Object}) before this task — see {@link
+     *                       PortalOpenEscalation}'s own note.
      */
     public record PortalStepDot(long id, int sequence, String name, String status, String rag,
-                                Long dependsOnStepId, Object openEscalation) {
+                                Long dependsOnStepId, PortalOpenEscalation openEscalation) {
 
         static PortalStepDot of(long id, int sequence, String name, String status, String rag,
-                                Long dependsOnStepId) {
-            return new PortalStepDot(id, sequence, name, status, rag, dependsOnStepId, null);
+                                Long dependsOnStepId, PortalOpenEscalation openEscalation) {
+            return new PortalStepDot(id, sequence, name, status, rag, dependsOnStepId, openEscalation);
         }
     }
 
@@ -168,6 +180,10 @@ public final class PortalOnboardingDtos {
     public record PortalPrereqCommentCreateRequest(@NotBlank @Size(max = 4000) String body) {
     }
 
+    /** C-126 · CP-03's Escalate control. The comment is mandatory — plan §4/§9's own rule. */
+    public record PortalEscalationRaiseRequest(@NotBlank @Size(max = 2000) String comment) {
+    }
+
     // ── envelopes ────────────────────────────────────────────────────────
 
     public record PortalOnboardingHomeResponse(PortalOnboardingHome data) {
@@ -186,6 +202,18 @@ public final class PortalOnboardingDtos {
     }
 
     public record PortalAttachmentResponse(PortalSubmissionFile data) {
+    }
+
+    /**
+     * C-126 · what CP-03 gets back after escalating — {@code
+     * ObClientEscalationService.RaiseResult}'s three public fields, plus
+     * whether this call actually raised it or found one already open (a
+     * double-click, or a page the client had open in two tabs).
+     */
+    public record PortalClientEscalation(long id, String comment, Instant raisedAt, boolean isNew) {
+    }
+
+    public record PortalClientEscalationResponse(PortalClientEscalation data) {
     }
 
     // ── CP-05 · the sign-off list ───────────────────────────────────────────

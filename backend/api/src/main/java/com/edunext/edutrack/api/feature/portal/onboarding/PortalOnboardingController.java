@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.portal.onboarding;
 
+import com.edunext.edutrack.api.feature.onboarding.escalations.ObClientEscalationService;
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObPrereqTaskService;
 import com.edunext.edutrack.api.feature.portal.ClientPrincipal;
@@ -26,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -51,12 +53,12 @@ import java.util.List;
  * <p>No owner names, no internal communications, no block reasons — plan
  * §9's CP-03 row, and {@link PortalJourneyReader}'s query never selects them
  * in the first place, which is stronger than filtering them out afterwards.
- * <b>No escalate action is implemented here</b> — {@link
- * PortalOnboardingDtos.PortalStepDot#openEscalation()} is the named slot,
- * always {@code null}; the raise route, the red chip and the resolve flow
- * are C-126's, running after this task on the same branch. Nothing about
- * that field or this controller should need to change when C-126 fills it —
- * that is the point of naming the slot now rather than adding it then.
+ * <b>C-126 fills the escalate slot</b>: {@link #escalate} is the raise route,
+ * {@link PortalOnboardingDtos.PortalStepDot#openEscalation()} is no longer
+ * always {@code null}, and the resolve flow and the OB-05 red chip are
+ * {@link com.edunext.edutrack.api.feature.onboarding.escalations.ObClientEscalationController}'s,
+ * on the staff side. Nothing about this controller's other routes changed to
+ * make room for it, which was the point of naming the slot ahead of time.
  *
  * <h2>Password-change gate, called explicitly on every route</h2>
  *
@@ -80,6 +82,8 @@ public class PortalOnboardingController {
     private final PortalPrimaryContactReader clients;
     private final PortalPasswordChangeGate passwordChangeGate;
     private final PortalSignoffReader signoffs;
+    private final PortalEscalationStepReader escalationSteps;
+    private final ObClientEscalationService clientEscalations;
 
     PortalOnboardingController(ObClientPrereqService prereqs,
                                ObPrereqTaskService tasks,
@@ -90,7 +94,9 @@ public class PortalOnboardingController {
                                PortalPrereqAttachmentService attachments,
                                PortalPrimaryContactReader clients,
                                PortalPasswordChangeGate passwordChangeGate,
-                               PortalSignoffReader signoffs) {
+                               PortalSignoffReader signoffs,
+                               PortalEscalationStepReader escalationSteps,
+                               ObClientEscalationService clientEscalations) {
         this.prereqs = prereqs;
         this.tasks = tasks;
         this.assembler = assembler;
@@ -101,6 +107,8 @@ public class PortalOnboardingController {
         this.clients = clients;
         this.passwordChangeGate = passwordChangeGate;
         this.signoffs = signoffs;
+        this.escalationSteps = escalationSteps;
+        this.clientEscalations = clientEscalations;
     }
 
     @GetMapping(path = "/home", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -151,6 +159,47 @@ public class PortalOnboardingController {
         passwordChangeGate.require(caller);
         long obClientId = obClientId(caller);
         return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffListResponse(signoffs.listFor(obClientId)));
+    }
+
+    /**
+     * C-126 · CP-03's Escalate control — "escalate on any running service
+     * with a mandatory comment" (plan §4/§9). {@code stepId} is resolved and
+     * validated against this caller's own {@code obClientId} by {@link
+     * PortalEscalationStepReader} before anything is written, on {@link
+     * #requireOwnTask}'s exact idiom one route up.
+     *
+     * <p>{@code 201} for a genuinely new escalation, {@code 200} when the
+     * step already carried an open one — {@link ObClientEscalationService
+     * #raise}'s own idempotent-in-effect handling of a double-click or two
+     * open tabs, surfaced here as the status code rather than hidden behind
+     * a uniform {@code 201}.
+     */
+    @PostMapping(path = "/steps/{stepId}/escalate",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "raisePortalEscalation", summary = "Escalate a running service to staff (CP-03)")
+    ResponseEntity<PortalOnboardingDtos.PortalClientEscalationResponse> escalate(
+            @PathVariable long stepId,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody PortalOnboardingDtos.PortalEscalationRaiseRequest request,
+            Authentication caller) {
+
+        passwordChangeGate.require(caller);
+        long obClientId = obClientId(caller);
+        PortalEscalationStepReader.StepContext step = escalationSteps.stepContextFor(obClientId, stepId)
+                .orElseThrow(PortalOnboardingNotFoundException::new);
+        if (!"IN_PROGRESS".equals(step.status())) {
+            throw new PortalStepNotRunningException(stepId);
+        }
+        long contactId = requirePrimaryContact(obClientId);
+
+        ObClientEscalationService.RaiseResult result = clientEscalations.raise(new ObClientEscalationService.RaiseCommand(
+                obClientId, step.clientName(), step.journeyId(), stepId, step.stepName(), step.productName(),
+                step.ownerUserId(), contactId, request.comment(), Instant.now()));
+
+        HttpStatus status = result.isNew() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(new PortalOnboardingDtos.PortalClientEscalationResponse(
+                new PortalOnboardingDtos.PortalClientEscalation(
+                        result.id(), result.comment(), result.raisedAt(), result.isNew())));
     }
 
     @GetMapping(path = "/prereq-tasks/{prereqTaskId}", produces = MediaType.APPLICATION_JSON_VALUE)

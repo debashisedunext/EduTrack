@@ -11921,10 +11921,9 @@ paths:
   # ══════════════════════════════════════════════ client portal · onboarding ═══
   # C-121 · CP-03/CP-04 — /portal/onboarding/**. No obClientId path segment
   # anywhere: ClientPrincipal.obClientId, read from the caller's own verified
-  # token, IS the client, so there is no id a caller could widen. C-126
-  # (running after this task on the same branch) adds the escalation raise
-  # route under this same tree — PortalStepDot.openEscalation is the slot it
-  # fills.
+  # token, IS the client, so there is no id a caller could widen. C-126 adds
+  # the escalation raise route (raisePortalEscalation, below) under this same
+  # tree — PortalStepDot.openEscalation is the slot it fills.
   /portal/onboarding/home:
     get:
       tags: [portal]
@@ -11947,6 +11946,67 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PortalOnboardingHomeResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /portal/onboarding/steps/{stepId}/escalate:
+    parameters:
+      - { name: stepId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: raisePortalEscalation
+      summary: Escalate a running service to staff (CP-03)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The client's own half of `ob_client_escalations` — not declared on
+        `/onboarding/client-escalations` (see that route's own comment), and
+        not the same principal type or the same response shape.
+
+        **Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+        validated against this account's own `obClientId` first — a step on
+        another client's journey answers `404`, never `403`, on the
+        no-existence-leak rule every portal route follows.
+
+        **Only a step currently `IN_PROGRESS` may be escalated.** The button
+        this fronts is disabled everywhere else in CP-03; this is the
+        server-side half of that rule, since a disabled control in one
+        client is not an authorization check.
+
+        **One open escalation per service.** `uq_ob_client_escalations_open`
+        (A-128) makes a second raise on the same step, while one is still
+        open, answer with the *existing* open escalation rather than an
+        error — `isNew: false` on the response says which happened. A client
+        tapping the control twice on a slow connection gets one escalation
+        and one notification, not two.
+
+        Raising notifies the onboarding manager and the step's owner
+        immediately, by email and WhatsApp (plan §7), and mirrors the
+        comment into the service's communication timeline as an
+        `ESCALATION` entry (plan §4) — visible to the client, since they
+        just said it. Staff see it, and resolve it, on
+        `resolveObClientEscalation`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalEscalationRaiseRequest' }
+      responses:
+        '200':
+          description: An escalation was already open on this service; that one is returned unchanged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalClientEscalationResponse' }
+        '201':
+          description: Raised.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalClientEscalationResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: This service is not currently running and cannot be escalated.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /portal/onboarding/signoffs:
     get:
@@ -21624,14 +21684,56 @@ components:
             - { type: 'null' }
         dependsOnStepId: { type: [integer, 'null'], format: int64 }
         openEscalation:
-          nullable: true
+          oneOf:
+            - { $ref: '#/components/schemas/PortalOpenEscalation' }
+            - { type: 'null' }
           description: |
-            Always `null` today. The named slot C-126 fills: one open
-            escalation for this service, if any, shown as a red chip until
-            staff resolve it. Left on the wire now, unshaped, so C-126 widens
-            this field rather than introducing a new one — and so the CP-03
-            row already has somewhere to read from and an obvious place to
-            put its own Escalate control.
+            C-126's own slot, filled. One open escalation for this service,
+            raised by this client, if any — shown as a red chip until staff
+            resolve it. `null` while none is open, including immediately
+            after `resolveObClientEscalation` runs.
+    PortalOpenEscalation:
+      type: object
+      required: [id, comment, raisedAt]
+      description: |
+        `ob_client_escalations`, the client's own narrow view of it —
+        `PortalOnboardingDtos.PortalStepDot`'s own note on why this carries
+        neither who it was sent to nor who will resolve it.
+      properties:
+        id: { type: integer, format: int64 }
+        comment: { type: string, maxLength: 2000 }
+        raisedAt: { type: string, format: date-time }
+    PortalEscalationRaiseRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Mandatory — plan §4/§9's own rule for CP-03's Escalate control.
+    PortalClientEscalation:
+      type: object
+      required: [id, comment, raisedAt, isNew]
+      description: |
+        What `raisePortalEscalation` hands back — not the staff-shaped
+        `ObClientEscalation` (no contact card to echo back to the contact
+        who is reading it, no resolution fields that cannot yet be set).
+      properties:
+        id: { type: integer, format: int64 }
+        comment: { type: string, maxLength: 2000 }
+        raisedAt: { type: string, format: date-time }
+        isNew:
+          type: boolean
+          description: |
+            `false` when this service already carried an open escalation and
+            that one was returned unchanged, rather than a second one being
+            raised — see the operation's own description.
+    PortalClientEscalationResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalClientEscalation' }
     PortalJourneyStrip:
       type: object
       required: [id, product, gateStatus, percentComplete, steps]

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * C-121 · CP-03's read-only journey accordions.
@@ -73,12 +74,14 @@ class PortalJourneyReader {
             return List.of();
         }
 
+        Map<Long, PortalOnboardingDtos.PortalOpenEscalation> openEscalations = openEscalationsOf(obClientId);
+
         Map<Long, List<PortalOnboardingDtos.PortalStepDot>> dots = new LinkedHashMap<>();
         for (StepRow step : stepDotsOf(obClientId)) {
             dots.computeIfAbsent(step.journeyId(), key -> new ArrayList<>())
                     .add(PortalOnboardingDtos.PortalStepDot.of(
                             step.id(), step.sequence(), step.name(), step.status(),
-                            step.rag(), step.dependsOnStepId()));
+                            step.rag(), step.dependsOnStepId(), openEscalations.get(step.id())));
         }
 
         List<PortalOnboardingDtos.PortalJourneyStrip> strips = new ArrayList<>(journeys.size());
@@ -117,6 +120,31 @@ class PortalJourneyReader {
                         rs.getObject("dependsOnStepId") == null ? null : rs.getLong("dependsOnStepId"),
                         rs.getString("rag")))
                 .list();
+    }
+
+    /**
+     * C-126 · this client's own open escalations, keyed by {@code stepId} —
+     * {@link PortalOnboardingDtos.PortalStepDot#openEscalation()}'s slot,
+     * filled. Reads {@code ob_client_escalations} directly rather than
+     * through {@code ObClientEscalationController}'s staff-scoped repository:
+     * there is no module role to apply here, only "this client's own", which
+     * {@code obClientId} already is by the time this method is called.
+     */
+    private Map<Long, PortalOnboardingDtos.PortalOpenEscalation> openEscalationsOf(long obClientId) {
+        return jdbc.sql("""
+                        SELECT e.step_id AS stepId, e.id AS id, e.comment AS comment, e.raised_at AS raisedAt
+                          FROM ob_client_escalations e
+                         WHERE e.ob_client_id = :obClientId
+                           AND e.resolved_at IS NULL
+                        """)
+                .param("obClientId", obClientId)
+                .query((rs, n) -> Map.entry(
+                        rs.getLong("stepId"),
+                        new PortalOnboardingDtos.PortalOpenEscalation(
+                                rs.getLong("id"), rs.getString("comment"), rs.getTimestamp("raisedAt").toInstant())))
+                .list()
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     private static int percentComplete(int settled, int total) {

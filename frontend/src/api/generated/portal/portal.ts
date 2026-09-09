@@ -76,7 +76,9 @@ import type {
   ObPrereqCommentCreateRequest,
   PortalAttachmentListResponse,
   PortalAttachmentResponse,
+  PortalClientEscalationResponse,
   PortalCommentListResponse,
+  PortalEscalationRaiseRequest,
   PortalLoginRequest,
   PortalOnboardingHomeResponse,
   PortalPrereqCommentListResponse,
@@ -980,6 +982,99 @@ export function useGetPortalOnboardingHome<TData = Awaited<ReturnType<typeof get
 
 
 /**
+ * The client's own half of `ob_client_escalations` — not declared on
+`/onboarding/client-escalations` (see that route's own comment), and
+not the same principal type or the same response shape.
+
+**Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+validated against this account's own `obClientId` first — a step on
+another client's journey answers `404`, never `403`, on the
+no-existence-leak rule every portal route follows.
+
+**Only a step currently `IN_PROGRESS` may be escalated.** The button
+this fronts is disabled everywhere else in CP-03; this is the
+server-side half of that rule, since a disabled control in one
+client is not an authorization check.
+
+**One open escalation per service.** `uq_ob_client_escalations_open`
+(A-128) makes a second raise on the same step, while one is still
+open, answer with the *existing* open escalation rather than an
+error — `isNew: false` on the response says which happened. A client
+tapping the control twice on a slow connection gets one escalation
+and one notification, not two.
+
+Raising notifies the onboarding manager and the step's owner
+immediately, by email and WhatsApp (plan §7), and mirrors the
+comment into the service's communication timeline as an
+`ESCALATION` entry (plan §4) — visible to the client, since they
+just said it. Staff see it, and resolve it, on
+`resolveObClientEscalation`.
+
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const raisePortalEscalation = (
+    stepId: number,
+    portalEscalationRaiseRequest: PortalEscalationRaiseRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalClientEscalationResponse | PortalClientEscalationResponse>(
+      {url: `/portal/onboarding/steps/${stepId}/escalate`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalEscalationRaiseRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRaisePortalEscalationMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext> => {
+
+const mutationKey = ['raisePortalEscalation'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof raisePortalEscalation>>, {stepId: number;data: PortalEscalationRaiseRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  raisePortalEscalation(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RaisePortalEscalationMutationResult = NonNullable<Awaited<ReturnType<typeof raisePortalEscalation>>>
+    export type RaisePortalEscalationMutationBody = PortalEscalationRaiseRequest
+    export type RaisePortalEscalationMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const useRaisePortalEscalation = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof raisePortalEscalation>>, TError,{stepId: number;data: PortalEscalationRaiseRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof raisePortalEscalation>>,
+        TError,
+        {stepId: number;data: PortalEscalationRaiseRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRaisePortalEscalationMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Every sign-off this client's onboarding has ever had raised, pending
 and past together — the screen sorts. Plan §8: "the portal adds a
 sign-off list (pending + past) deep-linking into the same flow; the

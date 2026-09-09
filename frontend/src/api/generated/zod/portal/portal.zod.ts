@@ -378,6 +378,8 @@ export const getPortalOnboardingHomeResponseDataPrereqsTasksItemSkipReasonMax = 
 export const getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMin = 0;
 export const getPortalOnboardingHomeResponseDataJourneysItemPercentCompleteMax = 100;
 
+export const getPortalOnboardingHomeResponseDataJourneysItemStepsItemOpenEscalationCommentMax = 2000;
+
 
 
 export const getPortalOnboardingHomeResponse = zod.object({
@@ -446,10 +448,74 @@ export const getPortalOnboardingHomeResponse = zod.object({
   "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']),zod.null()]).optional(),
   "dependsOnStepId": zod.number().nullish(),
-  "openEscalation": zod.unknown().nullish().describe('Always `null` today. The named slot C-126 fills: one open\nescalation for this service, if any, shown as a red chip until\nstaff resolve it. Left on the wire now, unshaped, so C-126 widens\nthis field rather than introducing a new one — and so the CP-03\nrow already has somewhere to read from and an obvious place to\nput its own Escalate control.\n')
+  "openEscalation": zod.union([zod.object({
+  "id": zod.number(),
+  "comment": zod.string().max(getPortalOnboardingHomeResponseDataJourneysItemStepsItemOpenEscalationCommentMax),
+  "raisedAt": zod.string().datetime({})
+}).describe('`ob_client_escalations`, the client\'s own narrow view of it —\n`PortalOnboardingDtos.PortalStepDot`\'s own note on why this carries\nneither who it was sent to nor who will resolve it.\n'),zod.null()]).optional().describe('C-126\'s own slot, filled. One open escalation for this service,\nraised by this client, if any — shown as a red chip until staff\nresolve it. `null` while none is open, including immediately\nafter `resolveObClientEscalation` runs.\n')
 }).describe('Step status only — plan §9\'s CP-03 row: \"no owner names, internal\ncomms, or block reasons\". No TAT figures either (plan §11\'s\nnever-visible list names \"TAT internals\" for the client explicitly).\n'))
 }).describe('One product\'s journey, read-only — CP-03\'s accordion. No\n`totalTatDays`\/`utilizedHours`, unlike OB-05\'s own `ObJourneyStrip`:\nplan §11\'s never-visible rule, one level up from the step dot.\n'))
 })
+})
+
+/**
+ * The client's own half of `ob_client_escalations` — not declared on
+`/onboarding/client-escalations` (see that route's own comment), and
+not the same principal type or the same response shape.
+
+**Mandatory comment, plan §4/§9's own rule.** `stepId` is resolved and
+validated against this account's own `obClientId` first — a step on
+another client's journey answers `404`, never `403`, on the
+no-existence-leak rule every portal route follows.
+
+**Only a step currently `IN_PROGRESS` may be escalated.** The button
+this fronts is disabled everywhere else in CP-03; this is the
+server-side half of that rule, since a disabled control in one
+client is not an authorization check.
+
+**One open escalation per service.** `uq_ob_client_escalations_open`
+(A-128) makes a second raise on the same step, while one is still
+open, answer with the *existing* open escalation rather than an
+error — `isNew: false` on the response says which happened. A client
+tapping the control twice on a slow connection gets one escalation
+and one notification, not two.
+
+Raising notifies the onboarding manager and the step's owner
+immediately, by email and WhatsApp (plan §7), and mirrors the
+comment into the service's communication timeline as an
+`ESCALATION` entry (plan §4) — visible to the client, since they
+just said it. Staff see it, and resolve it, on
+`resolveObClientEscalation`.
+
+ * @summary Escalate a running service to staff (CP-03)
+ */
+export const raisePortalEscalationParams = zod.object({
+  "stepId": zod.number()
+})
+
+export const raisePortalEscalationHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const raisePortalEscalationBodyCommentMax = 2000;
+
+
+
+export const raisePortalEscalationBody = zod.object({
+  "comment": zod.string().min(1).max(raisePortalEscalationBodyCommentMax).describe('Mandatory — plan §4\/§9\'s own rule for CP-03\'s Escalate control.')
+})
+
+export const raisePortalEscalationResponseDataCommentMax = 2000;
+
+
+
+export const raisePortalEscalationResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "comment": zod.string().max(raisePortalEscalationResponseDataCommentMax),
+  "raisedAt": zod.string().datetime({}),
+  "isNew": zod.boolean().describe('`false` when this service already carried an open escalation and\nthat one was returned unchanged, rather than a second one being\nraised — see the operation\'s own description.\n')
+}).describe('What `raisePortalEscalation` hands back — not the staff-shaped\n`ObClientEscalation` (no contact card to echo back to the contact\nwho is reading it, no resolution fields that cannot yet be set).\n')
 })
 
 /**

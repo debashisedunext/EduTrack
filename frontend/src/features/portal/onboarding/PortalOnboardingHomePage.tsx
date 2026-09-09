@@ -1,12 +1,22 @@
+import * as React from 'react'
 import { Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 
-import { useGetPortalOnboardingHome } from '@/api/generated/portal/portal'
+import {
+  getGetPortalOnboardingHomeQueryKey,
+  raisePortalEscalation,
+  useGetPortalOnboardingHome,
+} from '@/api/generated/portal/portal'
 import type { PortalJourneyStrip } from '@/api/generated/model/portalJourneyStrip'
+import type { PortalStepDot } from '@/api/generated/model/portalStepDot'
 import type { ObClientPrereqTask } from '@/api/generated/model/obClientPrereqTask'
 import type { ObClientPrereqs } from '@/api/generated/model/obClientPrereqs'
+import { ApiError } from '@/api/http'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
+import { ReasonDialog } from '@/components/ui/reason-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from '@/components/ui/use-toast'
 import { StepDotStrip } from '@/features/onboarding/journey/clientDetail/StepDotStrip'
 
 /**
@@ -21,8 +31,15 @@ import { StepDotStrip } from '@/features/onboarding/journey/clientDetail/StepDot
  * `openEscalation`), so no adapter is needed to pass one where the other is
  * expected.
  *
- * The per-step Escalate control C-126 owns is not built here — see the
- * disabled stub below and its own comment.
+ * <h2>C-126 · the Escalate control</h2>
+ *
+ * A running (`IN_PROGRESS`) step with no open escalation gets the control;
+ * one that already carries `openEscalation` gets a chip instead — the
+ * server enforces "one open escalation per service" regardless, but showing
+ * the state rather than a second live button is what keeps a client from
+ * reading a disabled-looking enabled button as broken. The mandatory comment
+ * is `ReasonDialog` (`components/ui`), the same dialog OB-05's own resolve
+ * flow uses.
  */
 export function PortalOnboardingHomePage() {
   const { data, isPending, isError } = useGetPortalOnboardingHome()
@@ -146,6 +163,34 @@ function StatusChip({ status, isOverdue }: { status: string; isOverdue?: boolean
 }
 
 function JourneyAccordion({ journey }: { journey: PortalJourneyStrip }) {
+  const queryClient = useQueryClient()
+  const [escalating, setEscalating] = React.useState<PortalStepDot | null>(null)
+  const [isPending, setIsPending] = React.useState(false)
+
+  const onConfirmEscalate = async (comment: string) => {
+    if (!escalating) return
+    setIsPending(true)
+    try {
+      const response = await raisePortalEscalation(escalating.id, { comment })
+      toast({
+        title: response.data.isNew ? 'Escalated to staff' : 'Already escalated',
+        description: response.data.isNew
+          ? 'The onboarding manager and the service owner have been notified.'
+          : 'This service already had an open escalation — staff have been notified once.',
+      })
+      await queryClient.invalidateQueries({ queryKey: getGetPortalOnboardingHomeQueryKey() })
+      setEscalating(null)
+    } catch (error) {
+      toast({
+        title: 'Could not escalate',
+        description: error instanceof ApiError ? error.problem.detail : undefined,
+        variant: 'danger',
+      })
+    } finally {
+      setIsPending(false)
+    }
+  }
+
   return (
     <details className="group rounded-card border border-border bg-surface open:shadow-rest" open>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 marker:content-none">
@@ -170,17 +215,15 @@ function JourneyAccordion({ journey }: { journey: PortalJourneyStrip }) {
               </span>
               <div className="flex items-center gap-2">
                 <Chip variant={rowVariant(step.status)}>{stepStatusLabel(step.status)}</Chip>
-                {step.status === 'IN_PROGRESS' ? (
-                  // C-126's own slot. Disabled and unwired on purpose — the
-                  // raise route, the red chip and the resolve flow are that
-                  // task's, running after this one on the same branch. This
-                  // button is trivially removable: delete this block, nothing
-                  // else on the page references it.
+                {step.openEscalation ? (
+                  <Chip variant="danger" title={step.openEscalation.comment}>
+                    Escalated · awaiting staff
+                  </Chip>
+                ) : step.status === 'IN_PROGRESS' ? (
                   <button
                     type="button"
-                    disabled
-                    title="Coming soon"
-                    className="rounded-control border border-border px-2 py-1 text-caption text-content-muted opacity-60"
+                    onClick={() => setEscalating(step)}
+                    className="rounded-control border border-border px-2 py-1 text-caption text-content hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     Escalate
                   </button>
@@ -190,6 +233,20 @@ function JourneyAccordion({ journey }: { journey: PortalJourneyStrip }) {
           ))}
         </ul>
       </div>
+
+      <ReasonDialog
+        open={escalating != null}
+        onOpenChange={(open) => {
+          if (!open) setEscalating(null)
+        }}
+        title={`Escalate ${escalating?.name ?? 'this service'}`}
+        description="This notifies the onboarding manager and the service owner immediately. Staff will see and resolve it — you'll be told when they do."
+        fieldLabel="What's the problem?"
+        confirmLabel="Escalate"
+        confirmVariant="danger"
+        isPending={isPending}
+        onConfirm={onConfirmEscalate}
+      />
     </details>
   )
 }

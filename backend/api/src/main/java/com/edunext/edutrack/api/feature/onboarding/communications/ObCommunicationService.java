@@ -140,6 +140,41 @@ public class ObCommunicationService {
     }
 
     /**
+     * C-126 · mirrors a client's escalation into the service's own timeline
+     * as an {@code ESCALATION} entry (plan §4). Not routed through {@link
+     * #record}: that door is staff-only and defaults to internal, and this
+     * entry is always client-visible with a client contact as its author —
+     * {@link ObCommunicationRepository#insertEscalationEntry}'s own note on
+     * the two differences.
+     *
+     * <p>No scope check and no 404: the caller ({@code
+     * ObClientEscalationService.raise}, reached from the portal) has already
+     * resolved and validated this exact step against the calling client's
+     * own token before this runs, so there is nothing left to authorise.
+     */
+    @Transactional
+    public void recordEscalationRaised(long stepId, long journeyId, long obClientId,
+                                       long raisedByContactId, String comment, Instant raisedAt) {
+        repository.insertEscalationEntry(
+                new ObCommunicationRepository.StepContext(stepId, journeyId, obClientId),
+                comment, ObCommunicationDtos.AUTHOR_CLIENT, null, raisedByContactId, raisedAt);
+    }
+
+    /**
+     * The other half — staff's resolution note, mirrored the same way and
+     * written as {@code STAFF}. Still client-visible: the contract's own
+     * description of {@code resolveObClientEscalation} is that this note
+     * "goes to the client".
+     */
+    @Transactional
+    public void recordEscalationResolved(long stepId, long journeyId, long obClientId,
+                                         long resolvedByUserId, String resolutionNote, Instant resolvedAt) {
+        repository.insertEscalationEntry(
+                new ObCommunicationRepository.StepContext(stepId, journeyId, obClientId),
+                resolutionNote, ObCommunicationDtos.AUTHOR_STAFF, resolvedByUserId, null, resolvedAt);
+    }
+
+    /**
      * {@code occurred_at|id} — when the conversation happened, not when it was
      * typed. Both reads sort on it, so both cursor on it; the direction
      * differs between them and lives in the SQL, not here.

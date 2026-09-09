@@ -38,21 +38,45 @@ function dotClass(dot: ObStepDot): string {
   return DOT[dot.rag ?? ''] ?? 'bg-subtle border-border'
 }
 
-export function StepDotStrip({ steps }: { steps: readonly ObStepDot[] }) {
+export interface StepDotStripProps {
+  steps: readonly ObStepDot[]
+  /**
+   * C-126 · steps carrying an open client escalation — a red ring around the
+   * dot, on top of whatever colour it already has, until staff resolve it.
+   *
+   * Additive and optional, defaulting to none: the portal reuses this same
+   * component (see the class docstring) and already renders its own
+   * escalation state inline per row, so it never passes this prop. OB-05
+   * passes it from its own `GET /onboarding/client-escalations` read — see
+   * `ObClientDetailPage`'s own note on why that is a second call rather than
+   * a field on `ObStepDot` itself.
+   */
+  openEscalationStepIds?: ReadonlySet<number>
+}
+
+export function StepDotStrip({ steps, openEscalationStepIds }: StepDotStripProps) {
   if (steps.length === 0) return null
 
   return (
     <ul role="list" aria-label="Service status" className="flex shrink-0 items-center gap-1">
-      {steps.map((dot) => (
-        <li key={dot.id}>
-          <span
-            role="img"
-            aria-label={stepDotLabel(dot)}
-            title={stepDotLabel(dot)}
-            className={cn('block h-2.5 w-2.5 rounded-full border-2', dotClass(dot))}
-          />
-        </li>
-      ))}
+      {steps.map((dot) => {
+        const isEscalated = openEscalationStepIds?.has(dot.id) ?? false
+        const label = isEscalated ? `${stepDotLabel(dot)} — escalated, awaiting staff` : stepDotLabel(dot)
+        return (
+          <li key={dot.id}>
+            <span
+              role="img"
+              aria-label={label}
+              title={label}
+              className={cn(
+                'block h-2.5 w-2.5 rounded-full border-2',
+                dotClass(dot),
+                isEscalated && 'ring-2 ring-danger ring-offset-1',
+              )}
+            />
+          </li>
+        )
+      })}
     </ul>
   )
 }

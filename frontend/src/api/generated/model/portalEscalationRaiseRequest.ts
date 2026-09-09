@@ -46,28 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObStepStatus } from './obStepStatus';
-import type { PortalStepDotRag } from './portalStepDotRag';
-import type { PortalStepDotDependsOnStepId } from './portalStepDotDependsOnStepId';
-import type { PortalStepDotOpenEscalation } from './portalStepDotOpenEscalation';
 
-/**
- * Step status only — plan §9's CP-03 row: "no owner names, internal
-comms, or block reasons". No TAT figures either (plan §11's
-never-visible list names "TAT internals" for the client explicitly).
-
- */
-export interface PortalStepDot {
-  id: number;
-  sequence: number;
-  name: string;
-  status: ObStepStatus;
-  rag?: PortalStepDotRag;
-  dependsOnStepId?: PortalStepDotDependsOnStepId;
-  /** C-126's own slot, filled. One open escalation for this service,
-raised by this client, if any — shown as a red chip until staff
-resolve it. `null` while none is open, including immediately
-after `resolveObClientEscalation` runs.
- */
-  openEscalation?: PortalStepDotOpenEscalation;
+export interface PortalEscalationRaiseRequest {
+  /**
+   * Mandatory — plan §4/§9's own rule for CP-03's Escalate control.
+   * @minLength 1
+   * @maxLength 2000
+   */
+  comment: string;
 }
