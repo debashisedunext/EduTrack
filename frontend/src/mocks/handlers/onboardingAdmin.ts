@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type {
-  Db, ObClientEscalationRow, ObEscalationRow, ObModuleAccessRow,
-  ObNotificationTemplateRow, ObSignoffRow,
+  Db, ObClient, ObClientEscalationRow, ObEscalationRow, ObJourney,
+  ObModuleAccessRow, ObNotificationTemplateRow, ObSignoffRow, ObStep,
 } from '../db';
 import { getDb, nextId } from '../db';
 import { stepRag } from './onboarding';
@@ -34,13 +34,22 @@ import {
 
 // ── the dashboard (OB-02) ───────────────────────────────────────────────────
 
+// The mockup's board order (`vDash()` in docs/prototype/onboarding.html):
+// escalations sit between overdue and live. The contract's enum order differs;
+// the board renders what the server sends, so the mock sends the design's
+// order.
 const CARD_KEYS = [
   'ongoing-projects', 'this-weeks-deadlines', 'todays-delivery',
-  'overdue-clients', 'live', 'at-risk', 'client-escalations',
+  'overdue-clients', 'client-escalations', 'live', 'at-risk',
 ] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 
-const COMPUTED_AT = '2026-09-05T06:00:00.000Z';
+/**
+ * "Today" for the whole board — 20 Aug 2026, the anchor the OB fixtures in
+ * `db.ts` are shaped around (Sunrise breached on the 18th, Horizon and
+ * Nalanda due today, the week's ten deadlines falling Mon 17 – Sun 23).
+ */
+const COMPUTED_AT = '2026-08-20T06:00:00.000Z';
 
 /**
  * The card counts.
@@ -52,10 +61,14 @@ const COMPUTED_AT = '2026-09-05T06:00:00.000Z';
  * disagree. Against the real server they can, by up to one refresh interval.
  */
 function cardCount(key: CardKey, db: Db): number {
-  const journeys = db.obClients.flatMap((c) => c.journeys.map((j) => ({ client: c, journey: j })));
   switch (key) {
     case 'ongoing-projects':
-      return journeys.filter(({ journey }) => !journey.completedAt && !journey.archivedAt).length;
+      // Clients being onboarded — the mockup's tile. A client still behind
+      // the prerequisite gate is boarded, not ongoing: nothing is running.
+      return db.obClients.filter(
+        (c) => c.status === 'ONBOARDING'
+          && c.journeys.some((j) => j.gateStatus === 'OPEN' && !j.archivedAt),
+      ).length;
     case 'this-weeks-deadlines':
       return dashboardItems('this-weeks-deadlines', db).length;
     case 'todays-delivery':
@@ -66,7 +79,10 @@ function cardCount(key: CardKey, db: Db): number {
     case 'live':
       return db.obClients.filter((c) => c.status === 'LIVE').length;
     case 'at-risk':
-      return journeys.filter(({ journey }) => journey.steps.some((s) => s.status === 'BLOCKED' || s.status === 'WAITING_ON_CLIENT')).length;
+      // Clients close to a limit but not over one — ≥ amber on a running
+      // service. Breached and blocked clients are past "at risk"; they are on
+      // the overdue tile and the stuck table instead.
+      return new Set(dashboardItems('at-risk', db).map((i) => i.obClientId)).size;
     case 'client-escalations':
       return new Set(db.obClientEscalations.filter((e) => !e.resolvedAt).map((e) => e.obClientId)).size;
     default:
@@ -79,7 +95,11 @@ interface DashItem {
   itemId: number; obClientId: number; obClientName: string;
   journeyId: number | null; product: { id: number; code: string; name: string } | null;
   title: string; owner: ReturnType<typeof userRef>; status: string;
+  /** The recorded block reason — non-null only when `status` is BLOCKED. */
+  blockedReason: string | null;
   dueAt: string; isOverdue: boolean;
+  /** Internal, never serialised by name the contract knows: the step's colour. */
+  rag?: 'GREEN' | 'AMBER' | 'RED' | null;
 }
 
 const startOfWeek = () => {
@@ -88,6 +108,12 @@ const startOfWeek = () => {
   d.setUTCHours(0, 0, 0, 0);
   return d;
 };
+
+/** First step of the journey (by sequence) that is neither DONE nor SKIPPED. */
+const currentStepIn = (j: ObJourney) =>
+  [...j.steps]
+    .sort((a, b) => a.sequence - b.sequence || a.id - b.id)
+    .find((s) => s.status !== 'DONE' && s.status !== 'SKIPPED');
 
 /**
  * The slide-over rows — **services and prerequisites in one list**.
@@ -103,25 +129,38 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
   const weekEnd = new Date(weekStart);
   weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
 
+  const serviceItem = (c: ObClient, j: ObJourney, s: ObStep): DashItem => {
+    const p = db.obProducts.find((x) => x.id === j.productId);
+    return {
+      itemType: 'SERVICE' as const,
+      itemId: s.id, obClientId: c.id, obClientName: c.name,
+      journeyId: j.id,
+      product: p ? { id: p.id, code: p.code, name: p.name } : null,
+      title: s.name,
+      owner: userRef(s.ownerUserId ?? null, db),
+      status: s.status,
+      // The note the owner typed when blocking, falling back to the reason
+      // code. Only a BLOCKED service carries one — a client-attributed pause
+      // has a counterparty, not a culprit, and the screen supplies its own
+      // copy for those.
+      blockedReason: s.status === 'BLOCKED' ? (s.blockedNote ?? s.blockedReasonCode ?? null) : null,
+      dueAt: s.dueAt ?? '',
+      isOverdue: s.dueAt != null && Date.parse(s.dueAt) < now.getTime(),
+      rag: stepRag(s),
+    };
+  };
+
+  // The mockup's `dashItems()`: in-flight services of ONBOARDING clients'
+  // open journeys. A step with no due date cannot be on a deadline card, so
+  // only dated ones enter the union.
   const services: DashItem[] = db.obClients.flatMap((c) =>
-    c.journeys.flatMap((j) =>
-      j.steps
-        .filter((s) => s.dueAt && s.status !== 'DONE' && s.status !== 'SKIPPED')
-        .map((s) => {
-          const p = db.obProducts.find((x) => x.id === j.productId);
-          return {
-            itemType: 'SERVICE' as const,
-            itemId: s.id, obClientId: c.id, obClientName: c.name,
-            journeyId: j.id,
-            product: p ? { id: p.id, code: p.code, name: p.name } : null,
-            title: s.name,
-            owner: userRef(s.ownerUserId ?? null, db),
-            status: s.status,
-            dueAt: s.dueAt as string,
-            isOverdue: Date.parse(s.dueAt as string) < now.getTime(),
-          };
-        }),
-    ),
+    c.status !== 'ONBOARDING' ? [] : c.journeys
+      .filter((j) => j.gateStatus === 'OPEN' && !j.archivedAt)
+      .flatMap((j) =>
+        j.steps
+          .filter((s) => s.dueAt && s.status !== 'DONE' && s.status !== 'SKIPPED')
+          .map((s) => serviceItem(c, j, s)),
+      ),
   );
 
   const prereqs: DashItem[] = db.obClientPrereqTasks
@@ -136,6 +175,7 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
         // than an implementor.
         journeyId: null, product: null,
         title: t.title, owner: null, status: t.status,
+        blockedReason: null,
         dueAt: t.dueAt,
         isOverdue: Date.parse(t.dueAt) < now.getTime(),
       };
@@ -154,10 +194,42 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
     case 'overdue-clients':
       return all.filter((i) => i.isOverdue);
     case 'at-risk':
-      return all.filter((i) => i.status === 'BLOCKED' || i.status === 'WAITING_ON_CLIENT');
+      // ≥ amber and still running. Blocked and waiting rows are the stuck
+      // table's (read off the ongoing card); breaches are the overdue card's.
+      return all.filter((i) => i.rag === 'AMBER');
     case 'client-escalations':
       return all.filter((i) =>
         db.obClientEscalations.some((e) => !e.resolvedAt && e.stepId === i.itemId && i.itemType === 'SERVICE'));
+    case 'ongoing-projects':
+      // One row per running client — where each one currently stands, which
+      // is the mockup's drill and what the "Where it's stuck" table reads.
+      return db.obClients.flatMap((c) => {
+        if (c.status !== 'ONBOARDING') return [];
+        const journey = c.journeys
+          .filter((j) => j.gateStatus === 'OPEN' && !j.archivedAt)
+          .sort((a, b) => a.id - b.id)[0];
+        const step = journey ? currentStepIn(journey) : undefined;
+        return journey && step ? [serviceItem(c, journey, step)] : [];
+      });
+    case 'live':
+      // One row per LIVE client. `dueAt` carries the go-live instant — the
+      // only date a finished onboarding has left to show.
+      return db.obClients
+        .filter((c) => c.status === 'LIVE')
+        .map((c) => {
+          const journey = [...c.journeys].sort((a, b) => a.id - b.id)[0];
+          const lastStep = journey ? [...journey.steps].sort((a, b) => b.sequence - a.sequence)[0] : undefined;
+          const p = journey ? db.obProducts.find((x) => x.id === journey.productId) : undefined;
+          return {
+            itemType: 'SERVICE' as const,
+            itemId: lastStep?.id ?? c.id, obClientId: c.id, obClientName: c.name,
+            journeyId: journey?.id ?? null,
+            product: p ? { id: p.id, code: p.code, name: p.name } : null,
+            title: `Live since ${new Date(c.liveAt ?? c.onboardingDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}`,
+            owner: null, status: 'DONE', blockedReason: null,
+            dueAt: c.liveAt ?? '', isOverdue: false,
+          };
+        });
     default:
       return all;
   }
@@ -334,26 +406,50 @@ export const obAdminHandlers = [
     if (ownerUserId) items = items.filter((i) => i.owner?.id === Number(ownerUserId));
 
     const { page, meta } = paginate(items, requestUrl);
-    return ok(page, { ...meta, computedAt: COMPUTED_AT });
+    // `rag` is this file's working column, not a contract field — stripped
+    // rather than leaked, so nobody builds a screen on it.
+    return ok(page.map((item) => {
+      const wire = { ...item };
+      delete wire.rag;
+      return wire;
+    }), { ...meta, computedAt: COMPUTED_AT });
   }),
 
   http.get(url('/onboarding/dashboard/delayed-projects'), ({ request }) => {
     const db = getDb();
     const requestUrl = new URL(request.url);
-    const now = Date.parse(COMPUTED_AT);
+    // Date-granular, like the mockup's day serials: a step due 18 Aug is two
+    // days late on the 20th whatever the clock says, and a millisecond
+    // subtraction would round it to one.
+    const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00.000Z`) / 86_400_000);
+    const today = dayOf(COMPUTED_AT);
 
     let rows = db.obClients.flatMap((c) =>
-      c.journeys
-        .filter((j) => !j.completedAt && !j.archivedAt)
+      c.status !== 'ONBOARDING' ? [] : c.journeys
+        .filter((j) => j.gateStatus === 'OPEN' && !j.completedAt && !j.archivedAt)
         .map((j) => {
-          const overdue = j.steps.filter((s) => s.dueAt && Date.parse(s.dueAt) < now && s.status !== 'DONE');
-          if (overdue.length === 0) return null;
-          const worst = Math.min(...overdue.map((s) => Date.parse(s.dueAt as string)));
+          // A journey is running behind once any of its services has gone RED
+          // — breached its TAT or blocked — the mockup's own line, which is
+          // what puts a blocked-but-not-yet-overdue journey on this grid.
+          const red = j.steps.filter((s) => s.status !== 'DONE' && s.status !== 'SKIPPED' && stepRag(s) === 'RED');
+          if (red.length === 0) return null;
+          const dued = red.filter((s) => s.dueAt);
+          const earliest = dued.length
+            ? Math.min(...dued.map((s) => dayOf(s.dueAt as string)))
+            : today;
+          const calendarDays = today - earliest;
           // Working days, through the calendar — a naive subtraction would
-          // spike every Monday until readers learned to discount it.
-          const calendarDays = Math.floor((now - worst) / 86_400_000);
-          const weekends = Math.floor(calendarDays / 7) * 2;
-          const current = j.steps.find((s) => s.status === 'IN_PROGRESS') ?? overdue[0];
+          // spike every Monday until readers learned to discount it. Floored
+          // at one: a red journey is late by definition, however fresh.
+          const weekends = Math.floor(Math.max(0, calendarDays) / 7) * 2;
+          const delayedByDays = Math.max(1, calendarDays - weekends);
+          // The mockup's recomputed finish: today + every unfinished service's
+          // TAT + the delay already banked.
+          const remainingTat = j.steps
+            .filter((s) => s.status !== 'DONE' && s.status !== 'SKIPPED')
+            .reduce((sum, s) => sum + s.tatDays, 0);
+          const expectedCompletionAt = new Date((today + remainingTat + delayedByDays) * 86_400_000).toISOString();
+          const current = currentStepIn(j) ?? red[0];
           const p = db.obProducts.find((x) => x.id === j.productId);
           return {
             journeyId: j.id, obClientId: c.id, obClientName: c.name,
@@ -367,8 +463,8 @@ export const obAdminHandlers = [
               ? { id: current.id, sequence: current.sequence, name: current.name, status: current.status, rag: stepRag(current), dependsOnStepId: current.dependsOnStepId }
               : null,
             responsible: userRef(current?.ownerUserId ?? null, db),
-            expectedCompletionAt: current?.dueAt ?? null,
-            delayedByDays: Math.max(1, calendarDays - weekends),
+            expectedCompletionAt,
+            delayedByDays,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r != null),
@@ -401,36 +497,57 @@ export const obAdminHandlers = [
     );
 
     const rows = grants.map((g) => {
+      // Locked journeys are skipped — a gated client has asked for nothing
+      // yet, and counting their untouched plan as this implementor's
+      // "not started" backlog would charge them for the client's slowness.
       const steps = db.obClients.flatMap((c) =>
-        c.journeys.flatMap((j) => j.steps.filter((s) => s.ownerUserId === g.userId).map((s) => ({ client: c, step: s }))));
-      const openClients = new Set(steps.filter(({ step }) => step.status !== 'DONE').map(({ client }) => client.id));
-      const blockedWaiting = new Set(steps.filter(({ step }) => step.status === 'BLOCKED' || step.status === 'WAITING_ON_CLIENT').map(({ client }) => client.id));
-      const notStarted = new Set(steps.filter(({ step }) => step.status === 'PENDING').map(({ client }) => client.id));
-      const delayed = new Set(steps.filter(({ step }) => step.dueAt && step.status !== 'DONE' && Date.parse(step.dueAt) < Date.parse(COMPUTED_AT)).map(({ client }) => client.id));
-      for (const id of blockedWaiting) { notStarted.delete(id); delayed.delete(id); }
-      for (const id of notStarted) delayed.delete(id);
-      // The six columns partition clientsOpen and must sum to it — an
-      // arithmetic contract a screen will assume and nothing checks at runtime.
-      const onTrack = openClients.size - blockedWaiting.size - notStarted.size - delayed.size;
+        c.journeys
+          .filter((j) => j.gateStatus === 'OPEN' && !j.archivedAt)
+          .flatMap((j) => j.steps.filter((s) => s.ownerUserId === g.userId).map((s) => ({ client: c, step: s }))));
+      const open = steps.filter(({ step }) => step.status !== 'DONE' && step.status !== 'SKIPPED');
+
+      // One bucket per client, worst state wins — delayed over blocked over
+      // at-risk over running over not-started — so the six columns partition
+      // `clientsOpen` and sum to it: the contract's arithmetic promise.
+      const buckets = { delayed: 0, blockedWaiting: 0, atRisk: 0, onTrack: 0, notStarted: 0 };
+      const byClient = new Map<number, typeof open>();
+      for (const row of open) {
+        const list = byClient.get(row.client.id) ?? [];
+        list.push(row);
+        byClient.set(row.client.id, list);
+      }
+      for (const list of byClient.values()) {
+        const has = (test: (s: ObStep) => boolean) => list.some(({ step }) => test(step));
+        if (has((s) => s.dueAt != null && Date.parse(s.dueAt) < Date.parse(COMPUTED_AT))) buckets.delayed += 1;
+        else if (has((s) => s.status === 'BLOCKED' || s.status === 'WAITING_ON_CLIENT')) buckets.blockedWaiting += 1;
+        else if (has((s) => stepRag(s) === 'AMBER')) buckets.atRisk += 1;
+        else if (has((s) => s.status === 'IN_PROGRESS')) buckets.onTrack += 1;
+        else buckets.notStarted += 1;
+      }
       const completedOnTime = steps.filter(({ step }) => step.status === 'DONE').length;
       return {
         user: userRef(g.userId, db),
         isActive: g.revokedAt == null,
-        clientsOpen: openClients.size,
-        onTrack: Math.max(0, onTrack),
-        notStarted: notStarted.size,
-        delayed: delayed.size,
-        atRisk: 0,
-        blockedWaiting: blockedWaiting.size,
+        clientsOpen: byClient.size,
+        onTrack: buckets.onTrack,
+        notStarted: buckets.notStarted,
+        delayed: buckets.delayed,
+        atRisk: buckets.atRisk,
+        blockedWaiting: buckets.blockedWaiting,
         aheadOfSchedule: 0,
         completedOnTime,
         completedEarly: 0,
         completedLate: 0,
-        blockedHours: blockedWaiting.size * 6,
-        // Derived on read, never stored — and null with no completions,
-        // because scoring an empty set produces a number that looks like
-        // judgement and is arithmetic.
-        performanceScore: completedOnTime === 0 ? null : Math.min(100, 60 + completedOnTime * 8 - delayed.size * 5),
+        blockedHours: buckets.blockedWaiting * 6,
+        // Derived on read, never stored — and null for the bench, because
+        // scoring somebody with no work yet produces a number that looks like
+        // judgement and is arithmetic on an empty set. The weights are the
+        // mock's stand-in for a formula the product will tune: a delay costs
+        // most, a block or a wait costs plenty, amber costs a little.
+        performanceScore: completedOnTime === 0 && byClient.size === 0
+          ? null
+          : Math.max(5, Math.min(100,
+              96 - 38 * buckets.delayed - 15 * buckets.blockedWaiting - 6 * buckets.atRisk)),
         statDate,
       };
     });

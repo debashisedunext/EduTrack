@@ -238,6 +238,34 @@ const applicationDto = (a: ObApplication, db: Db) => ({
   licenseEnd: a.licenseEnd,
 });
 
+/**
+ * `ObClientCurrentStep` — where the client's **first (primary) journey**
+ * stands, for the OB-02 RAG columns' and OB-03's caption "2 journeys · ERP
+ * step 4/8 · Data migration".
+ *
+ * The primary journey is the earliest instantiated live one (`MIN(id)` over
+ * non-archived, exactly the server's pick), and the field is **null while it
+ * is gate-locked, held behind a sibling, or finished** — nothing is running
+ * to name, and the screens already have words for those states.
+ */
+function currentStepOf(c: ObClient, db: Db) {
+  const primary = c.journeys
+    .filter((j) => j.archivedAt == null)
+    .reduce<ObJourney | null>((first, j) => (first == null || j.id < first.id ? j : first), null);
+  if (!primary || primary.gateStatus !== 'OPEN' || primary.heldByJourneyId != null) return null;
+  const steps = [...primary.steps].sort((a, b) => a.sequence - b.sequence || a.id - b.id);
+  const index = steps.findIndex((s) => s.status !== 'DONE' && s.status !== 'SKIPPED');
+  if (index < 0) return null;
+  return {
+    product: productRef(primary.productId, db),
+    name: steps[index].name,
+    // 1-based ordinal within the sequence — NOT the raw `sequence` value,
+    // which the contract does not promise contiguous.
+    stepIndex: index + 1,
+    stepTotal: steps.length,
+  };
+}
+
 /** The OB-03 row. No PAN and no address — identity data belongs to the detail. */
 function obClientDto(c: ObClient, db: Db) {
   return {
@@ -249,6 +277,7 @@ function obClientDto(c: ObClient, db: Db) {
     gateStatus: gateStatusOf(c),
     journeyCount: c.journeys.length,
     journeysComplete: c.journeys.filter(journeyIsComplete).length,
+    currentStep: currentStepOf(c, db),
     products: c.applications.map((a) => productRef(a.productId, db)).filter(Boolean),
     salesPerson: userRef(c.salesPersonId, db),
     primaryContact: c.contacts.find((x) => x.isPrimary) ?? null,

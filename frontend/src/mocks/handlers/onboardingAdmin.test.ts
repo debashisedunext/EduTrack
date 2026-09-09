@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { getDb } from '../db';
+
 /**
  * A-118 · mock-handler tests for the OB-02/08/09/10/11/12/13 surfaces.
  *
@@ -32,7 +34,7 @@ const post = (p: string, b?: unknown) => send('POST', p, b);
 const patch = (p: string, b?: unknown) => send('PATCH', p, b);
 const put = (p: string, b?: unknown) => send('PUT', p, b);
 
-/** The fixture's one PENDING sign-off — Northwind's blocked Data Migration. */
+/** The fixture's one PENDING sign-off — Cambridge Heights' UAT step (617). */
 const TOKEN = 'ob-signoff-demo-token-1';
 
 async function verifiedSession(token = TOKEN) {
@@ -73,7 +75,7 @@ describe('A-118 · the public sign-off surface', () => {
     const session = await verifiedSession();
     expect(session).toBeTruthy();
     const verified = await post('/public/onboarding/signoff/otp/verify', { token: TOKEN, otp: '123456' });
-    expect(verified.data.data.obClientName).toBe('Northwind Technologies Pvt Ltd');
+    expect(verified.data.data.obClientName).toBe('Cambridge Heights School');
   });
 
   it('never puts the token or the OTP on a staff response', async () => {
@@ -99,28 +101,38 @@ describe('A-118 · the public sign-off surface', () => {
   });
 
   it('records the acceptance even when the completion gate refuses the step', async () => {
-    const sessionToken = await verifiedSession();
+    // Trinity's blocked "Configuration & branding" (step 815) carries the
+    // fixture's only Task List, with both mandatory items unanswered — the
+    // completion gate's refusal case. No fixture sign-off points there, so the
+    // test requests one through the staff route and reads its token from the
+    // db, because the token deliberately appears on no wire response.
+    await post('/onboarding/journeys/81/signoffs', {
+      kind: 'STEP', stepId: 815, sentToContactId: 11,
+    });
+    const created = getDb().obSignoffs.find((s) => s.stepId === 815 && s.status === 'PENDING')!;
+
+    const sessionToken = await verifiedSession(created.token);
     const { status, data } = await post('/public/onboarding/signoff/accept', {
-      sessionToken, acceptedName: 'Meena Raghavan',
+      sessionToken, acceptedName: 'George Thomas',
     });
 
     expect(status).toBe(200);
     // PHASE-2-BUILD-PLAN §3 #4. The client did accept; they are not the ones
-    // who left a document unattached, so the signature is kept.
+    // who left a checklist unanswered, so the signature is kept.
     expect(data.data.signoff.status).toBe('SIGNED');
     expect(data.data.signoff.signedIp).not.toBeNull();
     expect(data.data.stepCompleted).toBe(false);
     expect(data.data.gateFailures.length).toBeGreaterThan(0);
 
     // And the step did NOT complete.
-    const step = await get('/onboarding/journey-steps/3');
+    const step = await get('/onboarding/journey-steps/815');
     expect(step.data.data.status).not.toBe('DONE');
   });
 
   it('spends a session token once', async () => {
     const sessionToken = await verifiedSession();
-    await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Meena Raghavan' });
-    const replay = await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Meena Raghavan' });
+    await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Sana Qureshi' });
+    const replay = await post('/public/onboarding/signoff/accept', { sessionToken, acceptedName: 'Sana Qureshi' });
     expect(replay.status).toBe(401);
   });
 
@@ -135,7 +147,7 @@ describe('A-118 · the public sign-off surface', () => {
     expect(status).toBe(200);
     expect(data.data.status).toBe('OBJECTED');
 
-    const step = await get('/onboarding/journey-steps/3');
+    const step = await get('/onboarding/journey-steps/617');
     expect(step.data.data.status).toBe('IN_PROGRESS');
   });
 
@@ -162,25 +174,25 @@ describe('A-118 · sign-off, staff side', () => {
   });
 
   it('refuses a second live request for the same service', async () => {
-    const { status, data } = await post('/onboarding/journeys/1/signoffs', {
-      kind: 'STEP', stepId: 3, sentToContactId: 1,
+    const { status, data } = await post('/onboarding/journeys/61/signoffs', {
+      kind: 'STEP', stepId: 617, sentToContactId: 9,
     });
     expect(status).toBe(409);
     expect(data.type).toBe('https://edutrack/errors/ob-signoff-already-pending');
   });
 
   it('refuses a go-live while a service is unfinished', async () => {
-    const { status, data } = await post('/onboarding/journeys/1/signoffs', {
-      kind: 'GO_LIVE', sentToContactId: 1,
+    const { status, data } = await post('/onboarding/journeys/61/signoffs', {
+      kind: 'GO_LIVE', sentToContactId: 9,
     });
     expect(status).toBe(422);
     expect(data.type).toBe('https://edutrack/errors/ob-signoff-journey-incomplete');
   });
 
   it('holds kind and stepId to the database’s own pairing rule', async () => {
-    const stepless = await post('/onboarding/journeys/1/signoffs', { kind: 'STEP', sentToContactId: 1 });
+    const stepless = await post('/onboarding/journeys/61/signoffs', { kind: 'STEP', sentToContactId: 9 });
     expect(stepless.status).toBe(400);
-    const stepped = await post('/onboarding/journeys/1/signoffs', { kind: 'GO_LIVE', stepId: 3, sentToContactId: 1 });
+    const stepped = await post('/onboarding/journeys/61/signoffs', { kind: 'GO_LIVE', stepId: 617, sentToContactId: 9 });
     expect(stepped.status).toBe(400);
   });
 
@@ -233,7 +245,7 @@ describe('A-118 · escalations', () => {
 
   it('names an external contact, not a user, as the raiser', async () => {
     const { data } = await get('/onboarding/client-escalations');
-    expect(data.data[0].raisedByContact.name).toBe('Meena Raghavan');
+    expect(data.data[0].raisedByContact.name).toBe('Arjun Shetty');
     expect(data.data[0].raisedByContact.email).toContain('@');
   });
 });
@@ -343,24 +355,58 @@ describe('A-118 · settings and templates', () => {
 });
 
 describe('A-118 · the OB-02 board and OB-10 hub', () => {
-  it('draws all seven cards, zeros included', async () => {
+  it('draws all seven cards, in the mockup’s order, with the fixture’s numbers', async () => {
     const { data } = await get('/onboarding/dashboard/summary');
-    expect(data.data.cards).toHaveLength(7);
-    // An absent card and a card reading nought are different claims.
-    expect(data.data.cards.map((c: { key: string }) => c.key)).toContain('client-escalations');
+    // An absent card and a card reading nought are different claims — and the
+    // eight-client world pins every count, so a board that miscounted any tile
+    // fails here by name rather than by length.
+    expect(data.data.cards.map((c: { key: string }) => c.key)).toEqual([
+      'ongoing-projects', 'this-weeks-deadlines', 'todays-delivery',
+      'overdue-clients', 'client-escalations', 'live', 'at-risk',
+    ]);
+    expect(data.data.cards.map((c: { count: number }) => c.count))
+      .toEqual([6, 10, 2, 2, 1, 1, 1]);
     expect(data.data.computedAt).toBeTruthy();
   });
 
   it('mixes services and prerequisites in one slide-over', async () => {
-    // Acme's checklist is overdue — which is what a stalled gate looks like,
-    // and the only reason a prerequisite appears on a delivery board at all.
+    // Little Scholars' checklist is overdue — which is what a stalled gate
+    // looks like, and the only reason a prerequisite appears on a delivery
+    // board at all. With Sunrise's breached migration that makes five overdue
+    // items across the tile's two clients.
     const { data } = await get('/onboarding/dashboard/cards/overdue-clients/items?limit=200');
+    expect(data.data).toHaveLength(5);
+    expect(data.data.map((i: { itemId: number }) => i.itemId).sort((a: number, b: number) => a - b))
+      .toEqual([161, 163, 164, 165, 214]);
+    expect(new Set(data.data.map((i: { obClientId: number }) => i.obClientId)).size).toBe(2);
     const types = new Set(data.data.map((i: { itemType: string }) => i.itemType));
     // Plan §9's "all client tasks". No existing list can answer this.
     expect(types.has('PREREQUISITE')).toBe(true);
     const prereq = data.data.find((i: { itemType: string }) => i.itemType === 'PREREQUISITE');
     expect(prereq.owner).toBeNull();
     expect(prereq.journeyId).toBeNull();
+    // Nothing overdue is BLOCKED, so no row on this card carries a reason.
+    expect(data.data.every((i: { blockedReason: string | null }) => i.blockedReason === null))
+      .toBe(true);
+  });
+
+  it('carries the block reason on the stuck row and on nothing else', async () => {
+    // One row per running client; the stuck table filters these client-side.
+    const { data } = await get('/onboarding/dashboard/cards/ongoing-projects/items?limit=200');
+    expect(data.data).toHaveLength(6);
+
+    const trinity = data.data.find(
+      (i: { obClientName: string }) => i.obClientName.startsWith('Trinity'),
+    );
+    expect(trinity.status).toBe('BLOCKED');
+    expect(trinity.blockedReason).toBe("Branding assets pending from client's design vendor");
+
+    // A client-attributed pause has a counterparty, not a culprit.
+    const bluebell = data.data.find(
+      (i: { obClientName: string }) => i.obClientName.startsWith('Bluebell'),
+    );
+    expect(bluebell.status).toBe('WAITING_ON_CLIENT');
+    expect(bluebell.blockedReason).toBeNull();
   });
 
   it('refuses an unknown card key', async () => {
@@ -370,7 +416,14 @@ describe('A-118 · the OB-02 board and OB-10 hub', () => {
 
   it('returns a row for an implementor with no clients', async () => {
     const { data } = await get('/onboarding/dashboard/implementor-workload');
-    expect(data.data.length).toBeGreaterThan(0);
+    // Exactly the five OB_STEP_OWNER grants, in grant order — Nikhil is the
+    // bench row, present with nothing to his name.
+    expect(data.data.map((r: { user: { displayName: string } }) => r.user.displayName)).toEqual([
+      'Priya Nair', 'Kavya Sharma', 'Rohan Gupta', 'Vikram Mehta', 'Nikhil Joshi',
+    ]);
+    // 96 − 38·delayed − 15·blockedWaiting − 6·atRisk, and null for the bench.
+    expect(data.data.map((r: { performanceScore: number | null }) => r.performanceScore))
+      .toEqual([60, 58, 96, 96, null]);
     for (const row of data.data) {
       // The six columns partition clientsOpen — A-108's arithmetic contract.
       const parts = row.onTrack + row.notStarted + row.delayed + row.atRisk

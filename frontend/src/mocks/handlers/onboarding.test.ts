@@ -106,23 +106,25 @@ beforeEach(() => {
 
 describe('A-118 · RAG carries health and nothing else', () => {
   it('reports null, not GREEN, while every journey is locked', async () => {
-    const acme = (await listClients()).find((c) => c.name.startsWith('Acme'))!
+    const littleScholars = (await listClients()).find((c) => c.name.startsWith('Little Scholars'))!
 
     // The distinction the whole enum turns on: OB-03 renders this as
     // "Prerequisites pending". GREEN here would claim a locked client is on
     // track, when nothing is running to be on track.
-    expect(acme.gateStatus).toBe('LOCKED')
-    expect(acme.rag).toBeNull()
+    expect(littleScholars.gateStatus).toBe('LOCKED')
+    expect(littleScholars.rag).toBeNull()
   })
 
   it('rolls the worst open step up to the client', async () => {
-    const northwind = (await listClients()).find((c) => c.name.startsWith('Northwind'))!
-    expect(northwind.gateStatus).toBe('OPEN')
-    expect(northwind.rag).toBe('RED')
+    // Sunrise: one breached migration beside a healthy sibling service.
+    const sunrise = (await listClients()).find((c) => c.name.startsWith('Sunrise'))!
+    expect(sunrise.gateStatus).toBe('OPEN')
+    expect(sunrise.rag).toBe('RED')
   })
 
   it('does not colour a step that is waiting on the client', async () => {
-    const detail = await getClient(1)
+    // Bluebell's requirements confirmation is paused on the client.
+    const detail = await getClient(4)
     const waiting = detail.journeys
       .flatMap((j) => j.steps)
       .find((s) => s.status === 'WAITING_ON_CLIENT')!
@@ -134,10 +136,10 @@ describe('A-118 · RAG carries health and nothing else', () => {
   })
 
   it('excludes locked journeys from the client roll-up', async () => {
-    const acme = await getClient(2)
-    expect(acme.journeys.every((j) => j.gateStatus === 'LOCKED')).toBe(true)
-    expect(acme.journeys.every((j) => j.rag === null)).toBe(true)
-    expect(acme.rag).toBeNull()
+    const littleScholars = await getClient(7)
+    expect(littleScholars.journeys.every((j) => j.gateStatus === 'LOCKED')).toBe(true)
+    expect(littleScholars.journeys.every((j) => j.rag === null)).toBe(true)
+    expect(littleScholars.rag).toBeNull()
   })
 
   it('filters by colour without ever returning a locked client', async () => {
@@ -155,16 +157,17 @@ describe('A-118 · RAG carries health and nothing else', () => {
  *
  * The only filter on this list that is not a field on the row, so a handler
  * that dropped it would return the whole corpus and read as working. The
- * fixture is arranged so both arms are narrowings: user 3 owns steps on clients
- * 1 and 2 and none on 3, and user 4 owns nothing anywhere while backing up one
- * step on client 3.
+ * fixture is arranged so both arms are narrowings: user 3 (Ravi) backs up
+ * steps on Bluebell (4) and Trinity (8) and owns none anywhere else, and
+ * user 4 owns nothing anywhere while backing up one finished step on
+ * GreenValley (1).
  */
 describe('B-108 · the ownerId filter', () => {
   it('returns only the clients whose journeys hold that person’s steps', async () => {
     const res = await fetch('/api/v1/onboarding/clients?ownerId=3')
     const { data } = await json<{ data: ClientRow[] }>(res)
 
-    expect(data.map((c) => c.id).sort()).toEqual([1, 2])
+    expect(data.map((c) => c.id).sort()).toEqual([4, 8])
   })
 
   /**
@@ -177,7 +180,7 @@ describe('B-108 · the ownerId filter', () => {
     const res = await fetch('/api/v1/onboarding/clients?ownerId=4')
     const { data } = await json<{ data: ClientRow[] }>(res)
 
-    expect(data.map((c) => c.id)).toEqual([3])
+    expect(data.map((c) => c.id)).toEqual([1])
   })
 
   it('gives a user who owns nothing an empty list rather than everything', async () => {
@@ -188,29 +191,32 @@ describe('B-108 · the ownerId filter', () => {
   })
 
   it('narrows alongside another filter rather than replacing it', async () => {
-    const res = await fetch('/api/v1/onboarding/clients?ownerId=3&gateStatus=LOCKED')
+    const res = await fetch('/api/v1/onboarding/clients?ownerId=3&rag=RED')
     const { data } = await json<{ data: ClientRow[] }>(res)
 
-    // Of user 3's two clients, only Acme is behind its gate.
-    expect(data.map((c) => c.id)).toEqual([2])
+    // Of user 3's two clients, only Trinity is red — Bluebell's wait is
+    // uncoloured, so it reads GREEN and falls out of this narrowing.
+    expect(data.map((c) => c.id)).toEqual([8])
   })
 })
 
 describe('A-118 · LIVE is earned, never set', () => {
   it('refuses a direct move to LIVE with 422', async () => {
-    const res = await patchClient(1, { status: 'LIVE' })
+    // Sunrise is mid-onboarding with a breached migration — exactly who
+    // somebody might be tempted to "just flip".
+    const res = await patchClient(2, { status: 'LIVE' })
     expect(res.status).toBe(422)
     const body = await json<{ type: string }>(res)
     expect(body.type).toContain('ob-client-live-not-earned')
   })
 
   it('still allows the statuses a person legitimately records', async () => {
-    const res = await patchClient(1, { status: 'ON_HOLD', statusReason: 'Client paused the rollout' })
+    const res = await patchClient(2, { status: 'ON_HOLD', statusReason: 'Client paused the rollout' })
     expect(res.status).toBe(200)
   })
 
   it('requires a reason for ON_HOLD and DROPPED', async () => {
-    expect((await patchClient(1, { status: 'DROPPED' })).status).toBe(400)
+    expect((await patchClient(2, { status: 'DROPPED' })).status).toBe(400)
   })
 })
 
@@ -226,8 +232,8 @@ describe('A-118 · PAN is masked on the way out', () => {
     const stored = getDb().obClients.find((c) => c.id === 1)!.pan!
     const detail = await getClient(1)
 
-    expect(stored).toBe('AABCN1234M')
-    expect(detail.pan).toBe('••••••234M')
+    expect(stored).toBe('AAGCG1204F')
+    expect(detail.pan).toBe('••••••204F')
     expect(detail.pan).not.toBe(stored)
   })
 
@@ -242,8 +248,8 @@ describe('A-118 · PAN is masked on the way out', () => {
   it('discloses none of the identifying prefix', async () => {
     const detail = await getClient(1)
 
-    expect(detail.pan).not.toContain('AABCN')
-    expect(detail.pan).toHaveLength('AABCN1234M'.length)
+    expect(detail.pan).not.toContain('AAGCG')
+    expect(detail.pan).toHaveLength('AAGCG1204F'.length)
   })
 
   it('keeps PAN off the list row entirely', async () => {
@@ -259,7 +265,7 @@ describe('A-118 · PAN is masked on the way out', () => {
   })
 
   it('does not let the search parameter match on PAN', async () => {
-    const res = await fetch('/api/v1/onboarding/clients?q=AABCN1234M')
+    const res = await fetch('/api/v1/onboarding/clients?q=AAGCG1204F')
     const { data } = await json<{ data: ClientRow[] }>(res)
 
     // Matching here would make the mock an oracle for a value the API masks.
@@ -289,21 +295,22 @@ describe('A-118 · a product with no template cannot be bought', () => {
 describe('A-118 · the duplicate guard is split on purpose', () => {
   it('refuses a duplicate PAN and offers no way past it', async () => {
     const res = await createClient(
-      validBody({ pan: 'AABCN1234M', acknowledgeSimilarNames: true }),
+      validBody({ pan: 'AAGCG1204F', acknowledgeSimilarNames: true }),
     )
     expect(res.status).toBe(409)
     expect((await json<{ type: string }>(res)).type).toContain('ob-client-pan-duplicate')
   })
 
   it('warns on a similar name and lets it be acknowledged', async () => {
-    // "Acme Private Limited" against the fixture's "Acme Private Limited" —
-    // the case the guard exists for, and the case it must not make final.
-    const warned = await createClient(validBody({ name: 'Acme Pvt Ltd' }))
+    // "Sunrise EdTech Private Limited" against the fixture's "Sunrise EdTech
+    // Pvt Ltd" — the case the guard exists for, and the case it must not make
+    // final.
+    const warned = await createClient(validBody({ name: 'Sunrise EdTech Private Limited' }))
     expect(warned.status).toBe(409)
     expect((await json<{ type: string }>(warned)).type).toContain('ob-client-name-similar')
 
     const forced = await createClient(
-      validBody({ name: 'Acme Pvt Ltd', acknowledgeSimilarNames: true }),
+      validBody({ name: 'Sunrise EdTech Private Limited', acknowledgeSimilarNames: true }),
     )
     expect(forced.status).toBe(201)
   })
@@ -385,23 +392,26 @@ describe('A-118 · what one call to createObClient creates', () => {
 
 describe('A-118 · the journey strip', () => {
   it('sums TAT from the steps and derives utilisation rather than storing it', async () => {
-    const detail = await getClient(1)
+    // Sunrise's ERP journey: three steps done (7 + 14 + 21 hours), the
+    // breached migration at 59.4 and its healthy sibling at 5.4.
+    const detail = await getClient(2)
     const erp = detail.journeys[0]
 
-    expect(erp.totalTatDays).toBe(24)
-    expect(erp.utilizedHours).toBe(128.5)
-    expect(erp.percentComplete).toBe(40)
+    expect(erp.totalTatDays).toBe(20)
+    expect(erp.utilizedHours).toBe(106.8)
+    expect(erp.percentComplete).toBe(38)
   })
 
   it('holds a journey behind a sibling without touching its gate', async () => {
-    const detail = await getClient(1)
+    // Horizon's biometric journey waits for the ERP one to finish.
+    const detail = await getClient(3)
     const biometric = detail.journeys.find((j) => j.heldByJourneyId != null)!
 
     // Two different things: the prerequisite gate is open, and the journey is
     // still held by a service-level dependency (plan §5.5). Modelling these as
     // one field is the mistake this asserts against.
     expect(biometric.gateStatus).toBe('OPEN')
-    expect(biometric.heldByJourneyId).toBe(1)
+    expect(biometric.heldByJourneyId).toBe(31)
   })
 })
 
@@ -443,17 +453,17 @@ const removeContact = (clientId: number, contactId: number) =>
 /** A SPOC body that passes validation, so each test varies only its own field. */
 const contactBody = (over: Record<string, unknown> = {}) => ({
   name: 'New SPOC',
-  email: 'new.spoc@northwind.example',
+  email: 'new.spoc@greenvalley.example',
   isPrimary: false,
   ...over,
 })
 
-/** Northwind — the only fixture with an inactive SPOC and a pre-capture consent. */
-const NORTHWIND = 1
+/** GreenValley — the only fixture with an inactive SPOC and a pre-capture consent. */
+const GREENVALLEY = 1
 
 describe('B-103 · consent is a triple, not a flag', () => {
   it('refuses a consent with no basis', async () => {
-    const res = await addContact(NORTHWIND, contactBody({ whatsappOptIn: true }))
+    const res = await addContact(GREENVALLEY, contactBody({ whatsappOptIn: true }))
 
     // The whole reason this capture is built in a phase that sends no WhatsApp:
     // a `true` on its own records that somebody ticked a box and cannot say
@@ -466,7 +476,7 @@ describe('B-103 · consent is a triple, not a flag', () => {
 
   it('refuses UNRECORDED, which belongs to rows that predate the capture', async () => {
     const res = await addContact(
-      NORTHWIND,
+      GREENVALLEY,
       contactBody({ whatsappOptIn: true, whatsappOptInSource: 'UNRECORDED' }),
     )
     expect(res.status).toBe(400)
@@ -475,29 +485,29 @@ describe('B-103 · consent is a triple, not a flag', () => {
   it('refuses a basis with no consent rather than ignoring it', async () => {
     // A form sending one beside a `false` has come apart. Accepting both and
     // storing neither is how somebody later concludes consent was recorded.
-    const res = await addContact(NORTHWIND, contactBody({ whatsappOptInSource: 'VERBAL' }))
+    const res = await addContact(GREENVALLEY, contactBody({ whatsappOptInSource: 'VERBAL' }))
     expect(res.status).toBe(400)
   })
 
   it('stamps the consent when a basis is given', async () => {
     const res = await addContact(
-      NORTHWIND,
+      GREENVALLEY,
       contactBody({ whatsappOptIn: true, whatsappOptInSource: 'EMAIL' }),
     )
     expect(res.status).toBe(201)
 
     const added = (await json<{ data: ClientDetail }>(res)).data.contacts.find(
-      (c) => c.email === 'new.spoc@northwind.example',
+      (c) => c.email === 'new.spoc@greenvalley.example',
     )!
     expect(added.whatsappOptInSource).toBe('EMAIL')
     expect(added.whatsappOptInAt).not.toBeNull()
   })
 
   it('does not re-date a consent an unrelated edit did not change', async () => {
-    const before = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    const before = (await getClient(GREENVALLEY)).contacts.find((c) => c.id === 1)!
     expect(before.whatsappOptInSource).toBe('VERBAL')
 
-    await patchContact(NORTHWIND, 1, {
+    await patchContact(GREENVALLEY, 1, {
       name: before.name,
       email: before.email,
       phone: '+91 90000 00000',
@@ -506,7 +516,7 @@ describe('B-103 · consent is a triple, not a flag', () => {
       isPrimary: true,
     })
 
-    const after = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    const after = (await getClient(GREENVALLEY)).contacts.find((c) => c.id === 1)!
     // Correcting a phone number must not move the date the consent is dated
     // from. That destroys the same fact a missing basis destroys, except
     // silently and by a routine edit.
@@ -515,17 +525,17 @@ describe('B-103 · consent is a triple, not a flag', () => {
   })
 
   it('clears the stamp when consent is withdrawn', async () => {
-    await patchContact(NORTHWIND, 1, { name: 'Meena Raghavan',
-      email: 'meena@northwind.example', whatsappOptIn: false, isPrimary: true })
+    await patchContact(GREENVALLEY, 1, { name: 'Deepa Kulkarni',
+      email: 'deepa@greenvalley.example', whatsappOptIn: false, isPrimary: true })
 
-    const after = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 1)!
+    const after = (await getClient(GREENVALLEY)).contacts.find((c) => c.id === 1)!
     expect(after.whatsappOptIn).toBe(false)
     expect(after.whatsappOptInAt).toBeNull()
     expect(after.whatsappOptInSource).toBeNull()
   })
 
   it('reads UNRECORDED back, so a pre-capture SPOC is visibly one to re-approach', async () => {
-    const farida = (await getClient(NORTHWIND)).contacts.find((c) => c.id === 5)!
+    const farida = (await getClient(GREENVALLEY)).contacts.find((c) => c.id === 3)!
     expect(farida.whatsappOptIn).toBe(true)
     expect(farida.whatsappOptInSource).toBe('UNRECORDED')
   })
@@ -533,19 +543,19 @@ describe('B-103 · consent is a triple, not a flag', () => {
 
 describe('B-103 · a client always has exactly one primary SPOC', () => {
   it('demotes the incumbent when a new primary is added', async () => {
-    const res = await addContact(NORTHWIND, contactBody({ isPrimary: true }))
+    const res = await addContact(GREENVALLEY, contactBody({ isPrimary: true }))
     expect(res.status).toBe(201)
 
     const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
     // One, not two: uq_ob_client_contacts_primary refuses a second, so the
     // demotion has to happen in the same write as the promotion.
     expect(contacts.filter((c) => c.isPrimary)).toHaveLength(1)
-    expect(contacts.find((c) => c.isPrimary)!.email).toBe('new.spoc@northwind.example')
+    expect(contacts.find((c) => c.isPrimary)!.email).toBe('new.spoc@greenvalley.example')
   })
 
   it('refuses to demote the only primary', async () => {
-    const res = await patchContact(NORTHWIND, 1, {
-      name: 'Meena Raghavan', email: 'meena@northwind.example', isPrimary: false,
+    const res = await patchContact(GREENVALLEY, 1, {
+      name: 'Deepa Kulkarni', email: 'deepa@greenvalley.example', isPrimary: false,
     })
 
     // Stricter than the ticketing master, which allows a client to have none.
@@ -556,12 +566,12 @@ describe('B-103 · a client always has exactly one primary SPOC', () => {
   })
 
   it('refuses to remove the only primary', async () => {
-    expect((await removeContact(NORTHWIND, 1)).status).toBe(409)
+    expect((await removeContact(GREENVALLEY, 1)).status).toBe(409)
   })
 
   it('releases the departing primary once a successor holds the slot', async () => {
-    await addContact(NORTHWIND, contactBody({ isPrimary: true }))
-    const res = await removeContact(NORTHWIND, 1)
+    await addContact(GREENVALLEY, contactBody({ isPrimary: true }))
+    const res = await removeContact(GREENVALLEY, 1)
 
     expect(res.status).toBe(200)
     const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
@@ -572,7 +582,7 @@ describe('B-103 · a client always has exactly one primary SPOC', () => {
 
 describe('B-103 · removal deactivates and never deletes', () => {
   it('keeps the contact in the client document', async () => {
-    const res = await removeContact(NORTHWIND, 2)
+    const res = await removeContact(GREENVALLEY, 2)
     const contacts = (await json<{ data: ClientDetail }>(res)).data.contacts
 
     // The row is what a past sign-off points at. A screen that could not see
@@ -582,19 +592,19 @@ describe('B-103 · removal deactivates and never deletes', () => {
   })
 
   it('is not an error the second time', async () => {
-    await removeContact(NORTHWIND, 2)
+    await removeContact(GREENVALLEY, 2)
     // A setter, and the second half of a double-click must not fail.
-    expect((await removeContact(NORTHWIND, 2)).status).toBe(200)
+    expect((await removeContact(GREENVALLEY, 2)).status).toBe(200)
   })
 
   it('brings a departed SPOC back rather than adding a second row', async () => {
-    const res = await patchContact(NORTHWIND, 5, {
-      name: 'Farida Qureshi', email: 'farida@northwind.example',
+    const res = await patchContact(GREENVALLEY, 3, {
+      name: 'Farida Qureshi', email: 'farida@greenvalley.example',
       whatsappOptIn: true, whatsappOptInSource: 'WRITTEN', isPrimary: false, isActive: true,
     })
 
     const farida = (await json<{ data: ClientDetail }>(res)).data.contacts.find(
-      (c) => c.id === 5,
+      (c) => c.id === 3,
     )!
     expect(farida.isActive).toBe(true)
     // Re-approached, and the answer recorded — which is what UNRECORDED exists
@@ -604,8 +614,8 @@ describe('B-103 · removal deactivates and never deletes', () => {
 
   it('refuses a second row for an address a removed contact still holds', async () => {
     const res = await addContact(
-      NORTHWIND,
-      contactBody({ email: 'farida@northwind.example' }),
+      GREENVALLEY,
+      contactBody({ email: 'farida@greenvalley.example' }),
     )
     expect(res.status).toBe(409)
     expect((await json<{ type: string }>(res)).type).toContain('ob-contact-email-duplicate')
@@ -619,15 +629,15 @@ describe('B-103 · removal deactivates and never deletes', () => {
 
 describe('B-103 · every SPOC write answers the whole client document', () => {
   it('returns the client, not the contact, so the page ETag stays usable', async () => {
-    const res = await addContact(NORTHWIND, contactBody())
+    const res = await addContact(GREENVALLEY, contactBody())
     const { data } = await json<{ data: ClientDetail }>(res)
 
     // getObClient's ETag covers contacts, so a SPOC write invalidates it.
     // Answering with the contact alone would leave the Client info card on the
     // same page holding a tag that is already stale.
-    expect(data.id).toBe(NORTHWIND)
+    expect(data.id).toBe(GREENVALLEY)
     expect(data.journeys.length).toBeGreaterThan(0)
-    expect(data.contacts.some((c) => c.email === 'new.spoc@northwind.example')).toBe(true)
+    expect(data.contacts.some((c) => c.email === 'new.spoc@greenvalley.example')).toBe(true)
   })
 })
 
@@ -658,10 +668,10 @@ const unboughtSellableProduct = (clientId: number) => {
 
 describe('B-104 · a purchase brings its journey with it', () => {
   it('instantiates one journey for the product just bought', async () => {
-    const before = await getClient(NORTHWIND)
-    const product = unboughtSellableProduct(NORTHWIND)
+    const before = await getClient(GREENVALLEY)
+    const product = unboughtSellableProduct(GREENVALLEY)
 
-    const res = await addApplication(NORTHWIND, {
+    const res = await addApplication(GREENVALLEY, {
       productId: product.id,
       licenseType: 'Subscription',
       units: 50,
@@ -687,11 +697,11 @@ describe('B-104 · a purchase brings its journey with it', () => {
     // prerequisites they already satisfied. This is precisely the case the route
     // creates and the wizard never could, which is why the mock models it rather
     // than defaulting every new journey to LOCKED.
-    const before = await getClient(NORTHWIND)
+    const before = await getClient(GREENVALLEY)
     expect(before.journeys.some((j) => j.gateStatus === 'OPEN')).toBe(true)
 
-    const product = unboughtSellableProduct(NORTHWIND)
-    const res = await addApplication(NORTHWIND, { productId: product.id })
+    const product = unboughtSellableProduct(GREENVALLEY)
+    const res = await addApplication(GREENVALLEY, { productId: product.id })
     const after = (await json<{ data: ClientDetail }>(res)).data
 
     const fresh = after.journeys.filter((j) => !before.journeys.some((b) => b.id === j.id))
@@ -703,20 +713,20 @@ describe('B-104 · a purchase brings its journey with it', () => {
     // getObClient's ETag covers applications AND journeys, so this write moves
     // it twice over. A purchase-shaped response would leave every other card on
     // OB-05 editing against a tag that is already stale.
-    const product = unboughtSellableProduct(NORTHWIND)
-    const res = await addApplication(NORTHWIND, { productId: product.id })
+    const product = unboughtSellableProduct(GREENVALLEY)
+    const res = await addApplication(GREENVALLEY, { productId: product.id })
 
     const data = (await json<{ data: ClientDetail }>(res)).data
-    expect(data.id).toBe(NORTHWIND)
+    expect(data.id).toBe(GREENVALLEY)
     expect(data.contacts.length).toBeGreaterThan(0)
     expect(data.journeys.length).toBeGreaterThan(0)
   })
 
   it('refuses a product the client already bought, and says which row to edit', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const owned = client.applications[0]
 
-    const res = await addApplication(NORTHWIND, { productId: owned.product.id, units: 500 })
+    const res = await addApplication(GREENVALLEY, { productId: owned.product.id, units: 500 })
 
     // uq_ob_client_applications is on (ob_client_id, product_id): more seats is
     // an edit, and a second row would mean a second journey for one product.
@@ -729,13 +739,13 @@ describe('B-104 · a purchase brings its journey with it', () => {
 
   it('refuses a product with no published journey template', async () => {
     const db = getDb()
-    const client = db.obClients.find((c) => c.id === NORTHWIND)!
+    const client = db.obClients.find((c) => c.id === GREENVALLEY)!
     const owned = new Set(client.applications.map((a) => a.productId))
     const templateless = db.obProducts.find((p) => p.isActive && !p.hasActiveTemplate && !owned.has(p.id))
 
     if (!templateless) return
 
-    const res = await addApplication(NORTHWIND, { productId: templateless.id })
+    const res = await addApplication(GREENVALLEY, { productId: templateless.id })
     expect(res.status).toBe(409)
     expect((await json<{ type: string }>(res)).type).toContain('ob-product-no-template')
   })
@@ -747,17 +757,17 @@ describe('B-104 · a purchase brings its journey with it', () => {
 
     // A retired product is out of the picker by definition — buying one today
     // would instantiate a journey from a template nobody maintains.
-    const res = await addApplication(NORTHWIND, { productId: retired.id })
+    const res = await addApplication(GREENVALLEY, { productId: retired.id })
     expect(res.status).toBe(400)
   })
 })
 
 describe('B-104 · the licence window is the renewal anchor', () => {
   it('moves the end date forward, which is what a renewal is', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications[0]
 
-    const res = await patchApplication(NORTHWIND, purchase.id, {
+    const res = await patchApplication(GREENVALLEY, purchase.id, {
       productId: purchase.product.id,
       licenseType: purchase.licenseType,
       units: purchase.units,
@@ -774,10 +784,10 @@ describe('B-104 · the licence window is the renewal anchor', () => {
   })
 
   it('refuses a licence that ends before it starts', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications[0]
 
-    const res = await patchApplication(NORTHWIND, purchase.id, {
+    const res = await patchApplication(GREENVALLEY, purchase.id, {
       productId: purchase.product.id,
       licenseStart: '2027-01-01',
       licenseEnd: '2026-12-31',
@@ -790,10 +800,10 @@ describe('B-104 · the licence window is the renewal anchor', () => {
   })
 
   it('allows an open-ended perpetual licence', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications[0]
 
-    const res = await patchApplication(NORTHWIND, purchase.id, {
+    const res = await patchApplication(GREENVALLEY, purchase.id, {
       productId: purchase.product.id,
       licenseType: 'Perpetual',
       licenseStart: '2026-08-01',
@@ -807,10 +817,10 @@ describe('B-104 · the licence window is the renewal anchor', () => {
   })
 
   it('clears an absent field rather than leaving it, because this is not a sparse patch', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications.find((a) => a.units != null)!
 
-    const res = await patchApplication(NORTHWIND, purchase.id, { productId: purchase.product.id })
+    const res = await patchApplication(GREENVALLEY, purchase.id, { productId: purchase.product.id })
     expect(res.status).toBe(200)
 
     const saved = (await json<{ data: ClientDetail }>(res)).data
@@ -822,11 +832,11 @@ describe('B-104 · the licence window is the renewal anchor', () => {
 
 describe('B-104 · the product identifies a purchase and is not a field on it', () => {
   it('refuses a PATCH naming a different product rather than ignoring it', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications[0]
-    const other = unboughtSellableProduct(NORTHWIND)
+    const other = unboughtSellableProduct(GREENVALLEY)
 
-    const res = await patchApplication(NORTHWIND, purchase.id, { productId: other.id })
+    const res = await patchApplication(GREENVALLEY, purchase.id, { productId: other.id })
 
     // Refused, not ignored. ob_journeys keys straight to (ob_client_id,
     // product_id) and the journey's template is pinned to the product actually
@@ -838,10 +848,10 @@ describe('B-104 · the product identifies a purchase and is not a field on it', 
   })
 
   it('accepts the same product echoed back, which is the normal case', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const purchase = client.applications[0]
 
-    const res = await patchApplication(NORTHWIND, purchase.id, {
+    const res = await patchApplication(GREENVALLEY, purchase.id, {
       productId: purchase.product.id,
       units: 300,
     })
@@ -850,13 +860,13 @@ describe('B-104 · the product identifies a purchase and is not a field on it', 
 
   it('404s a purchase id belonging to another client', async () => {
     const db = getDb()
-    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.applications.length > 0)!
+    const other = db.obClients.find((c) => c.id !== GREENVALLEY && c.applications.length > 0)!
     const theirs = other.applications[0]
 
     // The nested route resolves by BOTH ids, so a real purchase under somebody
     // else answers exactly as an invented one does — which is what stops it
     // enumerating which organisations bought which products.
-    const res = await patchApplication(NORTHWIND, theirs.id, { productId: theirs.productId })
+    const res = await patchApplication(GREENVALLEY, theirs.id, { productId: theirs.productId })
     expect(res.status).toBe(404)
   })
 })
@@ -885,9 +895,9 @@ const deleteRequirement = (clientId: number, requirementId: number) =>
 
 describe('B-106 · requirements are rows, not strings', () => {
   it('adds at the end of the list and derives the plain-text projection', async () => {
-    const before = await getClient(NORTHWIND)
+    const before = await getClient(GREENVALLEY)
 
-    const res = await addRequirement(NORTHWIND, {
+    const res = await addRequirement(GREENVALLEY, {
       title: 'Branding',
       bodyHtml: '<p>Logo and <strong>colour palette</strong> in the portal</p>',
     })
@@ -911,7 +921,7 @@ describe('B-106 · requirements are rows, not strings', () => {
     // that accepted this would ship with no handling for the 400 the server
     // answers — and the allow-list itself is the server's, deliberately not
     // reimplemented here.
-    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p><br></p>' })
+    const res = await addRequirement(GREENVALLEY, { bodyHtml: '<p><br></p>' })
 
     expect(res.status).toBe(400)
     const body = await json<{ errors: Record<string, string[]> }>(res)
@@ -919,12 +929,12 @@ describe('B-106 · requirements are rows, not strings', () => {
   })
 
   it('answers the whole client document, so the page ETag stays usable', async () => {
-    const res = await addRequirement(NORTHWIND, { bodyHtml: '<p>Handover pack</p>' })
+    const res = await addRequirement(GREENVALLEY, { bodyHtml: '<p>Handover pack</p>' })
     const body = await json<{ data: ClientDetail }>(res)
 
     // Not the requirement — the client, with its contacts and journeys, exactly
     // as every other write in this package answers.
-    expect(body.data.id).toBe(NORTHWIND)
+    expect(body.data.id).toBe(GREENVALLEY)
     expect(body.data.contacts.length).toBeGreaterThan(0)
     expect(body.data.journeys.length).toBeGreaterThan(0)
   })
@@ -932,11 +942,11 @@ describe('B-106 · requirements are rows, not strings', () => {
 
 describe('B-106 · the met flag carries its own evidence', () => {
   it('stamps who and when on the way in, and clears both on the way out', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const unmet = client.requirements.find((r) => !r.isMet)!
 
     const met = (await json<{ data: ClientDetail }>(
-      await patchRequirement(NORTHWIND, unmet.id, { isMet: true }),
+      await patchRequirement(GREENVALLEY, unmet.id, { isMet: true }),
     )).data.requirements.find((r) => r.id === unmet.id)!
 
     expect(met.isMet).toBe(true)
@@ -944,7 +954,7 @@ describe('B-106 · the met flag carries its own evidence', () => {
     expect(met.metBy).not.toBeNull()
 
     const reopened = (await json<{ data: ClientDetail }>(
-      await patchRequirement(NORTHWIND, unmet.id, { isMet: false }),
+      await patchRequirement(GREENVALLEY, unmet.id, { isMet: false }),
     )).data.requirements.find((r) => r.id === unmet.id)!
 
     // Cleared rather than left behind — a stamp beside a false flag is what
@@ -955,12 +965,12 @@ describe('B-106 · the met flag carries its own evidence', () => {
   })
 
   it('does not re-date a requirement that was already met', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const already = client.requirements.find((r) => r.isMet)!
     const stamped = already.metAt
 
     const after = (await json<{ data: ClientDetail }>(
-      await patchRequirement(NORTHWIND, already.id, { bodyHtml: '<p>Reworded in November</p>' }),
+      await patchRequirement(GREENVALLEY, already.id, { bodyHtml: '<p>Reworded in November</p>' }),
     )).data.requirements.find((r) => r.id === already.id)!
 
     // The rule the three-column design exists for: correcting the wording in
@@ -971,16 +981,16 @@ describe('B-106 · the met flag carries its own evidence', () => {
   })
 
   it('leaves an omitted field alone and clears an explicit null title', async () => {
-    const client = await getClient(NORTHWIND)
+    const client = await getClient(GREENVALLEY)
     const titled = client.requirements.find((r) => r.title !== null)!
 
     const untouched = (await json<{ data: ClientDetail }>(
-      await patchRequirement(NORTHWIND, titled.id, { bodyHtml: '<p>New wording</p>' }),
+      await patchRequirement(GREENVALLEY, titled.id, { bodyHtml: '<p>New wording</p>' }),
     )).data.requirements.find((r) => r.id === titled.id)!
     expect(untouched.title).toBe(titled.title)
 
     const cleared = (await json<{ data: ClientDetail }>(
-      await patchRequirement(NORTHWIND, titled.id, { title: null }),
+      await patchRequirement(GREENVALLEY, titled.id, { title: null }),
     )).data.requirements.find((r) => r.id === titled.id)!
     expect(cleared.title).toBeNull()
     // And the body the previous request set is still there — partial by field.
@@ -990,11 +1000,11 @@ describe('B-106 · the met flag carries its own evidence', () => {
 
 describe('B-106 · removing a requirement takes nothing with it', () => {
   it('removes the row, keeps the gap, and answers 200 with the document', async () => {
-    const before = await getClient(NORTHWIND)
+    const before = await getClient(GREENVALLEY)
     const target = before.requirements[0]
     const survivor = before.requirements[1]
 
-    const res = await deleteRequirement(NORTHWIND, target.id)
+    const res = await deleteRequirement(GREENVALLEY, target.id)
     // 200 and not 204: every write here answers with the client so the page
     // never holds a tag for a client that has just changed.
     expect(res.status).toBe(200)
@@ -1012,11 +1022,11 @@ describe('B-106 · removing a requirement takes nothing with it', () => {
 
   it('404s a requirement id belonging to another client', async () => {
     const db = getDb()
-    const other = db.obClients.find((c) => c.id !== NORTHWIND && c.requirements.length > 0)!
+    const other = db.obClients.find((c) => c.id !== GREENVALLEY && c.requirements.length > 0)!
 
     // Resolved by BOTH ids, as every nested onboarding route is: a real
     // requirement under somebody else answers exactly as an invented one does.
-    const res = await deleteRequirement(NORTHWIND, other.requirements[0].id)
+    const res = await deleteRequirement(GREENVALLEY, other.requirements[0].id)
     expect(res.status).toBe(404)
   })
 })
@@ -1083,7 +1093,7 @@ const seedAttachment = (clientId: number, uploadedById: number, fileName: string
 
 describe('B-107 · a document becomes readable only after the scan', () => {
   it('gives a CLEAN row a download URL and a PENDING row none', async () => {
-    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
 
     const clean = rows.find((a) => a.scanStatus === 'CLEAN')!
     const pending = rows.find((a) => a.scanStatus === 'PENDING')!
@@ -1096,12 +1106,12 @@ describe('B-107 · a document becomes readable only after the scan', () => {
   })
 
   it('returns a PENDING row rather than hiding it', async () => {
-    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
     expect(rows.some((a) => a.scanStatus === 'PENDING')).toBe(true)
   })
 
   it('carries both kinds a client-owned file can be, and neither of the other two', async () => {
-    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
 
     // REFERENCE is a document staff attached for the client to read;
     // SUBMISSION is what the client sent in. It decides what the portal may do
@@ -1117,7 +1127,7 @@ describe('B-107 · a document becomes readable only after the scan', () => {
 
 describe('B-107 · removal keeps the row and sometimes says so', () => {
   it('shows a tombstone for a removal that was not the uploader own', async () => {
-    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const rows = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
     const tombstone = rows.find((a) => a.isDeleted)!
 
     // "File removed by X on date" — the supervisory removal the record is
@@ -1130,11 +1140,11 @@ describe('B-107 · removal keeps the row and sometimes says so', () => {
 
   it('hides the tombstone when the uploader removes their own file promptly', async () => {
     // Uploaded by user 1, which is who the mock signs every write as.
-    const id = seedAttachment(NORTHWIND, 1, 'wrong-client.pdf')
+    const id = seedAttachment(GREENVALLEY, 1, 'wrong-client.pdf')
 
-    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+    expect((await deleteAttachment(GREENVALLEY, id)).status).toBe(204)
 
-    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
     // Gone from the listing entirely. Somebody who drops the wrong PDF and
     // removes it ten seconds later has not done anything the client record
     // needs to remember, and a permanent note for every mis-drop would train
@@ -1142,7 +1152,7 @@ describe('B-107 · removal keeps the row and sometimes says so', () => {
     expect(after.map((a) => a.id)).not.toContain(id)
 
     // But the row itself survives — the object goes, the record does not.
-    const stored = getDb().obClients.find((c) => c.id === NORTHWIND)!.attachments
+    const stored = getDb().obClients.find((c) => c.id === GREENVALLEY)!.attachments
     expect(stored.find((a) => a.id === id)!.deletedAt).not.toBeNull()
   })
 
@@ -1150,42 +1160,41 @@ describe('B-107 · removal keeps the row and sometimes says so', () => {
     // Uploaded by user 5, removed by user 1 seconds later. Time alone would
     // hide this; the uploader comparison is what makes the rule right — a
     // supervisory removal is exactly the kind the record should keep.
-    const id = seedAttachment(NORTHWIND, 5, 'leaked-pricing.pdf')
+    const id = seedAttachment(GREENVALLEY, 5, 'leaked-pricing.pdf')
 
-    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+    expect((await deleteAttachment(GREENVALLEY, id)).status).toBe(204)
 
-    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(NORTHWIND))).data
+    const after = (await json<{ data: AttachmentRow[] }>(await listAttachments(GREENVALLEY))).data
     const tombstone = after.find((a) => a.id === id)!
     expect(tombstone.isDeleted).toBe(true)
     expect(tombstone.downloadUrl).toBeNull()
   })
 
   it('is idempotent and does not re-stamp who removed it', async () => {
-    const id = seedAttachment(NORTHWIND, 1, 'duplicate-delete.pdf')
+    const id = seedAttachment(GREENVALLEY, 1, 'duplicate-delete.pdf')
 
-    await deleteAttachment(NORTHWIND, id)
-    const row = getDb().obClients.find((c) => c.id === NORTHWIND)!.attachments
+    await deleteAttachment(GREENVALLEY, id)
+    const row = getDb().obClients.find((c) => c.id === GREENVALLEY)!.attachments
       .find((a) => a.id === id)!
     const firstStamp = row.deletedAt
 
     // 204 rather than 404: the caller asked for the file to be gone and it is
     // gone, and refusing would distinguish "already removed" from "never
     // existed" for anyone allowed to ask.
-    expect((await deleteAttachment(NORTHWIND, id)).status).toBe(204)
+    expect((await deleteAttachment(GREENVALLEY, id)).status).toBe(204)
     expect(row.deletedAt).toBe(firstStamp)
   })
 
   it('404s an attachment id belonging to another client', async () => {
-    const db = getDb()
-    const other = db.obClients.find(
-      (c) => c.id !== NORTHWIND && c.attachments.length > 0,
-    )!
+    // GreenValley holds the fixture's only documents, so the foreign row is
+    // seeded onto Sunrise for the occasion.
+    const theirs = seedAttachment(2, 1, 'sunrise-agreement.pdf')
 
     // Resolved by BOTH ids. These ids are drawn from a sequence shared with
     // every journey step and sign-off file, so a status that distinguished
     // "not yours" from "not there" would enumerate the module whole upload
     // history one integer at a time.
-    const res = await deleteAttachment(NORTHWIND, other.attachments[0].id)
+    const res = await deleteAttachment(GREENVALLEY, theirs)
     expect(res.status).toBe(404)
   })
 })
