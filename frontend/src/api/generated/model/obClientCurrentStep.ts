@@ -46,57 +46,34 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObClientStatus } from './obClientStatus';
-import type { ObClientRag } from './obClientRag';
-import type { ObGateStatus } from './obGateStatus';
-import type { ObClientCurrentStepProperty } from './obClientCurrentStepProperty';
 import type { ObProductRef } from './obProductRef';
-import type { UserRef } from './userRef';
-import type { ObContact } from './obContact';
-import type { ObClientLiveAt } from './obClientLiveAt';
 
 /**
- * The OB-03 list row. No PAN and no address: identity data belongs to the
-detail read, where the masking rule and its audit apply, and a list is
-the wrong place to leak it a page at a time.
+ * The OB-02/OB-03 caption "2 journeys · ERP step 4/8 · Data migration",
+as data: where the client's **first (primary) journey** currently
+stands. Follows `ObStepDot`'s idiom rather than reusing it — the dot
+carries `sequence`, which cannot honestly render as "step i of n"
+without the total, and adding the total to the dot would put a
+journey-level fact on every dot of every strip. Like the dot, it
+carries nothing the client portal must not see.
 
  */
-export interface ObClient {
-  id: number;
-  /** @maxLength 200 */
+export interface ObClientCurrentStep {
+  /** The primary journey's product, so the caption can name it. */
+  product?: ObProductRef;
   name: string;
-  onboardingDate: string;
-  status: ObClientStatus;
-  /** Worst across the client's **open** journeys. Null while every
-journey is locked — OB-03 renders that as "Prerequisites pending",
-which is a gate state and not a colour.
- */
-  rag?: ObClientRag;
-  gateStatus: ObGateStatus;
-  /** One per purchased product. */
-  journeyCount: number;
-  journeysComplete?: number;
-  /** Where the client's **first (primary) journey** stands — the OB-02
-RAG columns' and OB-03's caption "2 journeys · ERP step 4/8 ·
-Data migration". The first journey is the earliest instantiated
-live one, which is the wizard's first purchase and, in every
-deployment so far, the ERP journey the others depend on.
+  /**
+   * **1-based position** of this service within its journey's
+sequence — the `4` of "step 4/8". Deliberately not
+`ObStepDot.sequence`, which is the template's ordering key and is
+neither promised contiguous nor promised to start at 1.
 
-**Null while that journey is gate-locked, held behind a sibling,
-or finished** — nothing is running to name, and OB-03 already has
-words for those states ("Prerequisites pending", "Journeys
-complete"). Added as an optional field — CONVENTIONS.md §1, not
-breaking.
- */
-  currentStep?: ObClientCurrentStepProperty;
-  products?: ObProductRef[];
-  salesPerson?: UserRef;
-  primaryContact?: ObContact;
-  liveAt?: ObClientLiveAt;
-  /** Whether a `client_accounts` row exists for this client. **Not
-whether one should** — creation is always an explicit staff action
-(plan §2.3), so `false` is the ordinary state of a boarded client
-and not an error to reconcile.
- */
-  hasPortalLogin?: boolean;
+   * @minimum 1
+   */
+  stepIndex: number;
+  /**
+   * How many services the journey has — the `8` of "step 4/8".
+   * @minimum 1
+   */
+  stepTotal: number;
 }

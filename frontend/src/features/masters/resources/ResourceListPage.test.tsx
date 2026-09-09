@@ -284,7 +284,7 @@ describe('bulk activate and deactivate', () => {
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all resources on this page' }))
 
-    expect(screen.getByText(/7 selected/)).toBeInTheDocument()
+    expect(screen.getByText(/11 selected/)).toBeInTheDocument()
   })
 
   it('clears the selection when a filter changes', async () => {

@@ -87,6 +87,8 @@ export const listObClientsQueryParams = zod.object({
 
 export const listObClientsResponseDataItemNameMax = 200;
 
+
+
 export const listObClientsResponseDataItemPrimaryContactNameMax = 160;
 
 export const listObClientsResponseDataItemPrimaryContactDesignationMax = 120;
@@ -105,6 +107,16 @@ export const listObClientsResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -265,6 +277,8 @@ export const getObClientParams = zod.object({
 
 export const getObClientResponseDataNameMax = 200;
 
+
+
 export const getObClientResponseDataPrimaryContactNameMax = 160;
 
 export const getObClientResponseDataPrimaryContactDesignationMax = 120;
@@ -299,6 +313,16 @@ export const getObClientResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -463,6 +487,8 @@ export const updateObClientBody = zod.object({
 
 export const updateObClientResponseDataNameMax = 200;
 
+
+
 export const updateObClientResponseDataPrimaryContactNameMax = 160;
 
 export const updateObClientResponseDataPrimaryContactDesignationMax = 120;
@@ -497,6 +523,16 @@ export const updateObClientResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -726,6 +762,8 @@ export const updateObClientContactBody = zod.object({
 
 export const updateObClientContactResponseDataNameMax = 200;
 
+
+
 export const updateObClientContactResponseDataPrimaryContactNameMax = 160;
 
 export const updateObClientContactResponseDataPrimaryContactDesignationMax = 120;
@@ -760,6 +798,16 @@ export const updateObClientContactResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -910,6 +958,8 @@ export const removeObClientContactParams = zod.object({
 
 export const removeObClientContactResponseDataNameMax = 200;
 
+
+
 export const removeObClientContactResponseDataPrimaryContactNameMax = 160;
 
 export const removeObClientContactResponseDataPrimaryContactDesignationMax = 120;
@@ -944,6 +994,16 @@ export const removeObClientContactResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -1181,6 +1241,8 @@ export const updateObClientApplicationBody = zod.object({
 
 export const updateObClientApplicationResponseDataNameMax = 200;
 
+
+
 export const updateObClientApplicationResponseDataPrimaryContactNameMax = 160;
 
 export const updateObClientApplicationResponseDataPrimaryContactDesignationMax = 120;
@@ -1215,6 +1277,16 @@ export const updateObClientApplicationResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -1438,6 +1510,8 @@ export const updateObClientRequirementBody = zod.object({
 
 export const updateObClientRequirementResponseDataNameMax = 200;
 
+
+
 export const updateObClientRequirementResponseDataPrimaryContactNameMax = 160;
 
 export const updateObClientRequirementResponseDataPrimaryContactDesignationMax = 120;
@@ -1472,6 +1546,16 @@ export const updateObClientRequirementResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -1628,6 +1712,8 @@ export const deleteObClientRequirementHeader = zod.object({
 
 export const deleteObClientRequirementResponseDataNameMax = 200;
 
+
+
 export const deleteObClientRequirementResponseDataPrimaryContactNameMax = 160;
 
 export const deleteObClientRequirementResponseDataPrimaryContactDesignationMax = 120;
@@ -1662,6 +1748,16 @@ export const deleteObClientRequirementResponse = zod.object({
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "journeyCount": zod.number().describe('One per purchased product.'),
   "journeysComplete": zod.number().optional(),
+  "currentStep": zod.union([zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).optional().describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "name": zod.string(),
+  "stepIndex": zod.number().min(1).describe('\*\*1-based position\*\* of this service within its journey\'s\nsequence — the `4` of \"step 4\/8\". Deliberately not\n`ObStepDot.sequence`, which is the template\'s ordering key and is\nneither promised contiguous nor promised to start at 1.\n'),
+  "stepTotal": zod.number().min(1).describe('How many services the journey has — the `8` of \"step 4\/8\".')
+}).describe('The OB-02\/OB-03 caption \"2 journeys · ERP step 4\/8 · Data migration\",\nas data: where the client\'s \*\*first (primary) journey\*\* currently\nstands. Follows `ObStepDot`\'s idiom rather than reusing it — the dot\ncarries `sequence`, which cannot honestly render as \"step i of n\"\nwithout the total, and adding the total to the dot would put a\njourney-level fact on every dot of every strip. Like the dot, it\ncarries nothing the client portal must not see.\n'),zod.null()]).optional().describe('Where the client\'s \*\*first (primary) journey\*\* stands — the OB-02\nRAG columns\' and OB-03\'s caption \"2 journeys · ERP step 4\/8 ·\nData migration\". The first journey is the earliest instantiated\nlive one, which is the wizard\'s first purchase and, in every\ndeployment so far, the ERP journey the others depend on.\n\n\*\*Null while that journey is gate-locked, held behind a sibling,\nor finished\*\* — nothing is running to name, and OB-03 already has\nwords for those states (\"Prerequisites pending\", \"Journeys\ncomplete\"). Added as an optional field — CONVENTIONS.md §1, not\nbreaking.\n'),
   "products": zod.array(zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -3045,6 +3141,7 @@ export const listObDashboardCardItemsResponse = zod.object({
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }),zod.null()]).optional().describe('Null on a prerequisite, whose counterparty is the client rather\nthan an implementor. The grid\'s \"owner\" column is empty on those\nrows rather than filled with whoever will verify it — verification\nis not ownership, and naming a verifier here would make the\nworkload grid double-count them.\n'),
   "status": zod.string().describe('An `ObJourneyStepStatus` or an `ObPrereqTaskStatus` depending on\n`itemType`. A plain string rather than a union of the two enums:\nthis is a display column on a slide-over, and a generated client\nforced to discriminate between two enums to render a chip would\ngain nothing it could act on.\n'),
+  "blockedReason": zod.string().nullish().describe('The reason recorded when the service was blocked — the note the\nowner typed, falling back to the reason code\'s label when no note\nwas given. \*\*Non-null only when `status` is `BLOCKED`\*\*; absent on\nevery other status and on every prerequisite. The \"Where it\'s\nstuck\" table\'s Reason column reads it; `WAITING_ON_CLIENT` rows\nrender the fixed copy \"Waiting on client input\" instead, because a\nclient-attributed pause has a counterparty, not a culprit.\n\nSafe here where `ObStepDot` must not carry it: these rows are a\nstaff-only read behind the OB-02 board, never the portal\'s. Added\nas an optional field — CONVENTIONS.md §1, not breaking.\n'),
   "dueAt": zod.string().datetime({}),
   "isOverdue": zod.boolean().optional()
 }).describe('One row of an OB-02 slide-over. Deliberately a union across services\nand prerequisites — see `ObDashboardItemType`.\n')),

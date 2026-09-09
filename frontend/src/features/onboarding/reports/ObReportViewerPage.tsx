@@ -10,7 +10,27 @@ import { ObReportFilterBar } from './ObReportFilterBar'
 import { ObReportTable } from './ObReportTable'
 
 /**
- * B-122 · OB-10's parameterised viewer.
+ * The mockup's six tabs (`vReports()`), in its order, keyed to the
+ * catalogue's report keys. A tab renders only when the catalogue names its
+ * key as available — the vocabulary of what exists stays server-side, the
+ * mockup only contributes the short labels and the order.
+ */
+const MOCKUP_TABS: readonly { key: string; label: string }[] = [
+  { key: 'journey-funnel', label: 'Funnel' },
+  { key: 'tat-compliance', label: 'TAT compliance' },
+  { key: 'time-to-live', label: 'Time to live' },
+  { key: 'sales-pipeline', label: 'Sales pipeline' },
+  { key: 'stuck-and-aging', label: 'Stuck & aging' },
+  { key: 'signoff-pending', label: 'Sign-offs pending' },
+]
+
+/**
+ * B-122 · OB-10's parameterised viewer, aligned to the mockup's reports
+ * screen: a "Reports" page head with the pre-aggregated-summaries caption and
+ * the export button, a tab row over the six core reports, and the current
+ * report's body in a card beneath. The hub + per-report routing structure is
+ * kept — each tab is a link to `/onboarding/reports/{key}`, so a tab is a
+ * bookmarkable report exactly as before.
  *
  * <h2>Filter state lives in the URL</h2>
  *
@@ -56,6 +76,9 @@ export function ObReportViewerPage() {
     ownerUserId: ownerUserId ? Number(ownerUserId) : undefined,
     rag: (rag as ObRag | null) ?? undefined,
   })
+
+  const availableReports = catalogue.data?.data.reports.filter((r) => r.available) ?? []
+  const tabs = MOCKUP_TABS.filter((tab) => availableReports.some((r) => r.key === tab.key))
 
   if (catalogue.isLoading) {
     return <div className="p-6 text-sm text-content-muted">Loading…</div>
@@ -104,65 +127,98 @@ export function ObReportViewerPage() {
     <div className="p-6">
       <BackLink />
 
-      <header className="mb-4">
-        <h1 className="text-h2 font-semibold text-content">{descriptor.title}</h1>
-        {descriptor.description && (
-          <p className="mt-1 text-sm text-content-muted">{descriptor.description}</p>
-        )}
+      {/* ── the mockup's page head: Reports · caption · export ─────────── */}
+      <header className="mb-4 flex flex-wrap items-start gap-3">
+        <div>
+          <h1 className="text-h2 font-semibold text-content">Reports</h1>
+          <p className="mt-1 text-caption text-content-muted">
+            All figures from pre-aggregated summaries — dashboards never run live counts.
+          </p>
+        </div>
+        <div className="ml-auto">
+          <ObReportExportButtons reportKey={descriptor.key} params={params} />
+        </div>
       </header>
 
-      <ObReportFilterBar filters={descriptor.filters} />
+      {/* ── the mockup's tab row over the six core reports ─────────────── */}
+      {tabs.length > 0 && (
+        <nav
+          role="tablist"
+          aria-label="Onboarding reports"
+          className="mb-4 flex flex-wrap gap-1 border-b border-border"
+        >
+          {tabs.map((tab) => {
+            const active = tab.key === reportKey
+            return (
+              <Link
+                key={tab.key}
+                to={`/onboarding/reports/${tab.key}`}
+                role="tab"
+                aria-selected={active}
+                className={
+                  '-mb-px rounded-t-control border-b-2 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary '
+                  + (active
+                    ? 'border-primary font-medium text-primary'
+                    : 'border-transparent text-content-muted hover:bg-subtle hover:text-content')
+                }
+              >
+                {tab.label}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
 
-      {/*
-        Below the filters, because an export is of what the filters currently
-        select — putting it in the header would suggest it exports the report
-        rather than this view of it.
-      */}
-      <div className="mb-4">
-        <ObReportExportButtons reportKey={descriptor.key} params={params} />
+      <div className="rounded-card border border-border bg-surface p-5">
+        <h2 className="text-h3 font-semibold text-content">{descriptor.title}</h2>
+        {descriptor.description && (
+          <p className="mb-3 mt-0.5 text-caption text-content-muted">{descriptor.description}</p>
+        )}
+
+        <ObReportFilterBar filters={descriptor.filters} />
+
+        {appliedScope && (
+          <p className="mb-4 flex items-center gap-2 text-caption text-content-muted">
+            <Info className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Showing {appliedScope}.
+          </p>
+        )}
+
+        {report.isLoading && <p className="text-sm text-content-muted">Running the report…</p>}
+
+        {report.isError && (
+          <p role="alert" className="text-sm text-danger-text">
+            This report could not be run. Check the filters, or refresh to try again.
+          </p>
+        )}
+
+        {!report.isLoading && !report.isError && rows.length === 0 && (
+          <EmptyState
+            title="Nothing to show"
+            description="No data was recorded for this filter and date range."
+          />
+        )}
+
+        {rows.length > 0 && (
+          <>
+            {/*
+              Chart AND table, never the chart alone — a chart cannot be read for
+              an exact value, and this is the screen people open to get a number
+              they intend to quote. A table-only report (chart === null) simply
+              renders no chart.
+            */}
+            {descriptor.chart && (
+              <ObReportChart
+                chart={descriptor.chart}
+                columns={columns}
+                rows={rows}
+                title={descriptor.title}
+              />
+            )}
+            <ObReportTable columns={columns} rows={rows} />
+          </>
+        )}
       </div>
-
-      {appliedScope && (
-        <p className="mb-4 flex items-center gap-2 text-caption text-content-muted">
-          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          Showing {appliedScope}.
-        </p>
-      )}
-
-      {report.isLoading && <p className="text-sm text-content-muted">Running the report…</p>}
-
-      {report.isError && (
-        <p role="alert" className="text-sm text-danger-text">
-          This report could not be run. Check the filters, or refresh to try again.
-        </p>
-      )}
-
-      {!report.isLoading && !report.isError && rows.length === 0 && (
-        <EmptyState
-          title="Nothing to show"
-          description="No data was recorded for this filter and date range."
-        />
-      )}
-
-      {rows.length > 0 && (
-        <>
-          {/*
-            Chart AND table, never the chart alone — a chart cannot be read for
-            an exact value, and this is the screen people open to get a number
-            they intend to quote. A table-only report (chart === null) simply
-            renders no chart.
-          */}
-          {descriptor.chart && (
-            <ObReportChart
-              chart={descriptor.chart}
-              columns={columns}
-              rows={rows}
-              title={descriptor.title}
-            />
-          )}
-          <ObReportTable columns={columns} rows={rows} />
-        </>
-      )}
     </div>
   )
 }

@@ -1207,6 +1207,16 @@ const USERS: User[] = [
   ['Karan Bose', 'karan', 'DEPLOYMENT', 'EMP-005', 2, 'Platform', 'Release Engineer', [3], true, null],
   ['Priya Nair', 'priya', 'SUPPORT', 'EMP-006', 2, 'Support', 'Support Lead', [1, 2, 3], true, '2026-08-11T03:20:00.000Z'],
   ['Sunil Menon', 'sunil', 'DEVELOPER', 'EMP-007', 2, 'Engineering', 'Engineer', [2], false, '2026-05-02T09:10:00.000Z'],
+  // The onboarding implementors (with Priya Nair above) — the OB-02 workload
+  // grid's population. On no ticketing project on purpose: they exist for the
+  // onboarding module, and putting them on CRM/PAY would quietly change every
+  // Team-tab and assignee-picker fixture in the other module.
+  ['Kavya Sharma', 'kavya', 'SUPPORT', 'EMP-008', 2, 'Onboarding', 'Implementation Lead', [], true, '2026-08-19T05:10:00.000Z'],
+  ['Rohan Gupta', 'rohan', 'SUPPORT', 'EMP-009', 1, 'Onboarding', 'Implementation Engineer', [], true, '2026-08-18T10:40:00.000Z'],
+  ['Vikram Mehta', 'vikram', 'PM', 'EMP-010', 1, 'Onboarding', 'Onboarding Manager', [], true, '2026-08-19T11:25:00.000Z'],
+  // Nikhil is the bench: he owns nothing yet, which the workload grid must
+  // render as "— no work yet" rather than as a judgement.
+  ['Nikhil Joshi', 'nikhil', 'SUPPORT', 'EMP-011', 2, 'Onboarding', 'Implementation Engineer', [], true, '2026-08-17T09:05:00.000Z'],
 ].map(([displayName, username, role, employeeCode, mgr, department, designation, projectIds, isActive, lastLoginAt], i) => ({
   id: i + 1,
   displayName: displayName as string,
@@ -1924,7 +1934,10 @@ const TEMPLATE_MAPPINGS: TemplateMappingRow[] = [
  * nothing. A fixture where every product is bookable never exercises that.
  */
 const OB_PRODUCTS: ObProduct[] = [
-  { id: 1, code: 'ERP', name: 'ERP Suite', isActive: true, hasActiveTemplate: true, totalTatDays: 24 },
+  // The catalogue's TAT still sums the *active template* (24d, template 1);
+  // the seeded journeys were instantiated from an earlier 8-step revision
+  // totalling 20d — pinned snapshots, exactly what a revised template leaves.
+  { id: 1, code: 'ERP', name: 'EduTrack ERP', isActive: true, hasActiveTemplate: true, totalTatDays: 24 },
   { id: 2, code: 'BIOMETRIC', name: 'Biometric Attendance', isActive: true, hasActiveTemplate: false, totalTatDays: null },
   { id: 3, code: 'LMS', name: 'Learning Management', isActive: false, hasActiveTemplate: true, totalTatDays: 12 },
   // B-104 · the fourth product exists so that "a client buys another product"
@@ -1944,191 +1957,432 @@ const OB_PRODUCTS: ObProduct[] = [
 ];
 
 /**
- * Three clients, chosen so the three states OB-03 has to render are all
- * present on first open rather than reachable only by editing the fixture:
+ * The OB-02 world, mirroring `docs/prototype/onboarding.html`'s demo data —
+ * eight clients anchored at **20 Aug 2026** (`onboardingAdmin.ts`'s
+ * `COMPUTED_AT`), chosen so every dashboard section renders the mockup's
+ * numbers rather than an empty state:
  *
- * - **Northwind** is past the gate and running — `rag` is a real colour, one
- *   service breached and one waiting on the client, so the RED roll-up and the
- *   paused clock are both visible.
- * - **Acme** is still `LOCKED`. Its `rag` is **null**, not GREEN: nothing is
- *   running to colour, and OB-03 renders that as "Prerequisites pending". A
- *   fixture that coloured it green would make the null case unreachable and
- *   the empty state untested.
- * - **Contoso** is `LIVE`, so the go-live flip has something to have produced.
+ * - **GreenValley** is `LIVE` since 07 Aug — the Live tile's 1.
+ * - **Sunrise** is RED the loud way: "Data migration" breached its 18 Aug due
+ *   date (132% of TAT), carries the one open client escalation, and is the
+ *   Delayed Projects grid's 2-day row.
+ * - **Trinity** is RED the quiet way: "Configuration & branding" BLOCKED on
+ *   the client's design vendor — the "Where it's stuck" table's reason row and
+ *   the grid's 1-day row.
+ * - **Horizon** is the AMBER client (training at 78% of TAT, due today) with a
+ *   second journey held behind the first — plan §5.5's combination.
+ * - **Bluebell** is WAITING_ON_CLIENT at "Requirements confirmation" — the
+ *   stuck table's other row, clock paused, so its RAG stays GREEN.
+ * - **Nalanda** and **Cambridge** are the green remainder (Nalanda's current
+ *   step is due today; Cambridge has a sign-off out for UAT).
+ * - **Little Scholars** is still `LOCKED` behind prerequisites — rag **null**,
+ *   in no RAG column, and its four unfinished prerequisite tasks (due 18 Aug)
+ *   are the overdue drill's other four items.
  *
- * Northwind buys two products and holds the second behind the first, which is
- * the service-level dependency of plan §5.5 — `heldByJourneyId` set while
- * `gateStatus` is already OPEN, the combination most likely to be modelled
- * wrongly as one field.
+ * Step ids are `journeyId * 10 + sequence` and journey ids are
+ * `clientId * 10 + n`, so a failing assertion names its row.
+ *
+ * Ravi (user 3, the mock's signed-in user) is **backup owner** on Trinity's
+ * blocked step and Bluebell's waiting step — `ObStepOwnership.mayAct` accepts
+ * a backup, so the C-104 lifecycle routes stay exercisable without swapping
+ * the signed-in user, while the *display* owner is the implementor the
+ * workload grid names.
  */
+interface ObStepSeed {
+  status?: ObStep['status'];
+  usedHours?: number;
+  dueAt?: string;
+  ownerUserId?: number;
+  backupOwnerUserId?: number;
+  blockedReasonCode?: string;
+  blockedNote?: string;
+  items?: ObStepItem[];
+  communications?: ObStepCommunicationRow[];
+}
+
+const ERP_STEP_TEMPLATE = [
+  { seq: 1, name: 'Kickoff call', tat: 1, owner: 9, dep: null as number | null },
+  { seq: 2, name: 'Requirements confirmation', tat: 2, owner: 6, dep: 1 },
+  { seq: 3, name: 'Account & environment setup', tat: 3, owner: 8, dep: 2 },
+  { seq: 4, name: 'Data migration', tat: 5, owner: 8, dep: 3 },
+  // Depends on step 3, not 4 — runs in parallel with the migration, which is
+  // what keeps Sunrise honest: one service breached while a sibling runs fine.
+  { seq: 5, name: 'Configuration & branding', tat: 3, owner: 6, dep: 3 },
+  { seq: 6, name: 'Admin & user training', tat: 2, owner: 6, dep: 5 },
+  { seq: 7, name: 'UAT & issue closure', tat: 3, owner: 8, dep: 6 },
+  { seq: 8, name: 'Go-live sign-off', tat: 1, owner: 10, dep: 7 },
+];
+
+const BIO_STEP_TEMPLATE = [
+  { seq: 1, name: 'Kickoff & site survey', tat: 1, owner: 9, dep: null as number | null },
+  { seq: 2, name: 'Device dispatch & installation', tat: 5, owner: 8, dep: 1 },
+  { seq: 3, name: 'Device configuration & ERP sync', tat: 3, owner: 8, dep: 2 },
+  { seq: 4, name: 'User enrollment', tat: 3, owner: 6, dep: 3 },
+  { seq: 5, name: 'Go-live sign-off', tat: 1, owner: 10, dep: 4 },
+];
+
+/** Steps 1..`doneThrough` DONE, the rest PENDING, with per-sequence overrides. */
+function mkObSteps(
+  journeyId: number,
+  template: typeof ERP_STEP_TEMPLATE,
+  doneThrough: number,
+  overrides: Record<number, ObStepSeed> = {},
+): ObStep[] {
+  return template.map((t) => {
+    const done = t.seq <= doneThrough;
+    const seed = overrides[t.seq] ?? {};
+    return {
+      id: journeyId * 10 + t.seq,
+      sequence: t.seq,
+      name: t.name,
+      status: seed.status ?? (done ? 'DONE' : 'PENDING'),
+      tatDays: t.tat,
+      usedHours: seed.usedHours ?? (done ? t.tat * 7 : 0),
+      dependsOnStepId: t.dep == null ? null : journeyId * 10 + t.dep,
+      ownerUserId: seed.ownerUserId ?? t.owner,
+      ...(seed.backupOwnerUserId != null ? { backupOwnerUserId: seed.backupOwnerUserId } : {}),
+      ...(seed.dueAt ? { dueAt: seed.dueAt } : {}),
+      ...(seed.blockedReasonCode ? { blockedReasonCode: seed.blockedReasonCode } : {}),
+      ...(seed.blockedNote ? { blockedNote: seed.blockedNote } : {}),
+      ...(seed.items ? { items: seed.items } : {}),
+      ...(seed.communications ? { communications: seed.communications } : {}),
+    };
+  });
+}
+
+const obComm = (
+  id: number,
+  channel: ObStepCommunicationRow['channel'],
+  occurredAt: string,
+  summary: string,
+  by: { staffId?: number; clientName?: string; internal?: boolean },
+): ObStepCommunicationRow => ({
+  id,
+  channel,
+  occurredAt,
+  summary,
+  isClientVisible: !by.internal,
+  authorType: by.staffId != null ? 'STAFF' : by.clientName ? 'CLIENT' : 'SYSTEM',
+  recordedById: by.staffId ?? null,
+  ...(by.clientName ? { authorName: by.clientName } : {}),
+  createdAt: occurredAt,
+});
+
 const OB_CLIENTS: ObClient[] = [
   {
-    id: 1, name: 'Northwind Technologies Pvt Ltd', description: 'Mid-market ERP rollout across three campuses.',
-    onboardingDate: '2026-07-14', pan: 'AABCN1234M', address: 'Baner, Pune 411045',
-    licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
+    id: 1, name: 'GreenValley International School', description: 'K-12 chain, 3 campuses, moving off spreadsheets.',
+    onboardingDate: '2026-06-12', pan: 'AAGCG1204F', address: '14 Ridge Rd, Aundh, Pune 411007',
+    licenseType: 'Enterprise · Annual', salesPersonId: 9, status: 'LIVE',
+    liveAt: '2026-08-07T11:40:00.000Z',
     hasPortalLogin: true,
     contacts: [
-      { id: 1, name: 'Meena Raghavan', designation: 'IT Head', email: 'meena@northwind.example', phone: '+91 98200 11223', whatsappOptIn: true, whatsappOptInAt: '2026-07-14T10:00:00Z', whatsappOptInSource: 'VERBAL', isPrimary: true, isActive: true },
-      { id: 2, name: 'Sanjay Bose', designation: 'Finance Lead', email: 'sanjay@northwind.example', phone: null, whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: false, isActive: true },
+      { id: 1, name: 'Deepa Kulkarni', designation: 'Director of Operations', email: 'deepa@greenvalley.example', phone: '+91 98220 11223', whatsappOptIn: true, whatsappOptInAt: '2026-06-12T10:00:00.000Z', whatsappOptInSource: 'VERBAL', isPrimary: true, isActive: true },
+      { id: 2, name: 'Prakash Rane', designation: 'Finance Lead', email: 'prakash@greenvalley.example', phone: null, whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: false, isActive: true },
       // The pre-capture row. Consent on file, basis unknown — B-103's backfill
       // value, and the one a screen has to render as 'ask again' rather than as
       // an ordinary consent. Inactive as well, so OB-05's panel has a departed
       // SPOC to show as removed and to reactivate.
-      { id: 5, name: 'Farida Qureshi', designation: 'Former IT Head', email: 'farida@northwind.example', phone: null, whatsappOptIn: true, whatsappOptInAt: '2026-05-02T09:30:00Z', whatsappOptInSource: 'UNRECORDED', isPrimary: false, isActive: false },
+      { id: 3, name: 'Farida Qureshi', designation: 'Former IT Head', email: 'farida@greenvalley.example', phone: null, whatsappOptIn: true, whatsappOptInAt: '2026-05-02T09:30:00.000Z', whatsappOptInSource: 'UNRECORDED', isPrimary: false, isActive: false },
     ],
     applications: [
-      { id: 1, productId: 1, licenseType: 'Subscription', units: 250, licenseStart: '2026-08-01', licenseEnd: '2027-07-31' },
-      { id: 2, productId: 2, licenseType: 'Perpetual', units: 8, licenseStart: '2026-08-01', licenseEnd: null },
+      { id: 1, productId: 1, licenseType: 'Enterprise', units: 120, licenseStart: '2026-06-15', licenseEnd: '2027-06-14' },
+      { id: 2, productId: 2, licenseType: 'Add-on', units: 8, licenseStart: '2026-06-15', licenseEnd: null },
     ],
     requirements: [
-      { id: 1, sequence: 0, title: 'Single sign-on', bodyHtml: '<p>Against their <strong>Azure AD</strong> tenant</p>', bodyText: 'Against their Azure AD tenant', isMet: true, metAt: '2026-08-14T11:20:00Z', metById: 3, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: '2026-08-14T11:20:00Z' },
-      { id: 2, sequence: 1, title: 'Tally migration', bodyHtml: '<p>Data migration from Tally for FY25-26</p>', bodyText: 'Data migration from Tally for FY25-26', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-02T09:00:00Z', updatedAt: null },
+      { id: 1, sequence: 0, title: 'Single sign-on', bodyHtml: '<p>Against their <strong>Google Workspace</strong> tenant</p>', bodyText: 'Against their Google Workspace tenant', isMet: true, metAt: '2026-07-14T11:20:00.000Z', metById: 6, createdById: 9, createdAt: '2026-06-13T09:00:00.000Z', updatedAt: '2026-07-14T11:20:00.000Z' },
+      { id: 2, sequence: 1, title: 'Records migration', bodyHtml: '<p>Migrate six years of student records</p>', bodyText: 'Migrate six years of student records', isMet: false, metAt: null, metById: null, createdById: 9, createdAt: '2026-06-13T09:00:00.000Z', updatedAt: null },
     ],
     attachments: [
       // The ordinary case: filed, scanned, downloadable.
-      { id: 1, fileName: 'northwind-msa-signed.pdf', contentType: 'application/pdf', sizeBytes: 412_338, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 5, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-07-15T10:05:00') },
+      { id: 1, fileName: 'greenvalley-msa-signed.pdf', contentType: 'application/pdf', sizeBytes: 412_338, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 9, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-06-13T10:05:00') },
       // Seconds old and not yet vouched for. The card has to render this
       // without a download action and without calling it an error — it is the
       // common state right after an upload, not a failure.
-      { id: 2, fileName: 'campus-network-diagram.png', contentType: 'image/png', sizeBytes: 88_120, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'PENDING', deletedAt: null, deletedById: null, createdAt: iso('2026-09-02T16:41:00') },
+      { id: 2, fileName: 'campus-network-diagram.png', contentType: 'image/png', sizeBytes: 88_120, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 6, scanStatus: 'PENDING', deletedAt: null, deletedById: null, createdAt: iso('2026-08-18T16:41:00') },
       // A document staff attached FOR the client, not one the client sent.
-      { id: 3, fileName: 'data-migration-signoff-form.pdf', contentType: 'application/pdf', sizeBytes: 61_004, kind: 'REFERENCE', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-08-26T09:18:00') },
+      { id: 3, fileName: 'data-migration-signoff-form.pdf', contentType: 'application/pdf', sizeBytes: 61_004, kind: 'REFERENCE', uploadedByType: 'STAFF', uploadedById: 6, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-07-02T09:18:00') },
       // A visible tombstone: removed by somebody who did not upload it, which
       // is the supervisory act the record is supposed to keep. Nothing else in
       // this fixture makes the card render "removed by X on date".
-      { id: 4, fileName: 'internal-pricing-notes.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: 24_880, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 5, scanStatus: 'CLEAN', deletedAt: iso('2026-08-30T12:15:00'), deletedById: 3, createdAt: iso('2026-08-30T11:55:00') },
+      { id: 4, fileName: 'internal-pricing-notes.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: 24_880, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 9, scanStatus: 'CLEAN', deletedAt: iso('2026-07-30T12:15:00'), deletedById: 6, createdAt: iso('2026-07-30T11:55:00') },
+      { id: 5, fileName: 'go-live-acceptance.pdf', contentType: 'application/pdf', sizeBytes: 233_190, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 6, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-08-07T11:45:00') },
     ],
     journeys: [
       {
-        id: 1, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
-        steps: [
-          // C-112 · the stitched view needs entries to stitch. Spread across
-          // two journeys, all three author types and both visibilities, so
-          // `listObClientCommunications` renders something recognisable and
-          // its `clientVisibleOnly` filter has both answers to give.
-          { id: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 19, dependsOnStepId: null,
-            communications: [
-              { id: 1, channel: 'MEETING', occurredAt: iso('2026-08-04T10:30:00'), summary: 'Kickoff call with Meena and Sanjay. Scope agreed, SSO confirmed in phase 1.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-04T15:10:00') },
-            ] },
-          { id: 2, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 26.5, dependsOnStepId: 1 },
-          // C-104 · owned by user 3 (Ravi, the default currentUserId) so the
-          // lifecycle routes have a caller who passes ObStepOwnership.mayAct
-          // without swapping the mock's signed-in user.
-          { id: 3, sequence: 3, name: 'Data Migration', status: 'BLOCKED', tatDays: 8, usedHours: 71, dependsOnStepId: 2, ownerUserId: 3, blockedReasonCode: 'client-unresponsive', blockedNote: 'Awaiting the signed data-migration sign-off from Northwind.',
-            // A-118 · the only step here with a Task List. Nothing in this
-            // fixture had one, which left OB-06 with no checklist to draw and
-            // the completion gate with nothing to refuse — so the one case
-            // PHASE-2-BUILD-PLAN §3 #4 rules on (a client accepting a service
-            // whose own gate has not been met) was unreachable in the mock.
-            items: [
-              { id: 31, sequence: 1, label: 'Staff master reconciled', isMandatory: true, isDone: true, doneAt: '2026-08-28T09:00:00.000Z', doneById: 3 },
-              { id: 32, sequence: 2, label: 'Student master reconciled', isMandatory: true, isDone: false, doneAt: null, doneById: null },
-              { id: 33, sequence: 3, label: 'Legacy ledger archived', isMandatory: false, isDone: false, doneAt: null, doneById: null },
-            ],
-            communications: [
-              { id: 2, channel: 'EMAIL', occurredAt: iso('2026-08-26T09:15:00'), summary: 'Sent the data-migration sign-off pack to Sanjay. Chasing on Friday if nothing back.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-26T09:20:00') },
-              // Internal, and it must stay internal — the portal read filters
-              // on exactly this flag.
-              { id: 3, channel: 'OTHER', occurredAt: iso('2026-08-27T16:00:00'), summary: 'Their Tally export is missing FY25 opening balances. Do not raise it until we have checked our own importer.', isClientVisible: false, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-08-27T16:02:00') },
-              // Written through the portal (CP-03), so no staff user at all.
-              { id: 4, channel: 'COMMENT', occurredAt: iso('2026-08-29T11:40:00'), summary: 'Finance is still reviewing. We should have the signed pack to you early next week.', isClientVisible: true, authorType: 'CLIENT', recordedById: null, authorName: 'Sanjay Bose', createdAt: iso('2026-08-29T11:40:00') },
-            ] },
-          { id: 4, sequence: 4, name: 'User Training', status: 'WAITING_ON_CLIENT', tatDays: 5, usedHours: 12, dependsOnStepId: null, ownerUserId: 3,
-            communications: [
-              // Nobody typed this one. `recordedBy` is null and `authorName`
-              // falls back to "System" on the wire.
-              { id: 5, channel: 'SYSTEM', occurredAt: iso('2026-09-01T08:00:00'), summary: 'Service paused — waiting on the client. The TAT clock is frozen.', isClientVisible: false, authorType: 'SYSTEM', recordedById: null, createdAt: iso('2026-09-01T08:00:00') },
-            ] },
-          // No dependency check yet (C-119's own task) — startable today even
-          // though its nominal dependency (step 3) is still BLOCKED, exactly
-          // as ObJourneyStepLifecycleService.start actually behaves.
-          { id: 5, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 3, ownerUserId: 3 },
-        ],
+        id: 11, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-06-15T09:00:00.000Z', completedAt: '2026-08-07T11:40:00.000Z',
+        steps: mkObSteps(11, ERP_STEP_TEMPLATE, 8, {
+          // C-112 · the stitched view needs entries to stitch: all three author
+          // types and both visibilities, across two journeys, so
+          // `listObClientCommunications` renders something recognisable and its
+          // `clientVisibleOnly` filter has both answers to give.
+          1: { communications: [
+            obComm(1, 'MEETING', iso('2026-06-16T10:30:00'), 'Kickoff call with Deepa and Prakash. Scope agreed, SSO confirmed in phase 1.', { staffId: 9 }),
+          ] },
+          // B-108 · the one backup owner on a finished journey: user 4 owns
+          // nothing anywhere, so `ownerId=4` returning exactly this client is
+          // the whole backup-owner-filter assertion.
+          3: { backupOwnerUserId: 4 },
+          4: { communications: [
+            obComm(2, 'EMAIL', iso('2026-07-06T09:15:00'), 'Sent the data-migration sign-off pack to Prakash. Chasing on Friday if nothing back.', { staffId: 8 }),
+            // Internal, and it must stay internal — the portal read filters on
+            // exactly this flag.
+            obComm(3, 'OTHER', iso('2026-07-07T16:00:00'), 'Their export was missing FY25 opening balances. Do not raise it until we have checked our own importer.', { staffId: 8, internal: true }),
+            // Written through the portal (CP-03), so no staff user at all.
+            obComm(4, 'COMMENT', iso('2026-07-09T11:40:00'), 'Finance has reviewed. The signed pack is on its way to you.', { clientName: 'Prakash Rane' }),
+          ] },
+          6: { communications: [
+            // Nobody typed this one. `recordedBy` is null and `authorName`
+            // falls back to "System" on the wire.
+            obComm(5, 'SYSTEM', iso('2026-07-24T08:00:00'), 'Training attendance sheet filed. All sub-tasks answered.', { internal: true }),
+          ] },
+        }),
       },
       {
-        // Held behind the ERP journey — bought, instantiated, past the gate,
-        // and still not started. Plan §5.5. Owned by user 3 too, so a start
-        // attempt here fails on JourneyNotOpenException specifically, not on
-        // ownership.
-        id: 2, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 1,
-        steps: [
-          // The second journey's own entry — the one that makes the stitched
-          // view different from a step's timeline.
-          { id: 6, sequence: 1, name: 'Device Rollout', status: 'PENDING', tatDays: 6, usedHours: 0, dependsOnStepId: null, ownerUserId: 3,
-            communications: [
-              { id: 6, channel: 'CALL', occurredAt: iso('2026-09-02T14:00:00'), summary: 'Meena asked whether biometric devices can ship before the ERP go-live. Told her yes, subject to the gate.', isClientVisible: true, authorType: 'STAFF', recordedById: 3, createdAt: iso('2026-09-02T14:25:00') },
-            ] },
-          { id: 7, sequence: 2, name: 'Attendance Policy Mapping', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: 6 },
-        ],
+        id: 12, productId: 2, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-07-10T09:00:00.000Z', completedAt: '2026-08-07T11:40:00.000Z',
+        steps: mkObSteps(12, BIO_STEP_TEMPLATE, 5, {
+          1: { communications: [
+            obComm(6, 'CALL', iso('2026-07-10T14:00:00'), 'Deepa confirmed device counts for all three campuses before dispatch.', { staffId: 9 }),
+          ] },
+        }),
       },
     ],
-    createdById: 5, createdAt: iso('2026-07-14T09:20:00'),
+    createdById: 9, createdAt: iso('2026-06-12T09:20:00'),
   },
   {
-    id: 2, name: 'Acme Private Limited', description: null,
-    onboardingDate: '2026-08-28', pan: 'AAACA9876Q', address: 'Andheri East, Mumbai 400069',
-    licenseType: 'Subscription', salesPersonId: 5, status: 'ONBOARDING', liveAt: null,
+    id: 2, name: 'Sunrise EdTech Pvt Ltd', description: 'Test-prep startup, 40 counsellors.',
+    onboardingDate: '2026-07-28', pan: 'AASCS8821K', address: '77 Residency Rd, Bengaluru 560025',
+    licenseType: 'Professional · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
     contacts: [
-      { id: 3, name: 'Priya Nair', designation: 'Operations Manager', email: 'priya@acme.example', phone: '+91 99300 44556', whatsappOptIn: true, whatsappOptInAt: '2026-08-03T11:15:00Z', whatsappOptInSource: 'EMAIL', isPrimary: true, isActive: true },
+      { id: 4, name: 'Arjun Shetty', designation: 'Head of Operations', email: 'arjun@sunrise-ed.example', phone: '+91 98450 77812', whatsappOptIn: true, whatsappOptInAt: '2026-07-28T11:15:00.000Z', whatsappOptInSource: 'EMAIL', isPrimary: true, isActive: true },
     ],
     applications: [
-      { id: 3, productId: 1, licenseType: 'Subscription', units: 40, licenseStart: '2026-09-01', licenseEnd: '2027-08-31' },
+      { id: 3, productId: 1, licenseType: 'Professional', units: 40, licenseStart: '2026-08-01', licenseEnd: '2027-07-31' },
+    ],
+    requirements: [
+      { id: 3, sequence: 0, title: null, bodyHtml: '<p>Bulk import of 12k leads; WhatsApp counselling follow-ups</p>', bodyText: 'Bulk import of 12k leads; WhatsApp counselling follow-ups', isMet: false, metAt: null, metById: null, createdById: 9, createdAt: '2026-07-28T10:00:00.000Z', updatedAt: null },
+    ],
+    attachments: [],
+    journeys: [
+      {
+        id: 21, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-07-28T09:00:00.000Z',
+        steps: mkObSteps(21, ERP_STEP_TEMPLATE, 3, {
+          // The breach: 132% of a 45-hour TAT, due 18 Aug and missed — the RED
+          // that drives the overdue tile, the breach table and the delayed grid.
+          4: {
+            status: 'IN_PROGRESS', usedHours: 59.4, dueAt: '2026-08-18T11:00:00.000Z',
+            communications: [
+              obComm(7, 'CALL', iso('2026-08-16T10:12:00'), 'Walked Arjun through the lead-import template; he will resend the corrected CSV.', { staffId: 8 }),
+              obComm(8, 'EMAIL', iso('2026-08-18T09:30:00'), 'Reminder sent — migration file still has 214 rows failing phone validation.', { staffId: 8 }),
+              obComm(9, 'SYSTEM', iso('2026-08-19T16:05:00'), 'TAT breach alert delivered to owner and manager.', { internal: true }),
+              obComm(10, 'ESCALATION', iso('2026-08-19T17:40:00'), 'Migration delay is holding our launch date — please expedite.', { clientName: 'Arjun Shetty' }),
+            ],
+          },
+          // Runs in parallel with the migration and is fine — one client, one
+          // red service, one green one.
+          5: { status: 'IN_PROGRESS', usedHours: 5.4, dueAt: '2026-08-22T17:00:00.000Z' },
+        }),
+      },
+    ],
+    createdById: 9, createdAt: iso('2026-07-28T14:05:00'),
+  },
+  {
+    id: 3, name: 'Horizon Academy', description: 'CBSE senior secondary, 2,100 students.',
+    onboardingDate: '2026-08-03', pan: 'AAHCH3310Q', address: '5-9-22 Banjara Hills, Hyderabad 500034',
+    licenseType: 'Professional · Annual', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 5, name: 'Fatima Begum', designation: 'Principal', email: 'fatima@horizon.example', phone: '+91 90000 44556', whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: true, isActive: true },
+    ],
+    applications: [
+      { id: 4, productId: 1, licenseType: 'Professional', units: 60, licenseStart: '2026-08-05', licenseEnd: '2027-08-04' },
+      { id: 5, productId: 2, licenseType: 'Add-on', units: 4, licenseStart: null, licenseEnd: null },
     ],
     requirements: [],
     attachments: [],
     journeys: [
       {
-        id: 3, productId: 1, gateStatus: 'LOCKED', heldByJourneyId: null,
-        steps: [
-          // C-104 · owned by user 3 too, so a start attempt here fails on
-          // JourneyNotOpenException (gate LOCKED) specifically, not on ownership.
-          { id: 8, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'PENDING', tatDays: 3, usedHours: 0, dependsOnStepId: null, ownerUserId: 3 },
-          { id: 9, sequence: 2, name: 'Environment Provisioning', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 8 },
-          { id: 10, sequence: 3, name: 'Data Migration', status: 'PENDING', tatDays: 8, usedHours: 0, dependsOnStepId: 9 },
-          { id: 11, sequence: 4, name: 'User Training', status: 'PENDING', tatDays: 5, usedHours: 0, dependsOnStepId: null },
-          { id: 12, sequence: 5, name: 'Go-live Readiness', status: 'PENDING', tatDays: 4, usedHours: 0, dependsOnStepId: 10 },
-        ],
+        id: 31, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-08-03T09:00:00.000Z',
+        steps: mkObSteps(31, ERP_STEP_TEMPLATE, 5, {
+          // The AMBER client: 78% of TAT used, due this evening.
+          6: { status: 'IN_PROGRESS', usedHours: 14, dueAt: '2026-08-20T18:30:00.000Z' },
+        }),
+      },
+      // Bought, instantiated, past the gate, and still not started — held
+      // behind the ERP journey's completion. Plan §5.5, and the combination
+      // most likely to be modelled wrongly as one field.
+      {
+        id: 32, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 31,
+        steps: mkObSteps(32, BIO_STEP_TEMPLATE, 0),
       },
     ],
-    createdById: 5, createdAt: iso('2026-08-28T14:05:00'),
+    createdById: 1, createdAt: iso('2026-08-03T10:00:00'),
   },
   {
-    id: 3, name: 'Contoso Education Trust', description: 'Completed rollout, retained for renewals.',
-    onboardingDate: '2026-04-02', pan: 'AAECC4567P', address: 'Salt Lake, Kolkata 700091',
-    licenseType: 'Perpetual', salesPersonId: 5, status: 'LIVE', liveAt: iso('2026-06-19T11:40:00'),
-    hasPortalLogin: true,
+    id: 4, name: 'Bluebell Public School', description: 'Single campus, first ERP purchase.',
+    onboardingDate: '2026-08-10', pan: 'AABCB9022L', address: 'C-31 Malviya Nagar, Jaipur 302017',
+    licenseType: 'Starter · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
     contacts: [
-      { id: 4, name: 'Arjun Sen', designation: 'Registrar', email: 'arjun@contoso.example', phone: '+91 98310 77889', whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: true, isActive: true },
+      { id: 6, name: 'Nikhil Saxena', designation: 'Administrator', email: 'nikhil@bluebell.example', phone: '+91 94140 22110', whatsappOptIn: true, whatsappOptInAt: '2026-08-10T09:30:00.000Z', whatsappOptInSource: 'WRITTEN', isPrimary: true, isActive: true },
     ],
     applications: [
-      { id: 4, productId: 1, licenseType: 'Perpetual', units: 120, licenseStart: '2026-04-15', licenseEnd: null },
+      { id: 6, productId: 1, licenseType: 'Starter', units: 15, licenseStart: '2026-08-12', licenseEnd: '2027-08-11' },
     ],
-    requirements: [
-      { id: 3, sequence: 0, title: null, bodyHtml: '<p>Bulk student import from their existing MIS</p>', bodyText: 'Bulk student import from their existing MIS', isMet: false, metAt: null, metById: null, createdById: 3, createdAt: '2026-08-20T10:00:00Z', updatedAt: null },
-    ],
-    attachments: [
-      { id: 5, fileName: 'contoso-go-live-acceptance.pdf', contentType: 'application/pdf', sizeBytes: 233_190, kind: 'SUBMISSION', uploadedByType: 'STAFF', uploadedById: 3, scanStatus: 'CLEAN', deletedAt: null, deletedById: null, createdAt: iso('2026-06-19T11:45:00') },
-    ],
+    requirements: [],
+    attachments: [],
     journeys: [
       {
-        id: 4, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
-        steps: [
-          { id: 13, sequence: 1, name: 'Kickoff & Requirement Sign-off', status: 'DONE', tatDays: 3, usedHours: 17, dependsOnStepId: null },
-          { id: 14, sequence: 2, name: 'Environment Provisioning', status: 'DONE', tatDays: 4, usedHours: 22, dependsOnStepId: 13 },
-          // B-108 · the only backup owner in the corpus, and the reason it is
-          // here: OB-03's `ownerId` filter counts backups, and a fixture where
-          // every owned step names its owner in the same column cannot tell a
-          // filter that reads both columns from one that reads only the first.
-          // User 4 owns nothing else anywhere, so `ownerId=4` returning exactly
-          // this client is the whole assertion.
-          { id: 15, sequence: 3, name: 'Data Migration', status: 'DONE', tatDays: 8, usedHours: 54, dependsOnStepId: 14, backupOwnerUserId: 4 },
-          { id: 16, sequence: 4, name: 'User Training', status: 'DONE', tatDays: 5, usedHours: 31, dependsOnStepId: null },
-          { id: 17, sequence: 5, name: 'Go-live Readiness', status: 'DONE', tatDays: 4, usedHours: 25, dependsOnStepId: 15 },
-        ],
+        id: 41, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-08-10T09:00:00.000Z',
+        steps: mkObSteps(41, ERP_STEP_TEMPLATE, 1, {
+          // WAITING_ON_CLIENT: the clock is paused and the wait is attributed
+          // to the client, so the RAG stays uncoloured and the client reads
+          // GREEN — plan §5.7. Ravi (user 3) is backup so `resume` is
+          // exercisable by the signed-in user.
+          2: {
+            status: 'WAITING_ON_CLIENT', usedHours: 4, dueAt: '2026-08-25T12:00:00.000Z',
+            backupOwnerUserId: 3,
+            communications: [
+              obComm(11, 'CALL', iso('2026-08-17T12:40:00'), 'Requirement sheet shared; Nikhil needs trustee approval before confirming.', { staffId: 6 }),
+              obComm(12, 'SYSTEM', iso('2026-08-17T12:45:00'), 'Service paused — waiting on the client. The TAT clock is frozen.', { internal: true }),
+            ],
+          },
+        }),
       },
     ],
-    createdById: 5, createdAt: iso('2026-04-02T10:00:00'),
+    createdById: 9, createdAt: iso('2026-08-10T14:05:00'),
+  },
+  {
+    id: 5, name: 'Nalanda Group of Institutions', description: '3 colleges + 2 schools under one trust.',
+    onboardingDate: '2026-08-12', pan: 'AANCN5540D', address: 'Boring Rd, Patna 800001',
+    licenseType: 'Enterprise · 3-year', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 7, name: 'Ritu Verma', designation: 'Registrar', email: 'ritu@nalanda.example', phone: '+91 98350 66778', whatsappOptIn: true, whatsappOptInAt: '2026-08-12T10:00:00.000Z', whatsappOptInSource: 'CONTRACT', isPrimary: true, isActive: true },
+      { id: 8, name: 'A. K. Singh', designation: 'Trustee', email: 'aksingh@nalanda.example', phone: '+91 94310 11224', whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: false, isActive: true },
+    ],
+    applications: [
+      { id: 7, productId: 1, licenseType: 'Enterprise', units: 200, licenseStart: '2026-08-14', licenseEnd: '2029-08-13' },
+      { id: 8, productId: 2, licenseType: 'Add-on', units: 12, licenseStart: null, licenseEnd: null },
+    ],
+    requirements: [],
+    attachments: [],
+    journeys: [
+      {
+        id: 51, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-08-12T09:00:00.000Z',
+        steps: mkObSteps(51, ERP_STEP_TEMPLATE, 2, {
+          // Due today, comfortably inside its TAT — "Today's delivery" without
+          // being anybody's emergency.
+          3: { status: 'IN_PROGRESS', usedHours: 9, dueAt: '2026-08-20T12:00:00.000Z' },
+        }),
+      },
+      { id: 52, productId: 2, gateStatus: 'OPEN', heldByJourneyId: 51, steps: mkObSteps(52, BIO_STEP_TEMPLATE, 0) },
+    ],
+    createdById: 1, createdAt: iso('2026-08-12T10:00:00'),
+  },
+  {
+    id: 6, name: 'Cambridge Heights School', description: 'IB curriculum, high-touch onboarding.',
+    onboardingDate: '2026-07-20', pan: 'AACCC7714M', address: 'Linking Rd, Bandra W, Mumbai 400050',
+    licenseType: 'Professional · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 9, name: 'Sana Qureshi', designation: 'Head of School', email: 'sana@cambridgeheights.example', phone: '+91 98200 33445', whatsappOptIn: true, whatsappOptInAt: '2026-07-20T09:00:00.000Z', whatsappOptInSource: 'EMAIL', isPrimary: true, isActive: true },
+    ],
+    applications: [
+      { id: 9, productId: 1, licenseType: 'Professional', units: 85, licenseStart: '2026-07-22', licenseEnd: '2027-07-21' },
+    ],
+    requirements: [],
+    attachments: [],
+    journeys: [
+      {
+        id: 61, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-07-20T09:00:00.000Z',
+        steps: mkObSteps(61, ERP_STEP_TEMPLATE, 6, {
+          // UAT in progress with a sign-off out — OB_SIGNOFFS row 1 points here.
+          7: {
+            status: 'IN_PROGRESS', usedHours: 15, dueAt: '2026-08-22T17:00:00.000Z',
+            communications: [
+              obComm(13, 'MEETING', iso('2026-08-18T14:20:00'), 'UAT round 2 with 8 teachers — 3 minor issues logged, all fixed.', { staffId: 8 }),
+              obComm(14, 'SYSTEM', iso('2026-08-19T11:00:00'), 'Sign-off link sent to Sana Qureshi (email + WhatsApp).', { internal: true }),
+            ],
+          },
+        }),
+      },
+    ],
+    createdById: 9, createdAt: iso('2026-07-20T10:00:00'),
+  },
+  {
+    id: 7, name: 'Little Scholars Preschool', description: 'Preschool chain, 6 centres.',
+    onboardingDate: '2026-08-19', pan: 'AALCL2201B', address: 'MG Rd, Kochi 682016',
+    licenseType: 'Starter · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 10, name: 'Divya Menon', designation: 'Founder', email: 'divya@littlescholars.example', phone: '+91 98470 88990', whatsappOptIn: true, whatsappOptInAt: '2026-08-19T09:00:00.000Z', whatsappOptInSource: 'CLIENT_PORTAL', isPrimary: true, isActive: true },
+    ],
+    applications: [
+      { id: 10, productId: 1, licenseType: 'Starter', units: 12, licenseStart: null, licenseEnd: null },
+    ],
+    requirements: [],
+    attachments: [],
+    journeys: [
+      // Prerequisites in flight → gate LOCKED, nothing started, **rag null**.
+      // Not GREEN: nothing is running to colour, so this client appears in no
+      // RAG column and OB-03 says "Prerequisites pending".
+      { id: 71, productId: 1, gateStatus: 'LOCKED', heldByJourneyId: null, steps: mkObSteps(71, ERP_STEP_TEMPLATE, 0) },
+    ],
+    createdById: 9, createdAt: iso('2026-08-19T09:20:00'),
+  },
+  {
+    id: 8, name: 'Trinity College of Commerce', description: 'UG college, 4,000 students.',
+    onboardingDate: '2026-07-25', pan: 'AATCT6635H', address: 'Anna Salai, Chennai 600002',
+    licenseType: 'Professional · Annual', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
+    hasPortalLogin: false,
+    contacts: [
+      { id: 11, name: 'George Thomas', designation: 'Bursar', email: 'george@trinitycc.example', phone: '+91 98410 55667', whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, isPrimary: true, isActive: true },
+    ],
+    applications: [
+      { id: 11, productId: 1, licenseType: 'Professional', units: 70, licenseStart: '2026-07-27', licenseEnd: '2027-07-26' },
+    ],
+    requirements: [],
+    attachments: [],
+    journeys: [
+      {
+        id: 81, productId: 1, gateStatus: 'OPEN', heldByJourneyId: null,
+        startedAt: '2026-07-25T09:00:00.000Z',
+        steps: mkObSteps(81, ERP_STEP_TEMPLATE, 4, {
+          // BLOCKED with a recorded reason — the "Where it's stuck" table's
+          // Reason column, and RED however healthy its clock looks. Due
+          // tomorrow, so it is delayed by the grid's 1-day floor rather than
+          // overdue. Ravi (user 3) is backup so `resume`/`unblock` are
+          // exercisable by the signed-in user.
+          5: {
+            status: 'BLOCKED', usedHours: 24, dueAt: '2026-08-21T10:00:00.000Z',
+            backupOwnerUserId: 3,
+            blockedReasonCode: 'client-unresponsive',
+            blockedNote: "Branding assets pending from client's design vendor",
+            // A-118 · the only step in the corpus with a Task List, so OB-06
+            // has a checklist to draw and the completion gate something to
+            // refuse.
+            items: [
+              { id: 31, sequence: 1, label: 'Logo & colours applied', isMandatory: true, isDone: false, doneAt: null, doneById: null },
+              { id: 32, sequence: 2, label: 'Notice / report templates set', isMandatory: true, isDone: false, doneAt: null, doneById: null },
+              { id: 33, sequence: 3, label: 'Roles & permissions configured', isMandatory: false, isDone: true, doneAt: '2026-08-14T09:00:00.000Z', doneById: 6 },
+            ],
+            communications: [
+              obComm(15, 'EMAIL', iso('2026-08-14T15:10:00'), 'Design vendor is travelling; logo files expected by 22 Aug.', { clientName: 'George Thomas' }),
+              obComm(16, 'OTHER', iso('2026-08-14T15:20:00'), 'Blocked — cannot theme the portal without final brand assets.', { staffId: 6, internal: true }),
+            ],
+          },
+        }),
+      },
+    ],
+    createdById: 1, createdAt: iso('2026-07-25T10:00:00'),
   },
 ];
 
@@ -2172,60 +2426,60 @@ const OB_CLIENTS: ObClient[] = [
 const OB_NOTIFICATIONS: ObNotificationRow[] = [
   {
     id: 1, recipientUserId: 3, eventKey: 'STEP_ASSIGNED', category: 'ASSIGNMENT',
-    title: 'Data Migration — Northwind Technologies Pvt Ltd',
-    body: 'Assigned to you, due 12 Sep 2026.',
-    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 3,
-    isRead: true, createdAt: '2026-09-01T04:30:00Z',
+    title: 'Data migration — Sunrise EdTech Pvt Ltd',
+    body: 'Assigned to Kavya Sharma, due 18 Aug 2026. You are the backup.',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 21, stepId: 214,
+    isRead: true, createdAt: '2026-08-12T04:30:00.000Z',
   },
   {
     id: 2, recipientUserId: 3, eventKey: 'GATE_OPENED', category: 'UPDATE',
-    title: 'Acme Private Limited has cleared prerequisites',
-    body: 'Their journeys have started and the first services are now running.',
-    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 3, stepId: null,
-    isRead: true, createdAt: '2026-09-01T09:15:00Z',
+    title: 'Bluebell Public School has cleared prerequisites',
+    body: 'Their journey has started and the first services are now running.',
+    linkUrl: '/onboarding/clients/4', obClientId: 4, journeyId: 41, stepId: null,
+    isRead: true, createdAt: '2026-08-10T09:15:00.000Z',
   },
   {
     id: 3, recipientUserId: 3, eventKey: 'TAT_REMINDER', category: 'REMINDER',
-    title: 'Due 05 Sep 2026: Environment Provisioning',
-    body: 'Acme Private Limited is waiting on this one.',
-    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 3, stepId: 9,
-    isRead: true, createdAt: '2026-09-02T03:00:00Z',
+    title: 'Due 22 Aug 2026: UAT & issue closure',
+    body: 'Cambridge Heights School is waiting on this one.',
+    linkUrl: '/onboarding/clients/6', obClientId: 6, journeyId: 61, stepId: 617,
+    isRead: true, createdAt: '2026-08-18T03:00:00.000Z',
   },
   {
     id: 4, recipientUserId: 3, eventKey: 'PREREQ_SUBMITTED', category: 'ASSIGNMENT',
-    title: 'Ready to verify: Signed statement of work',
-    body: 'Contoso Education Trust has submitted it. Their clock is paused while it waits with us.',
-    linkUrl: '/onboarding/clients/3', obClientId: 3, journeyId: null, stepId: null,
-    isRead: false, createdAt: '2026-09-03T06:45:00Z',
+    title: 'Ready to verify: Signed service agreement',
+    body: 'Little Scholars Preschool has submitted it. Their clock is paused while it waits with us.',
+    linkUrl: '/onboarding/clients/7', obClientId: 7, journeyId: null, stepId: null,
+    isRead: false, createdAt: '2026-08-19T06:45:00.000Z',
   },
   {
     id: 5, recipientUserId: 3, eventKey: 'TAT_BREACHED', category: 'ESCALATION',
-    title: 'Overdue by 2 days: Data Migration',
-    body: 'The onboarding for Northwind Technologies Pvt Ltd is held up until this closes.',
-    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 3,
-    isRead: false, createdAt: '2026-09-03T11:20:00Z',
+    title: 'Overdue by 2 days: Data migration',
+    body: 'The onboarding for Sunrise EdTech Pvt Ltd is held up until this closes.',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 21, stepId: 214,
+    isRead: false, createdAt: '2026-08-19T16:05:00.000Z',
   },
   {
     id: 6, recipientUserId: 3, eventKey: 'CLIENT_ESCALATION_RAISED', category: 'ESCALATION',
-    title: 'Contoso Education Trust has raised an escalation',
-    body: 'We were told training would start last week and nobody has been in touch.',
-    linkUrl: '/onboarding/clients/3', obClientId: 3, journeyId: 4, stepId: null,
-    isRead: false, createdAt: '2026-09-04T02:05:00Z',
+    title: 'Sunrise EdTech Pvt Ltd has raised an escalation',
+    body: 'Migration delay is holding our launch date — please expedite.',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 21, stepId: 214,
+    isRead: false, createdAt: '2026-08-19T17:40:00.000Z',
   },
   // Somebody else's. Never visible to user 3 — the scoping, not decoration.
   {
     id: 7, recipientUserId: 5, eventKey: 'GO_LIVE', category: 'UPDATE',
-    title: 'Northwind Technologies Pvt Ltd is live',
+    title: 'GreenValley International School is live',
     body: 'Every journey is complete and signed off. Handover to support can begin.',
-    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: null,
-    isRead: false, createdAt: '2026-09-04T03:10:00Z',
+    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 11, stepId: null,
+    isRead: false, createdAt: '2026-08-07T11:41:00.000Z',
   },
   {
     id: 8, recipientUserId: 5, eventKey: 'ESCALATION_RAISED', category: 'ESCALATION',
-    title: 'Escalated to L2: User Training',
+    title: 'Escalated to L2: Data migration',
     body: 'It has been overdue long enough to climb the escalation matrix.',
-    linkUrl: '/onboarding/clients/1', obClientId: 1, journeyId: 1, stepId: 4,
-    isRead: false, createdAt: '2026-09-04T03:12:00Z',
+    linkUrl: '/onboarding/clients/2', obClientId: 2, journeyId: 21, stepId: 214,
+    isRead: false, createdAt: '2026-08-18T15:30:00.000Z',
   },
 ];
 
@@ -2308,11 +2562,11 @@ export function createDb(): Db {
     chatThreads: [], chatMessages: [], chatAttachments: [], statusRequests: [],
     timesheetApprovals: [],
     currentUserId: 3, // Ravi — a Developer, so scoping is visible by default
-    // C-112 · past the six communications OB_CLIENTS seeds by hand, so the
+    // C-112 · past the sixteen communications OB_CLIENTS seeds by hand, so the
     // first recorded one does not collide with them. `nextId` starts at 1 for
     // any key not named here, which is right for every collection whose ids
     // are allocated rather than written into the fixture.
-    seq: { obStepCommunications: 6 },
+    seq: { obStepCommunications: 16 },
     twoFactor: {}, // opt-in, so nobody starts enrolled
     // C-027 · §4B.4's published defaults, which is also what the migration
     // seeds — 10 MB per file, 50 MB and 20 files per ticket.
@@ -2347,15 +2601,15 @@ export function createDb(): Db {
     obPrereqHistory: [],
     obSignoffs: structuredClone(OB_SIGNOFFS),
     obSignoffSessions: [],
-    // B-126 · Contoso (client 3) is LIVE and has a portal login; Northwind
-    // and Acme have none, which is what makes "create" reachable in a test
-    // rather than always answering 409.
+    // B-126 · GreenValley (client 1) is LIVE and has a portal login; the other
+    // seven have none, which is what makes "create" reachable in a test rather
+    // than always answering 409.
     obClientAccounts: [
       {
-        id: 1, obClientId: 3, username: 'CONTOSO.arjun', displayName: 'Arjun Mehta',
-        email: 'arjun@contoso.example', isActive: true, mustChangePassword: false,
-        lastLoginAt: '2026-09-02T08:15:00.000Z', lockedUntil: null,
-        credentialSentAt: '2026-08-12T09:00:00.000Z',
+        id: 1, obClientId: 1, username: 'GREENVALLEY.deepa', displayName: 'Deepa Kulkarni',
+        email: 'deepa@greenvalley.example', isActive: true, mustChangePassword: false,
+        lastLoginAt: '2026-08-18T08:15:00.000Z', lockedUntil: null,
+        credentialSentAt: '2026-06-13T09:00:00.000Z',
       },
     ],
     obEscalations: structuredClone(OB_ESCALATIONS),
@@ -3161,24 +3415,30 @@ const OB_PREREQ_TEMPLATE_TASKS: ObPrereqTemplateTaskRow[] = [
 ];
 
 /**
- * Three clients, three gate states — cleared, locked, cleared.
+ * Eight clients, one still gated.
  *
- * **Acme (client 2) is the locked one**, because Acme is who owns the journey
- * already seeded `gateStatus: 'LOCKED'` above. That pairing is the whole point
+ * **Little Scholars (client 7) is the locked one**, because it is who owns the
+ * journey seeded `gateStatus: 'LOCKED'` above. That pairing is the whole point
  * and it is easy to get wrong: a fixture whose header said `CLEARED` while the
  * client's own journey said `LOCKED` would let a screen ship that reads one and
  * trusts the other, and neither would look wrong on its own.
  */
 const OB_CLIENT_PREREQS: ObClientPrereqRow[] = [
-  { obClientId: 1, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-07-24T11:20:00.000Z' },
-  { obClientId: 2, templateVersion: 1, status: 'IN_PROGRESS', clearedAt: null },
-  { obClientId: 3, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-08-02T15:05:00.000Z' },
+  { obClientId: 1, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-06-14T11:20:00.000Z' },
+  { obClientId: 2, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-07-28T15:05:00.000Z' },
+  { obClientId: 3, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-08-03T15:05:00.000Z' },
+  { obClientId: 4, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-08-10T13:00:00.000Z' },
+  { obClientId: 5, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-08-12T15:05:00.000Z' },
+  { obClientId: 6, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-07-20T15:05:00.000Z' },
+  { obClientId: 7, templateVersion: 1, status: 'IN_PROGRESS', clearedAt: null },
+  { obClientId: 8, templateVersion: 1, status: 'CLEARED', clearedAt: '2026-07-25T15:05:00.000Z' },
 ];
 
 function prereqInstancesFor(
   obClientId: number,
   idBase: number,
   states: ObPrereqStatus[],
+  dueAt = '2026-07-15T12:00:00.000Z',
 ): ObClientPrereqTaskRow[] {
   return OB_PREREQ_TEMPLATE_TASKS.map((t, i) => {
     const status = states[i];
@@ -3188,7 +3448,7 @@ function prereqInstancesFor(
       title: t.title, description: t.description,
       isMandatory: t.isMandatory, isAdHoc: false,
       status,
-      dueAt: `2026-0${obClientId === 2 ? 8 : 7}-${String(10 + t.sequence).padStart(2, '0')}T12:00:00.000Z`,
+      dueAt,
       submittedAt: status === 'PENDING' ? null : '2026-07-20T09:00:00.000Z',
       submittedVia: status === 'PENDING' ? null : 'PORTAL',
       verifiedAt: settled ? '2026-07-21T09:00:00.000Z' : null,
@@ -3205,30 +3465,42 @@ function prereqInstancesFor(
 }
 
 const OB_CLIENT_PREREQ_TASKS: ObClientPrereqTaskRow[] = [
-  ...prereqInstancesFor(1, 101, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED', 'VERIFIED']),
-  // The locked gate — Acme, whose journey 3 is the seeded LOCKED one. One
-  // mandatory task submitted and awaiting verification, one still pending:
-  // both of the states a verifier's queue is made of.
-  ...prereqInstancesFor(2, 111, ['VERIFIED', 'SUBMITTED', 'PENDING', 'PENDING', 'PENDING']),
-  ...prereqInstancesFor(3, 121, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED']),
+  ...prereqInstancesFor(1, 101, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED', 'VERIFIED'], '2026-06-14T12:00:00.000Z'),
+  ...prereqInstancesFor(2, 111, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED'], '2026-07-28T12:00:00.000Z'),
+  ...prereqInstancesFor(3, 121, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED'], '2026-08-03T12:00:00.000Z'),
+  ...prereqInstancesFor(4, 131, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED', 'VERIFIED'], '2026-08-10T12:00:00.000Z'),
+  ...prereqInstancesFor(5, 141, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED'], '2026-08-12T12:00:00.000Z'),
+  ...prereqInstancesFor(6, 151, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'SKIPPED'], '2026-07-20T12:00:00.000Z'),
+  // The locked gate — Little Scholars, whose journey 71 is the seeded LOCKED
+  // one. One mandatory task submitted and awaiting verification, three still
+  // pending: both of the states a verifier's queue is made of, and — due
+  // 18 Aug, two days before `COMPUTED_AT` — the OB-02 overdue drill's other
+  // four items (with Sunrise's breached migration, "5 overdue items" across
+  // "2 overdue clients").
+  ...prereqInstancesFor(7, 161, ['SUBMITTED', 'VERIFIED', 'PENDING', 'PENDING', 'PENDING'], '2026-08-18T12:00:00.000Z'),
+  ...prereqInstancesFor(8, 171, ['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED'], '2026-07-25T12:00:00.000Z'),
 ];
 
 const OB_SIGNOFFS: ObSignoffRow[] = [
+  // Out and unanswered — Cambridge's UAT sign-off, the "sign-off requested"
+  // state the step panel and OB-09 both render.
   {
-    id: 1, obClientId: 1, journeyId: 1, stepId: 3, kind: 'STEP', status: 'PENDING',
+    id: 1, obClientId: 6, journeyId: 61, stepId: 617, kind: 'STEP', status: 'PENDING',
     token: 'ob-signoff-demo-token-1', tokenExpiresAt: '2026-09-30T12:00:00.000Z',
     otp: null, otpAttempts: 0,
-    requestedById: 2, requestedAt: '2026-09-01T10:00:00.000Z', sentToContactId: 1,
+    requestedById: 2, requestedAt: '2026-08-19T11:00:00.000Z', sentToContactId: 9,
     signedByContactId: null, signedAt: null, signedIp: null, signedUserAgent: null,
     objectedAt: null, objectionNote: null, pdfStorageKey: null,
     csatScore: null, csatComment: null,
   },
+  // Answered — GreenValley's requirements sign-off from June, with the
+  // certificate a SIGNED row carries.
   {
-    id: 2, obClientId: 3, journeyId: 4, stepId: 13, kind: 'STEP', status: 'SIGNED',
-    token: 'ob-signoff-demo-token-2', tokenExpiresAt: '2026-08-20T12:00:00.000Z',
+    id: 2, obClientId: 1, journeyId: 11, stepId: 112, kind: 'STEP', status: 'SIGNED',
+    token: 'ob-signoff-demo-token-2', tokenExpiresAt: '2026-07-20T12:00:00.000Z',
     otp: null, otpAttempts: 0,
-    requestedById: 2, requestedAt: '2026-08-10T10:00:00.000Z', sentToContactId: 4,
-    signedByContactId: 4, signedAt: '2026-08-11T09:14:00.000Z',
+    requestedById: 2, requestedAt: '2026-06-18T10:00:00.000Z', sentToContactId: 1,
+    signedByContactId: 1, signedAt: '2026-06-19T09:14:00.000Z',
     signedIp: '203.0.113.24', signedUserAgent: 'Mozilla/5.0 (Macintosh)',
     objectedAt: null, objectionNote: null,
     pdfStorageKey: 'ob-signoffs/2/certificate.pdf',
@@ -3237,27 +3509,30 @@ const OB_SIGNOFFS: ObSignoffRow[] = [
 ];
 
 const OB_ESCALATIONS: ObEscalationRow[] = [
+  // Sunrise's breached migration, one rung at a time — the internal ladder.
   {
-    id: 1, obClientId: 1, journeyId: 1, stepId: 3, level: 'L1', reason: 'TAT_BREACH',
-    escalatedToId: 3, escalatedAt: '2026-09-02T08:00:00.000Z',
-    acknowledgedById: 3, acknowledgedAt: '2026-09-02T09:10:00.000Z',
+    id: 1, obClientId: 2, journeyId: 21, stepId: 214, level: 'L1', reason: 'TAT_BREACH',
+    escalatedToId: 8, escalatedAt: '2026-08-18T11:30:00.000Z',
+    acknowledgedById: 8, acknowledgedAt: '2026-08-18T12:10:00.000Z',
     resolvedById: null, resolvedAt: null, resolutionNote: null,
   },
   {
-    id: 2, obClientId: 1, journeyId: 1, stepId: 3, level: 'L2', reason: 'TAT_BREACH',
+    id: 2, obClientId: 2, journeyId: 21, stepId: 214, level: 'L2', reason: 'TAT_BREACH',
     // Resolved nobody. A-107's DDL calls this "worth seeing on the dashboard",
     // so the fixture has one — a matrix gap is invisible until something shows it.
-    escalatedToId: null, escalatedAt: '2026-09-02T12:00:00.000Z',
+    escalatedToId: null, escalatedAt: '2026-08-18T15:30:00.000Z',
     acknowledgedById: null, acknowledgedAt: null,
     resolvedById: null, resolvedAt: null, resolutionNote: null,
   },
 ];
 
 const OB_CLIENT_ESCALATIONS: ObClientEscalationRow[] = [
+  // The one open client escalation — the OB-02 tile's 1, raised from the
+  // portal by Sunrise's SPOC against the breached migration.
   {
-    id: 1, obClientId: 1, journeyId: 1, stepId: 3, raisedByContactId: 1,
-    comment: 'We have heard nothing on the data migration for eight working days.',
-    raisedAt: '2026-09-03T06:30:00.000Z',
+    id: 1, obClientId: 2, journeyId: 21, stepId: 214, raisedByContactId: 4,
+    comment: 'Migration delay is holding our launch date — please expedite.',
+    raisedAt: '2026-08-19T17:40:00.000Z',
     resolvedById: null, resolvedAt: null, resolutionNote: null,
   },
 ];
@@ -3265,11 +3540,22 @@ const OB_CLIENT_ESCALATIONS: ObClientEscalationRow[] = [
 const OB_MODULE_ACCESS: ObModuleAccessRow[] = [
   { id: 1, userId: 1, module: 'ONBOARDING', moduleRole: 'OB_ADMIN', grantedById: null, grantedAt: '2026-07-01T09:00:00.000Z', revokedById: null, revokedAt: null },
   { id: 2, userId: 2, module: 'ONBOARDING', moduleRole: 'OB_MANAGER', grantedById: 1, grantedAt: '2026-07-01T09:05:00.000Z', revokedById: null, revokedAt: null },
-  { id: 3, userId: 3, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:06:00.000Z', revokedById: null, revokedAt: null },
+  // Ravi (the signed-in user) manages rather than implements: the OB-02
+  // workload grid is exactly the OB_STEP_OWNER grants below, and a sixth,
+  // permanently-empty row for the mock's own narrator would read as a second
+  // bench.
+  { id: 3, userId: 3, module: 'ONBOARDING', moduleRole: 'OB_MANAGER', grantedById: 1, grantedAt: '2026-07-01T09:06:00.000Z', revokedById: null, revokedAt: null },
   { id: 4, userId: 5, module: 'ONBOARDING', moduleRole: 'OB_SALES', grantedById: 1, grantedAt: '2026-07-02T09:00:00.000Z', revokedById: null, revokedAt: null },
   // One revoked grant, so OB-08's audit view has something to show and the
   // `includeRevoked` filter has something to filter.
   { id: 5, userId: 4, module: 'ONBOARDING', moduleRole: 'OB_VIEWER', grantedById: 1, grantedAt: '2026-07-03T09:00:00.000Z', revokedById: 1, revokedAt: '2026-08-14T11:00:00.000Z' },
+  // The implementors — the workload grid's population, in the order the
+  // mockup's table lists them. Nikhil owns nothing yet: the bench row.
+  { id: 6, userId: 6, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:10:00.000Z', revokedById: null, revokedAt: null },
+  { id: 7, userId: 8, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:11:00.000Z', revokedById: null, revokedAt: null },
+  { id: 8, userId: 9, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:12:00.000Z', revokedById: null, revokedAt: null },
+  { id: 9, userId: 10, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-07-01T09:13:00.000Z', revokedById: null, revokedAt: null },
+  { id: 10, userId: 11, module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER', grantedById: 1, grantedAt: '2026-08-17T09:14:00.000Z', revokedById: null, revokedAt: null },
 ];
 
 const OB_SETTINGS: ObSettingsRow = {

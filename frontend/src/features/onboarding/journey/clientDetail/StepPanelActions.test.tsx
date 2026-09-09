@@ -16,13 +16,14 @@ import { ObClientDetailPage } from './ObClientDetailPage'
  * own `mayAct`. A panel tested in isolation with hand-built props would prove
  * none of them.
  *
- * The fixture is the seeded Northwind ERP journey, and it is well chosen for
- * this: **step 3 (Data Migration) is `BLOCKED`, owned by user 3, which is the
- * mock's signed-in user** — so the default focus step is one the caller may act
- * on. It also carries the only seeded Task List in the module, with one
- * mandatory item ticked and one not, which is exactly the completion gate.
+ * The fixture is the seeded Trinity ERP journey (client 8), and it is well
+ * chosen for this: **step 5 (Configuration & branding) is `BLOCKED`, with
+ * user 3 — the mock's signed-in user — as backup owner** — so the default
+ * focus step is one the caller may act on. It also carries the only seeded
+ * Task List in the module, with the two mandatory items unticked and the
+ * optional one done, which is exactly the completion gate.
  */
-function renderClient(id = 1) {
+function renderClient(id = 8) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
@@ -40,8 +41,8 @@ const SLOW = { timeout: 5000 }
 
 /** Expand the ERP journey and wait for its panel. */
 async function openErpPanel(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
-  await user.click(screen.getByRole('button', { name: /^ERP Suite —/ }))
+  await screen.findByText('Trinity College of Commerce', undefined, SLOW)
+  await user.click(screen.getByRole('button', { name: /^EduTrack ERP —/ }))
   return screen.findByTestId('journey-step-panel', undefined, SLOW)
 }
 
@@ -73,9 +74,9 @@ describe('OB-06 — the step panel’s actions', () => {
       renderClient()
       await openErpPanel(user)
 
-      // Step 4, User Training, is WAITING_ON_CLIENT and owned by user 3 too —
-      // so pick step 2, Environment Provisioning, which has no owner at all.
-      await user.click(screen.getByRole('button', { name: /^Step 2:/ }))
+      // Step 5 is the only one whose backup is the signed-in user — so pick
+      // step 6, Admin & user training, which Priya owns and nobody backs up.
+      await user.click(screen.getByRole('button', { name: /^Step 6:/ }))
       const other = await screen.findByTestId('journey-step-panel', undefined, SLOW)
 
       expect(within(other).queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument()
@@ -89,10 +90,10 @@ describe('OB-06 — the step panel’s actions', () => {
       renderClient()
       const panel = await openErpPanel(user)
 
-      const staff = await within(panel).findByRole('checkbox', { name: /Staff master reconciled/ }, SLOW)
-      const student = within(panel).getByRole('checkbox', { name: /Student master reconciled/ })
-      expect(staff).toBeChecked()
-      expect(student).not.toBeChecked()
+      const roles = await within(panel).findByRole('checkbox', { name: /Roles & permissions configured/ }, SLOW)
+      const logo = within(panel).getByRole('checkbox', { name: /Logo & colours applied/ })
+      expect(roles).toBeChecked()
+      expect(logo).not.toBeChecked()
     })
 
     /**
@@ -102,7 +103,7 @@ describe('OB-06 — the step panel’s actions', () => {
      * presses Complete and reads a 422 for something the checklist in front of
      * them could have said.
      */
-    it('offers Complete disabled once resumed, naming the unticked mandatory item', async () => {
+    it('offers Complete disabled once resumed, naming the unticked mandatory items', async () => {
       const user = userEvent.setup()
       renderClient()
       const panel = await openErpPanel(user)
@@ -111,7 +112,7 @@ describe('OB-06 — the step panel’s actions', () => {
 
       const complete = await screen.findByRole('button', { name: 'Complete' }, SLOW)
       expect(complete).toBeDisabled()
-      expect(await screen.findByText(/“Student master reconciled” is not ticked/, undefined, SLOW))
+      expect(await screen.findByText(/“Logo & colours applied”/, undefined, SLOW))
         .toBeInTheDocument()
     })
 
@@ -127,7 +128,12 @@ describe('OB-06 — the step panel’s actions', () => {
       await user.click(await within(panel).findByRole('button', { name: 'Resume' }, SLOW))
       await screen.findByRole('button', { name: 'Complete' }, SLOW)
 
-      await user.click(screen.getByRole('checkbox', { name: /Student master reconciled/ }))
+      await user.click(screen.getByRole('checkbox', { name: /Logo & colours applied/ }))
+      await waitFor(
+        () => expect(screen.getByRole('checkbox', { name: /Logo & colours applied/ })).toBeChecked(),
+        SLOW,
+      )
+      await user.click(screen.getByRole('checkbox', { name: /Notice \/ report templates set/ }))
 
       await waitFor(
         () => expect(screen.getByRole('button', { name: 'Complete' })).toBeEnabled(),
@@ -172,8 +178,9 @@ describe('OB-06 — the step panel’s actions', () => {
 
       const dialog = await screen.findByRole('dialog')
       expect(within(dialog).getByText(/clock keeps running/i)).toBeInTheDocument()
-      // Scoped to the dialog: "Waiting on client" is also a ribbon tile's own
-      // state label on this journey, and an unscoped query matches both.
+      // Scoped to the dialog: "Waiting on client" is also a ribbon tile's
+      // state label wherever a journey has one, and an unscoped query would
+      // match both.
       expect(within(dialog).getByText(/Waiting on client/)).toBeInTheDocument()
     })
   })
@@ -189,21 +196,21 @@ describe('OB-06 — the step panel’s actions', () => {
     renderClient()
     const panel = await openErpPanel(user)
 
-    expect(await screen.findByRole('button', { name: /^Step 3:.*Blocked/ }, SLOW)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^Step 5:.*Blocked/ }, SLOW)).toBeInTheDocument()
 
     await user.click(await within(panel).findByRole('button', { name: 'Resume' }, SLOW))
 
     /*
       Asserted as the *absence* of "Blocked" rather than the presence of "In
-      progress", because the tile does not say "In progress" once resumed: this
-      step has consumed 71 hours against a 64-hour budget, so its RAG is RED and
-      `treatmentFor` renders it "Breached" — the breach overlay winning over the
-      state label is C-109's deliberate design, not a bug. Asserting the label
-      it happens to carry would couple this test to that treatment; what is
-      under test here is that the ribbon re-read at all.
+      progress", because the tile need not say "In progress" once resumed: this
+      step has consumed 24 hours against a 27-hour budget, so its RAG is AMBER
+      and `treatmentFor` renders the at-risk overlay over the state label —
+      C-109's deliberate design, not a bug. Asserting the label it happens to
+      carry would couple this test to that treatment; what is under test here
+      is that the ribbon re-read at all.
     */
     await waitFor(
-      () => expect(screen.queryByRole('button', { name: /^Step 3:.*Blocked/ })).not.toBeInTheDocument(),
+      () => expect(screen.queryByRole('button', { name: /^Step 5:.*Blocked/ })).not.toBeInTheDocument(),
       SLOW,
     )
   }, 15000)

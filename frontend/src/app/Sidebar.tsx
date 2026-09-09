@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
-  Building2, PlusCircle, Timer, Mail, ShieldCheck, Layers,
+  Building2, PlusCircle, Timer, Mail, ShieldCheck, Layers, ClipboardList,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -97,15 +97,16 @@ const TICKETING_NAV: NavEntry[] = [
 
   <h2>Only the screens that exist</h2>
 
-  The design this follows has nine entries; one of them points at a screen no
-  task has built yet — Prerequisites master (B-124). It is deliberately absent
-  rather than present-and-dead: a nav row that lands on a 404 is worse than no
-  row, because it reads as a broken product rather than an unfinished one.
-  Each is one line here the day its screen lands — Roles & module access
-  (A-117) and Module Service (the journey-template *list*; C-102 built only
-  the designer, reachable by template id, C-123 built this row) are the two
-  most recent arrivals, added below rather than left for a third task to
-  notice this comment.
+  The design this follows has nine entries, and with Prerequisites master
+  (B-124) landed, all nine now do. The rule that got them here stands for
+  whatever arrives next: a screen is deliberately absent until it exists
+  rather than present-and-dead, because a nav row that lands on a 404 reads
+  as a broken product rather than an unfinished one. Each is one line here
+  the day its screen lands — Roles & module access (A-117), Module Service
+  (the journey-template *list*; C-102 built only the designer, reachable by
+  template id, C-123 built this row) and Prerequisites master (B-124) each
+  arrived that way, added below rather than left for the next task to notice
+  this comment.
 
   <h2>Ungated, like the entry that leads here</h2>
 
@@ -142,9 +143,10 @@ const ONBOARDING_NAV: NavEntry[] = [
   { section: 'Administration' },
   { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
   // C-123 · Module Service, the journey-template list this task built.
-  // Prerequisites master (B-124) stays absent until its own screen exists,
-  // on that comment's own reasoning.
   { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
+  // B-124 · Prerequisites master (OB-14) — the last of the design's nine
+  // entries, added the day its screen landed, per the section comment above.
+  { to: '/onboarding/prereq-master', label: 'Prerequisites master', icon: ClipboardList },
   { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
   { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
 ]

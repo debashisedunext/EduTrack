@@ -99,11 +99,16 @@ const STATUS_WORDS: Record<string, string> = {
 
 export function JourneyStepPanel({
   step,
+  totalSteps,
   resolveUser,
   hold = null,
   obClientId,
 }: {
   step: ObJourneyStepView
+  /** How many services the journey has — the mockup's "Service i of n"
+   * eyebrow. Optional: a caller rendering one step outside a journey (a
+   * story, a preview) has no n, and the eyebrow simply drops the total. */
+  totalSteps?: number
   resolveUser?: ResolveUser
   /** The journey's own hold, from `journeyHold(journey)`. Decides whether
    * `start` is offered — a `PENDING` step on a locked or held journey is not
@@ -131,6 +136,11 @@ export function JourneyStepPanel({
 
   return (
     <div className="mt-4 rounded-card border border-border bg-app p-4" data-testid="journey-step-panel">
+      {/* The mockup's `stepCard` eyebrow — "Service i of n". */}
+      <p className="m-0 mb-0.5 text-caption font-semibold uppercase tracking-wide text-content-muted">
+        Service {step.sequence}
+        {totalSteps != null && ` of ${totalSteps}`}
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="m-0 text-sm font-semibold text-content">
           {step.sequence}. {step.name}
@@ -148,15 +158,24 @@ export function JourneyStepPanel({
 
       {step.description && <p className="mt-2 text-sm text-content-muted">{step.description}</p>}
 
-      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        <dt className="text-content-muted">Owner</dt>
-        <dd className="text-content">
-          {owner?.displayName ?? (step.ownerUserId != null ? 'Assigned' : 'Unassigned')}
-          {backup && <span className="text-content-muted"> · backup {backup.displayName}</span>}
-        </dd>
+      {/* The mockup `stepCard`'s meta tiles — an auto-fit grid of eyebrowed
+          facts rather than a two-column definition list. "TAT used %" is not
+          here: no read on this panel carries a per-step percentage (the
+          server computes RAG instead), and a figure derived locally could
+          disagree with the tile colours beside it. */}
+      <dl className="mt-3 grid gap-x-4 gap-y-3 text-sm [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Responsible</dt>
+          <dd className="m-0 mt-1 text-content">
+            {owner?.displayName ?? (step.ownerUserId != null ? 'Assigned' : 'Unassigned')}
+            {backup && <span className="text-content-muted"> · backup {backup.displayName}</span>}
+          </dd>
+        </div>
 
-        <dt className="text-content-muted">TAT budget</dt>
-        <dd className="text-content">{step.tatDays ?? 0} working days</dd>
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">TAT</dt>
+          <dd className="m-0 mt-1 text-content">{step.tatDays ?? 0} working day{(step.tatDays ?? 0) === 1 ? '' : 's'}</dd>
+        </div>
 
         {/*
           `dueAt` is the working-calendar deadline C-105 computed, not
@@ -166,31 +185,37 @@ export function JourneyStepPanel({
           calendar working.
         */}
         {formatDate(step.dueAt) && (
-          <>
-            <dt className="text-content-muted">Due</dt>
-            <dd className="text-content">{formatDate(step.dueAt)}</dd>
-          </>
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Due</dt>
+            <dd className="m-0 mt-1 text-content">
+              {step.status === 'DONE' && formatDate(step.finishedAt)
+                ? `Completed ${formatDate(step.finishedAt)}`
+                : formatDate(step.dueAt)}
+            </dd>
+          </div>
         )}
 
         {formatDate(step.startedAt) && (
-          <>
-            <dt className="text-content-muted">Started</dt>
-            <dd className="text-content">{formatDate(step.startedAt)}</dd>
-          </>
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Started</dt>
+            <dd className="m-0 mt-1 text-content">{formatDate(step.startedAt)}</dd>
+          </div>
         )}
 
-        {formatDate(step.finishedAt) && (
-          <>
-            <dt className="text-content-muted">Finished</dt>
-            <dd className="text-content">{formatDate(step.finishedAt)}</dd>
-          </>
+        {step.status === 'DONE' && formatDate(step.finishedAt) && (
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Finished</dt>
+            <dd className="m-0 mt-1 text-content">{formatDate(step.finishedAt)}</dd>
+          </div>
         )}
 
-        {step.status === 'BLOCKED' && step.blockedNote && (
-          <>
-            <dt className="text-content-muted">Hold reason</dt>
-            <dd className="text-content">{step.blockedNote}</dd>
-          </>
+        {stepDetail && stepDetail.items.length > 0 && (
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Task list</dt>
+            <dd className="m-0 mt-1 text-content">
+              ☑ {stepDetail.items.filter((i) => i.isDone).length}/{stepDetail.items.length} done
+            </dd>
+          </div>
         )}
 
         {/*
@@ -199,12 +224,20 @@ export function JourneyStepPanel({
           behind a tooltip.
         */}
         {step.status === 'SKIPPED' && (
-          <>
-            <dt className="text-content-muted">Waived because</dt>
-            <dd className="text-content">{step.skipReason ?? '—'}</dd>
-          </>
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-content-muted">Waived because</dt>
+            <dd className="m-0 mt-1 text-content">{step.skipReason ?? '—'}</dd>
+          </div>
         )}
       </dl>
+
+      {/* The mockup's `err` banner — the hold reason as a statement across
+          the card, not one more row in the fact grid. */}
+      {step.status === 'BLOCKED' && step.blockedNote && (
+        <p className="m-0 mt-3 rounded-control bg-level-critical-soft px-3 py-2 text-sm text-danger-text">
+          ⛔ Blocked: {step.blockedNote}
+        </p>
+      )}
 
       <StepTaskList
         stepId={step.id}

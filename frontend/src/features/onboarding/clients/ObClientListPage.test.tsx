@@ -14,20 +14,16 @@ import { ObClientListPage } from './ObClientListPage'
  * page and the URL disagreeing about a parameter name — which is the whole
  * mechanism this screen's shareable-link behaviour rests on.
  *
- * Fixture note — `db.ts`'s `OB_CLIENTS`: three clients, boarded Acme
- * 2026-08-28, Northwind 2026-07-14, Contoso 2026-04-02. Northwind has two
- * `OPEN` journeys, Acme's single journey is `LOCKED` — no colour, and §9's
- * "Prerequisites pending" — and Contoso is `LIVE` with its one journey
- * finished. User 3 owns steps on Northwind and Acme and none on Contoso; user 4
- * owns nothing anywhere and backs up one step on Contoso, which is what makes
- * the two owner assertions below narrowings rather than requests the server
- * could satisfy by ignoring the parameter.
- *
- * The sales-person filter has no test here, and that is the fixture's fault
- * rather than an omission: all three clients share sales person 5, so every
- * value of the filter either returns the whole list or none of it, and neither
- * outcome distinguishes a working filter from an ignored one. It is covered
- * server-side in `ObClientsIT` instead, where the rows can be arranged.
+ * Fixture note — `db.ts`'s eight `obClients`, ordered by onboarding date:
+ * Little Scholars 2026-08-19, Nalanda 08-12, Bluebell 08-10, Horizon 08-03,
+ * Sunrise 07-28, Trinity 07-25, Cambridge 07-20, GreenValley 06-12.
+ * Little Scholars' single journey is `LOCKED` — no colour, and §9's
+ * "Prerequisites pending" — and GreenValley (client 1) is `LIVE` with both
+ * its journeys finished. User 3 owns no step directly and backs up one step
+ * each on Bluebell and Trinity; user 4 owns nothing anywhere and backs up one
+ * (long-done) step on GreenValley, which is what makes the two owner
+ * assertions below narrowings rather than requests the server could satisfy
+ * by ignoring the parameter.
  */
 function renderList(initialPath = '/onboarding/clients') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -56,7 +52,7 @@ function bodyRows() {
 }
 
 async function clientNames() {
-  await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+  await screen.findByText('GreenValley International School', undefined, SLOW)
   return bodyRows().map((row) => within(row).getAllByRole('cell')[0].textContent?.trim() ?? '')
 }
 
@@ -65,18 +61,25 @@ describe('ObClientListPage', () => {
     renderList()
 
     const names = await clientNames()
-    // Acme 2026-08-28, Northwind 2026-07-14, Contoso 2026-04-02 — the
-    // contract's ordering, which the keyset cursor is built on.
-    expect(names[0]).toContain('Acme Private Limited')
-    expect(names[2]).toContain('Contoso Education Trust')
-    expect(names).toHaveLength(3)
+    // Onboarding date DESC — the contract's ordering, which the keyset cursor
+    // is built on. Little Scholars 2026-08-19 … GreenValley 2026-06-12.
+    expect(names).toEqual([
+      'Little Scholars Preschool',
+      'Nalanda Group of Institutions',
+      'Bluebell Public School',
+      'Horizon Academy',
+      'Sunrise EdTech Pvt Ltd',
+      'Trinity College of Commerce',
+      'Cambridge Heights School',
+      'GreenValley International School',
+    ])
   })
 
   it('links each row to OB-05 rather than making the row a click handler', async () => {
     renderList()
 
     const link = await screen.findByRole('link', {
-      name: 'Northwind Technologies Pvt Ltd',
+      name: 'GreenValley International School',
     }, SLOW)
     expect(link).toHaveAttribute('href', '/onboarding/clients/1')
   })
@@ -88,62 +91,93 @@ describe('ObClientListPage', () => {
   it('shows a locked client as “Prerequisites pending” and never as a colour', async () => {
     renderList()
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
-    const acme = bodyRows().find((row) => row.textContent?.includes('Acme Private Limited'))!
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    const scholars = bodyRows().find((row) =>
+      row.textContent?.includes('Little Scholars Preschool'),
+    )!
 
-    expect(within(acme).getByText('Prerequisites pending')).toBeInTheDocument()
-    expect(within(acme).queryByText('On track')).not.toBeInTheDocument()
-    expect(within(acme).queryByText('At risk')).not.toBeInTheDocument()
-    expect(within(acme).queryByText('Breached')).not.toBeInTheDocument()
+    expect(within(scholars).getByText('Prerequisites pending')).toBeInTheDocument()
+    expect(within(scholars).queryByText('On track')).not.toBeInTheDocument()
+    expect(within(scholars).queryByText('At risk')).not.toBeInTheDocument()
+    expect(within(scholars).queryByText('Breached')).not.toBeInTheDocument()
   })
 
-  it('shows journey count as complete over bought', async () => {
+  it('shows a finished client as “Journeys complete”, with the Live chip', async () => {
     renderList()
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
-    const contoso = bodyRows().find((row) => row.textContent?.includes('Contoso Education Trust'))!
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    const greenValley = bodyRows().find((row) =>
+      row.textContent?.includes('GreenValley International School'),
+    )!
 
-    // One journey, and it is finished — every step DONE.
-    expect(within(contoso).getByText('1 / 1')).toBeInTheDocument()
+    // Two journeys, and both are finished — every step DONE. The mockup's
+    // Current step column says so in words, and the health chip is "Live"
+    // because the list has no Status column to say it in.
+    expect(within(greenValley).getByText('Journeys complete')).toBeInTheDocument()
+    expect(within(greenValley).getByText('Live')).toBeInTheDocument()
+  })
+
+  it('shows the mockup’s small journey-count chip only when a client has more than one', async () => {
+    renderList()
+
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    // Horizon has a running ERP journey and a held biometric one; Sunrise has
+    // exactly one. (GreenValley and Nalanda also carry two, but GreenValley's
+    // row reads "Journeys complete" instead of a progress strip.)
+    const horizon = bodyRows().find((row) => row.textContent?.includes('Horizon Academy'))!
+    const sunrise = bodyRows().find((row) => row.textContent?.includes('Sunrise EdTech Pvt Ltd'))!
+
+    expect(within(horizon).getByText('2 journeys')).toBeInTheDocument()
+    expect(within(sunrise).queryByText(/journeys$/)).not.toBeInTheDocument()
+  })
+
+  it('captions the page head with boarded and live counts', async () => {
+    renderList()
+
+    // 8 fixture clients, of which GreenValley is LIVE.
+    await screen.findByText('8 boarded · 1 live', undefined, SLOW)
   })
 
   it('applies a status filter read straight off the URL', async () => {
     renderList('/onboarding/clients?status=LIVE')
 
-    await screen.findByText('Contoso Education Trust', undefined, SLOW)
+    await screen.findByText('GreenValley International School', undefined, SLOW)
     expect(bodyRows()).toHaveLength(1)
-    expect(screen.queryByText('Northwind Technologies Pvt Ltd')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sunrise EdTech Pvt Ltd')).not.toBeInTheDocument()
   })
 
   it('applies the gate filter, which is the only way to ask for a locked client', async () => {
     renderList('/onboarding/clients?gateStatus=LOCKED')
 
-    await screen.findByText('Acme Private Limited', undefined, SLOW)
+    await screen.findByText('Little Scholars Preschool', undefined, SLOW)
     expect(bodyRows()).toHaveLength(1)
   })
 
   /**
-   * The filter B-108 exists for. User 3 owns a step on Northwind and on Acme
-   * and none on Contoso, so this is a real narrowing rather than a request the
-   * server could satisfy by ignoring the parameter.
+   * The filter B-108 exists for. User 3 backs up a step on Bluebell and on
+   * Trinity and touches nobody else, so this is a real narrowing rather than
+   * a request the server could satisfy by ignoring the parameter — and both
+   * matches are *backup* assignments, so a filter reading only
+   * `owner_user_id` would return an empty list here.
    */
   it('filters to the clients an implementor owns a step on', async () => {
     renderList('/onboarding/clients?ownerId=3')
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+    await screen.findByText('Bluebell Public School', undefined, SLOW)
+    expect(screen.getByText('Trinity College of Commerce')).toBeInTheDocument()
     expect(bodyRows()).toHaveLength(2)
-    expect(screen.queryByText('Contoso Education Trust')).not.toBeInTheDocument()
+    expect(screen.queryByText('GreenValley International School')).not.toBeInTheDocument()
   })
 
   /**
    * The half of the owner rule that is easiest to lose. User 4 owns nothing
-   * and backs up one step on Contoso — a filter reading only `owner_user_id`
-   * would return an empty list here and look perfectly reasonable doing it.
+   * and backs up one step on GreenValley — a step long since DONE, on a LIVE
+   * client — and covering a step is what a backup is for, finished or not.
    */
   it('counts a backup owner, because covering a step is what a backup is for', async () => {
     renderList('/onboarding/clients?ownerId=4')
 
-    await screen.findByText('Contoso Education Trust', undefined, SLOW)
+    await screen.findByText('GreenValley International School', undefined, SLOW)
     expect(bodyRows()).toHaveLength(1)
   })
 
@@ -157,40 +191,51 @@ describe('ObClientListPage', () => {
   })
 
   it('resets the filter row and keeps the search term', async () => {
-    renderList('/onboarding/clients?q=Northwind&status=LIVE')
+    renderList('/onboarding/clients?q=Sunrise&status=LIVE')
 
-    // Live *and* named Northwind is nobody — Northwind is ONBOARDING.
+    // Live *and* named Sunrise is nobody — Sunrise is ONBOARDING.
     await screen.findByText('No clients match these filters', undefined, SLOW)
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
-    expect(screen.getByLabelText('Search onboarding clients by name')).toHaveValue('Northwind')
+    await screen.findByText('Sunrise EdTech Pvt Ltd', undefined, SLOW)
+    expect(screen.getByLabelText('Search onboarding clients by name')).toHaveValue('Sunrise')
     expect(bodyRows()).toHaveLength(1)
   })
 
-  it('drives the filter from the dropdown and writes it into the URL', async () => {
+  it('drives the filter from the Status select and writes it into the URL', async () => {
     renderList()
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+    await screen.findByText('GreenValley International School', undefined, SLOW)
 
-    fireEvent.click(screen.getByRole('button', { name: /Status/ }))
-    fireEvent.click(await screen.findByRole('option', { name: 'Live' }, SLOW))
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'LIVE' } })
 
     await waitFor(() => expect(bodyRows()).toHaveLength(1), SLOW)
-    expect(screen.getByText('Contoso Education Trust')).toBeInTheDocument()
+    expect(screen.getByText('GreenValley International School')).toBeInTheDocument()
   })
 
   /**
-   * A client with no primary SPOC is not merely a blank cell — it is a client
-   * nothing the module sends can reach. Every fixture client has one, so this
-   * asserts the ordinary case renders the contact rather than the warning.
+   * The mockup's Health select offers "Live", which is a status in the
+   * contract — `toQueryParams` translates it, so the same one-row answer
+   * comes back as for `status=LIVE`.
    */
-  it('names the primary SPOC on the row', async () => {
+  it('answers Health "Live" by asking the server for status LIVE', async () => {
     renderList()
 
-    await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
-    expect(screen.getByText('Meena Raghavan')).toBeInTheDocument()
-    expect(screen.queryByText('No primary SPOC')).not.toBeInTheDocument()
+    await screen.findByText('Little Scholars Preschool', undefined, SLOW)
+
+    fireEvent.change(screen.getByLabelText('Health'), { target: { value: 'LIVE' } })
+
+    await waitFor(() => expect(bodyRows()).toHaveLength(1), SLOW)
+    expect(screen.getByText('GreenValley International School')).toBeInTheDocument()
+  })
+
+  it('refuses to translate Health "Live" over an explicit non-Live status, and explains', async () => {
+    renderList('/onboarding/clients?status=ONBOARDING&rag=LIVE')
+
+    await screen.findByText('No clients match these filters', undefined, SLOW)
+    expect(
+      screen.getByText(/cannot both be true of one client/),
+    ).toBeInTheDocument()
   })
 })

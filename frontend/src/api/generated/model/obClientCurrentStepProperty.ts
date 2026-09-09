@@ -46,37 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObClientStatus } from './obClientStatus';
-import type { ObClientRag } from './obClientRag';
-import type { ObGateStatus } from './obGateStatus';
-import type { ObClientCurrentStepProperty } from './obClientCurrentStepProperty';
-import type { ObProductRef } from './obProductRef';
-import type { UserRef } from './userRef';
-import type { ObContact } from './obContact';
-import type { ObClientLiveAt } from './obClientLiveAt';
+import type { ObClientCurrentStep } from './obClientCurrentStep';
 
 /**
- * The OB-03 list row. No PAN and no address: identity data belongs to the
-detail read, where the masking rule and its audit apply, and a list is
-the wrong place to leak it a page at a time.
-
- */
-export interface ObClient {
-  id: number;
-  /** @maxLength 200 */
-  name: string;
-  onboardingDate: string;
-  status: ObClientStatus;
-  /** Worst across the client's **open** journeys. Null while every
-journey is locked — OB-03 renders that as "Prerequisites pending",
-which is a gate state and not a colour.
- */
-  rag?: ObClientRag;
-  gateStatus: ObGateStatus;
-  /** One per purchased product. */
-  journeyCount: number;
-  journeysComplete?: number;
-  /** Where the client's **first (primary) journey** stands — the OB-02
+ * Where the client's **first (primary) journey** stands — the OB-02
 RAG columns' and OB-03's caption "2 journeys · ERP step 4/8 ·
 Data migration". The first journey is the earliest instantiated
 live one, which is the wizard's first purchase and, in every
@@ -87,16 +60,6 @@ or finished** — nothing is running to name, and OB-03 already has
 words for those states ("Prerequisites pending", "Journeys
 complete"). Added as an optional field — CONVENTIONS.md §1, not
 breaking.
+
  */
-  currentStep?: ObClientCurrentStepProperty;
-  products?: ObProductRef[];
-  salesPerson?: UserRef;
-  primaryContact?: ObContact;
-  liveAt?: ObClientLiveAt;
-  /** Whether a `client_accounts` row exists for this client. **Not
-whether one should** — creation is always an explicit staff action
-(plan §2.3), so `false` is the ordinary state of a boarded client
-and not an error to reconcile.
- */
-  hasPortalLogin?: boolean;
-}
+export type ObClientCurrentStepProperty = ObClientCurrentStep | null;

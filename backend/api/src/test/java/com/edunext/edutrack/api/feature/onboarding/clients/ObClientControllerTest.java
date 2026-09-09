@@ -183,7 +183,7 @@ class ObClientControllerTest {
     private static ObClientDtos.ObClientDetail detail(String name) {
         return new ObClientDtos.ObClientDetail(
                 CLIENT, name, LocalDate.of(2026, 9, 7), "ONBOARDING", null, "LOCKED", 1, 0,
-                List.of(), null, null, null, false,
+                null, List.of(), null, null, null, false,
                 null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), null, null);
     }
@@ -197,7 +197,8 @@ class ObClientControllerTest {
         ObClientDtos.ObClientDetail base = detail(name);
         return new ObClientDtos.ObClientDetail(
                 base.id(), base.name(), base.onboardingDate(), base.status(), base.rag(),
-                base.gateStatus(), base.journeyCount(), base.journeysComplete(), base.products(),
+                base.gateStatus(), base.journeyCount(), base.journeysComplete(), base.currentStep(),
+                base.products(),
                 base.salesPerson(), base.primaryContact(), base.liveAt(), base.hasPortalLogin(),
                 base.description(), base.address(), base.licenseType(), base.pan(),
                 base.statusReason(), base.contacts(), base.applications(), base.requirements(),

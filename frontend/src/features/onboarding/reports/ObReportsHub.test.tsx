@@ -282,7 +282,7 @@ describe('OB-10 the viewer', () => {
     ).toBeInTheDocument()
   })
 
-  it('offers Excel and CSV, and never PDF', async () => {
+  it('offers XLSX and CSV exports, and never PDF', async () => {
     catalogue()
     run({
       data: {
@@ -294,9 +294,85 @@ describe('OB-10 the viewer', () => {
     })
     renderViewer('/onboarding/reports/signoff-pending')
 
-    expect(await screen.findByRole('button', { name: /Excel/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /CSV/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Export XLSX/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Export CSV/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /PDF/ })).not.toBeInTheDocument()
+  })
+
+  /**
+   * The mockup's tab row, drawn only over reports the catalogue names as
+   * available — this catalogue has three of the six, so three tabs, with the
+   * current one marked selected. Each tab is a link, because the viewer's
+   * routing structure (one URL per report) is kept.
+   */
+  it('draws the mockup’s tab row from the catalogue and marks the current report selected', async () => {
+    catalogue()
+    run({
+      data: {
+        reportKey: 'signoff-pending',
+        columns: [{ key: 'client', label: 'Client', type: 'string' }],
+        rows: [{ client: 'Horizon Group' }],
+      },
+      meta: { appliedScope: 'all clients' },
+    })
+    renderViewer('/onboarding/reports/signoff-pending')
+
+    const selected = await screen.findByRole('tab', { name: 'Sign-offs pending' })
+    expect(selected).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Funnel' })).toHaveAttribute(
+      'href',
+      '/onboarding/reports/journey-funnel',
+    )
+    expect(screen.getByRole('tab', { name: 'Stuck & aging' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    // TAT compliance is not in this catalogue, so no tab claims it exists.
+    expect(screen.queryByRole('tab', { name: 'TAT compliance' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * The mockup's hbar drawing: a labelled row per category with the value
+   * printed at the end, and — for percent columns — the threshold colouring
+   * with its swatch legend. The figure is a labelled image; the table below
+   * stays the readable copy of every number.
+   */
+  it('draws a percent report as hbar rows with the mockup’s threshold legend', async () => {
+    catalogue({
+      data: {
+        reports: [
+          {
+            key: 'journey-funnel',
+            title: 'Journey funnel by product',
+            category: 'DELIVERY',
+            chart: 'bar',
+            filters: [],
+            available: true,
+          },
+        ],
+        scopeNote: null,
+      },
+    })
+    run({
+      data: {
+        reportKey: 'journey-funnel',
+        columns: [
+          { key: 'step', label: 'Step', type: 'string' },
+          { key: 'onTime', label: 'On time', type: 'percent' },
+        ],
+        rows: [
+          { step: 'Kickoff', onTime: 92 },
+          { step: 'Data migration', onTime: 58 },
+        ],
+      },
+      meta: { appliedScope: 'all clients' },
+    })
+    renderViewer('/onboarding/reports/journey-funnel')
+
+    const figure = await screen.findByRole('img', { name: /Bar chart: Journey funnel by product/ })
+    expect(figure).toBeInTheDocument()
+    expect(screen.getByText('below 70%')).toBeInTheDocument()
+    expect(screen.getByText('70–85%')).toBeInTheDocument()
   })
 
   /**

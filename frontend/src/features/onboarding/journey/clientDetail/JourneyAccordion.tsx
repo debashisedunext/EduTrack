@@ -99,13 +99,24 @@ export function JourneyAccordion({
       label={`${productName} — ${journey.percentComplete}% complete, ${ragLabel(journey.rag).toLowerCase()}`}
       summary={
         <>
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-content">{productName}</span>
+          {/* The mockup's `jstrip` order: name, the template caption, the
+              status chip, TAT, then dots and percent pushed to the right. */}
+          <span className="min-w-0 truncate text-sm font-semibold text-content">{productName}</span>
 
-          <span className="shrink-0 text-sm tabular-nums text-content-muted">
-            {journey.percentComplete}%
+          {/* `ObJourneyStrip` carries no template name or pinned version —
+              only the expanded detail read does — so the collapsed caption
+              states what the strip knows: how many services the journey has. */}
+          <span className="shrink-0 text-caption text-content-muted">
+            {(journey.steps ?? []).length} services
           </span>
 
-          <StepDotStrip steps={journey.steps ?? []} />
+          {hold === 'GATE_LOCKED' ? (
+            <Chip variant="neutral">Prerequisites pending</Chip>
+          ) : hold === 'HELD_BY_SIBLING' ? (
+            <Chip variant="info">Held for {heldBy?.product?.name ?? 'another service'}</Chip>
+          ) : (
+            journey.rag && <Chip variant={ragVariant(journey.rag)}>{ragLabel(journey.rag)}</Chip>
+          )}
 
           {/*
             Overrun highlighted red and ≥75% amber — §10, and the figure is the
@@ -130,13 +141,13 @@ export function JourneyAccordion({
             <span className="shrink-0 text-caption text-content-muted">No TAT budget</span>
           )}
 
-          {hold === 'GATE_LOCKED' ? (
-            <Chip variant="neutral">Prerequisites pending</Chip>
-          ) : hold === 'HELD_BY_SIBLING' ? (
-            <Chip variant="info">Held for {heldBy?.product?.name ?? 'another service'}</Chip>
-          ) : (
-            journey.rag && <Chip variant={ragVariant(journey.rag)}>{ragLabel(journey.rag)}</Chip>
-          )}
+          <span className="min-w-0 flex-1" aria-hidden="true" />
+
+          <StepDotStrip steps={journey.steps ?? []} />
+
+          <span className="shrink-0 text-sm tabular-nums text-content-muted">
+            {journey.percentComplete}%
+          </span>
         </>
       }
     >
@@ -153,14 +164,29 @@ export function JourneyAccordion({
         />
       ) : (
         <>
-          <JourneyRibbonStrip
-            steps={ribbonSteps}
-            selectedStepId={activeStepId ?? undefined}
-            onSelectStep={(step) => setSelectedStepId(step.id)}
-          />
+          {/* The mockup's ribbon header line: eyebrow + working-calendar
+              caption, with the pinned template version the strip could not
+              show while collapsed — the detail read carries it. */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="text-caption font-semibold uppercase tracking-wide text-content-muted">
+              Journey ribbon
+            </span>
+            <span className="text-caption text-content-muted">
+              TATs in working days (weekends &amp; holidays excluded)
+              {detail.data?.data && ` · template v${detail.data.data.templateVersion}`}
+            </span>
+          </div>
+          <div className="rounded-card border border-border bg-surface p-3">
+            <JourneyRibbonStrip
+              steps={ribbonSteps}
+              selectedStepId={activeStepId ?? undefined}
+              onSelectStep={(step) => setSelectedStepId(step.id)}
+            />
+          </div>
           {activeStep && (
             <JourneyStepPanel
               step={activeStep}
+              totalSteps={steps?.length}
               resolveUser={resolveUser}
               hold={hold}
               obClientId={obClientId}

@@ -8,13 +8,14 @@ import { ObClientAccountPanel } from './ObClientAccountPanel'
 /**
  * B-126 · the client-account panel against the mock server.
  *
- * Fixture note — `db.ts`'s `obClientAccounts`: only Contoso (client 3) has a
- * portal login. Northwind (1) and Acme (2) have none, which is what makes the
- * create path reachable rather than always answering 409. Acme's contacts
- * include an active primary, so the 422 case needs a client without one and is
- * covered server-side in `ClientAccountAdminServiceTest` instead — the mock's
- * three clients all have a primary, and inventing a fourth here would be
- * testing a fixture rather than the panel.
+ * Fixture note — `db.ts`'s `obClientAccounts`: only GreenValley (client 1) has
+ * a portal login. The other seven clients — Sunrise (2) is the one used here —
+ * have none, which is what makes the create path reachable rather than always
+ * answering 409. Sunrise's contacts include an active primary (Arjun Shetty),
+ * so the 422 case needs a client without one and is covered server-side in
+ * `ClientAccountAdminServiceTest` instead — the mock's eight clients all have
+ * a primary, and inventing a ninth here would be testing a fixture rather
+ * than the panel.
  */
 function renderPanel(obClientId: number) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -27,16 +28,16 @@ function renderPanel(obClientId: number) {
 
 describe('OB-05 client-account panel', () => {
   it('offers to create a login for a client that has none', async () => {
-    renderPanel(1)
+    renderPanel(2)
 
     expect(await screen.findByRole('button', { name: /create portal login/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /email a new link/i })).not.toBeInTheDocument()
   })
 
   it('shows the login for a client that has one, and never a credential', async () => {
-    renderPanel(3)
+    renderPanel(1)
 
-    expect(await screen.findByText('CONTOSO.arjun')).toBeInTheDocument()
+    expect(await screen.findByText('GREENVALLEY.deepa')).toBeInTheDocument()
     // The response carries no password, hash or link, so there is nothing on
     // the panel to copy. This is the assertion that fails if somebody ever
     // "helpfully" adds one to the server.
@@ -68,7 +69,7 @@ describe('OB-05 client-account panel', () => {
 
   it('reissuing says the earlier link has stopped working', async () => {
     const user = userEvent.setup()
-    renderPanel(3)
+    renderPanel(1)
 
     await user.click(await screen.findByRole('button', { name: /email a new link/i }))
 
@@ -78,7 +79,7 @@ describe('OB-05 client-account panel', () => {
 
   it('disabling flips the control rather than leaving a dead button', async () => {
     const user = userEvent.setup()
-    renderPanel(3)
+    renderPanel(1)
 
     await user.click(await screen.findByRole('button', { name: /disable login/i }))
 
@@ -87,7 +88,7 @@ describe('OB-05 client-account panel', () => {
   })
 
   it('warns that disabling also kills a link already sent', async () => {
-    renderPanel(3)
+    renderPanel(1)
 
     // The operator pressing "disable" believes they have closed the door. This
     // line is what makes that true on screen as well as on the server.

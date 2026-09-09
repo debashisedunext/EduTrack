@@ -8,13 +8,14 @@ import { describe, expect, it } from 'vitest';
  * silent: a gate that opens one task early looks identical to one that opened
  * correctly, and nothing downstream can tell.
  *
- * Acme (client 2) is the fixture with a locked gate — one mandatory task
- * `SUBMITTED`, one mandatory and two optional still `PENDING`. Acme owns
- * journey 3, the one seeded `gateStatus: 'LOCKED'`, so opening the gate here is
- * observable on the journey rather than only on the checklist. Which client
- * that is matters and is easy to get wrong: journey 2 belongs to Northwind
- * despite the numbering, and asserting against the wrong one produces a test
- * that fails for a reason nothing on screen would explain.
+ * Little Scholars (client 7) is the fixture with a locked gate — one mandatory
+ * task `SUBMITTED` (161), one mandatory `VERIFIED` (162), one mandatory and two
+ * optional still `PENDING` (163, 164, 165). Little Scholars owns journey 71,
+ * the one seeded `gateStatus: 'LOCKED'`, so opening the gate here is observable
+ * on the journey rather than only on the checklist. Which client that is
+ * matters and is easy to get wrong: every other client's checklist is already
+ * cleared, and asserting against one of those produces a test that fails for a
+ * reason nothing on screen would explain.
  */
 
 const BASE = '/api/v1';
@@ -36,9 +37,9 @@ async function send(method: string, path: string, body?: unknown) {
 const post = (p: string, b?: unknown) => send('POST', p, b);
 const patch = (p: string, b?: unknown) => send('PATCH', p, b);
 
-/** Clear every outstanding task on Acme except the one named. */
-async function clearAcmeExcept(keepId: number) {
-  const { data } = await get('/onboarding/clients/2/prereqs');
+/** Clear every outstanding task on Little Scholars except the one named. */
+async function clearLittleScholarsExcept(keepId: number) {
+  const { data } = await get('/onboarding/clients/7/prereqs');
   for (const t of data.data.tasks) {
     if (t.id === keepId || t.status === 'VERIFIED' || t.status === 'SKIPPED') continue;
     if (t.status === 'PENDING') await post(`/onboarding/prereq-tasks/${t.id}/submit`);
@@ -51,10 +52,10 @@ async function clearAcmeExcept(keepId: number) {
 }
 
 /**
- * `clearAcmeExcept` walks the checklist one request at a time, so the two
- * tests that drive the gate all the way open cost ten-odd MSW round trips
- * before their first assertion. That sits just under vitest's 5s default
- * alone and just over it in a full run, where the workers compete — a
+ * `clearLittleScholarsExcept` walks the checklist one request at a time, so
+ * the two tests that drive the gate all the way open cost ten-odd MSW round
+ * trips before their first assertion. That sits just under vitest's 5s
+ * default alone and just over it in a full run, where the workers compete — a
  * timeout, never a wrong answer. Stated here rather than per call so the
  * number is one decision instead of two.
  */
@@ -62,7 +63,7 @@ const GATE_WALK_TIMEOUT = 20_000;
 
 describe('A-118 · the prerequisite gate', () => {
   it('reports a locked gate with its mandatory progress', async () => {
-    const { status, data } = await get('/onboarding/clients/2/prereqs');
+    const { status, data } = await get('/onboarding/clients/7/prereqs');
     expect(status).toBe(200);
     expect(data.data.gateStatus).toBe('LOCKED');
     expect(data.data.status).toBe('IN_PROGRESS');
@@ -74,7 +75,8 @@ describe('A-118 · the prerequisite gate', () => {
   });
 
   it('does not open the gate while anything is outstanding', async () => {
-    const { status, data } = await post('/onboarding/prereq-tasks/112/verify');
+    // 161 is the SUBMITTED signed-agreement task, awaiting verification.
+    const { status, data } = await post('/onboarding/prereq-tasks/161/verify');
     expect(status).toBe(200);
     expect(data.data.task.status).toBe('VERIFIED');
     expect(data.data.gateOpened).toBe(false);
@@ -83,31 +85,31 @@ describe('A-118 · the prerequisite gate', () => {
   });
 
   it('opens the gate on the last transition, and starts the locked journey', async () => {
-    await clearAcmeExcept(113);
-    await post('/onboarding/prereq-tasks/113/submit');
+    await clearLittleScholarsExcept(163);
+    await post('/onboarding/prereq-tasks/163/submit');
 
-    const { status, data } = await post('/onboarding/prereq-tasks/113/verify');
+    const { status, data } = await post('/onboarding/prereq-tasks/163/verify');
     expect(status).toBe(200);
     expect(data.data.gateOpened).toBe(true);
     expect(data.data.gateStatus).toBe('OPEN');
-    expect(data.data.openedJourneyIds).toContain(3);
+    expect(data.data.openedJourneyIds).toContain(71);
 
     // The journey itself moved, not only the checklist's own header.
-    const journey = await get('/onboarding/journeys/3');
+    const journey = await get('/onboarding/journeys/71');
     expect(journey.data.data.gateStatus).toBe('OPEN');
   }, GATE_WALK_TIMEOUT);
 
   it('reports gateOpened exactly once — a screen cannot infer it from gateStatus', async () => {
-    await clearAcmeExcept(113);
-    await post('/onboarding/prereq-tasks/113/submit');
-    const first = await post('/onboarding/prereq-tasks/113/verify');
+    await clearLittleScholarsExcept(163);
+    await post('/onboarding/prereq-tasks/163/submit');
+    const first = await post('/onboarding/prereq-tasks/163/verify');
     expect(first.data.data.gateOpened).toBe(true);
 
     // A second transition on an already-open gate still reads OPEN, which is
     // why `gateOpened` exists: a screen refreshing whenever the gate reads open
     // would refresh forever. An optional ad-hoc task gives us that transition
     // without re-locking anything — only a mandatory addition does that.
-    const added = await post('/onboarding/clients/2/prereq-tasks', {
+    const added = await post('/onboarding/clients/7/prereq-tasks', {
       title: 'Post-gate courtesy check', tatDays: 2, isMandatory: false,
     });
     const { data } = await post(`/onboarding/prereq-tasks/${added.data.data.id}/skip`, {
@@ -118,7 +120,7 @@ describe('A-118 · the prerequisite gate', () => {
   }, GATE_WALK_TIMEOUT);
 
   it('refuses to skip a mandatory task, whoever is asking', async () => {
-    const { status, data } = await post('/onboarding/prereq-tasks/113/skip', { reason: 'Client is slow.' });
+    const { status, data } = await post('/onboarding/prereq-tasks/163/skip', { reason: 'Client is slow.' });
     expect(status).toBe(422);
     expect(data.type).toBe('https://edutrack/errors/ob-prereq-mandatory-not-skippable');
   });
@@ -127,64 +129,64 @@ describe('A-118 · the prerequisite gate', () => {
     // The absence is the guarantee — plan §5.3's "no open gate anyway"
     // override. A 501 from the catch-all means nothing is mocked here, and the
     // contract declares no such operation for anything to be mocked against.
-    const { status } = await post('/onboarding/clients/2/gate');
+    const { status } = await post('/onboarding/clients/7/gate');
     expect(status).toBe(501);
   });
 });
 
 describe('A-118 · the submission loop', () => {
   it('refuses to verify a task that was never submitted', async () => {
-    const { status, data } = await post('/onboarding/prereq-tasks/113/verify');
+    const { status, data } = await post('/onboarding/prereq-tasks/163/verify');
     expect(status).toBe(422);
     expect(data.type).toBe('https://edutrack/errors/ob-prereq-not-verifiable');
   });
 
   it('returns a submission to PENDING with the reason on the thread', async () => {
-    const { status, data } = await post('/onboarding/prereq-tasks/112/return', {
+    const { status, data } = await post('/onboarding/prereq-tasks/161/return', {
       comment: 'The named contact is not on the agreement.',
     });
     expect(status).toBe(200);
     expect(data.data.status).toBe('PENDING');
 
-    const comments = await get('/onboarding/prereq-tasks/112/comments');
+    const comments = await get('/onboarding/prereq-tasks/161/comments');
     expect(comments.data.data).toHaveLength(1);
     expect(comments.data.data[0].isSystem).toBe(true);
     expect(comments.data.data[0].body).toContain('not on the agreement');
   });
 
   it('requires a reason to return', async () => {
-    const { status } = await post('/onboarding/prereq-tasks/112/return', { comment: '  ' });
+    const { status } = await post('/onboarding/prereq-tasks/161/return', { comment: '  ' });
     expect(status).toBe(400);
   });
 
   it('does not reset the clock on a return — a bad submission buys no extension', async () => {
-    const before = await get('/onboarding/prereq-tasks/112');
-    await post('/onboarding/prereq-tasks/112/return', { comment: 'Wrong format.' });
-    const after = await get('/onboarding/prereq-tasks/112');
+    const before = await get('/onboarding/prereq-tasks/161');
+    await post('/onboarding/prereq-tasks/161/return', { comment: 'Wrong format.' });
+    const after = await get('/onboarding/prereq-tasks/161');
     expect(after.data.data.dueAt).toBe(before.data.data.dueAt);
   });
 
   it('records every transition in an append-only history', async () => {
-    await post('/onboarding/prereq-tasks/113/submit');
-    await post('/onboarding/prereq-tasks/113/verify');
-    const { data } = await get('/onboarding/prereq-tasks/113/history');
+    await post('/onboarding/prereq-tasks/163/submit');
+    await post('/onboarding/prereq-tasks/163/verify');
+    const { data } = await get('/onboarding/prereq-tasks/163/history');
     expect(data.data.map((h: { toStatus: string }) => h.toStatus)).toEqual(['SUBMITTED', 'VERIFIED']);
     expect(data.data.every((h: { isCorrection: boolean }) => h.isCorrection === false)).toBe(true);
 
     // No mutation verb exists on the path — CONVENTIONS §8.
-    const res = await fetch(`${BASE}/onboarding/prereq-tasks/113/history`, { method: 'DELETE' });
+    const res = await fetch(`${BASE}/onboarding/prereq-tasks/163/history`, { method: 'DELETE' });
     expect(res.status).toBe(501);
   });
 
   it('will not reword a settled task', async () => {
-    const { status } = await patch('/onboarding/prereq-tasks/111', { title: 'Rewritten after the fact' });
+    const { status } = await patch('/onboarding/prereq-tasks/162', { title: 'Rewritten after the fact' });
     expect(status).toBe(422);
   });
 });
 
 describe('A-118 · ad-hoc tasks and the gate they can re-lock', () => {
   it('adds a task to one client only, marked as ad-hoc', async () => {
-    const { status, data } = await post('/onboarding/clients/2/prereq-tasks', {
+    const { status, data } = await post('/onboarding/clients/7/prereq-tasks', {
       title: 'Campus network survey', tatDays: 4, isMandatory: false,
     });
     expect(status).toBe(201);
@@ -199,23 +201,24 @@ describe('A-118 · ad-hoc tasks and the gate they can re-lock', () => {
   });
 
   it('re-locks a cleared gate when the new task is mandatory', async () => {
-    const before = await get('/onboarding/clients/1/prereqs');
+    // Bluebell (client 4) cleared its checklist on 10 Aug.
+    const before = await get('/onboarding/clients/4/prereqs');
     expect(before.data.data.gateStatus).toBe('OPEN');
 
-    await post('/onboarding/clients/1/prereq-tasks', {
+    await post('/onboarding/clients/4/prereq-tasks', {
       title: 'Signed data-processing addendum', tatDays: 3, isMandatory: true,
     });
 
-    const after = await get('/onboarding/clients/1/prereqs');
+    const after = await get('/onboarding/clients/4/prereqs');
     expect(after.data.data.gateStatus).toBe('LOCKED');
     expect(after.data.data.clearedAt).toBeNull();
   });
 
   it('leaves a cleared gate alone when the new task is optional', async () => {
-    await post('/onboarding/clients/1/prereq-tasks', {
+    await post('/onboarding/clients/4/prereq-tasks', {
       title: 'Optional branding refresh', tatDays: 3, isMandatory: false,
     });
-    const after = await get('/onboarding/clients/1/prereqs');
+    const after = await get('/onboarding/clients/4/prereqs');
     expect(after.data.data.gateStatus).toBe('OPEN');
   });
 });
@@ -283,7 +286,7 @@ describe('A-118 · the OB-14 master', () => {
   it('leaves boarded clients on the version they were given', async () => {
     await post('/onboarding/prereq-template/revisions');
     await post('/onboarding/prereq-template/publish');
-    const { data } = await get('/onboarding/clients/2/prereqs');
+    const { data } = await get('/onboarding/clients/7/prereqs');
     expect(data.data.templateVersion).toBe(1);
   });
 

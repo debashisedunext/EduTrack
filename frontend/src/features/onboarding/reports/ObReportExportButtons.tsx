@@ -36,9 +36,14 @@ import { BASE, getAccessToken } from '@/api/http'
  * noticed — files would simply start arriving with yesterday's convention.
  */
 
+/**
+ * The mockup's button says "⬇ Export XLSX"; CSV is kept alongside it because
+ * the engine already writes it and a working export is not removed to match a
+ * prototype that predates it.
+ */
 const FORMATS = [
-  { format: 'xlsx', label: 'Excel' },
-  { format: 'csv', label: 'CSV' },
+  { format: 'xlsx', label: 'Export XLSX' },
+  { format: 'csv', label: 'Export CSV' },
 ] as const
 
 export function ObReportExportButtons({
@@ -91,7 +96,6 @@ export function ObReportExportButtons({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-caption font-medium text-content-muted">Export</span>
       {FORMATS.map(({ format, label }) => (
         <button
           key={format}

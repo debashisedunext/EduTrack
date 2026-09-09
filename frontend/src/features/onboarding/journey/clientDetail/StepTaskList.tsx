@@ -2,6 +2,7 @@ import type { ObJourneyStepDoc, ObJourneyStepItem } from '@/api/generated/model'
 import { useUpdateObJourneyStepItem } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { useQueryClient } from '@tanstack/react-query'
 import { getGetObJourneyStepQueryKey } from '@/api/generated/onboarding-journeys/onboarding-journeys'
+import { Chip } from '@/components/ui/chip'
 import { cn } from '@/lib/utils'
 
 /**
@@ -106,24 +107,23 @@ export function StepTaskList({ stepId, items, docs, canEdit }: StepTaskListProps
       {docs.length > 0 && (
         <section>
           <h5 className="m-0 text-caption font-semibold uppercase tracking-wide text-content-muted">
-            Documents
+            Required documents
           </h5>
-          <ul role="list" className="mt-2 flex flex-col gap-1">
+          {/* The mockup's chip row — `✓ name` once attached, `○ name` while
+              outstanding, with the words carrying what the mark means so the
+              state never rides on colour alone. */}
+          <ul role="list" className="mt-2 flex flex-wrap items-center gap-1.5">
             {docs.map((doc) => (
-              <li key={doc.id} className="flex items-center gap-2 text-sm">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'inline-block h-2 w-2 shrink-0 rounded-full',
-                    doc.isSatisfied ? 'bg-success' : doc.isRequired ? 'bg-danger' : 'bg-subtle',
-                  )}
-                />
-                <span className={doc.isSatisfied ? 'text-content-muted' : 'text-content'}>
-                  {doc.label}
-                </span>
-                <span className="text-caption text-content-muted">
-                  {doc.isSatisfied ? 'attached' : doc.isRequired ? 'required — missing' : 'optional'}
-                </span>
+              <li key={doc.id}>
+                <Chip
+                  variant={doc.isSatisfied ? 'success' : 'neutral'}
+                  title={doc.isSatisfied ? 'Attached' : doc.isRequired ? 'Required — missing' : 'Optional'}
+                >
+                  {doc.isSatisfied ? '✓' : '○'} {doc.label}
+                  <span className={cn('text-caption', doc.isSatisfied ? undefined : 'text-content-muted')}>
+                    {doc.isSatisfied ? ' · attached' : doc.isRequired ? ' · required' : ' · optional'}
+                  </span>
+                </Chip>
               </li>
             ))}
           </ul>

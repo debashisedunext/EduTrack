@@ -48,12 +48,12 @@ describe('ObNotificationCentrePage', () => {
   it('lists the caller’s own entries, newest first', async () => {
     renderCentre()
 
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     const titles = within(panel())
       .getAllByRole('link')
       .map((row) => within(row).getAllByText(/./)[0].textContent)
-    expect(titles[0]).toBe('Contoso Education Trust has raised an escalation')
+    expect(titles[0]).toBe('Sunrise EdTech Pvt Ltd has raised an escalation')
     expect(titles).toHaveLength(6)
   })
 
@@ -65,10 +65,10 @@ describe('ObNotificationCentrePage', () => {
   it('never shows an entry addressed to somebody else', async () => {
     renderCentre()
 
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
-    expect(screen.queryByText('Northwind Technologies Pvt Ltd is live')).not.toBeInTheDocument()
-    expect(screen.queryByText('Escalated to L2: User Training')).not.toBeInTheDocument()
+    expect(screen.queryByText('GreenValley International School is live')).not.toBeInTheDocument()
+    expect(screen.queryByText('Escalated to L2: Data migration')).not.toBeInTheDocument()
   })
 
   it('shows the unread total in the header, not the count in the open tab', async () => {
@@ -81,14 +81,14 @@ describe('ObNotificationCentrePage', () => {
 
   it('filters to one category when a tab is selected', async () => {
     renderCentre()
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Escalations' }))
 
     await waitFor(() => expect(within(panel()).getAllByRole('link')).toHaveLength(2), SLOW)
-    expect(screen.getByText('Overdue by 2 days: Data Migration')).toBeInTheDocument()
+    expect(screen.getByText('Overdue by 2 days: Data migration')).toBeInTheDocument()
     // An ASSIGNMENT is not an ESCALATION.
-    expect(screen.queryByText('Ready to verify: Signed statement of work')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ready to verify: Signed service agreement')).not.toBeInTheDocument()
   })
 
   /**
@@ -98,13 +98,13 @@ describe('ObNotificationCentrePage', () => {
    */
   it('shows an uncategorised update under All and under no tab', async () => {
     renderCentre()
-    await screen.findByText('Acme Private Limited has cleared prerequisites', undefined, SLOW)
+    await screen.findByText('Bluebell Public School has cleared prerequisites', undefined, SLOW)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Assignments' }))
     await waitFor(
       () =>
         expect(
-          screen.queryByText('Acme Private Limited has cleared prerequisites'),
+          screen.queryByText('Bluebell Public School has cleared prerequisites'),
         ).not.toBeInTheDocument(),
       SLOW,
     )
@@ -127,7 +127,7 @@ describe('ObNotificationCentrePage', () => {
 
   it('filters to unread only', async () => {
     renderCentre()
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     fireEvent.click(screen.getByLabelText('Unread only'))
 
@@ -148,7 +148,7 @@ describe('ObNotificationCentrePage', () => {
 
   it('marks one entry read when it is opened', async () => {
     renderCentre()
-    const row = await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    const row = await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     fireEvent.click(row)
 
@@ -238,7 +238,7 @@ describe('ObNotificationCentrePage', () => {
    */
   it('arrow keys move focus between tabs without selecting', async () => {
     renderCentre()
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     const all = screen.getByRole('tab', { name: 'All' })
     all.focus()
@@ -252,7 +252,7 @@ describe('ObNotificationCentrePage', () => {
 
   it('keeps one tab stop for the whole strip', async () => {
     renderCentre()
-    await screen.findByText('Contoso Education Trust has raised an escalation', undefined, SLOW)
+    await screen.findByText('Sunrise EdTech Pvt Ltd has raised an escalation', undefined, SLOW)
 
     expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('tabindex', '0')
     expect(screen.getByRole('tab', { name: 'Escalations' })).toHaveAttribute('tabindex', '-1')
@@ -260,7 +260,7 @@ describe('ObNotificationCentrePage', () => {
 
   it('wraps from the last tab to the first', async () => {
     renderCentre('/onboarding/notifications?tab=reminders')
-    await screen.findByText('Due 05 Sep 2026: Environment Provisioning', undefined, SLOW)
+    await screen.findByText('Due 22 Aug 2026: UAT & issue closure', undefined, SLOW)
 
     const reminders = screen.getByRole('tab', { name: 'Reminders' })
     reminders.focus()

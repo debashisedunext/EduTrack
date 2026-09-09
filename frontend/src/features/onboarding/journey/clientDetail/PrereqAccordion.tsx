@@ -182,15 +182,32 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
                 className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-app px-3 py-2"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-content">
+                  <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-content">
                     {task.sequence}. {task.title}
+                    {/* The mockup's per-row MANDATORY/OPTIONAL chip beside the
+                        title, rather than a word buried in the caption. */}
+                    <Chip variant={task.isMandatory ? 'danger' : 'neutral'} className="text-[10px]">
+                      {task.isMandatory ? 'Mandatory' : 'Optional'}
+                    </Chip>
                   </span>
                   <span className="block text-caption text-content-muted">
-                    {task.isMandatory ? 'Mandatory' : 'Optional'}
-                    {task.isAdHoc && ' · added for this client'}
-                    {formatDate(task.dueAt) && ` · due ${formatDate(task.dueAt)}`}
+                    {task.isAdHoc && 'added for this client · '}
+                    {formatDate(task.dueAt) && `due ${formatDate(task.dueAt)}`}
                     {task.status === 'SKIPPED' && task.skipReason && ` · waived: ${task.skipReason}`}
                   </span>
+                  {/* What the client has said and sent on this task — counts
+                      are all the checklist read carries; the entries
+                      themselves live on the portal surface. */}
+                  {((task.commentCount ?? 0) > 0 || (task.attachmentCount ?? 0) > 0) && (
+                    <span className="mt-1 flex flex-wrap gap-1.5">
+                      {(task.attachmentCount ?? 0) > 0 && (
+                        <Chip variant="neutral">📎 {task.attachmentCount}</Chip>
+                      )}
+                      {(task.commentCount ?? 0) > 0 && (
+                        <Chip variant="neutral">💬 {task.commentCount}</Chip>
+                      )}
+                    </span>
+                  )}
                 </span>
 
                 {/*

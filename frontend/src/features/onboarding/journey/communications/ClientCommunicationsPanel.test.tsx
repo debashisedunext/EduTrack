@@ -9,13 +9,13 @@ import { ClientCommunicationsPanel } from './ClientCommunicationsPanel'
 /**
  * C-112 · the stitched view against the mock server.
  *
- * Northwind (client 1) is the fixture, because it is the only seeded client
+ * GreenValley (client 1) is the fixture, because it is the only seeded client
  * with communications on **two** journeys — which is the whole point of a
  * stitched view and the one thing a per-service timeline cannot show.
  */
 const JOURNEYS = [
-  { id: 1, product: { id: 1, code: 'ERP', name: 'ERP Suite' }, gateStatus: 'OPEN' },
-  { id: 2, product: { id: 2, code: 'BIO', name: 'Biometric Attendance' }, gateStatus: 'OPEN' },
+  { id: 11, product: { id: 1, code: 'ERP', name: 'EduTrack ERP' }, gateStatus: 'OPEN' },
+  { id: 12, product: { id: 2, code: 'BIOMETRIC', name: 'Biometric Attendance' }, gateStatus: 'OPEN' },
 ] as unknown as ObJourneyStrip[]
 
 function renderPanel() {
@@ -43,10 +43,10 @@ describe('ClientCommunicationsPanel', () => {
   it('stitches entries from every service of the client into one timeline', async () => {
     renderPanel()
 
-    // Journey 1's own thread…
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
-    // …and journey 2's, which no per-service timeline would ever show beside it.
-    expect(screen.getByText(/biometric devices can ship/)).toBeInTheDocument()
+    // Journey 11's own thread…
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
+    // …and journey 12's, which no per-service timeline would ever show beside it.
+    expect(screen.getByText(/Deepa confirmed device counts/)).toBeInTheDocument()
   })
 
   /*
@@ -55,11 +55,11 @@ describe('ClientCommunicationsPanel', () => {
    */
   it('puts the most recent conversation first', async () => {
     renderPanel()
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
 
     const entries = screen.getAllByTestId('communication-entry')
-    expect(entries[0]).toHaveTextContent(/biometric devices can ship/)
-    expect(entries[entries.length - 1]).toHaveTextContent(/Kickoff call with Meena and Sanjay/)
+    expect(entries[0]).toHaveTextContent(/Training attendance sheet filed/)
+    expect(entries[entries.length - 1]).toHaveTextContent(/Kickoff call with Deepa and Prakash/)
   })
 
   /*
@@ -69,19 +69,19 @@ describe('ClientCommunicationsPanel', () => {
    */
   it('names the service every entry came from', async () => {
     renderPanel()
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
 
-    expect(screen.getByText('ERP Suite · 1. Kickoff & Requirement Sign-off')).toBeInTheDocument()
-    expect(screen.getByText('Biometric Attendance · 1. Device Rollout')).toBeInTheDocument()
+    expect(screen.getByText('EduTrack ERP · 1. Kickoff call')).toBeInTheDocument()
+    expect(screen.getByText('Biometric Attendance · 1. Kickoff & site survey')).toBeInTheDocument()
   })
 
   it('renders all three author shapes, including the ones no staff user wrote', async () => {
     renderPanel()
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
 
-    expect(screen.getByText('Portal comment · Sanjay Bose (client)')).toBeInTheDocument()
+    expect(screen.getByText('Portal comment · Prakash Rane (client)')).toBeInTheDocument()
     expect(screen.getByText('System · System')).toBeInTheDocument()
-    expect(screen.getAllByText(/· Ravi Kumar$/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/· Kavya Sharma$/).length).toBeGreaterThan(0)
   })
 
   /*
@@ -91,7 +91,7 @@ describe('ClientCommunicationsPanel', () => {
    */
   it('says of every entry, in words, whether the client can read it', async () => {
     renderPanel()
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
 
     expect(screen.getAllByText('Client can see this').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Internal only').length).toBeGreaterThan(0)
@@ -102,29 +102,29 @@ describe('ClientCommunicationsPanel', () => {
     async () => {
       const user = userEvent.setup()
       renderPanel()
-      await screen.findByText(/biometric devices can ship/, undefined, SLOW)
+      await screen.findByText(/Deepa confirmed device counts/, undefined, SLOW)
 
-      await user.selectOptions(screen.getByLabelText('Service'), '2')
+      await user.selectOptions(screen.getByLabelText('Service'), '12')
 
       // The filter is a new query key, so the panel goes back through its
       // pending state — wait for the surviving entry rather than asserting
       // into the skeleton.
-      await screen.findByText(/biometric devices can ship/, undefined, SLOW)
+      await screen.findByText(/Deepa confirmed device counts/, undefined, SLOW)
       await waitFor(
-        () => expect(screen.queryByText(/Kickoff call with Meena and Sanjay/)).not.toBeInTheDocument(),
+        () => expect(screen.queryByText(/Kickoff call with Deepa and Prakash/)).not.toBeInTheDocument(),
         SLOW,
       )
 
       await user.selectOptions(screen.getByLabelText('Service'), '')
-      await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+      await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
     },
     MULTI_STEP,
   )
 
   /*
    * The question before a call: did we say that to them, or only to each
-   * other. The internal note about their Tally export is exactly the entry
-   * this filter exists to keep out of that answer.
+   * other. The internal note about their missing opening balances is exactly
+   * the entry this filter exists to keep out of that answer.
    */
   it(
     'hides internal entries when the reader asks what the client can see',
@@ -138,7 +138,7 @@ describe('ClientCommunicationsPanel', () => {
       // The client-visible kickoff call survives the filter, so waiting for it
       // is what proves the second read finished rather than that it is still
       // pending — a "not in the document" assertion is true of a skeleton too.
-      await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+      await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
       expect(screen.queryByText(/opening balances/)).not.toBeInTheDocument()
       expect(screen.queryByText('Internal only')).not.toBeInTheDocument()
     },
@@ -146,7 +146,7 @@ describe('ClientCommunicationsPanel', () => {
   )
 
   /*
-   * Acme has journeys and no communications at all. The sentence has to say
+   * Nalanda has journeys and no communications at all. The sentence has to say
    * "nothing has been recorded", not "nothing matches these filters" — the
    * two are different facts and only one of them is the reader's to fix.
    */
@@ -158,10 +158,10 @@ describe('ClientCommunicationsPanel', () => {
       render(
         <QueryClientProvider client={queryClient}>
           <ClientCommunicationsPanel
-            obClientId={2}
+            obClientId={5}
             journeys={
               [
-                { id: 3, product: { id: 1, code: 'ERP', name: 'ERP Suite' }, gateStatus: 'LOCKED' },
+                { id: 51, product: { id: 1, code: 'ERP', name: 'EduTrack ERP' }, gateStatus: 'OPEN' },
               ] as unknown as ObJourneyStrip[]
             }
           />
@@ -179,7 +179,7 @@ describe('ClientCommunicationsPanel', () => {
 
   it('is a labelled region, not an unnamed stack of rows', async () => {
     renderPanel()
-    await screen.findByText(/Kickoff call with Meena and Sanjay/, undefined, SLOW)
+    await screen.findByText(/Kickoff call with Deepa and Prakash/, undefined, SLOW)
 
     const region = screen.getByTestId('client-communications')
     expect(within(region).getByRole('heading', { name: 'Communications' })).toBeInTheDocument()
