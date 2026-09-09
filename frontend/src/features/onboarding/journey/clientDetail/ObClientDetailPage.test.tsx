@@ -317,20 +317,21 @@ describe('ObClientDetailPage', () => {
   })
 
   /**
-   * C-126 · client 1's "Data Migration" step carries a seeded open
-   * escalation (`OB_CLIENT_ESCALATIONS` in the mock db) — the banner plan
-   * §4/§9 ask for, and resolve-and-acknowledge.
+   * C-126 · Sunrise's "Data migration" step (journey 21, step 214) carries
+   * the fixture's one seeded open escalation (`OB_CLIENT_ESCALATIONS` in the
+   * mock db) — the banner plan §4/§9 ask for, and resolve-and-acknowledge.
    */
   describe('escalations', () => {
     it('shows the open escalation in a banner, and resolving it clears the banner and the dot', async () => {
       const user = userEvent.setup()
-      renderClient(1)
-      await screen.findByText('Northwind Technologies Pvt Ltd', undefined, SLOW)
+      renderClient(2)
+      await screen.findByText('Sunrise EdTech Pvt Ltd', undefined, SLOW)
 
+      const banner = screen.getByRole('alert', { name: 'Open client escalations' })
+      expect(within(banner).getByText('Data migration')).toBeInTheDocument()
       expect(
-        await screen.findByText(/eight working days/, undefined, SLOW),
+        within(banner).getByText('Migration delay is holding our launch date — please expedite.'),
       ).toBeInTheDocument()
-      expect(screen.getByRole('alert', { name: 'Open client escalations' })).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Resolve' }))
       const dialog = await screen.findByRole('dialog', undefined, SLOW)
@@ -346,13 +347,13 @@ describe('ObClientDetailPage', () => {
       const labels = within(strips[0])
         .getAllByRole('img')
         .map((dot) => dot.getAttribute('aria-label'))
-      expect(labels).toContain('3. Data Migration — Blocked · red')
-      expect(labels).not.toContain('3. Data Migration — Blocked · red — escalated, awaiting staff')
+      expect(labels).toContain('4. Data migration — In progress · red')
+      expect(labels).not.toContain('4. Data migration — In progress · red — escalated, awaiting staff')
     })
 
     it('will not resolve with no note', async () => {
       const user = userEvent.setup()
-      renderClient(1)
+      renderClient(2)
       await screen.findByRole('alert', { name: 'Open client escalations' }, SLOW)
 
       await user.click(screen.getByRole('button', { name: 'Resolve' }))
