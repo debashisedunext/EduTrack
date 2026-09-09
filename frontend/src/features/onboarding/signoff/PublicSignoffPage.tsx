@@ -2,10 +2,12 @@ import * as React from 'react';
 
 import {
   acceptObSignoff,
+  objectObSignoff,
   requestObSignoffOtp,
   verifyObSignoffOtp,
 } from '@/api/generated/onboarding/onboarding';
 import type {
+  ObSignoff,
   ObSignoffAcceptResult,
   ObSignoffSession,
 } from '@/api/generated/model';
@@ -54,11 +56,22 @@ import { Input } from '@/components/ui/input';
  * rebuild the enumeration oracle the server refuses to be, in the one place
  * nobody would think to look for it. So there is one message, and it tells the
  * reader the thing that is actually actionable: ask the person who sent it.
+ *
+ * ## A fourth state, for B-117's objection
+ *
+ * The review step now branches two ways instead of ending one — accept, or
+ * object — and both are terminal in the same sense: `acceptObSignoff` and
+ * `objectObSignoff` are each single-use (the session is spent either way), so
+ * there is no path back to the checklist once one of them has answered.
+ * `Outcome` carries which one happened, because the two responses render
+ * different words and the contract is explicit that objecting is "not the
+ * same event, rendered differently" — there is no un-object, so this page
+ * never offers a way to change an objection back into an acceptance.
  */
 export function PublicSignoffPage() {
   const [token] = React.useState(readTokenFromUrl);
   const [session, setSession] = React.useState<ObSignoffSession | null>(null);
-  const [result, setResult] = React.useState<ObSignoffAcceptResult | null>(null);
+  const [outcome, setOutcome] = React.useState<Outcome | null>(null);
 
   React.useEffect(() => {
     stripTokenFromUrl();
@@ -76,10 +89,18 @@ export function PublicSignoffPage() {
     );
   }
 
-  if (result) {
+  if (outcome?.kind === 'accepted') {
     return (
       <SignoffShell>
-        <AcceptedPanel result={result} />
+        <AcceptedPanel result={outcome.result} />
+      </SignoffShell>
+    );
+  }
+
+  if (outcome?.kind === 'objected') {
+    return (
+      <SignoffShell>
+        <ObjectedPanel signoff={outcome.signoff} />
       </SignoffShell>
     );
   }
@@ -94,10 +115,19 @@ export function PublicSignoffPage() {
 
   return (
     <SignoffShell>
-      <ReviewPanel session={session} onAccepted={setResult} />
+      <ReviewPanel
+        session={session}
+        onAccepted={(result) => setOutcome({ kind: 'accepted', result })}
+        onObjected={(signoff) => setOutcome({ kind: 'objected', signoff })}
+      />
     </SignoffShell>
   );
 }
+
+/** What the review step ended in — B-117's second branch alongside acceptance. */
+type Outcome =
+  | { kind: 'accepted'; result: ObSignoffAcceptResult }
+  | { kind: 'objected'; signoff: ObSignoff };
 
 /* ── step one: prove who is holding the link ───────────────────────────── */
 
@@ -210,14 +240,91 @@ function IdentifyPanel({
   );
 }
 
-/* ── step two: read what is being accepted, and accept it ──────────────── */
+/* ── step two: read what is being accepted, and accept it — or object ──── */
 
+/**
+ * B-117 · the review step now has a sibling branch rather than one ending.
+ *
+ * `mode` starts on `'review'` (the checklist and the Accept form, unchanged
+ * from B-115) and can switch to `'object'` — a smaller form with one
+ * mandatory field, on the contract's own reasoning for why the note cannot
+ * be optional here the way the acceptance note is: "an objection with no
+ * reason guarantees a second round trip." Switching back to `'review'` is
+ * just clearing local state — nothing has been sent yet, so there is nothing
+ * to undo.
+ */
 function ReviewPanel({
   session,
   onAccepted,
+  onObjected,
 }: {
   session: ObSignoffSession;
   onAccepted: (result: ObSignoffAcceptResult) => void;
+  onObjected: (signoff: ObSignoff) => void;
+}) {
+  const [mode, setMode] = React.useState<'review' | 'object'>('review');
+
+  const heading =
+    session.kind === 'GO_LIVE'
+      ? 'Confirm go-live'
+      : session.stepTitle ?? 'Confirm this service';
+
+  // `checklist` is optional on the generated type — a GO_LIVE session omits it
+  // rather than sending an empty array.
+  const checklist = session.checklist ?? [];
+
+  return (
+    <>
+      <p className="text-sm font-medium uppercase tracking-wide text-slate-500">
+        {session.obClientName}
+        {session.productName ? ` · ${session.productName}` : ''}
+      </p>
+      <h1 id="signoff-review" className="mt-1 text-xl font-semibold text-slate-900">
+        {heading}
+      </h1>
+
+      {checklist.length > 0 ? (
+        <>
+          <h2 className="mt-6 text-sm font-medium text-slate-700">What you are reviewing</h2>
+          <ul className="mt-2 space-y-2">
+            {checklist.map((item) => (
+              <li key={item.id} className="flex gap-2 text-sm text-slate-700">
+                {/*
+                  `isDone` means ANSWERED, not answered True — C-111's
+                  distinction, restated on A-121's DTO. So the mark is
+                  "recorded" rather than a tick, which would tell the reader
+                  something the field does not say.
+                */}
+                <span aria-hidden="true" className={item.isDone ? 'text-slate-900' : 'text-slate-300'}>
+                  {item.isDone ? '●' : '○'}
+                </span>
+                <span>
+                  {item.label}
+                  <span className="sr-only">{item.isDone ? ' — recorded' : ' — not yet recorded'}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {mode === 'review' ? (
+        <AcceptForm session={session} onAccepted={onAccepted} onObjectInstead={() => setMode('object')} />
+      ) : (
+        <ObjectForm session={session} onObjected={onObjected} onCancel={() => setMode('review')} />
+      )}
+    </>
+  );
+}
+
+function AcceptForm({
+  session,
+  onAccepted,
+  onObjectInstead,
+}: {
+  session: ObSignoffSession;
+  onAccepted: (result: ObSignoffAcceptResult) => void;
+  onObjectInstead: () => void;
 }) {
   const [name, setName] = React.useState('');
   const [note, setNote] = React.useState('');
@@ -242,50 +349,8 @@ function ReviewPanel({
     }
   }
 
-  // `checklist` is optional on the generated type — a GO_LIVE session omits it
-  // rather than sending an empty array.
-  const checklist = session.checklist ?? [];
-
-  const heading =
-    session.kind === 'GO_LIVE'
-      ? 'Confirm go-live'
-      : session.stepTitle ?? 'Confirm this service';
-
   return (
     <form onSubmit={accept} aria-labelledby="signoff-review">
-      <p className="text-sm font-medium uppercase tracking-wide text-slate-500">
-        {session.obClientName}
-        {session.productName ? ` · ${session.productName}` : ''}
-      </p>
-      <h1 id="signoff-review" className="mt-1 text-xl font-semibold text-slate-900">
-        {heading}
-      </h1>
-
-      {checklist.length > 0 ? (
-        <>
-          <h2 className="mt-6 text-sm font-medium text-slate-700">What you are accepting</h2>
-          <ul className="mt-2 space-y-2">
-            {checklist.map((item) => (
-              <li key={item.id} className="flex gap-2 text-sm text-slate-700">
-                {/*
-                  `isDone` means ANSWERED, not answered True — C-111's
-                  distinction, restated on A-121's DTO. So the mark is
-                  "recorded" rather than a tick, which would tell the reader
-                  something the field does not say.
-                */}
-                <span aria-hidden="true" className={item.isDone ? 'text-slate-900' : 'text-slate-300'}>
-                  {item.isDone ? '●' : '○'}
-                </span>
-                <span>
-                  {item.label}
-                  <span className="sr-only">{item.isDone ? ' — recorded' : ' — not yet recorded'}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
-
       {error ? <Alert>{error}</Alert> : null}
 
       <label htmlFor="signoff-name" className="mt-6 block text-sm font-medium text-slate-700">
@@ -319,6 +384,98 @@ function ReviewPanel({
       <Button type="submit" className="mt-6 w-full" disabled={busy || name.trim().length === 0}>
         {busy ? 'Recording…' : 'Accept'}
       </Button>
+      <button
+        type="button"
+        onClick={onObjectInstead}
+        disabled={busy}
+        className="mt-4 w-full text-sm text-slate-500 underline underline-offset-2 disabled:opacity-50"
+      >
+        I need to raise an objection instead
+      </button>
+    </form>
+  );
+}
+
+/**
+ * B-117 · one mandatory field, because that is the whole route. Submitting
+ * this spends the session exactly as accepting does — `objectObSignoff` is
+ * single-use, and the contract states plainly that there is no changing an
+ * objection back into an acceptance from here: "a client who changes their
+ * mind is a new sign-off request", which is staff sending a fresh link.
+ */
+function ObjectForm({
+  session,
+  onObjected,
+  onCancel,
+}: {
+  session: ObSignoffSession;
+  onObjected: (signoff: ObSignoff) => void;
+  onCancel: () => void;
+}) {
+  const [note, setNote] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function object(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await objectObSignoff({
+        sessionToken: session.sessionToken,
+        note: note.trim(),
+      });
+      onObjected(response.data);
+    } catch (caught) {
+      setError(messageFor(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={object} aria-labelledby="signoff-object" className="mt-6">
+      <h2 id="signoff-object" className="text-sm font-medium text-slate-700">
+        What is wrong?
+      </h2>
+      <p className="text-xs text-slate-500">
+        Tell us what needs to change. We will pick this back up rather than treat it as
+        accepted.
+      </p>
+
+      {error ? <Alert>{error}</Alert> : null}
+
+      <label htmlFor="signoff-objection-note" className="sr-only">
+        Your objection
+      </label>
+      <textarea
+        id="signoff-objection-note"
+        className="mt-2 w-full rounded-md border border-slate-300 p-2 text-sm"
+        rows={4}
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        minLength={1}
+        maxLength={2000}
+        required
+        autoFocus
+      />
+
+      <Button
+        type="submit"
+        variant="danger"
+        className="mt-4 w-full"
+        disabled={busy || note.trim().length === 0}
+      >
+        {busy ? 'Sending…' : 'Submit objection'}
+      </Button>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        className="mt-4 w-full text-sm text-slate-500 underline underline-offset-2 disabled:opacity-50"
+      >
+        Back to review
+      </button>
     </form>
   );
 }
@@ -349,6 +506,35 @@ function AcceptedPanel({ result }: { result: ObSignoffAcceptResult }) {
       {result.signoff.signedAt ? (
         <p className="mt-4 text-xs text-slate-500">
           Recorded {new Date(result.signoff.signedAt).toLocaleString()}.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * B-117 · client-facing wording, not the internal codes.
+ *
+ * "Objection recorded, the step reverted" is what the backend did; a reader
+ * here was never shown the word `IN_PROGRESS` or `WAITING_ON_CLIENT` to begin
+ * with, so this says only what changes for them — we are back on it, and there
+ * is nothing further to click. No mention of "reverted" or a status name: this
+ * is the same restraint `AcceptedPanel` shows for `gateFailures`, applied to
+ * the other outcome the review step can end in.
+ */
+function ObjectedPanel({ signoff }: { signoff: ObSignoff }) {
+  return (
+    <section aria-labelledby="signoff-objected" role="status">
+      <h1 id="signoff-objected" className="text-xl font-semibold text-slate-900">
+        Thank you — your objection is recorded
+      </h1>
+      <p className="mt-2 text-sm text-slate-600">
+        We have picked this back up and will be in touch. There is nothing further for you
+        to do right now.
+      </p>
+      {signoff.objectedAt ? (
+        <p className="mt-4 text-xs text-slate-500">
+          Recorded {new Date(signoff.objectedAt).toLocaleString()}.
         </p>
       ) : null}
     </section>

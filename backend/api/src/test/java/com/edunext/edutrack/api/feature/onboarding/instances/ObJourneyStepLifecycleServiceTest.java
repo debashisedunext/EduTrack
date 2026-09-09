@@ -21,6 +21,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepositor
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepClockActorType;
 import com.edunext.edutrack.domain.onboarding.ObStepClockAttribution;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEvent;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEventRepository;
@@ -719,6 +720,157 @@ class ObJourneyStepLifecycleServiceTest {
         paused.setOccurredAt(occurredAt);
         when(clockEvents.findFirstByStepIdAndEventTypeOrderByOccurredAtDescIdDesc(STEP, ObStepClockEventType.PAUSED))
                 .thenReturn(Optional.of(paused));
+    }
+
+    // ── revertOnClientObjection (B-117) ──────────────────────────────────
+
+    private static final long CONTACT = 42L;
+
+    @Test
+    void objectionRevertsAWaitingOnClientStepToInProgress() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        step.setDueAt(Instant.parse("2026-10-01T00:00:00Z"));
+        stubLastPause(Instant.parse("2026-09-28T00:00:00Z"));
+
+        ObJourneyStepLifecycleService.ObjectionResult result =
+                service.revertOnClientObjection(STEP, CONTACT, "The invoice total is wrong.");
+
+        assertThat(result.stepReverted()).isTrue();
+        assertThat(result.ownerUserId()).isEqualTo(OWNER);
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    /**
+     * "Our clock resumes" — the backlog's own line. A wait pauses the clock
+     * (C-105); an objection is one of the ways it ends, exactly like a staff
+     * {@link #resumeMovesAWaitingOnClientStepBackToInProgress} resume, and
+     * reuses the identical {@code due_at} recomputation.
+     */
+    @Test
+    void objectionFromWaitingOnClientRecomputesDueAtAndRecordsAResumedClockEvent() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        Instant oldDueAt = Instant.parse("2026-09-30T00:00:00Z");
+        step.setDueAt(oldDueAt);
+        Instant pausedAt = Instant.parse("2026-09-27T00:00:00Z");
+        stubLastPause(pausedAt);
+
+        service.revertOnClientObjection(STEP, CONTACT, "Please re-check the figures.");
+
+        ArgumentCaptor<BigDecimal> hoursCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(workingHours).addWorkingHours(any(), hoursCaptor.capture());
+        verify(workingHours).workingHoursBetween(eq(pausedAt), eq(oldDueAt));
+        assertThat(hoursCaptor.getValue()).isEqualByComparingTo("72.00");
+
+        ArgumentCaptor<ObStepClockEvent> eventCaptor = ArgumentCaptor.forClass(ObStepClockEvent.class);
+        verify(clockRecorder).record(eventCaptor.capture());
+        ObStepClockEvent event = eventCaptor.getValue();
+        assertThat(event.getStepId()).isEqualTo(STEP);
+        assertThat(event.getJourneyId()).isEqualTo(JOURNEY);
+        assertThat(event.getEventType()).isEqualTo(ObStepClockEventType.RESUMED);
+        assertThat(event.getAttributedTo()).isEqualTo(ObStepClockAttribution.INTERNAL);
+        // SYSTEM/null, not the staff USER/OWNER pairing a manual resume
+        // writes — the actor here is the client, and ObStepClockActorType
+        // has no CLIENT member to name them with.
+        assertThat(event.getActorType()).isEqualTo(ObStepClockActorType.SYSTEM);
+        assertThat(event.getActorId()).isNull();
+    }
+
+    @Test
+    void objectionFromInProgressRevertsWithNoClockEvent() {
+        // A sign-off requested without ever pausing the step — nothing here
+        // paused the clock, so nothing needs to give it back.
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        ObJourneyStepLifecycleService.ObjectionResult result =
+                service.revertOnClientObjection(STEP, CONTACT, "Not what we agreed.");
+
+        assertThat(result.stepReverted()).isTrue();
+        verify(clockRecorder, never()).record(any());
+        verify(workingHours, never()).addWorkingHours(any(), any());
+    }
+
+    @Test
+    void objectionOnADoneStepDoesNotUnwindCompletion() {
+        // Un-completing a step that may already have activated siblings and
+        // settled the journey is a cascade this task does not ask for —
+        // completeOnClientAcceptance's own precedent for the same caller.
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.DONE);
+        step.setFinishedAt(Instant.parse("2026-09-20T00:00:00Z"));
+
+        ObJourneyStepLifecycleService.ObjectionResult result =
+                service.revertOnClientObjection(STEP, CONTACT, "Too late, but noted.");
+
+        assertThat(result.stepReverted()).isFalse();
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.DONE);
+        assertThat(step.getFinishedAt()).isNotNull();
+        verify(clockRecorder, never()).record(any());
+    }
+
+    @Test
+    void objectionOnABlockedStepDoesNotForceItBackToInProgress() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setStatus(ObJourneyStepStatus.BLOCKED);
+        step.setBlockedReasonCode("client-unresponsive");
+
+        ObJourneyStepLifecycleService.ObjectionResult result =
+                service.revertOnClientObjection(STEP, CONTACT, "Objecting anyway.");
+
+        assertThat(result.stepReverted()).isFalse();
+        assertThat(step.getStatus()).isEqualTo(ObJourneyStepStatus.BLOCKED);
+    }
+
+    @Test
+    void objectionIsJournalledEvenWhenTheStepDoesNotRevert() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.DONE);
+
+        service.revertOnClientObjection(STEP, CONTACT, "Recorded for the file.");
+
+        assertThat(historyRows).hasSize(1);
+        ObStepHistory entry = historyRows.get(0);
+        assertThat(entry.getOldValue()).isEqualTo("DONE");
+        assertThat(entry.getNewValue()).isEqualTo("DONE");
+        assertThat(entry.getRemarks()).isEqualTo("Recorded for the file.");
+    }
+
+    @Test
+    void objectionWritesAClientAttributedHistoryRowNamingTheContact() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+
+        service.revertOnClientObjection(STEP, CONTACT, "The invoice total is wrong.");
+
+        assertThat(historyRows).hasSize(1);
+        ObStepHistory entry = historyRows.get(0);
+        assertThat(entry.getJourneyId()).isEqualTo(JOURNEY);
+        assertThat(entry.getStepId()).isEqualTo(STEP);
+        assertThat(entry.getObClientId()).isEqualTo(journeyRows.get(JOURNEY).getObClientId());
+        assertThat(entry.getEventType()).isEqualTo("OBJECTED");
+        assertThat(entry.getOldValue()).isEqualTo("IN_PROGRESS");
+        assertThat(entry.getNewValue()).isEqualTo("IN_PROGRESS");
+        assertThat(entry.getActorType()).isEqualTo("CLIENT");
+        assertThat(entry.getActorContactId()).isEqualTo(CONTACT);
+        assertThat(entry.getActorId()).isNull();
+        assertThat(entry.getRemarks()).isEqualTo("The invoice total is wrong.");
+        assertThat(entry.getRowHash()).isNotBlank();
+    }
+
+    @Test
+    void objectionReturnsTheOwnerSoTheCallerCanNotifyThem() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        stepRows.get(STEP).setOwnerUserId(OWNER);
+
+        ObJourneyStepLifecycleService.ObjectionResult result =
+                service.revertOnClientObjection(STEP, CONTACT, "Objection");
+
+        assertThat(result.ownerUserId()).isEqualTo(OWNER);
+    }
+
+    @Test
+    void objectionFailsCleanlyForAnUnknownStep() {
+        assertThatThrownBy(() -> service.revertOnClientObjection(404L, CONTACT, "no such step"))
+                .isInstanceOf(JourneyStepNotFoundException.class);
     }
 
     // ── skip (C-107) ─────────────────────────────────────────────────────

@@ -108,6 +108,10 @@ class RouteAuthorizationTest {
             // when that caller proved the OTP — not the link token, and not a
             // principal.
             "POST /api/v1/public/onboarding/signoff/accept",
+            // B-117 · the fourth route on the same surface, the same caller and
+            // the same session — "there is no un-object" (the contract's own
+            // line), so this spends the session exactly as accept does.
+            "POST /api/v1/public/onboarding/signoff/object",
             // A-130 · the client portal's way in, and the same argument as the
             // three above: the caller holds no account, so a 401 from the chain
             // would refuse the only caller these exist for. What authenticates
