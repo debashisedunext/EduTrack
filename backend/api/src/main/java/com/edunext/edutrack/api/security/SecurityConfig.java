@@ -176,6 +176,23 @@ public class SecurityConfig {
             // through ObSignoffTokens, which checks the SHA-256, the TTL and
             // the PENDING status. Opening the path does not open the data.
             "/api/v1/public/onboarding/**",
+            /*
+              A-130 · the client portal's way in. Nobody holding a portal token
+              needs these three, and everybody who needs them holds none, so a
+              401 from the chain would refuse the only callers they exist for —
+              the same argument the sign-off surface above makes.
+
+              They stay under `/api/v1/portal/`, which PortalRouteFilter still
+              polices: `blocks` answers false for a caller who is neither staff
+              nor client, so anonymous passes, while a *staff* token is still
+              404ed here. That is correct rather than incidental — a staff
+              member has no business redeeming a client's credential link.
+
+              What stands in for authentication is the credential token on two
+              of them (256-bit, SHA-256 at rest, single-use, 7-day TTL) and the
+              password on the third. Opening the path does not open the data.
+            */
+            "/api/v1/portal/auth/**",
     };
 
     static final String[] PUBLIC_INFRA_PATHS = {
