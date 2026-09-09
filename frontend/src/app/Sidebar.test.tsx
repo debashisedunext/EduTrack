@@ -176,16 +176,16 @@ describe('Sidebar · onboarding module', () => {
   })
 
   /**
-   * Every row must lead somewhere that exists. One entry in the design still
-   * points at a screen no task has built (Prerequisites master) — a row that
-   * 404s reads as a broken product.
+   * Every row must lead somewhere that exists. Prerequisites master was the
+   * one entry withheld while no task had built its screen; now that the
+   * screen and its route are real, the row must be offered — a master
+   * reachable only by typing its URL reads as a missing product.
    */
-  it('offers no row for a screen that is not built yet', () => {
+  it('offers Prerequisites master now that its screen is built', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Prerequisites master']) {
-      expect(within(obNav()).queryByRole('link', { name: label })).not.toBeInTheDocument()
-    }
+    expect(within(obNav()).getByRole('link', { name: 'Prerequisites master' }))
+      .toHaveAttribute('href', '/onboarding/prereq-master')
   })
 
   // A-117 landed its screen, so the row it was waiting on is now real.

@@ -73,6 +73,9 @@ const NewObClientWizardPage = lazy(() =>
 const ObNotificationCentrePage = lazy(() =>
   import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
 )
+const ObPrereqMasterPage = lazy(() =>
+  import('./features/onboarding/prereqmaster/ObPrereqMasterPage').then((m) => ({ default: m.ObPrereqMasterPage })),
+)
 const ObReportViewerPage = lazy(() =>
   import('./features/onboarding/reports/ObReportViewerPage').then((m) => ({ default: m.ObReportViewerPage })),
 )
@@ -464,6 +467,18 @@ export default function App() {
             {/* OB-11 — B-113. OB Admin only; the server answers 403 and the page
                 renders that rather than a blank form. */}
             <Route path="/onboarding/settings" element={withSuspense(<ObSettingsPage />)} />
+            {/*
+              B-124 · OB-14, the prerequisites master. Beside the other
+              administration routes and outside `/masters/**` for the reason
+              they all state — the Onboarding module's screens are disjoint
+              from the ticketing masters (plan §1.2). This is the org-wide
+              checklist OB-04's boarding snapshots from; the per-client
+              instance lives on the client detail page (C-110), not here.
+              Sidebar.tsx's Administration section gains its row in the same
+              task — the comment there has named this screen's absence since
+              A-129.
+            */}
+            <Route path="/onboarding/prereq-master" element={withSuspense(<ObPrereqMasterPage />)} />
             {/*
               A-117 · OB-08. Its own route rather than a tab on `/onboarding/settings`:
               that screen configures the module's behaviour (thresholds, the escalation
