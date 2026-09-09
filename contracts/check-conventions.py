@@ -49,6 +49,11 @@ NO_IF_MATCH = {
     "/onboarding/journey-templates/order": "C-123 — the Module Service catalogue's ↑/↓, every active template renumbered in one call. As with /clients/bulk-status and /tickets/bulk-level, one If-Match cannot speak for the whole catalogue, and per-template tags would fail the write because somebody touched an unrelated product's service. Unlike those two this genuinely is last-write-wins rather than idempotent, but the loser's only loss is a card position — nothing else on the row is touched, nothing is deleted, and the next reorder corrects it. The picker at .../{templateId}/depends-on, which does touch a single row with a real tag, is NOT exempt and requires If-Match",
 }
 
+# §5 — a detail-shaped GET with no lost-update race to precondition.
+NO_ETAG = {
+    "/portal/auth/credential/{token}": "A-130/C-121 — the path segment is a single-use credential token, not a resource id with a lifetime worth preconditioning. The GET changes nothing and the POST on the same path that spends the token takes no If-Match either (see NO_IF_MATCH), so there is no write this read stands in front of",
+}
+
 # §6 — bounded by a constraint the product already enforces.
 NO_PAGINATION = {
     "/masters/task-types":               "11 rows",
@@ -284,7 +289,7 @@ def main():
                 fail.append("%s: takes If-Match but never answers 412" % opid)
 
         # §5 — detail reads carry ETag
-        if m == "get" and (p.rstrip("/").endswith("}") or p.endswith("/full")):
+        if m == "get" and (p.rstrip("/").endswith("}") or p.endswith("/full")) and p not in NO_ETAG:
             if "ETag" not in str(o.get("responses", {}).get("200", {})):
                 fail.append("%s: detail read without ETag" % opid)
 
