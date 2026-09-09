@@ -12,6 +12,7 @@ import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
 import com.edunext.edutrack.domain.masters.WorkingCalendarRepository;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -72,6 +73,8 @@ class ObDelayedProjectsService {
     private final WorkingCalendarRepository calendars;
     private final Clock clock;
 
+    /** {@code ObDashboardCardItemsService}'s own note on why {@code @Autowired} is not decorative once a second constructor exists. */
+    @Autowired
     ObDelayedProjectsService(ObDelayedProjectsRepository repository, WorkingHoursService workingHours,
             WorkingCalendarRepository calendars) {
         this(repository, workingHours, calendars, Clock.systemUTC());
