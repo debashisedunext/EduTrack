@@ -39,17 +39,19 @@ import java.util.List;
  *       not landed. The prototype's file names are transcribed onto
  *       {@link ClientSpec#attachmentNames()} anyway, unused, so B-107 can seed
  *       them without re-reading the prototype.</li>
- *   <li><b>The prerequisites master is seeded; its per-client instances are
- *       not.</b> B-124's tables landed on 8 Sep, so the exclusion that used to
- *       stand here no longer holds for the master: {@link #PREREQ_MASTER} is
- *       transcribed and {@link OnboardingFixture} writes it, because OB-14
+ *   <li><b>The prerequisites master and its per-client instances are both
+ *       seeded.</b> B-124's tables landed on 8 Sep, so {@link #PREREQ_MASTER}
+ *       is transcribed and {@link OnboardingFixture} writes it, because OB-14
  *       answers 404 without it and renders that as a broken screen.
- *       B-125's {@code ob_client_prereqs} / {@code ob_client_prereq_tasks} —
- *       the prototype's per-client {@code c.prereqs}, with Bluebell's skipped
- *       non-mandatory task and Little Scholars' in-flight set behind the
- *       locked gate — are a larger separate piece of work and stay dropped.
- *       Until they are seeded, {@code c7}'s {@code gate_status = 'LOCKED'} is
- *       a column with no checklist behind it.</li>
+ *       B-125's {@code ob_client_prereqs} / {@code ob_client_prereq_tasks}
+ *       followed for the same reason, one screen over: {@code
+ *       getObClientPrereqs} answers 404 without them, so {@code c7}'s
+ *       {@code gate_status = 'LOCKED'} was a column with no checklist behind
+ *       it and OB-05 drew the locked gate as an error. Each client is now
+ *       snapshotted onto the master and advanced to agree with its own gate —
+ *       see {@code OnboardingFixture#createClientPrereqs}, which carries
+ *       Bluebell's skipped non-mandatory task ({@link #PREREQ_SKIP_CLIENT_KEY})
+ *       and Little Scholars' in-flight set behind the locked gate.</li>
  *   <li><b>The master's reference documents are dropped.</b>
  *       {@code ob_prereq_template_task_docs} needs an {@code attachment_id}
  *       into {@code ob_attachments}, which means a {@code storage_key} naming
@@ -354,6 +356,21 @@ final class OnboardingFixtureData {
      * pressed "start a revision" on a demo database.
      */
     static final int PREREQ_MASTER_VERSION = 1;
+
+    /**
+     * The client whose non-mandatory prerequisite is skipped rather than
+     * verified — the prototype's Bluebell, and the corpus's only exercise of
+     * plan §5.3's gate valve.
+     *
+     * <p>One client rather than several: a skip is the exception the flag
+     * exists for, and a corpus where half the clients had skipped the same
+     * task would make "skipped" read as an ordinary outcome rather than a
+     * decision somebody has to answer for.
+     */
+    static final String PREREQ_SKIP_CLIENT_KEY = "c4";
+
+    /** The prototype's own wording for that skip. */
+    static final String PREREQ_SKIP_REASON = "Client IT policy blocks whitelisting.";
 
     /**
      * Who published the master: the prototype's OB Admin, Anita Rao.

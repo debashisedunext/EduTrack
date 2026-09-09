@@ -146,10 +146,10 @@ public class OnboardingFixture {
         Map<String, Long> userIds = createUsers();
         Map<String, Long> productIds = createProducts(userIds);
         Map<String, TemplateRefs> templates = createTemplates(productIds, userIds);
-        createPrereqMaster(userIds);
+        PrereqMasterRefs prereqMaster = createPrereqMaster(userIds);
 
         for (ClientSpec client : OnboardingFixtureData.CLIENTS) {
-            createClient(client, userIds, productIds, templates, zone, anchor);
+            createClient(client, userIds, productIds, templates, prereqMaster, zone, anchor);
         }
     }
 
@@ -327,7 +327,7 @@ public class OnboardingFixture {
      * onto {@code PrereqTaskSpec#refDocName()}, unused, exactly as
      * {@code ClientSpec#attachmentNames()} carried A-102's before it landed.
      */
-    private void createPrereqMaster(Map<String, Long> userIds) {
+    private PrereqMasterRefs createPrereqMaster(Map<String, Long> userIds) {
         Long publisher = userIds.get(OnboardingFixtureData.PREREQ_PUBLISHER_KEY);
         // Published "now" rather than at a serial: the master is not part of
         // any client's timeline, and a version published before the org's own
@@ -340,19 +340,32 @@ public class OnboardingFixture {
                      VALUES (?, 1, ?, ?, ?)
                 """, OnboardingFixtureData.PREREQ_MASTER_VERSION, publishedAt, publisher, publisher);
 
+        List<Long> taskIds = new ArrayList<>();
         for (int i = 0; i < OnboardingFixtureData.PREREQ_MASTER.size(); i++) {
             var task = OnboardingFixtureData.PREREQ_MASTER.get(i);
             // version_id is the header row's id, not its version number — the
             // FK points at ob_prereq_template_versions.id and 1 would resolve
             // to whatever row happens to hold that id.
-            insert("""
+            taskIds.add(insert("""
                     INSERT INTO ob_prereq_template_tasks (version_id, sequence, title, description,
                                                           tat_days, is_mandatory, is_active)
                          VALUES (?, ?, ?, ?, ?, ?, 1)
                     """,
                     versionId, i + 1, task.title(), task.description(), task.tatDays(),
-                    task.mandatory() ? 1 : 0);
+                    task.mandatory() ? 1 : 0));
         }
+        return new PrereqMasterRefs(versionId, List.copyOf(taskIds));
+    }
+
+    /**
+     * The seeded master, addressable by the client instances snapshotted from
+     * it. {@code taskIds} is positional — index i is
+     * {@code OnboardingFixtureData.PREREQ_MASTER.get(i)} — because
+     * {@code ob_client_prereq_tasks.template_task_id} is a real FK and
+     * {@code ck_ob_client_prereq_tasks_ad_hoc} requires it on every
+     * non-ad-hoc row.
+     */
+    private record PrereqMasterRefs(long versionId, List<Long> taskIds) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -360,7 +373,8 @@ public class OnboardingFixture {
     // ══════════════════════════════════════════════════════════════════════
 
     private void createClient(ClientSpec spec, Map<String, Long> userIds, Map<String, Long> productIds,
-                              Map<String, TemplateRefs> templates, ZoneId zone, LocalDate anchor) {
+                              Map<String, TemplateRefs> templates, PrereqMasterRefs prereqMaster,
+                              ZoneId zone, LocalDate anchor) {
         LocalDate onboardingDate = dateFor(spec.onboardSerial(), anchor);
         Instant liveAt = spec.liveSerial() == null
                 ? null
@@ -380,11 +394,136 @@ public class OnboardingFixture {
         Map<String, Long> contactIds = createContacts(spec, clientId, userIds, onboardingDate);
         createApplications(spec, clientId, productIds, onboardingDate);
         createRequirements(spec, clientId, userIds);
+        createClientPrereqs(spec, clientId, userIds, contactIds, prereqMaster, onboardingDate, zone);
 
         Map<String, Long> journeyIds = new LinkedHashMap<>();
         for (JourneySpec journey : spec.journeys()) {
             createJourney(spec, journey, clientId, productIds, templates, userIds, contactIds,
                     journeyIds, zone, anchor);
+        }
+    }
+
+    /**
+     * B-125 · this client's own copy of the prerequisites checklist.
+     *
+     * <h2>Why this is not optional seed data</h2>
+     *
+     * <p>{@code getObClientPrereqs} answers <b>404</b> when a client has no
+     * {@code ob_client_prereqs} row, and OB-05 renders the gate from that read.
+     * A corpus that sets {@code ob_journeys.gate_status = 'LOCKED'} without
+     * writing the checklist behind it therefore produces a client detail page
+     * whose header says "Prerequisites pending" over a checklist that cannot be
+     * loaded — a broken screen for the one client the locked gate exists to
+     * demonstrate. Production cannot reach that state: {@code
+     * ObClientWriteService.create} calls {@code ObClientPrereqService
+     * .instantiate} inside the same transaction as the client row, so a client
+     * never exists without one. Only the fixture could, and did.
+     *
+     * <h2>The state each client is left in</h2>
+     *
+     * <p>Snapshotted from the active master exactly as {@code instantiate}
+     * does — copied wording, TAT and mandatory flag, {@code template_task_id}
+     * pinned, {@code due_at} through the working calendar — then advanced to
+     * match the gate the journeys already carry, because the two are one fact
+     * and a corpus whose checklist disagreed with its gate would be worse than
+     * no checklist:
+     *
+     * <ul>
+     *   <li><b>Gate open</b> — every task {@code VERIFIED} and the header
+     *       {@code CLEARED}, which is what opened the gate. One non-mandatory
+     *       task is {@code SKIPPED} instead on the client named by
+     *       {@link OnboardingFixtureData#PREREQ_SKIP_CLIENT_KEY}, so the corpus
+     *       exercises plan §5.3's only valve — and carries the skip reason
+     *       {@code ck_ob_client_prereq_tasks_skipped} demands.</li>
+     *   <li><b>Gate locked</b> — the in-flight mix the verifier's queue is
+     *       built to show: the first task {@code SUBMITTED} and awaiting
+     *       verification, the second {@code VERIFIED}, the rest {@code
+     *       PENDING}. Mandatory work outstanding is what keeps the gate shut,
+     *       so this state and {@code gate_status = 'LOCKED'} agree.</li>
+     * </ul>
+     *
+     * <p>A submission is attributed to the primary SPOC through {@code PORTAL},
+     * which is the arm of {@code ck_ob_client_prereq_tasks_submitted} a client
+     * upload takes; verifications and skips are attributed to the staff user
+     * who boarded the client.
+     */
+    private void createClientPrereqs(ClientSpec spec, long clientId, Map<String, Long> userIds,
+                                     Map<String, Long> contactIds, PrereqMasterRefs master,
+                                     LocalDate onboardingDate, ZoneId zone) {
+
+        // A client's gate is one fact across its journeys — ObJourneyGateReader
+        // reads it that way — so any locked journey means the checklist is
+        // still in flight.
+        boolean gateOpen = spec.journeys().stream().allMatch(JourneySpec::gateOpen);
+
+        Instant boardedAt = onboardingDate.atTime(10, 0).toInstant(ZoneOffset.UTC);
+        // The gate cleared on the boarding day for a corpus whose journeys
+        // started from it; a moment after boarding keeps cleared_at after
+        // created_at without inventing a second date.
+        Instant clearedAt = boardedAt.plusSeconds(3600);
+        Long staff = userIds.get(spec.createdByUserKey());
+        Long primaryContact = spec.contacts().stream()
+                .filter(ContactSpec::primary).findFirst()
+                .map(c -> contactIds.get(c.name())).orElse(null);
+        boolean skipsOne = OnboardingFixtureData.PREREQ_SKIP_CLIENT_KEY.equals(spec.key());
+
+        long headerId = insert("""
+                INSERT INTO ob_client_prereqs (ob_client_id, template_version_id, template_version,
+                                               status, cleared_at, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                clientId, master.versionId(), OnboardingFixtureData.PREREQ_MASTER_VERSION,
+                gateOpen ? "CLEARED" : "IN_PROGRESS",
+                gateOpen ? Timestamp.from(clearedAt) : null,
+                Timestamp.from(boardedAt));
+
+        for (int i = 0; i < OnboardingFixtureData.PREREQ_MASTER.size(); i++) {
+            var task = OnboardingFixtureData.PREREQ_MASTER.get(i);
+            boolean skipped = gateOpen && skipsOne && !task.mandatory();
+
+            String status;
+            if (gateOpen) {
+                status = skipped ? "SKIPPED" : "VERIFIED";
+            } else {
+                status = switch (i) {
+                    case 0 -> "SUBMITTED";
+                    case 1 -> "VERIFIED";
+                    default -> "PENDING";
+                };
+            }
+
+            boolean isSubmitted = "SUBMITTED".equals(status);
+            boolean isVerified = "VERIFIED".equals(status);
+            // A verified task was submitted first — the row would otherwise
+            // claim a verification of nothing.
+            boolean hasSubmission = isSubmitted || isVerified;
+            Instant submittedAt = boardedAt.plusSeconds(1800);
+            Instant verifiedAt = boardedAt.plusSeconds(2700);
+
+            insert("""
+                    INSERT INTO ob_client_prereq_tasks (ob_client_prereqs_id, ob_client_id,
+                                                        template_task_id, sequence, title, description,
+                                                        tat_days, is_mandatory, is_ad_hoc, status,
+                                                        due_at, submitted_at, submitted_via,
+                                                        submitted_by_user, submitted_by_contact,
+                                                        verified_at, verified_by,
+                                                        skipped_at, skipped_by, skip_reason,
+                                                        created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    headerId, clientId, master.taskIds().get(i), i + 1, task.title(), task.description(),
+                    task.tatDays(), task.mandatory() ? 1 : 0, status,
+                    Timestamp.from(dueAt(boardedAt, task.tatDays(), zone)),
+                    hasSubmission ? Timestamp.from(submittedAt) : null,
+                    hasSubmission ? "PORTAL" : null,
+                    null,
+                    hasSubmission ? primaryContact : null,
+                    isVerified ? Timestamp.from(verifiedAt) : null,
+                    isVerified ? staff : null,
+                    skipped ? Timestamp.from(verifiedAt) : null,
+                    skipped ? staff : null,
+                    skipped ? OnboardingFixtureData.PREREQ_SKIP_REASON : null,
+                    Timestamp.from(boardedAt));
         }
     }
 
