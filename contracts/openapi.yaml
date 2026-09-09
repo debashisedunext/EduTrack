@@ -19864,7 +19864,8 @@ components:
 
     ObClientPrereqTask:
       type: object
-      required: [id, obClientId, sequence, title, isMandatory, isAdHoc, status, dueAt]
+      required: [id, obClientId, sequence, title, tatDays, isMandatory, isAdHoc, status, dueAt,
+                 referenceDocs]
       properties:
         id: { type: integer, format: int64 }
         obClientId: { type: integer, format: int64 }
@@ -19892,6 +19893,21 @@ components:
             six days left. Deriving the budget back out of `dueAt` is not
             available to a client — it would need the working calendar, the
             org holidays and the boarding moment.
+        referenceDocs:
+          type: array
+          items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
+          description: |
+            The Admin's reference documents, read through the task's
+            `templateTaskId` rather than copied onto it — a specimen form the
+            Admin may replace with a clearer one, which the client benefits
+            from, unlike the wording, which is frozen at boarding.
+
+            **On the list as well as the detail**, because OB-05's accordion
+            and CP-03 both name them per row: the checklist's whole job is to
+            say what to send and what to send it on, and a reader who has to
+            open each task to find the template is reading the checklist
+            twice. Empty on an ad-hoc task, which has no master row to read
+            through.
         isMandatory: { type: boolean }
         isAdHoc:
           type: boolean
@@ -19950,15 +19966,8 @@ components:
       allOf:
         - { $ref: '#/components/schemas/ObClientPrereqTask' }
         - type: object
-          required: [referenceDocs, submissions]
+          required: [submissions]
           properties:
-            referenceDocs:
-              type: array
-              items: { $ref: '#/components/schemas/ObPrereqTemplateTaskDoc' }
-              description: |
-                The Admin's documents, carried through from the master task at
-                snapshot time. Empty on an ad-hoc task unless one was attached
-                to it directly.
             submissions:
               type: array
               items: { $ref: '#/components/schemas/ObPrereqSubmissionFile' }

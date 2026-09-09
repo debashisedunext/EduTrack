@@ -114,6 +114,39 @@ describe('ObClientDetailPage', () => {
     })
 
     /**
+     * The checklist's job is to say what to send and what to send it on, so a
+     * row carries the Admin's wording, its TAT budget beside the due date, and
+     * the reference document by name.
+     */
+    it('gives each task its description, its TAT budget and its reference document', async () => {
+      renderClient(7)
+      await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
+
+      const rows = await screen.findAllByRole('listitem', undefined, SLOW)
+      const masterData = rows.find((r) => within(r).queryByText(/Master data extract/))
+      expect(masterData).toBeDefined()
+
+      expect(within(masterData!).getByText(/Staff, student and department masters/)).toBeInTheDocument()
+      // The budget and the date together — one without the other cannot say
+      // whether a task is nearly out of time.
+      expect(within(masterData!).getByText(/TAT 7d · due/)).toBeInTheDocument()
+      expect(within(masterData!).getByText('master-data-format.xlsx')).toBeInTheDocument()
+    })
+
+    /**
+     * A chip, not a link. A-102 refuses to serve bytes for an attachment that
+     * is not CLEAN, so a download control here would be one that refuses —
+     * the name is what the reader needs, without the broken promise.
+     */
+    it('names the reference document without offering a download', async () => {
+      renderClient(7)
+      await screen.findByRole('button', { name: /Prerequisites/ }, SLOW)
+
+      const doc = await screen.findByText('master-data-format.xlsx', undefined, SLOW)
+      expect(doc.closest('a')).toBeNull()
+    })
+
+    /**
      * Plan §5.3 has no override: a mandatory task cannot be waived, and the
      * server answers 422 as a fact about the row. Offering the button and
      * letting the refusal arrive from the network would advertise a valve

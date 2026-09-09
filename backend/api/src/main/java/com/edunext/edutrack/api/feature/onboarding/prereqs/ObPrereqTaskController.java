@@ -90,7 +90,6 @@ class ObPrereqTaskController {
         ObClientPrereqDtos.ObClientPrereqTaskDetail detail =
                 ObClientPrereqDtos.ObClientPrereqTaskDetail.of(
                         assembler.task(task),
-                        assembler.referenceDocsOf(task.getTemplateTaskId()),
                         assembler.submissionsOf(prereqTaskId));
 
         return ResponseEntity.ok()
@@ -290,7 +289,6 @@ class ObPrereqTaskController {
         ObClientPrereqDtos.ObClientPrereqTaskDetail current =
                 ObClientPrereqDtos.ObClientPrereqTaskDetail.of(
                         assembler.task(task),
-                        assembler.referenceDocsOf(task.getTemplateTaskId()),
                         assembler.submissionsOf(task.getId()));
 
         String candidate = ifMatch.trim();

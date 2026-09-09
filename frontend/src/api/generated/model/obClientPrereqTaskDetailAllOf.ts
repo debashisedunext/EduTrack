@@ -46,15 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObPrereqTemplateTaskDoc } from './obPrereqTemplateTaskDoc';
 import type { ObPrereqSubmissionFile } from './obPrereqSubmissionFile';
 
 export type ObClientPrereqTaskDetailAllOf = {
-  /** The Admin's documents, carried through from the master task at
-snapshot time. Empty on an ad-hoc task unless one was attached
-to it directly.
- */
-  referenceDocs: ObPrereqTemplateTaskDoc[];
   /** What the client sent back — `ob_attachments` with `kind:
 SUBMISSION` and `uploadedByType: CLIENT`, or `STAFF` where an
 implementor recorded a document that arrived by email.

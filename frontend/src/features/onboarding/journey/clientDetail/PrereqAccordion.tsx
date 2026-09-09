@@ -239,6 +239,31 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
                     {formatDate(task.dueAt) && `due ${formatDate(task.dueAt)}`}
                     {task.status === 'SKIPPED' && task.skipReason && ` · waived: ${task.skipReason}`}
                   </span>
+                  {/*
+                    The Admin's reference documents, named — the mockup's
+                    "📄 Master_data_template.xlsx (reference)".
+
+                    A chip and not a link, which is where this departs from the
+                    prototype. A-102 will not serve bytes for an attachment
+                    that is not `CLEAN`, and the seeded reference rows name
+                    objects storage does not hold — so a download control here
+                    would be one that refuses. The name is the part the reader
+                    actually needs ("fill *that* template"), and offering it
+                    without a broken promise is better than the promise. It
+                    becomes a link when the master's files are real uploads.
+                  */}
+                  {(task.referenceDocs ?? []).length > 0 && (
+                    <span className="mt-1 flex flex-wrap gap-1.5">
+                      {(task.referenceDocs ?? []).map((doc) => (
+                        <Chip key={doc.id} variant="info" className="max-w-full">
+                          <span aria-hidden="true">📄</span>
+                          <span className="truncate">{doc.fileName ?? doc.label}</span>
+                          <span className="font-normal opacity-70">(reference)</span>
+                        </Chip>
+                      ))}
+                    </span>
+                  )}
+
                   {/* What the client has said and sent on this task — counts
                       are all the checklist read carries; the entries
                       themselves live on the portal surface. */}

@@ -77,12 +77,12 @@ function taskDto(t: ObClientPrereqTaskRow, db: Db) {
     skipReason: t.skipReason,
     commentCount: db.obPrereqComments.filter((c) => c.prereqTaskId === t.id).length,
     attachmentCount: t.submissions.length,
+    referenceDocs: t.referenceDocs.map((d) => docDto(d, t.templateTaskId ?? t.id)),
   };
 }
 
 const taskDetailDto = (t: ObClientPrereqTaskRow, db: Db) => ({
   ...taskDto(t, db),
-  referenceDocs: t.referenceDocs.map((d) => docDto(d, t.templateTaskId ?? t.id)),
   submissions: t.submissions,
 });
 

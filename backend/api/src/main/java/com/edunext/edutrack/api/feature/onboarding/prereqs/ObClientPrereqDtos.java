@@ -90,11 +90,13 @@ final class ObClientPrereqDtos {
             Instant submittedAt, ObPrereqSubmittedVia submittedVia,
             Instant verifiedAt, UserRef verifiedBy,
             Instant skippedAt, UserRef skippedBy, String skipReason,
-            int commentCount, int attachmentCount) {
+            int commentCount, int attachmentCount,
+            List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc> referenceDocs) {
 
         static ObClientPrereqTaskDto of(ObClientPrereqTask t, Instant now,
                                         UserRef verifiedBy, UserRef skippedBy,
-                                        int commentCount, int attachmentCount) {
+                                        int commentCount, int attachmentCount,
+                                        List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc> referenceDocs) {
 
             return new ObClientPrereqTaskDto(
                     t.getId(), t.getObClientId(), t.getTemplateTaskId(), t.getSequence(),
@@ -103,7 +105,7 @@ final class ObClientPrereqDtos {
                     t.getSubmittedAt(), t.getSubmittedVia(),
                     t.getVerifiedAt(), verifiedBy,
                     t.getSkippedAt(), skippedBy, t.getSkipReason(),
-                    commentCount, attachmentCount);
+                    commentCount, attachmentCount, referenceDocs);
         }
     }
 
@@ -126,9 +128,14 @@ final class ObClientPrereqDtos {
             List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc> referenceDocs,
             List<ObPrereqSubmissionFile> submissions) {
 
+        /**
+         * {@code referenceDocs} now rides on {@code base} — the list carries
+         * them too, so OB-05's accordion can name the template beside each
+         * row. Taken from there rather than re-read, so the two documents
+         * cannot disagree about one task.
+         */
         static ObClientPrereqTaskDetail of(
                 ObClientPrereqTaskDto base,
-                List<ObPrereqTemplateDtos.ObPrereqTemplateTaskDoc> referenceDocs,
                 List<ObPrereqSubmissionFile> submissions) {
 
             return new ObClientPrereqTaskDetail(
@@ -139,7 +146,7 @@ final class ObClientPrereqDtos {
                     base.verifiedAt(), base.verifiedBy(),
                     base.skippedAt(), base.skippedBy(), base.skipReason(),
                     base.commentCount(), base.attachmentCount(),
-                    referenceDocs, submissions);
+                    base.referenceDocs(), submissions);
         }
     }
 

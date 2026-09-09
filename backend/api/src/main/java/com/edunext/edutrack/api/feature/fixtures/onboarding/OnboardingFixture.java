@@ -437,14 +437,22 @@ public class OnboardingFixture {
      * user map rather than a literal id — the prototype's OB Admin, resolved
      * the same way every other actor here is.
      *
-     * <p><b>Reference documents are not written.</b>
+     * <p><b>Reference documents are written, and their bytes are not.</b>
      * {@code ob_prereq_template_task_docs.attachment_id} is NOT NULL and points
-     * into {@code ob_attachments}, so seeding the prototype's three
-     * {@code refDoc} names would mean inventing a {@code storage_key} for an
-     * object MinIO does not hold: CP-04 would draw a download chip that 404s,
-     * which is a worse defect than the absent chip. The names are transcribed
-     * onto {@code PrereqTaskSpec#refDocName()}, unused, exactly as
-     * {@code ClientSpec#attachmentNames()} carried A-102's before it landed.
+     * into {@code ob_attachments}, so a seeded row necessarily names a
+     * {@code storage_key} MinIO does not hold. The exclusion that used to
+     * stand here reasoned from that to dropping the rows altogether, on the
+     * grounds that a download chip which 404s is worse than no chip — and that
+     * is true of a <em>download</em> chip. It is not true of the name.
+     *
+     * <p>The checklist's whole job is to say what to send and what to send it
+     * on, and "fill the shared template exactly" is not actionable without the
+     * template's name. So the rows are seeded, and the screens render the name
+     * without offering the file: {@code scan_status} is {@code PENDING}, which
+     * A-102 already forbids serving bytes for, so the download route refuses
+     * these on its own rule rather than on a special case. What a reader gets
+     * is the document's name, which is what the prototype's chip is mostly
+     * carrying anyway.
      */
     private PrereqMasterRefs createPrereqMaster(Map<String, Long> userIds) {
         Long publisher = userIds.get(OnboardingFixtureData.PREREQ_PUBLISHER_KEY);
@@ -465,15 +473,57 @@ public class OnboardingFixture {
             // version_id is the header row's id, not its version number — the
             // FK points at ob_prereq_template_versions.id and 1 would resolve
             // to whatever row happens to hold that id.
-            taskIds.add(insert("""
+            long taskId = insert("""
                     INSERT INTO ob_prereq_template_tasks (version_id, sequence, title, description,
                                                           tat_days, is_mandatory, is_active)
                          VALUES (?, ?, ?, ?, ?, ?, 1)
                     """,
                     versionId, i + 1, task.title(), task.description(), task.tatDays(),
-                    task.mandatory() ? 1 : 0));
+                    task.mandatory() ? 1 : 0);
+            taskIds.add(taskId);
+            createReferenceDoc(task.refDocName(), taskId, publisher);
         }
         return new PrereqMasterRefs(versionId, List.copyOf(taskIds));
+    }
+
+    /**
+     * One master task's reference document — the {@code ob_attachments} row it
+     * needs, and the join row that names it.
+     *
+     * <p>Nothing for a task the prototype gave no {@code refDoc}: two of the
+     * five have none, and a corpus that invented one for them would make the
+     * chip look mandatory when it is the exception.
+     *
+     * <p>{@code scan_status} is {@code PENDING} rather than {@code CLEAN},
+     * which is the honest value and also the safe one — the storage key names
+     * an object MinIO does not hold, and A-102 already refuses to serve bytes
+     * for anything not {@code CLEAN}. So the name renders and the download
+     * refuses on the rule that exists, with no special case anywhere.
+     * {@code content_type} and {@code size_bytes} are plausible rather than
+     * measured; {@code ck_ob_attachments_size} only requires a positive
+     * number.
+     */
+    private void createReferenceDoc(String fileName, long templateTaskId, Long uploader) {
+        if (fileName == null || fileName.isBlank()) {
+            return;
+        }
+        String contentType = fileName.endsWith(".xlsx")
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "application/pdf";
+
+        long attachmentId = insert("""
+                INSERT INTO ob_attachments (prereq_template_task_id, kind, file_name, content_type,
+                                            size_bytes, storage_key, scan_status,
+                                            uploaded_by_type, uploaded_by_user)
+                     VALUES (?, 'REFERENCE', ?, ?, ?, ?, 'PENDING', 'STAFF', ?)
+                """,
+                templateTaskId, fileName, contentType, 148_480L,
+                "ob-prereq-reference/" + templateTaskId + "/" + fileName, uploader);
+
+        insert("""
+                INSERT INTO ob_prereq_template_task_docs (template_task_id, attachment_id, label, sequence)
+                     VALUES (?, ?, ?, 0)
+                """, templateTaskId, attachmentId, fileName);
     }
 
     /**

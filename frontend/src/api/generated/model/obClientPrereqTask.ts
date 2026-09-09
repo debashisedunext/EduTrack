@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObClientPrereqTaskTemplateTaskId } from './obClientPrereqTaskTemplateTaskId';
 import type { ObClientPrereqTaskDescription } from './obClientPrereqTaskDescription';
+import type { ObPrereqTemplateTaskDoc } from './obPrereqTemplateTaskDoc';
 import type { ObPrereqTaskStatus } from './obPrereqTaskStatus';
 import type { ObClientPrereqTaskSubmittedAt } from './obClientPrereqTaskSubmittedAt';
 import type { ObClientPrereqTaskSubmittedVia } from './obClientPrereqTaskSubmittedVia';
@@ -87,7 +88,20 @@ org holidays and the boarding moment.
    * @minimum 1
    * @maximum 365
    */
-  tatDays?: number;
+  tatDays: number;
+  /** The Admin's reference documents, read through the task's
+`templateTaskId` rather than copied onto it — a specimen form the
+Admin may replace with a clearer one, which the client benefits
+from, unlike the wording, which is frozen at boarding.
+
+**On the list as well as the detail**, because OB-05's accordion
+and CP-03 both name them per row: the checklist's whole job is to
+say what to send and what to send it on, and a reader who has to
+open each task to find the template is reading the checklist
+twice. Empty on an ad-hoc task, which has no master row to read
+through.
+ */
+  referenceDocs: ObPrereqTemplateTaskDoc[];
   isMandatory: boolean;
   /** Added for this client rather than snapshotted (plan §4). Worth a
 field of its own rather than leaving the screen to infer it from
