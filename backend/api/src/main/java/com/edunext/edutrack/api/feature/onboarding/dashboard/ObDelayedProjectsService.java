@@ -12,6 +12,7 @@ import com.edunext.edutrack.common.pagination.CursorPage;
 import com.edunext.edutrack.common.pagination.PageLimit;
 import com.edunext.edutrack.domain.masters.WorkingCalendarRepository;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -72,6 +73,14 @@ class ObDelayedProjectsService {
     private final WorkingCalendarRepository calendars;
     private final Clock clock;
 
+    /**
+     * {@code @Autowired} is load-bearing, on {@code ObSignoffAcceptService}'s
+     * precedent: two constructors and no explicit choice leaves Spring looking
+     * for a no-arg constructor that is not here, failing the whole application
+     * context under a message that names the missing constructor rather than
+     * the ambiguity that caused it to be looked for.
+     */
+    @Autowired
     ObDelayedProjectsService(ObDelayedProjectsRepository repository, WorkingHoursService workingHours,
             WorkingCalendarRepository calendars) {
         this(repository, workingHours, calendars, Clock.systemUTC());
