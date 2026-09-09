@@ -87,9 +87,19 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
   const missing = account.isError && account.error instanceof ApiError
     && account.error.status === 404;
 
+  /*
+    Styled from the design tokens rather than raw palette classes, and matching
+    `ObClientInfoCard` exactly — same surface, radius, border and shadow. The
+    two sit side by side on OB-05, and a panel that is a different shade of
+    white with a different corner radius reads as a different kind of thing
+    rather than as the card beside it.
+  */
   return (
-    <section aria-labelledby="ob-client-account" className="rounded-lg border border-slate-200 p-4">
-      <h2 id="ob-client-account" className="text-sm font-semibold text-slate-900">
+    <section
+      aria-labelledby="ob-client-account"
+      className="rounded-card border border-border bg-surface p-5 shadow-sm"
+    >
+      <h2 id="ob-client-account" className="m-0 text-base font-semibold text-content">
         Client portal login
       </h2>
 
@@ -102,11 +112,11 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
         </p>
       ) : null}
 
-      {account.isPending ? <p className="mt-3 text-sm text-slate-500">Loading…</p> : null}
+      {account.isPending ? <p className="mt-3 text-sm text-content-muted">Loading…</p> : null}
 
       {missing && !data ? (
         <>
-          <p className="mt-3 text-sm text-slate-600">
+          <p className="mt-3 text-sm text-content-muted">
             This client has no portal login. Creating one emails a single-use link to the
             primary SPOC.
           </p>
@@ -119,31 +129,31 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
       {data ? (
         <>
           <dl className="mt-3 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-slate-500">Username</dt>
-            <dd className="font-mono text-slate-900">{data.username}</dd>
-            <dt className="text-slate-500">Issued to</dt>
-            <dd className="text-slate-900">{data.displayName} · {data.email}</dd>
-            <dt className="text-slate-500">Status</dt>
-            <dd className="text-slate-900">{data.isActive ? 'Active' : 'Disabled'}</dd>
-            <dt className="text-slate-500">Last signed in</dt>
+            <dt className="text-content-muted">Username</dt>
+            <dd className="font-mono text-content">{data.username}</dd>
+            <dt className="text-content-muted">Issued to</dt>
+            <dd className="text-content">{data.displayName} · {data.email}</dd>
+            <dt className="text-content-muted">Status</dt>
+            <dd className="text-content">{data.isActive ? 'Active' : 'Disabled'}</dd>
+            <dt className="text-content-muted">Last signed in</dt>
             {/*
               Never, rather than a blank. "This client has never used their
               login" is the answer support is actually looking for, and an
               empty cell reads as missing data.
             */}
-            <dd className="text-slate-900">
+            <dd className="text-content">
               {data.lastLoginAt ? new Date(data.lastLoginAt).toLocaleString() : 'Never'}
             </dd>
             {data.lockedUntil ? (
               <>
-                <dt className="text-slate-500">Locked until</dt>
-                <dd className="text-slate-900">{new Date(data.lockedUntil).toLocaleString()}</dd>
+                <dt className="text-content-muted">Locked until</dt>
+                <dd className="text-content">{new Date(data.lockedUntil).toLocaleString()}</dd>
               </>
             ) : null}
           </dl>
 
           {data.mustChangePassword ? (
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-caption text-content-muted">
               The client has not set their own password yet.
             </p>
           ) : null}
@@ -162,7 +172,7 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
           </div>
 
           {data.isActive ? (
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-caption text-content-muted">
               Disabling also invalidates any link already emailed.
             </p>
           ) : null}
