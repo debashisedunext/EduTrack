@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
+import { format, parseISO } from 'date-fns'
 import { ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -26,7 +27,7 @@ import { isContradictory, toQueryParams, useObClientFilters } from './useObClien
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
-const COLUMN_COUNT = 5
+const COLUMN_COUNT = 8
 
 /**
  * The mockup's two selects, verbatim (`vClients()` in
@@ -82,6 +83,15 @@ const HEALTH_OPTIONS = [
  * `gateStatus`, `ownerId`, `salesPersonId` and `productId` remain in
  * `useObClientFilters` and keep working from the URL (OB-02's cards deep-link
  * into them), but the filter card shows the mockup's three controls only.
+ *
+ * ## Products Bought, Start Date and Expected Completion are not in the mockup
+ *
+ * Added on top of `vClients()` rather than aligned to it: `products` was
+ * already on `ObClient`, and `startedAt`/`currentStep.dueAt` were added to
+ * the contract for this. Both dates are null under the same "nothing is
+ * running to name" cases `currentStep` already documents, except that
+ * `startedAt` stays populated once a finished primary journey has no current
+ * step left — a client that is done still started on a real day.
  */
 export function ObClientListPage() {
   const navigate = useNavigate()
@@ -167,7 +177,7 @@ export function ObClientListPage() {
       {/* ── page head — h1, "N boarded · M live", the boarding button ──── */}
       <div className="flex flex-wrap items-start gap-3">
         <div>
-          <h1 className="text-h1 text-content">Clients</h1>
+          <h1 className="text-h1 text-content">Projects</h1>
           {boarded != null && live != null && (
             <p className="mt-0.5 text-caption text-content-muted">
               {boarded} boarded · {live} live
@@ -259,6 +269,9 @@ export function ObClientListPage() {
               <TableHead>Client</TableHead>
               <TableHead>Health</TableHead>
               <TableHead>Current step</TableHead>
+              <TableHead>Products Bought</TableHead>
+              <TableHead>Start Date</TableHead>
+              <TableHead>Expected Completion</TableHead>
               <TableHead>Sales</TableHead>
               <TableHead>Boarded</TableHead>
             </TableRow>
@@ -432,6 +445,46 @@ function ObClientRow({
             )}
             <span className="tabular-nums text-content">{journeys.label}</span>
           </span>
+        )}
+      </TableCell>
+      <TableCell className="text-content-muted">
+        {client.products && client.products.length > 0 ? (
+          <span className="flex flex-wrap items-center gap-x-1">
+            {client.products.map((p, i) => (
+              <React.Fragment key={p.id}>
+                {i > 0 && <span aria-hidden>,</span>}
+                {/* Straight to this product's own ribbon — OB-05's card chooser
+                    is a detour when the reader already knows which product
+                    they want. stopPropagation so this wins over the row's own
+                    click, which would otherwise still open the client page. */}
+                <Link
+                  to={`/onboarding/clients/${client.id}/products/${p.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="hover:text-primary hover:underline"
+                >
+                  {p.code ?? p.name}
+                </Link>
+              </React.Fragment>
+            ))}
+          </span>
+        ) : (
+          '—'
+        )}
+      </TableCell>
+      <TableCell className="text-content-muted tabular-nums">
+        {client.startedAt ? (
+          <time dateTime={client.startedAt}>{format(parseISO(client.startedAt), 'd MMM yyyy')}</time>
+        ) : (
+          '—'
+        )}
+      </TableCell>
+      <TableCell className="text-content-muted tabular-nums">
+        {client.currentStep?.dueAt ? (
+          <time dateTime={client.currentStep.dueAt}>
+            {format(parseISO(client.currentStep.dueAt), 'd MMM yyyy')}
+          </time>
+        ) : (
+          '—'
         )}
       </TableCell>
       <TableCell className="text-content-muted">{client.salesPerson?.displayName ?? '—'}</TableCell>

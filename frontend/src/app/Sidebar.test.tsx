@@ -116,7 +116,7 @@ describe('Sidebar · onboarding module', () => {
   it('swaps to the onboarding navigation on an onboarding route', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Dashboard', 'Clients', 'New client', 'Reports', 'TAT & escalation']) {
+    for (const label of ['Dashboard', 'Projects', 'New client', 'Reports', 'TAT & escalation']) {
       expect(within(obNav()).getByRole('link', { name: label })).toBeInTheDocument()
     }
     // The ticketing entries are gone, not merely pushed down.
@@ -183,15 +183,15 @@ describe('Sidebar · onboarding module', () => {
       'aria-current',
       'page',
     )
-    expect(within(obNav()).getByRole('link', { name: 'Clients' })).not.toHaveAttribute(
+    expect(within(obNav()).getByRole('link', { name: 'Projects' })).not.toHaveAttribute(
       'aria-current',
     )
   })
 
-  it('keeps Clients current on a client detail page', () => {
+  it('keeps Projects current on a client detail page', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/clients/42')
 
-    expect(within(obNav()).getByRole('link', { name: 'Clients' })).toHaveAttribute(
+    expect(within(obNav()).getByRole('link', { name: 'Projects' })).toHaveAttribute(
       'aria-current',
       'page',
     )

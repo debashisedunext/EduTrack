@@ -110,6 +110,25 @@ class ObClientReadRepository {
             """;
 
     /**
+     * When the client's primary journey actually began — the earliest
+     * {@code started_at} among its steps, not {@code ob_journeys.started_at}
+     * itself, which no write path in this codebase sets. Null while that
+     * journey is still gate-locked and no step has ever activated, which is
+     * the OB-03 "Start Date" column's own null case.
+     *
+     * <p>Independent of {@link #currentStepsOf}'s primary-journey query on
+     * purpose: a finished journey has no current step but did start, so
+     * tying this to the same {@code gate_status = 'OPEN'} / unsettled-step
+     * filter would blank a completed client's start date.
+     */
+    private static final String PRIMARY_JOURNEY_STARTED_AT = """
+            (SELECT MIN(ps.started_at)
+               FROM ob_journey_steps ps
+              WHERE ps.journey_id = (SELECT MIN(pj.id) FROM ob_journeys pj
+                                       WHERE pj.ob_client_id = c.id AND pj.archived_at IS NULL))
+            """;
+
+    /**
      * B-119's go-live survey score, for OB-05's LIVE banner — "…sign-offs on
      * record · CSAT 5/5".
      *
@@ -150,10 +169,12 @@ class ObClientReadRepository {
                    %s                  AS gateStatus,
                    %s                  AS journeyCount,
                    %s                  AS journeysComplete,
-                   %s                  AS hasPortalLogin
+                   %s                  AS hasPortalLogin,
+                   %s                  AS startedAt
               FROM ob_clients c
          LEFT JOIN users sp ON sp.id = c.sales_person_id
-            """.formatted(RAG_EXPRESSION, GATE_EXPRESSION, JOURNEY_COUNT, JOURNEYS_COMPLETE, HAS_PORTAL_LOGIN);
+            """.formatted(RAG_EXPRESSION, GATE_EXPRESSION, JOURNEY_COUNT, JOURNEYS_COMPLETE, HAS_PORTAL_LOGIN,
+            PRIMARY_JOURNEY_STARTED_AT);
 
     /**
      * The list's filters, all optional and all narrowing.
@@ -253,12 +274,13 @@ class ObClientReadRepository {
                    %s                  AS journeyCount,
                    %s                  AS journeysComplete,
                    %s                  AS hasPortalLogin,
+                   %s                  AS startedAt,
                    %s                  AS csatScore
               FROM ob_clients c
          LEFT JOIN users sp ON sp.id = c.sales_person_id
          LEFT JOIN users cb ON cb.id = c.created_by
             """.formatted(RAG_EXPRESSION, GATE_EXPRESSION, JOURNEY_COUNT, JOURNEYS_COMPLETE,
-            HAS_PORTAL_LOGIN, CSAT_SCORE)
+            HAS_PORTAL_LOGIN, PRIMARY_JOURNEY_STARTED_AT, CSAT_SCORE)
             // The scope predicate is the caller's, so it is applied where it is
             // used rather than baked in here.
             + """
@@ -366,6 +388,11 @@ class ObClientReadRepository {
      * {@code id} tiebreak matches {@link #stepDotsOf}'s ordering; today
      * {@code uq_ob_journey_steps_seq} makes it unreachable, but a query that
      * agrees with its siblings survives that index changing.
+     *
+     * <p>{@code dueAt} is this same step's own {@code due_at} — already
+     * calendar-derived and stored, not computed here — and is OB-03's
+     * "Expected Completion" column. It shares this row's null cases exactly,
+     * which the contract's own note on {@code ObClientCurrentStep} names.
      */
     List<CurrentStepRow> currentStepsOf(Collection<Long> clientIds) {
         if (clientIds.isEmpty()) {
@@ -377,6 +404,7 @@ class ObClientReadRepository {
                        p.code         AS productCode,
                        p.name         AS productName,
                        s.name         AS stepName,
+                       s.due_at       AS dueAt,
                        (SELECT COUNT(*) FROM ob_journey_steps x
                          WHERE x.journey_id = s.journey_id
                            AND (x.sequence < s.sequence
@@ -723,7 +751,7 @@ class ObClientReadRepository {
 
     record ListRow(long id, String name, LocalDate onboardingDate, String status, Instant liveAt,
                    Long salesPersonId, String salesPersonName, String rag, String gateStatus,
-                   int journeyCount, int journeysComplete, boolean hasPortalLogin) {
+                   int journeyCount, int journeysComplete, boolean hasPortalLogin, Instant startedAt) {
     }
 
     record DetailRow(ListRow summary, String description, String address, String licenseType,
@@ -736,7 +764,7 @@ class ObClientReadRepository {
 
     /** One client's primary-journey position — {@link #currentStepsOf}'s projection. */
     record CurrentStepRow(long obClientId, long productId, String productCode, String productName,
-                          String stepName, int stepIndex, int stepTotal) {
+                          String stepName, Instant dueAt, int stepIndex, int stepTotal) {
     }
 
     /**
@@ -888,7 +916,7 @@ class ObClientReadRepository {
 
     private static final RowMapper<CurrentStepRow> CURRENT_STEP_MAPPER = (rs, n) -> new CurrentStepRow(
             rs.getLong("obClientId"), rs.getLong("productId"), rs.getString("productCode"),
-            rs.getString("productName"), rs.getString("stepName"),
+            rs.getString("productName"), rs.getString("stepName"), instant(rs, "dueAt"),
             rs.getInt("stepIndex"), rs.getInt("stepTotal"));
 
     private static final RowMapper<ContactRow> CONTACT_MAPPER = (rs, n) -> new ContactRow(
@@ -938,7 +966,8 @@ class ObClientReadRepository {
                 rs.getString("gateStatus"),
                 rs.getInt("journeyCount"),
                 rs.getInt("journeysComplete"),
-                rs.getBoolean("hasPortalLogin"));
+                rs.getBoolean("hasPortalLogin"),
+                instant(rs, "startedAt"));
     }
 
     private static Long nullableLong(ResultSet rs, String column) throws SQLException {

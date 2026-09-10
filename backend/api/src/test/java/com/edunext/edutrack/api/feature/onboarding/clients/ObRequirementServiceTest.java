@@ -369,7 +369,7 @@ class ObRequirementServiceTest {
     private static ObClientDtos.ObClientDetail detailStub() {
         return new ObClientDtos.ObClientDetail(
                 CLIENT, "Acme", LocalDate.of(2026, 9, 7), "ONBOARDING", null, "LOCKED", 1, 0,
-                null, List.of(), null, null, null, false,
+                null, List.of(), null, null, null, null, false,
                 null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), null, null, null);
     }

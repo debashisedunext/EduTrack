@@ -265,11 +265,27 @@ function currentStepOf(c: ObClient, db: Db) {
   return {
     product: productRef(primary.productId, db),
     name: steps[index].name,
+    dueAt: steps[index].dueAt ?? null,
     // 1-based ordinal within the sequence — NOT the raw `sequence` value,
     // which the contract does not promise contiguous.
     stepIndex: index + 1,
     stepTotal: steps.length,
   };
+}
+
+/**
+ * `ObClient.startedAt` — OB-03's "Start Date": when the primary journey
+ * itself started, null while it is still gate-locked.
+ *
+ * Independent of `currentStepOf`'s gate/held/unsettled filters on purpose —
+ * a finished primary journey has no current step left to name but did
+ * start, and this must not go null just because that one did.
+ */
+function primaryJourneyStartedAt(c: ObClient) {
+  const primary = c.journeys
+    .filter((j) => j.archivedAt == null)
+    .reduce<ObJourney | null>((first, j) => (first == null || j.id < first.id ? j : first), null);
+  return primary?.startedAt ?? null;
 }
 
 /** The OB-03 row. No PAN and no address — identity data belongs to the detail. */
@@ -288,6 +304,7 @@ function obClientDto(c: ObClient, db: Db) {
     salesPerson: userRef(c.salesPersonId, db),
     primaryContact: c.contacts.find((x) => x.isPrimary) ?? null,
     liveAt: c.liveAt,
+    startedAt: primaryJourneyStartedAt(c),
     hasPortalLogin: c.hasPortalLogin,
   };
 }

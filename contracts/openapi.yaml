@@ -19263,6 +19263,14 @@ components:
           $ref: '#/components/schemas/ObProductRef'
           description: The primary journey's product, so the caption can name it.
         name: { type: string }
+        dueAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            This step's own due date — OB-03's "Expected Completion" column.
+            Calendar-derived and stored when the step activates, not computed
+            on read. Shares this whole object's null cases: gate-locked, held
+            behind a sibling, or finished.
         stepIndex:
           type: integer
           minimum: 1
@@ -19324,6 +19332,15 @@ components:
         salesPerson: { $ref: '#/components/schemas/UserRef' }
         primaryContact: { $ref: '#/components/schemas/ObContact' }
         liveAt: { type: [string, 'null'], format: date-time }
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            OB-03's "Start Date" — when the primary journey's earliest step
+            actually began. Null while that journey is still gate-locked and
+            nothing has ever activated. Unlike `currentStep`, this stays
+            populated once a finished journey has no current step left to
+            name.
         hasPortalLogin:
           type: boolean
           description: |

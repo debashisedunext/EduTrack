@@ -73,10 +73,11 @@ class ObJourneyInstantiationServiceTest {
     private final ObJourneyTemplateStepItemRepository templateStepItems = mock(ObJourneyTemplateStepItemRepository.class);
     private final PurchasedProductAccess purchasedProducts = mock(PurchasedProductAccess.class);
     private final ObJourneyStepLifecycleService stepLifecycle = mock(ObJourneyStepLifecycleService.class);
+    private final ObDemoStepDocumentSeeder demoStepDocumentSeeder = mock(ObDemoStepDocumentSeeder.class);
 
     private final ObJourneyInstantiationService service = new ObJourneyInstantiationService(
             journeys, journeySteps, journeyStepItems, templates, templateSteps, templateStepItems, purchasedProducts,
-            stepLifecycle);
+            stepLifecycle, demoStepDocumentSeeder);
 
     @BeforeEach
     void wireFakes() {

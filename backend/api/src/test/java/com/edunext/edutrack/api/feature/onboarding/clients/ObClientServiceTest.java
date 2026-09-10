@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,8 @@ class ObClientServiceTest {
     private static final long OTHER_CLIENT = 43L;
 
     private static final ObClientScope ADMIN = new ObClientScope(ObClientScope.OB_ADMIN, 7L);
+    private static final Instant DUE_AT = Instant.parse("2026-09-15T10:00:00Z");
+    private static final Instant STARTED_AT = Instant.parse("2026-09-01T09:00:00Z");
 
     private ObClientReadRepository reads;
     private ObClientService service;
@@ -58,15 +61,18 @@ class ObClientServiceTest {
                 .thenReturn(List.of(listRow(CLIENT)));
         when(reads.currentStepsOf(List.of(CLIENT)))
                 .thenReturn(List.of(new ObClientReadRepository.CurrentStepRow(
-                        CLIENT, 5L, "ERP", "ERP Suite", "Data migration", 4, 8)));
+                        CLIENT, 5L, "ERP", "ERP Suite", "Data migration", DUE_AT, 4, 8)));
 
         ObClientDtos.ObClientSummary row = service
                 .list(ADMIN, null, null, null, null, null, null, null, null, null)
                 .data().getFirst();
 
+        assertThat(row.startedAt()).isEqualTo(STARTED_AT);
+
         ObClientDtos.ObClientCurrentStep step = row.currentStep();
         assertThat(step).isNotNull();
         assertThat(step.name()).isEqualTo("Data migration");
+        assertThat(step.dueAt()).isEqualTo(DUE_AT);
         assertThat(step.stepIndex()).isEqualTo(4);
         assertThat(step.stepTotal()).isEqualTo(8);
         assertThat(step.product())
@@ -87,7 +93,7 @@ class ObClientServiceTest {
         // behind its gate, behind a sibling, or done — SQL's call, no row here.
         when(reads.currentStepsOf(List.of(CLIENT, OTHER_CLIENT)))
                 .thenReturn(List.of(new ObClientReadRepository.CurrentStepRow(
-                        OTHER_CLIENT, 5L, "ERP", "ERP Suite", "Kickoff", 1, 8)));
+                        OTHER_CLIENT, 5L, "ERP", "ERP Suite", "Kickoff", DUE_AT, 1, 8)));
 
         List<ObClientDtos.ObClientSummary> page = service
                 .list(ADMIN, null, null, null, null, null, null, null, null, null)
@@ -105,13 +111,13 @@ class ObClientServiceTest {
         when(reads.findDetail(any(), anyLong())).thenReturn(Optional.of(detailRow(CLIENT)));
         when(reads.currentStepsOf(List.of(CLIENT)))
                 .thenReturn(List.of(new ObClientReadRepository.CurrentStepRow(
-                        CLIENT, 5L, "ERP", "ERP Suite", "Data migration", 4, 8)));
+                        CLIENT, 5L, "ERP", "ERP Suite", "Data migration", DUE_AT, 4, 8)));
 
         Optional<ObClientDtos.ObClientDetail> detail = service.findDetail(ADMIN, CLIENT);
 
         assertThat(detail).isPresent();
         assertThat(detail.get().currentStep()).isEqualTo(new ObClientDtos.ObClientCurrentStep(
-                new ObClientDtos.ObProductRef(5L, "ERP", "ERP Suite"), "Data migration", 4, 8));
+                new ObClientDtos.ObProductRef(5L, "ERP", "ERP Suite"), "Data migration", DUE_AT, 4, 8));
         // The singleton list, not a second query shape that can drift.
         verify(reads).currentStepsOf(eq(List.of(CLIENT)));
     }
@@ -133,7 +139,7 @@ class ObClientServiceTest {
     private static ObClientReadRepository.ListRow listRow(long id) {
         return new ObClientReadRepository.ListRow(
                 id, "Acme", LocalDate.of(2026, 9, 7), "ONBOARDING", null,
-                null, null, null, "OPEN", 2, 0, false);
+                null, null, null, "OPEN", 2, 0, false, STARTED_AT);
     }
 
     private static ObClientReadRepository.DetailRow detailRow(long id) {

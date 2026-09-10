@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { format, parseISO } from 'date-fns'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { ObClientListPage } from './ObClientListPage'
+
+/** The table's own rendering, so the assertion tracks the environment's timezone rather than a hardcoded one. */
+const asDate = (iso: string) => format(parseISO(iso), 'd MMM yyyy')
 
 /**
  * B-108 · OB-03 against the mock server.
@@ -85,6 +89,27 @@ describe('ObClientListPage', () => {
   })
 
   /**
+   * Products Bought links straight to that product's own ribbon page
+   * (`/onboarding/clients/:id/products/:productId`), not to the client page's
+   * card chooser — the reader already named the product by clicking it.
+   */
+  it('links a bought product straight to its own ribbon, skipping the card chooser', async () => {
+    renderList()
+
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    const horizon = bodyRows().find((row) => row.textContent?.includes('Horizon Academy'))!
+
+    expect(within(horizon).getByRole('link', { name: 'ERP' })).toHaveAttribute(
+      'href',
+      '/onboarding/clients/3/products/1',
+    )
+    expect(within(horizon).getByRole('link', { name: 'BIOMETRIC' })).toHaveAttribute(
+      'href',
+      '/onboarding/clients/3/products/2',
+    )
+  })
+
+  /**
    * §9's sentence for this screen, and the one thing on it that is not a
    * colour: a client whose journeys are all locked has no RAG at all.
    */
@@ -129,6 +154,58 @@ describe('ObClientListPage', () => {
 
     expect(within(horizon).getByText('2 journeys')).toBeInTheDocument()
     expect(within(sunrise).queryByText(/journeys$/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * Horizon's ERP journey (id 31) is running: bought ERP and Biometric,
+   * started 2026-08-03, current step "Admin & user training" due
+   * 2026-08-20T18:30Z.
+   */
+  it('shows products bought, start date and expected completion for a running client', async () => {
+    renderList()
+
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    const horizon = bodyRows().find((row) => row.textContent?.includes('Horizon Academy'))!
+
+    expect(within(horizon).getByRole('link', { name: 'ERP' })).toBeInTheDocument()
+    expect(within(horizon).getByRole('link', { name: 'BIOMETRIC' })).toBeInTheDocument()
+    expect(within(horizon).getByText(asDate('2026-08-03T09:00:00.000Z'))).toBeInTheDocument()
+    expect(within(horizon).getByText(asDate('2026-08-20T18:30:00.000Z'))).toBeInTheDocument()
+  })
+
+  /**
+   * Little Scholars is gate-locked: bought ERP, but nothing has started, so
+   * neither Start Date nor Expected Completion has anything to show.
+   */
+  it('shows a dash for start date and expected completion on a gate-locked client', async () => {
+    renderList()
+
+    await screen.findByText('GreenValley International School', undefined, SLOW)
+    const scholars = bodyRows().find((row) =>
+      row.textContent?.includes('Little Scholars Preschool'),
+    )!
+
+    expect(within(scholars).getByText('ERP')).toBeInTheDocument()
+    const dashes = within(scholars).getAllByText('—')
+    // Health's own "Prerequisites pending" lock glyph is a separate cell —
+    // this counts only the plain em-dash cells, Start Date and Expected
+    // Completion.
+    expect(dashes).toHaveLength(2)
+  })
+
+  /**
+   * GreenValley's two journeys are both finished: Start Date still names
+   * when the primary one began, but Expected Completion has no current step
+   * left to name.
+   */
+  it('keeps the start date once a client finishes, but drops expected completion', async () => {
+    renderList()
+
+    const greenValley = (await screen.findByText('GreenValley International School', undefined, SLOW))
+      .closest('tr')!
+
+    expect(within(greenValley).getByText(asDate('2026-06-15T09:00:00.000Z'))).toBeInTheDocument()
+    expect(within(greenValley).getAllByText('—')).toHaveLength(1)
   })
 
   it('captions the page head with boarded and live counts', async () => {
