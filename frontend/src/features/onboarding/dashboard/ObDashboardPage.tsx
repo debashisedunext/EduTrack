@@ -1,17 +1,16 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { useGetObDashboardSummary } from '@/api/generated/onboarding/onboarding'
 import type { ObDashboardCard, ObDashboardCardKey } from '@/api/generated/model'
 import { Button } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Tabs, type TabItem } from '@/components/ui/tabs'
 
-import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
 import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
-import { ObDashboardRagBoard } from './ObDashboardRagBoard'
 import { ObDashboardStuckPanel } from './ObDashboardStuckPanel'
 import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
 import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
+import { ObSummaryTab } from './tabs/summary/ObSummaryTab'
 
 /**
  * B-127/B-128 · what the S-06 slide-over is currently showing, or nothing.
@@ -20,7 +19,10 @@ import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
  * which only ever names its own `cardKey`, and {@link ObImplementorWorkloadGrid},
  * which also narrows by `ownerUserId` and supplies its own `title`. A single
  * piece of state and a single panel instance, rather than one panel per
- * caller, is the reuse B-127 built the panel for in the first place.
+ * caller, is the reuse B-127 built the panel for in the first place. It lives
+ * on the page, not inside a tab, because a click from the Summary tab and a
+ * click from the Workload tab open the identical panel and neither tab
+ * should own an instance the other one also needs.
  */
 interface DrillTarget {
   cardKey: ObDashboardCardKey
@@ -28,15 +30,37 @@ interface DrillTarget {
   title?: string
 }
 
+/** The four tabs, and the `?tab=` value each one is. */
+const TAB_IDS = ['summary', 'stuck', 'delayed', 'workload'] as const
+type TabId = (typeof TAB_IDS)[number]
+
+const DEFAULT_TAB: TabId = 'summary'
+
+function isTabId(value: string | null): value is TabId {
+  return value !== null && (TAB_IDS as readonly string[]).includes(value)
+}
+
 /**
  * B-121 · OB-02, the onboarding dashboard — `/onboarding/dashboard`.
+ *
+ * <h2>Four tabs, on the ticketing dashboard's own shell</h2>
+ *
+ * Summary / Where it's stuck / Delayed projects / Implementor workload &amp;
+ * performance, mirroring `DashboardPage`'s Today's Progress / Ticket Overview
+ * / Weekly Progress / Analytics — the same {@link Tabs} control, the same
+ * `?tab=` URL state so a tab is a link a colleague can paste, and the same
+ * reason: only the active tab's content mounts, so a manager checking
+ * Delayed projects no longer also pays for the stuck-panel and workload-grid
+ * requests on every load.
  *
  * <h2>Seven counters, one request</h2>
  *
  * `GET /onboarding/dashboard/summary` is the board's whole first paint. Not
  * seven requests and not a request per card: the contract's own reasoning, and
  * the same call A-073 made for the ticketing dashboard after the per-widget
- * shape cost eleven round trips on load.
+ * shape cost eleven round trips on load. It stays here rather than moving
+ * into the Summary tab because the header's "as of" line reads it too, and
+ * that line is not part of any one tab.
  *
  * <h2>Every number is pre-aggregated, and the screen says how old it is</h2>
  *
@@ -59,24 +83,45 @@ interface DrillTarget {
  * `listObDashboardCardItems`. Nothing about *which* card is decided twice —
  * the tile passes its own `card.key` straight through, so the panel opens
  * exactly the card that was clicked.
- *
- * <h2>The two grids below the board — B-128</h2>
- *
- * Delayed Projects and Implementor workload &amp; performance, in plan §9's
- * own order. The workload grid's cells open the identical slide-over via the
- * same `drill` state, narrowed by `ownerUserId` — {@link DrillTarget}'s own
- * note on why this is one piece of state rather than two panels.
  */
 export function ObDashboardPage() {
   const { data, isPending, isError } = useGetObDashboardSummary()
   const [drill, setDrill] = useState<DrillTarget | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const summary = data?.data
   const cards = summary?.cards ?? []
+  const activeTab: TabId = isTabId(searchParams.get('tab')) ? (searchParams.get('tab') as TabId) : DEFAULT_TAB
+
+  function selectTab(id: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', id)
+        return next
+      },
+      { replace: true },
+    )
+  }
 
   function openDrill(card: ObDashboardCard) {
     setDrill({ cardKey: card.key })
   }
+
+  const tabs: TabItem[] = [
+    {
+      id: 'summary',
+      label: 'Summary',
+      content: <ObSummaryTab cards={cards} isPending={isPending} isError={isError} onOpen={openDrill} />,
+    },
+    { id: 'stuck', label: "Where it's stuck", content: <ObDashboardStuckPanel /> },
+    { id: 'delayed', label: 'Delayed projects', content: <ObDelayedProjectsGrid /> },
+    {
+      id: 'workload',
+      label: 'Implementor workload & performance',
+      content: <ObImplementorWorkloadGrid onDrill={setDrill} />,
+    },
+  ]
 
   return (
     <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 p-6">
@@ -93,47 +138,7 @@ export function ObDashboardPage() {
         </Button>
       </header>
 
-      {isError ? (
-        <EmptyState
-          title="The board could not be loaded"
-          description="Refresh to try again. If it keeps failing, the onboarding module may not be enabled for your account."
-        />
-      ) : (
-        <div
-          /*
-            A list, not a bare grid of divs. Seven tiles with no grouping are
-            seven unrelated announcements; naming the group is what tells a
-            screen-reader user how many there are and that they belong together.
-          */
-          role="list"
-          aria-label="Onboarding summary"
-          /*
-            Fixed-width tracks (`auto-fill`, not `auto-fit … 1fr`) — every card
-            is 190px whatever the row it lands in. `1fr` stretches whichever row
-            has the fewest cards to fill the leftover width, which is exactly
-            what made "Live"/"At risk" (a two-card second row) balloon wider
-            than the five cards above them.
-          */
-          className="grid grid-cols-[repeat(auto-fill,190px)] items-stretch gap-4"
-        >
-          {isPending
-            ? Array.from({ length: 7 }, (_, index) => (
-                <div role="listitem" key={index}>
-                  <ObDashboardCardTileSkeleton />
-                </div>
-              ))
-            : cards.map((card) => (
-                <div role="listitem" key={card.key}>
-                  <ObDashboardCardTile card={card} onOpen={openDrill} />
-                </div>
-              ))}
-        </div>
-      )}
-
-      <ObDashboardRagBoard />
-      <ObDashboardStuckPanel />
-      <ObDelayedProjectsGrid />
-      <ObImplementorWorkloadGrid onDrill={setDrill} />
+      <Tabs tabs={tabs} activeId={activeTab} onSelect={selectTab} ariaLabel="Onboarding dashboard" />
 
       <ObDashboardDrillPanel
         cardKey={drill?.cardKey ?? null}
