@@ -79,9 +79,15 @@ class ObJourneyTemplateServiceTest {
         lenient().when(templates.findById(any())).thenAnswer(inv -> Optional.ofNullable(templateRows.get(inv.<Long>getArgument(0))));
         lenient().when(templates.existsByProductId(any())).thenAnswer(inv ->
                 templateRows.values().stream().anyMatch(t -> t.getProductId().equals(inv.<Long>getArgument(0))));
-        lenient().when(templates.findByProductIdAndIsActiveTrue(any())).thenAnswer(inv ->
+        // Keyed on the service, not the product: a fake that still answered
+        // per product would make publish's own scoping untestable —
+        // publishing one service would look like it had retired another and
+        // nothing here would notice.
+        lenient().when(templates.findByProductIdAndNameAndIsActiveTrue(any(), any())).thenAnswer(inv ->
                 templateRows.values().stream()
-                        .filter(t -> t.getProductId().equals(inv.<Long>getArgument(0)) && t.isActive())
+                        .filter(t -> t.getProductId().equals(inv.<Long>getArgument(0))
+                                && inv.<String>getArgument(1).equals(t.getName())
+                                && t.isActive())
                         .findFirst());
         lenient().when(templates.findTopByProductIdOrderByVersionDesc(any())).thenAnswer(inv ->
                 templateRows.values().stream()

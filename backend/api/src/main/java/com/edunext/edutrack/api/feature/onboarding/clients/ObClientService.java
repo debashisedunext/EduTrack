@@ -195,6 +195,7 @@ class ObClientService {
                     journey.id(),
                     new ObClientDtos.ObProductRef(journey.productId(), journey.productCode(),
                             journey.productName()),
+                    journey.serviceName(),
                     journey.gateStatus(),
                     journey.rag(),
                     percentComplete(journey.stepsSettled(), journey.stepCount()),

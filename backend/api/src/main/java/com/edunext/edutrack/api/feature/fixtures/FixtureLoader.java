@@ -88,6 +88,27 @@ class FixtureLoader implements ApplicationRunner {
         log.info("B-007: fixture corpus loaded.");
     }
 
+    /**
+     * Idempotent on both paths — a fresh load and a database that already had
+     * the corpus — because it is driven entirely by which (client, service)
+     * journeys are absent, and a database where none are absent does nothing.
+     */
+    private void topUpServiceJourneys() {
+        // Order matters: a service still retired publishes no journeys, so
+        // activating has to happen before the journeys are counted.
+        int retired = onboarding.corpusServicesRetired();
+        if (retired > 0) {
+            log.info("B-101: {} corpus module service(s) are retired in this database — publishing them.", retired);
+            onboarding.activateCorpusServices();
+        }
+        int missingJourneys = onboarding.purchasesMissingServiceJourneys();
+        if (missingJourneys > 0) {
+            log.info("B-101: {} purchase(s) have a module service with no journey — instantiating those.",
+                    missingJourneys);
+            onboarding.loadMissingServiceJourneys();
+        }
+    }
+
     private void loadOnboardingCorpus() {
         if (onboarding.alreadyLoaded()) {
             log.info("B-101 onboarding corpus already present (product ERP exists) — skipping.");
@@ -104,10 +125,15 @@ class FixtureLoader implements ApplicationRunner {
                 log.info("B-101: {} client(s) have no prerequisites checklist — seeding those.", missing);
                 onboarding.loadMissingPrereqs();
             }
+            topUpServiceJourneys();
             return;
         }
         log.info("B-101: loading the onboarding corpus (journey templates, 8 clients, their journeys)...");
         onboarding.load();
+        // The corpus writes one journey per purchase by hand; a product that
+        // publishes two Module Services needs the second instantiated for
+        // every client who bought it. See purchasesMissingServiceJourneys.
+        topUpServiceJourneys();
         log.info("B-101: onboarding corpus loaded.");
     }
 }

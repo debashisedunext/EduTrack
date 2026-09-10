@@ -61,6 +61,23 @@ six journeys does not pay for six ribbons on first paint.
 export interface ObJourneyStrip {
   id: number;
   product: ObProductRef;
+  /**
+   * **The Module Service this journey runs, and what the strip is
+titled with** — the product is the caption beneath it.
+
+A product publishes several services at once and a client who
+buys it is boarded through every one of them, so a page with two
+strips both headed "EduTrack ERP" would be two identical rows
+carrying different progress. The service is what tells them
+apart.
+
+The **pinned** name, from the journey's own column rather than a
+join, so it matches the tasks rendered beneath it even after the
+catalogue has moved on.
+
+   * @maxLength 160
+   */
+  serviceName: string;
   gateStatus: ObGateStatus;
   /** Null while `gateStatus` is `LOCKED` — nothing is running to colour. */
   rag?: ObJourneyStripRag;

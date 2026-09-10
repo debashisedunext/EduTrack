@@ -68,6 +68,15 @@ navigation; this is for the eye.
  */
   clientName: string;
   product: ObProductRef;
+  /**
+   * The Module Service this journey runs — "Standard SaaS
+Onboarding", not "EduTrack ERP". A product publishes several at
+once, each its own journey, so the product alone no longer
+identifies which ribbon a reader is looking at.
+
+   * @maxLength 160
+   */
+  serviceName?: string;
   gateStatus: ObGateStatus;
   /** Null while the gate is `LOCKED` — nothing is running to colour. */
   rag?: ObJourneySummaryRag;

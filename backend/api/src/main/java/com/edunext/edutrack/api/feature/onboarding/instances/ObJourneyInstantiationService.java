@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.util.List;
@@ -90,28 +91,60 @@ public class ObJourneyInstantiationService {
     }
 
     /**
-     * One product, one journey. The wizard's multi-select (OB-04, B-109)
-     * calls this once per product it creates a purchase row for; C-118's
-     * gate-open flow and a same-client repeat purchase both land here too.
+     * <b>One product, one journey <em>per Module Service</em> it publishes.</b>
+     * The wizard's multi-select (OB-04, B-109) calls this once per product it
+     * creates a purchase row for; C-118's gate-open flow and a same-client
+     * repeat purchase both land here too.
+     *
+     * <p>Until {@code V20260910_0030} a product could publish only one
+     * service and this returned one journey. EduTrack ERP now runs Standard
+     * SaaS Onboarding and Enterprise (with data migration audit) at once, and
+     * a client buying it is boarded through both — one ribbon each, in
+     * catalogue sequence. The whole set is created in one transaction: a
+     * client holding some of a product's services and not others is a
+     * half-boarded client nothing downstream knows how to read.
+     *
+     * <p><b>Services already running are skipped, not refused.</b> A product
+     * whose catalogue grew a service after this client was boarded
+     * instantiates the new one on the next call and leaves the rest alone;
+     * only a product with nothing left to instantiate raises
+     * {@link JourneyAlreadyExistsException}.
      *
      * @throws ProductNotPurchasedException      no {@code ob_client_applications} row for this pair
-     * @throws JourneyAlreadyExistsException      a live journey for this product already exists
-     * @throws NoActiveTemplateForProductException the product has no published template to pin
+     * @throws JourneyAlreadyExistsException      every service of the product already runs for this client
+     * @throws NoActiveTemplateForProductException the product publishes no service to pin
      */
     @Transactional
-    public ObJourney instantiate(long obClientId, long productId) {
+    public List<ObJourney> instantiate(long obClientId, long productId) {
         if (!purchasedProducts.isPurchased(obClientId, productId)) {
             throw new ProductNotPurchasedException(obClientId, productId);
         }
-        if (journeys.existsByObClientIdAndProductIdAndArchivedAtIsNull(obClientId, productId)) {
+        List<ObJourneyTemplate> services =
+                templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId);
+        if (services.isEmpty()) {
+            throw new NoActiveTemplateForProductException(productId);
+        }
+
+        List<ObJourney> created = new ArrayList<>();
+        for (ObJourneyTemplate service : services) {
+            if (journeys.existsByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNull(
+                    obClientId, productId, service.getName())) {
+                continue;
+            }
+            created.add(instantiateService(obClientId, productId, service));
+        }
+        if (created.isEmpty()) {
             throw new JourneyAlreadyExistsException(obClientId, productId);
         }
-        ObJourneyTemplate template = templates.findByProductIdAndIsActiveTrue(productId)
-                .orElseThrow(() -> new NoActiveTemplateForProductException(productId));
+        return created;
+    }
 
+    /** One service of one product, the caller having already settled that it is missing. */
+    private ObJourney instantiateService(long obClientId, long productId, ObJourneyTemplate template) {
         ObJourney journey = new ObJourney();
         journey.setObClientId(obClientId);
         journey.setProductId(productId);
+        journey.setServiceName(template.getName());
         journey.setTemplateId(template.getId());
 
         // Plan §5.3 item 3: "products bought after gate-open instantiate
@@ -160,20 +193,30 @@ public class ObJourneyInstantiationService {
         // exists before the journey that has to be held behind it.
         List<Long> ordered = productIds.stream()
                 .sorted(Comparator.comparingInt(productId -> templates
-                        .findByProductIdAndIsActiveTrue(productId)
-                        .map(ObJourneyTemplate::getSequence)
+                        .findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId).stream()
+                        .mapToInt(ObJourneyTemplate::getSequence)
+                        .min()
                         .orElse(Integer.MAX_VALUE)))
                 .toList();
-        return ordered.stream().map(productId -> instantiate(obClientId, productId)).toList();
+        // Flattened: one product contributes as many journeys as it publishes
+        // services, and `instantiate` has already ordered each product's own
+        // by the same catalogue sequence.
+        return ordered.stream().flatMap(productId -> instantiate(obClientId, productId).stream()).toList();
     }
 
     /**
      * The journey this one waits behind, or {@code null}.
      *
-     * <p>The dependency is declared between <em>templates</em>
-     * ({@code depends_on_template_id}) but held between <em>journeys</em>: the
-     * dependency template's product is what the client either bought or did
-     * not, and its live, unfinished journey — if there is one — is the holder.
+     * <p>The dependency is declared between <em>template versions</em>
+     * ({@code depends_on_template_id}) but held between <em>journeys</em>, and
+     * it resolves through the dependency's <b>service</b> rather than its row:
+     * the client's live journey for that (product, service name) pair — if
+     * there is one — is the holder.
+     *
+     * <p>Resolving by row id would hold only until the dependency published a
+     * new version, at which point the client's journey would be pinned to v2
+     * while the declaration still named v1, and every dependent journey would
+     * start unheld.
      */
     private Long holdingJourneyFor(long obClientId, ObJourneyTemplate template) {
         Long dependsOn = template.getDependsOnTemplateId();
@@ -181,8 +224,9 @@ public class ObJourneyInstantiationService {
             return null;
         }
         return templates.findById(dependsOn)
-                .flatMap(dependency -> journeys.findFirstByObClientIdAndProductIdAndArchivedAtIsNullOrderByIdDesc(
-                        obClientId, dependency.getProductId()))
+                .flatMap(dependency -> journeys
+                        .findFirstByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNullOrderByIdDesc(
+                                obClientId, dependency.getProductId(), dependency.getName()))
                 .filter(holder -> holder.getCompletedAt() == null)
                 .map(ObJourney::getId)
                 .orElse(null);

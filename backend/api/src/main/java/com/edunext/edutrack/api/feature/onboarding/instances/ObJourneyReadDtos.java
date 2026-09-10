@@ -50,8 +50,14 @@ final class ObJourneyReadDtos {
         }
     }
 
+    /**
+     * <p>{@code serviceName} names the Module Service this ribbon belongs to
+     * — "Standard SaaS Onboarding", not "EduTrack ERP". A product publishes
+     * several at once, each its own journey, so the product alone no longer
+     * identifies which ribbon a reader is looking at.
+     */
     record ObJourneyDetail(
-            long id, long obClientId, String clientName, ObProductRef product,
+            long id, long obClientId, String clientName, ObProductRef product, String serviceName,
             ObGateStatus gateStatus, ObRag rag, int percentComplete,
             ObStepDot currentStep, UserRef owner, Long heldByJourneyId,
             int totalTatDays, double elapsedTatDays,

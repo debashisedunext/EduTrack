@@ -45,6 +45,20 @@ public class ObJourney {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
+    /**
+     * Which Module Service of that product this journey runs — the name of
+     * the template it was instantiated from, denormalised because
+     * {@code uq_ob_journeys_client_service} is a unique index and a unique
+     * index cannot span a join.
+     *
+     * <p>Written once at instantiation, never updated, exactly like
+     * {@link #templateId}. It cannot drift from the template either: the
+     * pinned row is frozen, and {@code V20260909_1900} made a rename in the
+     * designer a <em>different</em> service rather than a rename of this one.
+     */
+    @Column(name = "service_name", nullable = false, length = 160)
+    private String serviceName;
+
     @Column(name = "template_id", nullable = false)
     private Long templateId;
 
@@ -104,6 +118,14 @@ public class ObJourney {
 
     public void setProductId(Long productId) {
         this.productId = productId;
+    }
+
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    public void setServiceName(String serviceName) {
+        this.serviceName = serviceName;
     }
 
     public Long getTemplateId() {

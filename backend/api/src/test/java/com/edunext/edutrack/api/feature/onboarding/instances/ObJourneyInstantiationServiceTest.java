@@ -90,24 +90,30 @@ class ObJourneyInstantiationServiceTest {
             journeyRows.put(j.getId(), j);
             return j;
         });
-        lenient().when(journeys.existsByObClientIdAndProductIdAndArchivedAtIsNull(any(), any())).thenReturn(false);
+        lenient().when(journeys.existsByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNull(
+                any(), any(), any())).thenReturn(false);
         lenient().when(journeys.existsByObClientIdAndGateStatus(any(), any())).thenAnswer(inv ->
                 journeyRows.values().stream().anyMatch(j ->
                         j.getObClientId().equals(inv.<Long>getArgument(0)) && j.getGateStatus() == inv.getArgument(1)));
-        lenient().when(journeys.findFirstByObClientIdAndProductIdAndArchivedAtIsNullOrderByIdDesc(any(), any()))
+        lenient().when(journeys.findFirstByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNullOrderByIdDesc(
+                        any(), any(), any()))
                 .thenAnswer(inv -> journeyRows.values().stream()
                         .filter(j -> j.getObClientId().equals(inv.<Long>getArgument(0))
                                 && j.getProductId().equals(inv.<Long>getArgument(1))
+                                && inv.<String>getArgument(2).equals(j.getServiceName())
                                 && j.getArchivedAt() == null)
                         .max(Comparator.comparing(ObJourney::getId)));
 
-        lenient().when(templates.findByProductIdAndIsActiveTrue(any())).thenAnswer(inv -> {
+        // One Module Service per product by default; the two-service case is
+        // its own test, which overrides this.
+        lenient().when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(any())).thenAnswer(inv -> {
             ObJourneyTemplate t = new ObJourneyTemplate();
             t.setId(TEMPLATE);
             t.setProductId(inv.getArgument(0));
+            t.setName("Standard SaaS Onboarding");
             t.setVersion(1);
             t.setActive(true);
-            return Optional.of(t);
+            return List.of(t);
         });
 
         lenient().when(journeySteps.save(any())).thenAnswer(inv -> {
@@ -148,6 +154,19 @@ class ObJourneyInstantiationServiceTest {
         return result;
     }
 
+    /**
+     * The one journey a single-service product instantiates.
+     *
+     * <p>{@code instantiate} returns a list because a product publishes as
+     * many Module Services as it sells; asserting the size here rather than
+     * indexing blindly means a test that silently started producing two
+     * journeys fails on the count instead of on the wrong journey's fields.
+     */
+    private static ObJourney only(List<ObJourney> created) {
+        assertThat(created).hasSize(1);
+        return created.get(0);
+    }
+
     private ObJourneyTemplateStep templateStep(long id, int sequence, String name, Long ownerUserId,
                                                 String ownerRole, Long dependsOnStepId) {
         ObJourneyTemplateStep step = new ObJourneyTemplateStep();
@@ -173,7 +192,7 @@ class ObJourneyInstantiationServiceTest {
                     templateStep(1L, 1, "Kickoff", 42L, null, null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
 
             assertThat(journey.getGateStatus()).isEqualTo(ObGateStatus.LOCKED);
             assertThat(journey.getGateOpenedAt()).isNull();
@@ -191,21 +210,72 @@ class ObJourneyInstantiationServiceTest {
         }
 
         @Test
-        @DisplayName("refused when a live journey already exists for this client and product")
+        @DisplayName("refused when every service of the product already runs for this client")
         void refusedWhenAlreadyInstantiated() {
-            when(journeys.existsByObClientIdAndProductIdAndArchivedAtIsNull(CLIENT, PRODUCT)).thenReturn(true);
+            when(journeys.existsByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNull(
+                    CLIENT, PRODUCT, "Standard SaaS Onboarding")).thenReturn(true);
 
             assertThatThrownBy(() -> service.instantiate(CLIENT, PRODUCT))
                     .isInstanceOf(JourneyAlreadyExistsException.class);
         }
 
         @Test
-        @DisplayName("refused when the product has no active template")
+        @DisplayName("refused when the product publishes no active service")
         void refusedWhenNoActiveTemplate() {
-            when(templates.findByProductIdAndIsActiveTrue(PRODUCT)).thenReturn(Optional.empty());
+            when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(PRODUCT)).thenReturn(List.of());
 
             assertThatThrownBy(() -> service.instantiate(CLIENT, PRODUCT))
                     .isInstanceOf(NoActiveTemplateForProductException.class);
+        }
+
+        @Test
+        @DisplayName("a product publishing two Module Services instantiates one journey per service")
+        void oneJourneyPerModuleService() {
+            when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(PRODUCT))
+                    .thenReturn(List.of(
+                            activeService(TEMPLATE, "Standard SaaS Onboarding", 1),
+                            activeService(TEMPLATE + 1, "Enterprise (with data migration audit)", 2)));
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(any())).thenReturn(List.of());
+
+            List<ObJourney> created = service.instantiate(CLIENT, PRODUCT);
+
+            // Two ribbons on one purchase, in catalogue sequence, each pinned
+            // to its own service's own version.
+            assertThat(created).hasSize(2);
+            assertThat(created).extracting(ObJourney::getServiceName)
+                    .containsExactly("Standard SaaS Onboarding", "Enterprise (with data migration audit)");
+            assertThat(created).extracting(ObJourney::getTemplateId)
+                    .containsExactly(TEMPLATE, TEMPLATE + 1);
+            assertThat(created).allMatch(j -> j.getProductId() == PRODUCT);
+        }
+
+        @Test
+        @DisplayName("a service published after the client was boarded is topped up, not refused")
+        void topsUpAServicePublishedLater() {
+            when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(PRODUCT))
+                    .thenReturn(List.of(
+                            activeService(TEMPLATE, "Standard SaaS Onboarding", 1),
+                            activeService(TEMPLATE + 1, "Enterprise (with data migration audit)", 2)));
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(any())).thenReturn(List.of());
+            // The client already runs the service they were boarded on.
+            when(journeys.existsByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNull(
+                    CLIENT, PRODUCT, "Standard SaaS Onboarding")).thenReturn(true);
+
+            List<ObJourney> created = service.instantiate(CLIENT, PRODUCT);
+
+            assertThat(created).extracting(ObJourney::getServiceName)
+                    .containsExactly("Enterprise (with data migration audit)");
+        }
+
+        private ObJourneyTemplate activeService(long templateId, String name, int sequence) {
+            ObJourneyTemplate t = new ObJourneyTemplate();
+            t.setId(templateId);
+            t.setProductId(PRODUCT);
+            t.setName(name);
+            t.setSequence(sequence);
+            t.setVersion(1);
+            t.setActive(true);
+            return t;
         }
 
         @Test
@@ -220,7 +290,7 @@ class ObJourneyInstantiationServiceTest {
 
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
 
             assertThat(journey.getGateStatus()).isEqualTo(ObGateStatus.OPEN);
             assertThat(journey.getGateOpenedAt()).isNotNull();
@@ -238,7 +308,7 @@ class ObJourneyInstantiationServiceTest {
             journeyRows.put(1L, priorJourney);
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
 
             verify(stepLifecycle).activateEligibleSteps(journey.getId());
         }
@@ -265,7 +335,7 @@ class ObJourneyInstantiationServiceTest {
                     templateStep(1L, 1, "Kickoff", 42L, null, null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
             List<ObJourneyStep> steps = stepsFor(journey.getId());
 
             assertThat(steps).hasSize(1);
@@ -283,7 +353,7 @@ class ObJourneyInstantiationServiceTest {
                     templateStep(1L, 1, "Legal review", null, "OB_MANAGER", null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
             ObJourneyStep step = stepsFor(journey.getId()).get(0);
 
             assertThat(step.getOwnerUserId()).isNull();
@@ -302,7 +372,7 @@ class ObJourneyInstantiationServiceTest {
                     templateStep(102L, 2, "Data migration", 42L, null, 101L)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
             List<ObJourneyStep> steps = stepsFor(journey.getId());
 
             ObJourneyStep kickoff = steps.get(0);
@@ -324,7 +394,7 @@ class ObJourneyInstantiationServiceTest {
             templateItem.setMandatory(true);
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of(templateItem));
 
-            ObJourney journey = service.instantiate(CLIENT, PRODUCT);
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
             ObJourneyStep step = stepsFor(journey.getId()).get(0);
             List<ObJourneyStepItem> items = itemsFor(step.getId());
 
@@ -367,8 +437,10 @@ class ObJourneyInstantiationServiceTest {
             t.setProductId(productId);
             t.setVersion(1);
             t.setActive(true);
+            t.setName("Service of product " + productId);
             t.setDependsOnTemplateId(dependsOnTemplateId);
-            lenient().when(templates.findByProductIdAndIsActiveTrue(productId)).thenReturn(Optional.of(t));
+            lenient().when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId))
+                    .thenReturn(List.of(t));
             lenient().when(templates.findById(templateId)).thenReturn(Optional.of(t));
             lenient().when(templateSteps.findByTemplateIdOrderBySequenceAsc(templateId)).thenReturn(List.of());
             return t;
@@ -380,8 +452,8 @@ class ObJourneyInstantiationServiceTest {
             stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
-            ObJourney dependency = service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
-            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+            ObJourney dependency = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
+            ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
 
             assertThat(dependent.getHeldByJourneyId()).isEqualTo(dependency.getId());
         }
@@ -392,7 +464,7 @@ class ObJourneyInstantiationServiceTest {
             stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
-            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+            ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
 
             assertThat(dependent.getHeldByJourneyId()).isNull();
         }
@@ -403,10 +475,10 @@ class ObJourneyInstantiationServiceTest {
             stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
-            ObJourney dependency = service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
+            ObJourney dependency = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
             dependency.setCompletedAt(Instant.now());
 
-            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+            ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
 
             assertThat(dependent.getHeldByJourneyId()).isNull();
         }
@@ -418,7 +490,7 @@ class ObJourneyInstantiationServiceTest {
             service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
 
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, null);
-            ObJourney dependent = service.instantiate(CLIENT, DEPENDENT_PRODUCT);
+            ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
 
             assertThat(dependent.getHeldByJourneyId()).isNull();
         }

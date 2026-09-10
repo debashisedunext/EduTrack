@@ -16,9 +16,20 @@ import { productIcon } from './productIcon'
 import { focusStepId, toRibbonSteps, type ResolveUser } from './ribbonSteps'
 
 /**
- * C-110 · one product's accordion on OB-05 — §9's "journey accordions (strip:
- * product, % complete, RAG step dots, and TAT `used / total` with overrun
- * highlighting; expanded: ribbon + step panel)".
+ * C-110 · one **Module Service's** accordion on OB-05 — §9's "journey
+ * accordions (strip: product, % complete, RAG step dots, and TAT
+ * `used / total` with overrun highlighting; expanded: ribbon + step panel)".
+ *
+ * ## The strip is titled with the service, not the product
+ *
+ * A product publishes several services at once and a client who bought it is
+ * boarded through each of them, one journey — one ribbon — each. Two strips
+ * both headed "EduTrack ERP" would be two identical rows carrying different
+ * progress, so `serviceName` is the heading and the product is the caption
+ * underneath it.
+ *
+ * `serviceName` is the journey's **pinned** service, matching the tasks in
+ * the ribbon rather than whatever the catalogue has been renamed to since.
  *
  * ## Two reads, and the second one only when it is asked for
  *
@@ -107,13 +118,17 @@ export function JourneyAccordion({
     : undefined
 
   const productName = journey.product?.name ?? 'Product'
+  // A strip from a server older than `serviceName` still has to render
+  // something a reader can tell apart; the product name is the honest
+  // fallback and never the preferred title.
+  const serviceName = journey.serviceName ?? productName
 
   return (
     <ObAccordion
       id={`ob-journey-${journey.id}`}
       isOpen={isOpen}
       onToggle={onToggle}
-      label={`${productName} — ${journey.percentComplete}% complete, ${ragLabel(journey.rag).toLowerCase()}`}
+      label={`${serviceName} — ${journey.percentComplete}% complete, ${ragLabel(journey.rag).toLowerCase()}`}
       summary={
         <>
           {/* The mockup's `jstrip` order: icon, name, the template caption,
@@ -121,19 +136,21 @@ export function JourneyAccordion({
           <span className="shrink-0 text-lg leading-none" aria-hidden="true">
             {productIcon(journey.product?.code)}
           </span>
-          <span className="min-w-0 truncate text-sm font-semibold text-content">{productName}</span>
+          <span className="min-w-0 truncate text-sm font-semibold text-content">{serviceName}</span>
 
-          {/* `ObJourneyStrip` carries no template name or pinned version —
-              only the expanded detail read does — so the collapsed caption
-              states what the strip knows: how many services the journey has. */}
+          {/* The product this service belongs to, and how many tasks the
+              journey has. The strip still carries no pinned *version* — only
+              the expanded detail read does. */}
           <span className="shrink-0 text-caption text-content-muted">
-            {(journey.steps ?? []).length} services
+            {productName} · {(journey.steps ?? []).length} services
           </span>
 
           {hold === 'GATE_LOCKED' ? (
             <Chip variant="neutral">Prerequisites pending</Chip>
           ) : hold === 'HELD_BY_SIBLING' ? (
-            <Chip variant="info">Held for {heldBy?.product?.name ?? 'another service'}</Chip>
+            <Chip variant="info">
+              Held for {heldBy?.serviceName ?? heldBy?.product?.name ?? 'another service'}
+            </Chip>
           ) : (
             journey.rag && <Chip variant={ragVariant(journey.rag)}>{ragLabel(journey.rag)}</Chip>
           )}

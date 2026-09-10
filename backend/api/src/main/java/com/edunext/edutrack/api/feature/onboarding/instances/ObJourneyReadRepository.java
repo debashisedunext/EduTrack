@@ -73,6 +73,7 @@ class ObJourneyReadRepository {
                        p.id                 AS productId,
                        p.code               AS productCode,
                        p.name               AS productName,
+                       j.service_name       AS serviceName,
                        t.id                 AS templateId,
                        t.version            AS templateVersion,
                        (SELECT COUNT(*) FROM ob_journey_steps ts WHERE ts.journey_id = j.id) AS stepCount,
@@ -105,7 +106,7 @@ class ObJourneyReadRepository {
 
     record Row(long id, long obClientId, String clientName, String gateStatus, Long heldByJourneyId,
                Instant startedAt, Instant completedAt, Instant archivedAt,
-               long productId, String productCode, String productName,
+               long productId, String productCode, String productName, String serviceName,
                long templateId, int templateVersion,
                int stepCount, int stepsSettled, int totalTatDays, String rag) {
     }
@@ -122,6 +123,7 @@ class ObJourneyReadRepository {
             rs.getLong("productId"),
             rs.getString("productCode"),
             rs.getString("productName"),
+            rs.getString("serviceName"),
             rs.getLong("templateId"),
             rs.getInt("templateVersion"),
             rs.getInt("stepCount"),

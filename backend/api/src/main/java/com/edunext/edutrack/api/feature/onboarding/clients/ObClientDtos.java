@@ -112,7 +112,19 @@ final class ObClientDtos {
     }
 
     /**
-     * {@code ObJourneyStrip} — one accordion strip on OB-05.
+     * {@code ObJourneyStrip} — one accordion strip on OB-05: <b>one Module
+     * Service of one purchased product</b>, which is one ribbon.
+     *
+     * <p>{@code serviceName} is what the strip is titled with and
+     * {@code product} is the caption beneath it, not the other way round. A
+     * client who bought EduTrack ERP sees "Standard SaaS Onboarding" and
+     * "Enterprise (with data migration audit)" as separate strips, and
+     * titling both "EduTrack ERP" would leave the page showing two identical
+     * rows with different progress.
+     *
+     * <p>It is the <b>pinned</b> service name — the journey's own column,
+     * not a join to whatever the catalogue is called today — so it matches
+     * the task list rendered beneath it.
      *
      * <p>{@code utilizedHours} (C-120) is the sum of {@code
      * ObJourneyStepRagService#hoursConsumed} across the journey's steps —
@@ -120,7 +132,8 @@ final class ObClientDtos {
      * The type stays {@code Double} rather than {@code double} on the
      * contract's own optionality, not because this service still omits it.
      */
-    record ObJourneyStrip(long id, ObProductRef product, String gateStatus, String rag,
+    record ObJourneyStrip(long id, ObProductRef product, String serviceName,
+                          String gateStatus, String rag,
                           int percentComplete, Long heldByJourneyId,
                           Integer totalTatDays, Double utilizedHours, List<ObStepDot> steps) {
     }
