@@ -52,7 +52,7 @@ const serviceCard = (name: string) =>
   screen.getAllByRole('listitem').find((li) => within(li).queryByRole('heading', { name }))!
 
 describe('the catalogue lists every service', () => {
-  it('shows an active service with its total TAT, active chip and edit link', async () => {
+  it('shows an active service with its total TAT and active chip', async () => {
     await openCatalogue()
 
     const card = serviceCard('ERP Suite onboarding')
@@ -60,19 +60,34 @@ describe('the catalogue lists every service', () => {
     expect(within(card).getByText('EduTrack ERP')).toBeInTheDocument()
     expect(within(card).getByText(/d total TAT/)).toBeInTheDocument()
     expect(within(card).getByText('Active version')).toBeInTheDocument()
-    // The version chip and the edit label both come off the template detail.
-    // "Edit steps" rather than "Edit" since C-124: the card now carries a
-    // second edit control ("Edit details", the rename), and one card with two
-    // buttons both reading "Edit" says nothing about which does what.
-    await within(card).findByRole('link', { name: /✎ Edit steps \(publishes v\d+\)/ }, SLOW)
   })
 
-  it('lists the services with TAT, owner and dependency markers', async () => {
+  /**
+   * The card is a summary: it says *how many* steps a service has and leaves
+   * what they are to the page it opens. It used to print every step as a line
+   * of text, which made a grid of five services a wall nobody read.
+   */
+  it('counts the steps rather than listing them', async () => {
     await openCatalogue()
 
     const card = serviceCard('ERP Suite onboarding')
-    // The active ERP template's first step, drawn as the mockup's step line.
-    await within(card).findByText(/∥ parallel|↳ after step \d+/, undefined, SLOW)
+    // Template 1 is the five-step ERP journey in `db.ts`.
+    expect(within(card).getByText('☰ 5 steps')).toBeInTheDocument()
+    // No step lines: the mockup's `name · TATd · owner · ↳ after step n`.
+    expect(within(card).queryByText(/· \d+d ·/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/↳ after step \d+/)).not.toBeInTheDocument()
+  })
+
+  it('opens the service when the card is clicked, not a button inside it', async () => {
+    await openCatalogue()
+
+    const card = serviceCard('ERP Suite onboarding')
+    // The heading is the link, stretched over the whole tile — so the card's
+    // accessible name is the service, and there is no second "Edit" control
+    // competing with it.
+    const link = within(card).getByRole('link', { name: 'ERP Suite onboarding' })
+    expect(link).toHaveAttribute('href', '/onboarding/journey-templates/1')
+    expect(within(card).queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
   })
 
   /**
@@ -87,6 +102,26 @@ describe('the catalogue lists every service', () => {
     expect(within(card).getByText('Draft — not published')).toBeInTheDocument()
     expect(within(card).queryByLabelText('Service depends on')).not.toBeInTheDocument()
     expect(within(card).queryByText('Active version')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Rename, move to another product and delete moved onto the service's own
+   * page when the card became a summary tile. Asserted rather than merely
+   * deleted, so a "convenient" inline control does not drift back onto a tile
+   * that is one big link.
+   *
+   * The two that stayed are both about a service's place among the others,
+   * which is a fact only this screen has: ↑/↓ and "Service depends on".
+   */
+  it('keeps the controls that compare services, and no others', async () => {
+    await openCatalogue()
+
+    const card = serviceCard('ERP Suite onboarding')
+    expect(within(card).queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument()
+    expect(within(card).getByLabelText('Service depends on')).toBeInTheDocument()
+    expect(
+      within(card).getByRole('button', { name: 'Move ERP Suite onboarding down' }),
+    ).toBeInTheDocument()
   })
 
   /**
@@ -221,6 +256,14 @@ describe('reordering the catalogue', () => {
   })
 })
 
+/**
+ * "Service depends on" stayed on the card when rename and delete moved to the
+ * service's own page: the choice it offers is *the other services*, so it
+ * belongs on the one screen where all of them are already on the page.
+ *
+ * <p>It sits above the card's stretched link on `relative z-10` — driving the
+ * select must change the dependency, not open the service underneath it.
+ */
 describe('the depends-on picker', () => {
   it('shows the current dependency, pre-selected', async () => {
     await openCatalogue()
@@ -255,191 +298,5 @@ describe('the depends-on picker', () => {
     await waitFor(() => {
       expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.dependsOnTemplateId).toBeNull()
     }, SLOW)
-  })
-})
-
-/**
- * C-124 · editing and deleting a whole Module Service.
- *
- * The rule these all turn on: a service a client has been boarded on can be
- * neither renamed nor deleted, and the card says so before the admin clicks
- * rather than after a `409`. The fixture journeys carry no `templateId`, so
- * every seeded service starts unused and the in-use case is set up explicitly
- * — which is the honest way round, since it makes the gate visible in the test
- * rather than inherited from a fixture nobody reads.
- */
-describe('editing a module service', () => {
-  it('renames every version of the service, not the row that was clicked', async () => {
-    // A second version of the ERP service, so the rename has a chain to move
-    // rather than one row — the whole reason the route is chain-wide.
-    getDb().obJourneyTemplates.push({
-      id: 98, productId: 1, name: 'ERP Suite onboarding', version: 2, isActive: false,
-      sequence: 1, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
-    })
-    await openCatalogue()
-
-    const card = serviceCard('ERP Suite onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: '✎ Edit details' }))
-
-    const form = await screen.findByRole('form', { name: 'Edit ERP Suite onboarding' }, SLOW)
-    fireEvent.change(within(form).getByLabelText('Name'), {
-      target: { value: 'ERP Suite rollout' },
-    })
-    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      const templates = getDb().obJourneyTemplates
-      expect(templates.find((t) => t.id === 1)!.name).toBe('ERP Suite rollout')
-      // v2 moved too. A rename that touched only the clicked row would leave
-      // this one behind and the catalogue would draw two cards for one service.
-      expect(templates.find((t) => t.id === 98)!.name).toBe('ERP Suite rollout')
-    }, SLOW)
-  })
-
-  it('moves the service to another product', async () => {
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: '✎ Edit details' }))
-
-    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
-    fireEvent.change(within(form).getByLabelText('Product'), { target: { value: '4' } })
-    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.productId).toBe(4)
-    }, SLOW)
-  })
-
-  it('surfaces the server refusal when the new name is already taken', async () => {
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: '✎ Edit details' }))
-
-    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
-    // Product 3 has no sibling, so move it onto product 1 under a name that
-    // product already sells — the collision the unique index would raise.
-    fireEvent.change(within(form).getByLabelText('Name'), {
-      target: { value: 'ERP Suite onboarding' },
-    })
-    fireEvent.change(within(form).getByLabelText('Product'), { target: { value: '1' } })
-    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
-
-    expect(await screen.findByText(/Could not update that module service/, undefined, SLOW))
-      .toBeInTheDocument()
-    // Nothing moved. The refusal is the server's, and the page does not guess.
-    expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.name).toBe('LMS onboarding')
-  })
-
-  it('reopening the form discards an abandoned edit', async () => {
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: '✎ Edit details' }))
-    let form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
-    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Half-typed' } })
-    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
-
-    fireEvent.click(within(card).getByRole('button', { name: '✎ Edit details' }))
-    form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
-    expect((within(form).getByLabelText('Name') as HTMLInputElement).value).toBe('LMS onboarding')
-  })
-})
-
-describe('deleting a module service', () => {
-  it('deletes every version of the service, with its steps', async () => {
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: 'Delete LMS onboarding' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete service' }, SLOW))
-
-    await waitFor(() => {
-      const db = getDb()
-      expect(db.obJourneyTemplates.find((t) => t.id === 3)).toBeUndefined()
-      expect(db.obJourneyTemplateSteps.filter((s) => s.templateId === 3)).toHaveLength(0)
-    }, SLOW)
-  })
-
-  it('refuses while another service depends on it, naming the dependent', async () => {
-    await openCatalogue()
-
-    // The fixture's "Enterprise (data migration)" waits on ERP Suite
-    // onboarding, so deleting the latter would leave a dangling dependency —
-    // fk_ob_journey_templates_depends_on is RESTRICT for exactly this.
-    const card = serviceCard('ERP Suite onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: 'Delete ERP Suite onboarding' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete service' }, SLOW))
-
-    // Matched on the refusal sentence rather than on the name alone — the
-    // dependent's own card heading is on screen too, and it says nothing about
-    // why the delete was refused.
-    expect(
-      await screen.findByText(/cannot be deleted — Enterprise \(data migration\)/, undefined, SLOW),
-    ).toBeInTheDocument()
-    expect(getDb().obJourneyTemplates.find((t) => t.id === 1)).toBeDefined()
-  })
-
-  it('the confirmation can be dismissed without deleting anything', async () => {
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    fireEvent.click(within(card).getByRole('button', { name: 'Delete LMS onboarding' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }, SLOW))
-
-    expect(getDb().obJourneyTemplates.find((t) => t.id === 3)).toBeDefined()
-  })
-})
-
-describe('a service a client is already on', () => {
-  /**
-   * The gate, from the card's side. `serviceJourneyCount` is chain-wide, so
-   * pinning a journey to *any* version locks the service — including a retired
-   * v1 while the catalogue draws v2, which is the case a per-row count would
-   * have got wrong.
-   */
-  function boardAClientOn(templateId: number) {
-    const client = getDb().obClients[0]
-    client.journeys[0].templateId = templateId
-  }
-
-  it('disables Edit details and Delete, and says how many clients are on it', async () => {
-    boardAClientOn(1)
-    await openCatalogue()
-
-    const card = serviceCard('ERP Suite onboarding')
-    await waitFor(() => {
-      expect(within(card).getByRole('button', { name: '✎ Edit details' })).toBeDisabled()
-    }, SLOW)
-    expect(within(card).getByRole('button', { name: 'Delete ERP Suite onboarding' })).toBeDisabled()
-    // Disabled *and* explained. A tooltip alone is invisible to a keyboard
-    // user tabbing past a disabled control.
-    expect(within(card).getByText(/1 client journey has been instantiated/)).toBeInTheDocument()
-  })
-
-  it('locks the service through a retired version, not only the head', async () => {
-    getDb().obJourneyTemplates.push({
-      id: 97, productId: 3, name: 'LMS onboarding', version: 2, isActive: false,
-      sequence: 3, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
-    })
-    // The client is on v1; the catalogue's card for this service is v2.
-    boardAClientOn(3)
-    await openCatalogue()
-
-    const card = serviceCard('LMS onboarding')
-    await waitFor(() => {
-      expect(within(card).getByRole('button', { name: 'Delete LMS onboarding' })).toBeDisabled()
-    }, SLOW)
-  })
-
-  it('leaves the steps editor reachable — a new version is how it changes', async () => {
-    boardAClientOn(1)
-    await openCatalogue()
-
-    const card = serviceCard('ERP Suite onboarding')
-    // Not disabled: publishing over it is precisely the supported way to
-    // change a service somebody is on.
-    await within(card).findByRole('link', { name: /✎ Edit steps \(publishes v\d+\)/ }, SLOW)
   })
 })

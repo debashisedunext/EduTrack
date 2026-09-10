@@ -8,6 +8,7 @@ import type { Role } from '@/api/generated/model/role'
 import type { UserRef } from '@/api/generated/model'
 import { useListRoles } from '@/api/generated/masters/masters'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
+import { useListObJourneyTemplates } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { useListUsers } from '@/api/generated/users/users'
 
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,7 @@ import {
   useReorderJourneyTemplateSteps,
 } from './journeyTemplateQueries'
 import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTemplateTat'
+import { ModuleServiceAdmin } from './ModuleServiceAdmin'
 
 /**
  * C-102 · OB-07's journey template designer, laid out to
@@ -83,6 +85,20 @@ import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTempl
  * each is one route with no rollback between it and the next. Reordering is
  * different: {@code PUT .../steps/order} replaces the whole set under one
  * {@code If-Match}, so it is staged locally and sent once, on confirm.
+ *
+ * <h2>This page is the whole service, not only its steps</h2>
+ *
+ * <p>The OB-07 catalogue card is now a summary tile — a step count, not a step
+ * list — and clicking it lands here. So {@code ModuleServiceAdmin}'s rename /
+ * move / delete came with it and sit below the table: they act on the whole
+ * version chain rather than on this version, and are still refused outright
+ * while a client is boarded on any version of it. The one control that stayed
+ * on the card is "Service depends on", which is a comparison between services
+ * and belongs where the other services are.
+ *
+ * <p>{@code serviceJourneyCount} is what that refusal reads, and it is on the
+ * catalogue <em>summary</em> row rather than on this detail payload — hence
+ * the {@code listObJourneyTemplates} read here.
  */
 export function JourneyTemplateDesignerPage() {
   const params = useParams()
@@ -150,6 +166,14 @@ function Designer({
   const allRoles = useListRoles()
   const roleOptions = activeRoles.data?.data ?? []
   const roleList = allRoles.data?.data ?? []
+  /*
+    This service's own catalogue row, for `serviceJourneyCount` — chain-wide,
+    and the one fact the rename and the delete are gated on. It is on the
+    summary row rather than on this detail payload, so the list read is how
+    the page gets at it.
+  */
+  const catalogue = useListObJourneyTemplates()
+  const serviceRow = catalogue.data?.data.find((row) => row.id === templateId)
 
   const [ordered, setOrdered] = React.useState<ObJourneyTemplateStep[] | null>(null)
   const [announcement, setAnnouncement] = React.useState('')
@@ -241,7 +265,13 @@ function Designer({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
+    /*
+      Full-bleed, not centred in a `max-w-4xl` column. The step table is the
+      widest thing in the module — seven columns plus a task list under every
+      row — and the measure that suits a page of prose left it scrolling
+      sideways inside a card with empty gutters either side of it.
+    */
+    <div className="flex w-full flex-col gap-4 p-6">
       <Button asChild variant="ghost" size="sm" className="self-start">
         <Link to="/onboarding/journey-templates">← Module Service</Link>
       </Button>
@@ -372,6 +402,24 @@ function Designer({
       )}
 
       <ParallelGroupsPanel groups={detail.parallelGroups} steps={detail.steps} />
+
+      {/*
+        Held back until the catalogue row is in hand. `serviceJourneyCount` is
+        what disables the rename and the delete, so drawing the section before
+        it lands would offer both controls enabled for a moment on a service
+        that is locked — and a click inside that moment answers 409.
+      */}
+      {serviceRow && (
+        <ModuleServiceAdmin
+          templateId={templateId}
+          serviceName={detail.name}
+          productId={detail.productId}
+          productName={product?.name ?? `Product ${detail.productId}`}
+          version={detail.version}
+          serviceJourneyCount={serviceRow.serviceJourneyCount}
+          products={products.data?.data ?? []}
+        />
+      )}
     </div>
   )
 }
@@ -496,9 +544,15 @@ function StepRows({
 }
 
 /**
- * The mockup's Task List chip editor — chips with ✕, an "Add a task…" input
+ * The Task List editor — one task per line with a ✕, an "Add a task…" input
  * (Enter submits) and a "+ Add" button. Items are always added mandatory,
  * matching the mockup, which has no optional flag on a task.
+ *
+ * <p>A vertical list rather than a wrapping chip row. Tasks are sentences
+ * ("Cut-over window agreed with the client"), not tags, so a row of them wraps
+ * at arbitrary points and two tasks read as one; stacked, each is a line the
+ * eye can count, and the input beneath spans the cell rather than sitting in
+ * whatever gap the last chip left.
  */
 function StepItemChips({
   templateId,
@@ -552,40 +606,60 @@ function StepItemChips({
     <div>
       <p className="m-0 mb-1.5 text-caption text-content-muted">
         Task list — shown when this service is clicked on the client page; each task is ticked off
-        with the step unable to complete until the mandatory ones are
+        there, and the step cannot complete until the mandatory ones are ticked.
       </p>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {step.items.map((item) => (
-          <Chip key={item.id} variant="neutral">
-            {item.label}
-            {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
-            {editable && (
-              <button
-                type="button"
-                aria-label={`Remove ${item.label}`}
-                className="ml-0.5 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                onClick={() => doRemove(item.id, item.label)}
-              >
-                ✕
-              </button>
-            )}
-          </Chip>
-        ))}
-        {editable && (
-          <form onSubmit={submit} className="inline-flex items-center gap-1.5">
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Add a task…"
-              aria-label={`New task list item for ${step.name}`}
-              className="h-7 w-56 text-caption"
-            />
-            <Button type="submit" size="sm" variant="secondary" disabled={addItem.isPending || !label.trim()}>
-              + Add
-            </Button>
-          </form>
-        )}
-      </div>
+      {step.items.length > 0 && (
+        // `items-start` is what keeps each row the width of its own task
+        // rather than the width of the cell: a column flex container stretches
+        // its children by default, and a one-line task in a full-bleed band
+        // reads as an empty field waiting to be filled.
+        <ul className="m-0 flex list-none flex-col items-start gap-1 p-0">
+          {step.items.map((item) => (
+            <li
+              key={item.id}
+              className="flex max-w-full items-start gap-2 rounded-control border border-border bg-subtle px-2.5 py-1.5 text-sm text-content"
+            >
+              <span className="min-w-0 flex-1 break-words">
+                {item.label}
+                {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
+              </span>
+              {editable && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.label}`}
+                  className="rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  onClick={() => doRemove(item.id, item.label)}
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        // `w-full` on the form and `flex-1 min-w-0` on the input: the cell is
+        // as wide as the table, and a fixed `w-56` box in it was the one thing
+        // on the row that did not use the width it was given.
+        <form onSubmit={submit} className="mt-1.5 flex w-full items-center gap-2">
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Add a task…"
+            aria-label={`New task list item for ${step.name}`}
+            className="h-8 min-w-0 flex-1 text-caption"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            variant="secondary"
+            className="shrink-0"
+            disabled={addItem.isPending || !label.trim()}
+          >
+            + Add
+          </Button>
+        </form>
+      )}
     </div>
   )
 }
@@ -649,38 +723,51 @@ function StepDocChips({
       <p className="m-0 mb-1.5 text-caption text-content-muted">
         Required documents — the step's document gate on the client page
       </p>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {step.docs.map((doc) => (
-          <Chip key={doc.id} variant="neutral">
-            📎 {doc.label}
-            {!doc.required && <span className="text-content-muted"> (optional)</span>}
-            {editable && (
-              <button
-                type="button"
-                aria-label={`Remove ${doc.label}`}
-                className="ml-0.5 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                onClick={() => doRemove(doc.id, doc.label)}
-              >
-                ✕
-              </button>
-            )}
-          </Chip>
-        ))}
-        {editable && (
-          <form onSubmit={submit} className="inline-flex items-center gap-1.5">
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Add a document…"
-              aria-label={`New required document for ${step.name}`}
-              className="h-7 w-56 text-caption"
-            />
-            <Button type="submit" size="sm" variant="secondary" disabled={addDoc.isPending || !label.trim()}>
-              + Add
-            </Button>
-          </form>
-        )}
-      </div>
+      {step.docs.length > 0 && (
+        <ul className="m-0 flex list-none flex-col items-start gap-1 p-0">
+          {step.docs.map((doc) => (
+            <li
+              key={doc.id}
+              className="flex max-w-full items-start gap-2 rounded-control border border-border bg-subtle px-2.5 py-1.5 text-sm text-content"
+            >
+              <span className="min-w-0 flex-1 break-words">
+                📎 {doc.label}
+                {!doc.required && <span className="text-content-muted"> (optional)</span>}
+              </span>
+              {editable && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${doc.label}`}
+                  className="rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  onClick={() => doRemove(doc.id, doc.label)}
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        <form onSubmit={submit} className="mt-1.5 flex w-full items-center gap-2">
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Add a document…"
+            aria-label={`New required document for ${step.name}`}
+            className="h-8 min-w-0 flex-1 text-caption"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            variant="secondary"
+            className="shrink-0"
+            disabled={addDoc.isPending || !label.trim()}
+          >
+            + Add
+          </Button>
+        </form>
+      )}
     </div>
   )
 }
