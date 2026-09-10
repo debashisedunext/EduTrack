@@ -14,12 +14,15 @@ import { ModuleServiceCataloguePage } from './ModuleServiceCataloguePage'
  * then the card grid.
  *
  * <p>Fixture note — `db.ts`'s `OB_PRODUCTS`/`OB_JOURNEY_TEMPLATES`: EduTrack
- * ERP (product 1, template 1) is active, sequence 1. LMS (product 3, template
+ * ERP (product 1) sells **two live services** — "ERP Suite onboarding"
+ * (template 1, sequence 1) and "Enterprise (data migration)" (template 4,
+ * sequence 2, held behind template 1). LMS (product 3, template 3, sequence
  * 3) is a *retired* product with its own active, published template —
- * sequence 2, `dependsOnTemplateId: 1` — added by this task specifically so
- * the ↑/↓ control and the depends-on picker have a second real row to act
- * on. Biometric (product 2) has a draft template only, and is the
- * "no active Module Service yet" case.
+ * retiring a product does not unpublish what it had — so the ↑/↓ control and
+ * the depends-on picker have real rows to act on. Biometric (product 2) has
+ * a draft template only, and is the "no active Module Service yet" case.
+ *
+ * <p>The catalogue order is therefore templates 1, 4, 3.
  */
 function renderCatalogue() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -56,7 +59,7 @@ describe('the catalogue lists every service', () => {
     // The product is context on the service's card, not the card's subject.
     expect(within(card).getByText('EduTrack ERP')).toBeInTheDocument()
     expect(within(card).getByText(/d total TAT/)).toBeInTheDocument()
-    expect(within(card).getByText('Active for product')).toBeInTheDocument()
+    expect(within(card).getByText('Active version')).toBeInTheDocument()
     // The version chip and the edit label both come off the template detail.
     await within(card).findByRole('link', { name: /✎ Edit \(publishes v\d+\)/ }, SLOW)
   })
@@ -80,7 +83,7 @@ describe('the catalogue lists every service', () => {
     const card = serviceCard('Biometric Attendance onboarding')
     expect(within(card).getByText('Draft — not published')).toBeInTheDocument()
     expect(within(card).queryByLabelText('Service depends on')).not.toBeInTheDocument()
-    expect(within(card).queryByText('Active for product')).not.toBeInTheDocument()
+    expect(within(card).queryByText('Active version')).not.toBeInTheDocument()
   })
 
   /**
@@ -97,6 +100,19 @@ describe('the catalogue lists every service', () => {
 
     expect(await screen.findByRole('heading', { name: 'ERP Suite onboarding' }, SLOW)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'ERP Enterprise onboarding' })).toBeInTheDocument()
+  })
+
+  it('draws both of a product\'s live services as active, not one', async () => {
+    // The two are not alternatives — a client who buys EduTrack ERP is
+    // boarded through both, one ribbon each. Publishing the second used to
+    // retire the first, which showed here as a single active card.
+    await openCatalogue()
+
+    const standard = serviceCard('ERP Suite onboarding')
+    const enterprise = serviceCard('Enterprise (data migration)')
+    expect(within(standard).getByText('Active version')).toBeInTheDocument()
+    expect(within(enterprise).getByText('Active version')).toBeInTheDocument()
+    expect(within(enterprise).getByText('⛓ after ERP Suite onboarding')).toBeInTheDocument()
   })
 
   it('the "Show services for" filter narrows the grid to one card', async () => {
@@ -147,10 +163,13 @@ describe('reordering the catalogue', () => {
     const erpCard = serviceCard('ERP Suite onboarding')
     fireEvent.click(within(erpCard).getByRole('button', { name: 'Move ERP Suite onboarding down' }))
 
+    // Order was [1, 4, 3]; moving the first down makes it [4, 1, 3],
+    // persisted as sequence 0..N-1.
     await waitFor(() => {
       const templates = getDb().obJourneyTemplates
+      expect(templates.find((t) => t.id === 4)!.sequence).toBe(0)
       expect(templates.find((t) => t.id === 1)!.sequence).toBe(1)
-      expect(templates.find((t) => t.id === 3)!.sequence).toBe(0)
+      expect(templates.find((t) => t.id === 3)!.sequence).toBe(2)
     }, SLOW)
   })
 

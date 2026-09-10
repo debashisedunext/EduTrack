@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.fixtures.onboarding;
 
+import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
 import com.edunext.edutrack.api.feature.fixtures.onboarding.OnboardingFixtureData.ApplicationSpec;
 import com.edunext.edutrack.api.feature.fixtures.onboarding.OnboardingFixtureData.ClientSpec;
 import com.edunext.edutrack.api.feature.fixtures.onboarding.OnboardingFixtureData.CommunicationSpec;
@@ -110,13 +111,152 @@ public class OnboardingFixture {
     private final WorkingHoursService workingHours;
     private final WorkingCalendarRepository calendars;
     private final PasswordEncoder passwordEncoder;
+    private final ObJourneyInstantiationService instantiation;
 
     OnboardingFixture(JdbcTemplate jdbc, WorkingHoursService workingHours,
-                      WorkingCalendarRepository calendars, PasswordEncoder passwordEncoder) {
+                      WorkingCalendarRepository calendars, PasswordEncoder passwordEncoder,
+                      ObJourneyInstantiationService instantiation) {
         this.jdbc = jdbc;
         this.workingHours = workingHours;
         this.calendars = calendars;
         this.passwordEncoder = passwordEncoder;
+        this.instantiation = instantiation;
+    }
+
+    /**
+     * Purchases whose product publishes a Module Service the client has no
+     * live journey for — {@link #clientsMissingPrereqs}' shape one level up,
+     * and topped up for the same reason.
+     *
+     * <p>A product used to publish exactly one service, so "bought the
+     * product" and "has its journey" were the same fact and the corpus wrote
+     * one journey per purchase by hand. ERP now runs two at once, and a
+     * database seeded before that has clients holding the first and not the
+     * second. {@link #alreadyLoaded} is what skips the fix, so it arrives
+     * here rather than by wiping the volume.
+     *
+     * <p>Also runs straight after a fresh {@link #load}: the corpus's journey
+     * specs enumerate one journey per client per service they were written
+     * for, so a service added to the catalogue later would otherwise exist in
+     * the catalogue and on nobody's client page.
+     */
+    /**
+     * Corpus services this database has, but retired — the state every
+     * database seeded before a product could publish two of them is in.
+     *
+     * <p>"Enterprise (with data migration audit)" was seeded {@code
+     * is_active = 0} for one reason: {@code uq_ob_journey_templates_active}
+     * allowed a product one live service, so the corpus had to pick. It is
+     * seeded live now, and a database that already holds the corpus never
+     * re-reads {@link OnboardingFixtureData#TEMPLATES} — {@link
+     * #alreadyLoaded} skips the whole load — so without this the second ERP
+     * ribbon appears only on a wiped volume.
+     *
+     * <p><b>Only rows the corpus itself declares active are touched</b>,
+     * matched on (product, name, version), and only when no other version of
+     * that same service is already live. A service somebody retired
+     * deliberately through OB-07 has a different version live and is left
+     * exactly as it is.
+     */
+    @Transactional(readOnly = true)
+    public int corpusServicesRetired() {
+        int count = 0;
+        for (TemplateSpec spec : OnboardingFixtureData.TEMPLATES) {
+            if (!spec.active()) {
+                continue;
+            }
+            Integer retired = jdbc.queryForObject("""
+                    SELECT COUNT(*)
+                      FROM ob_journey_templates t
+                      JOIN ob_products p ON p.id = t.product_id
+                     WHERE p.code = ? AND t.name = ? AND t.version = ? AND t.is_active = 0
+                       AND NOT EXISTS (SELECT 1 FROM ob_journey_templates o
+                                        WHERE o.product_id = t.product_id AND o.name = t.name
+                                          AND o.is_active = 1)
+                    """, Integer.class, productCodeOf(spec.productKey()), spec.name(), spec.version());
+            count += retired == null ? 0 : retired;
+        }
+        return count;
+    }
+
+    /** Flips exactly the rows {@link #corpusServicesRetired} counts. */
+    @Transactional
+    public void activateCorpusServices() {
+        for (TemplateSpec spec : OnboardingFixtureData.TEMPLATES) {
+            if (!spec.active()) {
+                continue;
+            }
+            jdbc.update("""
+                    UPDATE ob_journey_templates t
+                      JOIN ob_products p ON p.id = t.product_id
+                       SET t.is_active = 1
+                     WHERE p.code = ? AND t.name = ? AND t.version = ? AND t.is_active = 0
+                       AND NOT EXISTS (SELECT 1 FROM (SELECT * FROM ob_journey_templates) o
+                                        WHERE o.product_id = t.product_id AND o.name = t.name
+                                          AND o.is_active = 1)
+                    """, productCodeOf(spec.productKey()), spec.name(), spec.version());
+        }
+    }
+
+    /** The product code behind a corpus product key, for the two queries above. */
+    private String productCodeOf(String productKey) {
+        return OnboardingFixtureData.PRODUCTS.stream()
+                .filter(p -> p.key().equals(productKey))
+                .map(ProductSpec::code)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("no fixture product keyed " + productKey));
+    }
+
+    @Transactional(readOnly = true)
+    public int purchasesMissingServiceJourneys() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                  FROM ob_client_applications a
+                  JOIN ob_journey_templates t
+                    ON t.product_id = a.product_id AND t.is_active = 1
+                 WHERE NOT EXISTS (
+                           SELECT 1 FROM ob_journeys j
+                            WHERE j.ob_client_id = a.ob_client_id
+                              AND j.product_id = a.product_id
+                              AND j.service_name = t.name
+                              AND j.archived_at IS NULL)
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Instantiates every missing (client, service) journey through the
+     * production path — {@link ObJourneyInstantiationService#instantiate},
+     * which skips services that already run, resolves the gate from the
+     * client's existing journeys and activates the first wave of steps if it
+     * is open.
+     *
+     * <p>Not written as fixture SQL on purpose. Everything the corpus writes
+     * by hand it also has to keep true by hand, and a journey has a gate, a
+     * hold, a pinned template, a cloned step tree and an activation rule.
+     * Going through the service means a topped-up journey is exactly what an
+     * admin adding the service to the catalogue would have produced.
+     */
+    @Transactional
+    public void loadMissingServiceJourneys() {
+        List<Map<String, Object>> pairs = jdbc.queryForList("""
+                SELECT DISTINCT a.ob_client_id AS clientId, a.product_id AS productId
+                  FROM ob_client_applications a
+                  JOIN ob_journey_templates t
+                    ON t.product_id = a.product_id AND t.is_active = 1
+                 WHERE NOT EXISTS (
+                           SELECT 1 FROM ob_journeys j
+                            WHERE j.ob_client_id = a.ob_client_id
+                              AND j.product_id = a.product_id
+                              AND j.service_name = t.name
+                              AND j.archived_at IS NULL)
+                 ORDER BY a.ob_client_id, a.product_id
+                """);
+        for (Map<String, Object> pair : pairs) {
+            instantiation.instantiate(
+                    ((Number) pair.get("clientId")).longValue(),
+                    ((Number) pair.get("productId")).longValue());
+        }
     }
 
     /**
@@ -831,11 +971,13 @@ public class OnboardingFixture {
         }
 
         long journeyId = insert("""
-                INSERT INTO ob_journeys (ob_client_id, product_id, template_id, gate_status, gate_opened_at,
-                                         gate_opened_by, held_by_journey_id, started_at, completed_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ob_journeys (ob_client_id, product_id, service_name, template_id, gate_status,
+                                         gate_opened_at, gate_opened_by, held_by_journey_id, started_at,
+                                         completed_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                clientId, productIds.get(templateSpec.productKey()), template.templateId(),
+                clientId, productIds.get(templateSpec.productKey()), templateSpec.name(),
+                template.templateId(),
                 spec.gateOpen() ? "OPEN" : "LOCKED",
                 gateOpenedAt == null ? null : Timestamp.from(gateOpenedAt),
                 spec.gateOpen() ? userIds.get(client.createdByUserKey()) : null,

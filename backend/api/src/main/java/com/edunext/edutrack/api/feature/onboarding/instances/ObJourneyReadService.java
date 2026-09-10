@@ -69,6 +69,7 @@ public class ObJourneyReadService {
                 row.obClientId(),
                 row.clientName(),
                 new ObJourneyReadDtos.ObProductRef(row.productId(), row.productCode(), row.productName()),
+                row.serviceName(),
                 ObGateStatus.valueOf(row.gateStatus()),
                 row.rag() == null ? null : ObRag.valueOf(row.rag()),
                 percentComplete(row.stepsSettled(), row.stepCount()),

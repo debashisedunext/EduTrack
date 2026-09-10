@@ -297,27 +297,36 @@ final class OnboardingFixtureData {
                     List.of("Attendance flowing to ERP", "Support handover completed")));
 
     /**
-     * The prototype's {@code TEMPLATES}.
+     * The prototype's {@code TEMPLATES} — <b>two live Module Services on the
+     * ERP product</b>, plus the Biometric one.
      *
-     * <p><b>Version 2 of the ERP service does not exist, and that is the
-     * prototype's own arrangement rather than an omission here.</b> It declares
-     * "Standard SaaS Onboarding" at version 3 and "Enterprise (with data
-     * migration audit)" at version 1, both on the ERP product, one of them
-     * active. A-103 reads a row as one version of one product's service, so the
-     * two land as versions 1 and 3 with nothing at 2. Harmless:
-     * {@code version} is a label that {@code ob_journeys.template_id} pins, not
-     * a dense sequence anything counts along.
+     * <p><b>"Enterprise (with data migration audit)" used to be seeded
+     * retired, and that was a workaround for the schema rather than the
+     * prototype's intent.</b> The prototype declares it alongside "Standard
+     * SaaS Onboarding" on the ERP product and draws a card for each; before
+     * {@code V20260910_0030} only one of a product's services could be
+     * active, so the corpus had to pick one and retire the other. Both are
+     * live now, which is what makes a client who bought ERP show two ribbons
+     * — the thing the fixture exists to demonstrate.
      *
-     * <p>Retired first, active second, dependency last — {@link OnboardingFixture}
-     * inserts in this order and {@code fk_ob_journey_templates_depends_on} needs
+     * <p>Version 3 and version 1 with nothing at 2 is the prototype's own
+     * arrangement: each service versions independently
+     * ({@code V20260909_1900}), so these are v3 of one chain and v1 of
+     * another rather than a gap in one.
+     *
+     * <p>{@code sequence} orders them across the catalogue (plan §5.5): the
+     * standard onboarding, then the enterprise data migration, then the
+     * Biometric rollout held behind the ERP service it depends on. The
+     * dependency comes last because {@link OnboardingFixture} inserts in
+     * this order and {@code fk_ob_journey_templates_depends_on} needs
      * {@code t1} to exist before {@code t3} names it.
      */
     static final List<TemplateSpec> TEMPLATES = List.of(
-            new TemplateSpec("t2", "Enterprise (with data migration audit)", 1, "p1", false, 1, null,
-                    STANDARD_SAAS_STEPS),
             new TemplateSpec("t1", "Standard SaaS Onboarding", 3, "p1", true, 1, null,
                     STANDARD_SAAS_STEPS),
-            new TemplateSpec("t3", "Biometric Device Rollout", 2, "p2", true, 2, "t1",
+            new TemplateSpec("t2", "Enterprise (with data migration audit)", 1, "p1", true, 2, null,
+                    STANDARD_SAAS_STEPS),
+            new TemplateSpec("t3", "Biometric Device Rollout", 2, "p2", true, 3, "t1",
                     BIOMETRIC_STEPS));
 
     // ══════════════════════════════════════════════════════════════════════

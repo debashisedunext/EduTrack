@@ -343,7 +343,13 @@ export const onboardingJourneyHandlers = [
       });
     }
 
-    const current = db.obJourneyTemplates.find((t) => t.productId === draft.productId && t.isActive);
+    // Retires the active version of *this service*. By product it would
+    // switch off every other service the product publishes — the bug
+    // V20260910_0030 exists to fix, and a mock that kept it would let the
+    // screen pass offline and fail against the API.
+    const current = db.obJourneyTemplates.find(
+      (t) => t.productId === draft.productId && t.name === draft.name && t.isActive,
+    );
     if (current) current.isActive = false;
 
     draft.isActive = true;

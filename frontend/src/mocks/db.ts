@@ -2489,6 +2489,16 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
     sequence: 1, dependsOnTemplateId: null,
     publishedBy: 1, publishedAt: iso('2026-06-20T09:00:00'),
   },
+  // A second *live* service on the SAME product. EduTrack ERP sells a
+  // standard onboarding and an enterprise data migration, and a client who
+  // buys the product is boarded through both, one ribbon each. Without one
+  // here nothing offline exercises the case, and "one active service per
+  // product" would keep passing every test.
+  {
+    id: 4, productId: 1, name: 'Enterprise (data migration)', version: 1, isActive: true,
+    sequence: 2, dependsOnTemplateId: 1,
+    publishedBy: 1, publishedAt: iso('2026-06-22T09:00:00'),
+  },
   {
     id: 2, productId: 2, name: 'Biometric Attendance onboarding', version: 1, isActive: false,
     sequence: 1, dependsOnTemplateId: null,
@@ -2503,7 +2513,7 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   // needs one.
   {
     id: 3, productId: 3, name: 'LMS onboarding', version: 1, isActive: true,
-    sequence: 2, dependsOnTemplateId: 1,
+    sequence: 3, dependsOnTemplateId: 1,
     publishedBy: 1, publishedAt: iso('2026-07-01T09:00:00'),
   },
 ];

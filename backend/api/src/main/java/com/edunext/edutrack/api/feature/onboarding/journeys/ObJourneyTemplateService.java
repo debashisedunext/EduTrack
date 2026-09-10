@@ -472,10 +472,17 @@ public class ObJourneyTemplateService {
     }
 
     /**
-     * The draft becomes the product's active version. If another version is
-     * currently active, it is retired first — in the same transaction, and
-     * in that order — so the unique index over one active row per product
-     * never sees two at once.
+     * The draft becomes the active version <b>of its own service</b>. If
+     * another version of that service is currently active it is retired
+     * first — in the same transaction, and in that order — so
+     * {@code uq_ob_journey_templates_service_active} never sees two at once.
+     *
+     * <p><b>Scoped to the service since {@code V20260910_0030}, and the
+     * previous scope was the bug that migration exists to fix.</b> Retiring
+     * by product meant publishing "Enterprise (with data migration audit)"
+     * switched off "Standard SaaS Onboarding" — no error, no warning, and
+     * every client boarded afterwards silently got the wrong journey. The
+     * two are separate pieces of work sold together, not alternatives.
      */
     @Transactional
     public ObJourneyTemplate publish(long templateId, long publishedBy) {
@@ -488,7 +495,7 @@ public class ObJourneyTemplateService {
             throw new TemplateHasNoStepsException(templateId);
         }
 
-        templates.findByProductIdAndIsActiveTrue(draft.getProductId())
+        templates.findByProductIdAndNameAndIsActiveTrue(draft.getProductId(), draft.getName())
                 .ifPresent(current -> {
                     current.setActive(false);
                     templates.saveAndFlush(current);

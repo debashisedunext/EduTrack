@@ -190,7 +190,8 @@ class ObClientControllerTest {
 
     private static ObClientDtos.ObClientDetail detailWithJourney(String name) {
         ObClientDtos.ObJourneyStrip strip = new ObClientDtos.ObJourneyStrip(
-                9L, new ObClientDtos.ObProductRef(1L, "ERP", "ERP"), "LOCKED", null, 0,
+                9L, new ObClientDtos.ObProductRef(1L, "ERP", "ERP"), "Standard SaaS Onboarding",
+                "LOCKED", null, 0,
                 null, 5, null,
                 List.of(new ObClientDtos.ObStepDot(3L, 1, "Kickoff", "IN_PROGRESS", "AMBER", null)));
 

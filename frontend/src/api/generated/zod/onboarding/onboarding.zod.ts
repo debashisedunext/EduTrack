@@ -298,6 +298,8 @@ export const getObClientResponseDataApplicationsItemLicenseTypeMax = 64;
 
 export const getObClientResponseDataRequirementsItemTitleMax = 200;
 
+export const getObClientResponseDataJourneysItemServiceNameMax = 160;
+
 export const getObClientResponseDataJourneysItemPercentCompleteMin = 0;
 export const getObClientResponseDataJourneysItemPercentCompleteMax = 100;
 
@@ -413,6 +415,7 @@ export const getObClientResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(getObClientResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(getObClientResponseDataJourneysItemPercentCompleteMin).max(getObClientResponseDataJourneysItemPercentCompleteMax),
@@ -510,6 +513,8 @@ export const updateObClientResponseDataApplicationsItemLicenseTypeMax = 64;
 
 
 export const updateObClientResponseDataRequirementsItemTitleMax = 200;
+
+export const updateObClientResponseDataJourneysItemServiceNameMax = 160;
 
 export const updateObClientResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientResponseDataJourneysItemPercentCompleteMax = 100;
@@ -626,6 +631,7 @@ export const updateObClientResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(updateObClientResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(updateObClientResponseDataJourneysItemPercentCompleteMin).max(updateObClientResponseDataJourneysItemPercentCompleteMax),
@@ -789,6 +795,8 @@ export const updateObClientContactResponseDataApplicationsItemLicenseTypeMax = 6
 
 export const updateObClientContactResponseDataRequirementsItemTitleMax = 200;
 
+export const updateObClientContactResponseDataJourneysItemServiceNameMax = 160;
+
 export const updateObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
 
@@ -904,6 +912,7 @@ export const updateObClientContactResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(updateObClientContactResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(updateObClientContactResponseDataJourneysItemPercentCompleteMin).max(updateObClientContactResponseDataJourneysItemPercentCompleteMax),
@@ -987,6 +996,8 @@ export const removeObClientContactResponseDataApplicationsItemLicenseTypeMax = 6
 
 
 export const removeObClientContactResponseDataRequirementsItemTitleMax = 200;
+
+export const removeObClientContactResponseDataJourneysItemServiceNameMax = 160;
 
 export const removeObClientContactResponseDataJourneysItemPercentCompleteMin = 0;
 export const removeObClientContactResponseDataJourneysItemPercentCompleteMax = 100;
@@ -1103,6 +1114,7 @@ export const removeObClientContactResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(removeObClientContactResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(removeObClientContactResponseDataJourneysItemPercentCompleteMin).max(removeObClientContactResponseDataJourneysItemPercentCompleteMax),
@@ -1274,6 +1286,8 @@ export const updateObClientApplicationResponseDataApplicationsItemLicenseTypeMax
 
 export const updateObClientApplicationResponseDataRequirementsItemTitleMax = 200;
 
+export const updateObClientApplicationResponseDataJourneysItemServiceNameMax = 160;
+
 export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientApplicationResponseDataJourneysItemPercentCompleteMax = 100;
 
@@ -1389,6 +1403,7 @@ export const updateObClientApplicationResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(updateObClientApplicationResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(updateObClientApplicationResponseDataJourneysItemPercentCompleteMin).max(updateObClientApplicationResponseDataJourneysItemPercentCompleteMax),
@@ -1546,6 +1561,8 @@ export const updateObClientRequirementResponseDataApplicationsItemLicenseTypeMax
 
 export const updateObClientRequirementResponseDataRequirementsItemTitleMax = 200;
 
+export const updateObClientRequirementResponseDataJourneysItemServiceNameMax = 160;
+
 export const updateObClientRequirementResponseDataJourneysItemPercentCompleteMin = 0;
 export const updateObClientRequirementResponseDataJourneysItemPercentCompleteMax = 100;
 
@@ -1661,6 +1678,7 @@ export const updateObClientRequirementResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(updateObClientRequirementResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(updateObClientRequirementResponseDataJourneysItemPercentCompleteMin).max(updateObClientRequirementResponseDataJourneysItemPercentCompleteMax),
@@ -1750,6 +1768,8 @@ export const deleteObClientRequirementResponseDataApplicationsItemLicenseTypeMax
 
 
 export const deleteObClientRequirementResponseDataRequirementsItemTitleMax = 200;
+
+export const deleteObClientRequirementResponseDataJourneysItemServiceNameMax = 160;
 
 export const deleteObClientRequirementResponseDataJourneysItemPercentCompleteMin = 0;
 export const deleteObClientRequirementResponseDataJourneysItemPercentCompleteMax = 100;
@@ -1866,6 +1886,7 @@ export const deleteObClientRequirementResponse = zod.object({
   "code": zod.string(),
   "name": zod.string()
 }).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "serviceName": zod.string().max(deleteObClientRequirementResponseDataJourneysItemServiceNameMax).describe('\*\*The Module Service this journey runs, and what the strip is\ntitled with\*\* — the product is the caption beneath it.\n\nA product publishes several services at once and a client who\nbuys it is boarded through every one of them, so a page with two\nstrips both headed \"EduTrack ERP\" would be two identical rows\ncarrying different progress. The service is what tells them\napart.\n\nThe \*\*pinned\*\* name, from the journey\'s own column rather than a\njoin, so it matches the tasks rendered beneath it even after the\ncatalogue has moved on.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional().describe('Null while `gateStatus` is `LOCKED` — nothing is running to colour.'),
   "percentComplete": zod.number().min(deleteObClientRequirementResponseDataJourneysItemPercentCompleteMin).max(deleteObClientRequirementResponseDataJourneysItemPercentCompleteMax),

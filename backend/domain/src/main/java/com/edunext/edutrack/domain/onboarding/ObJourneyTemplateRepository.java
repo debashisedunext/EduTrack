@@ -10,7 +10,26 @@ public interface ObJourneyTemplateRepository extends JpaRepository<ObJourneyTemp
     /** Any version at all — a product's very first template has none. */
     boolean existsByProductId(Long productId);
 
-    Optional<ObJourneyTemplate> findByProductIdAndIsActiveTrue(Long productId);
+    /**
+     * Every Module Service the product currently publishes, in the order
+     * they instantiate and display ({@code sequence}, plan §5.5), with
+     * {@code id} as the tiebreak so two services sharing a position still
+     * come back in a stable order.
+     *
+     * <p><b>This replaced {@code findByProductIdAndIsActiveTrue}.</b> That
+     * method returned an {@code Optional} and its correctness rested
+     * entirely on {@code uq_ob_journey_templates_active} making a second
+     * active row per product impossible. {@code V20260910_0030} made it
+     * possible on purpose, at which point the old signature would not have
+     * failed a test — it would have thrown
+     * {@code IncorrectResultSizeDataAccessException} the first time an admin
+     * published a second service, in production. Deleted rather than
+     * deprecated so nothing reaches for it again.
+     */
+    List<ObJourneyTemplate> findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(Long productId);
+
+    /** One named service of a product, at whatever version is live now. */
+    Optional<ObJourneyTemplate> findByProductIdAndNameAndIsActiveTrue(Long productId, String name);
 
     List<ObJourneyTemplate> findByProductIdOrderByVersionDesc(Long productId);
 

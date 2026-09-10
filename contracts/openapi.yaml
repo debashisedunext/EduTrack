@@ -19006,10 +19006,26 @@ components:
         data: { type: array, items: { $ref: '#/components/schemas/ObAttachment' } }
     ObJourneyStrip:
       type: object
-      required: [id, product, gateStatus, percentComplete, steps]
+      required: [id, product, serviceName, gateStatus, percentComplete, steps]
       properties:
         id: { type: integer, format: int64 }
         product: { $ref: '#/components/schemas/ObProductRef' }
+        serviceName:
+          type: string
+          maxLength: 160
+          description: |
+            **The Module Service this journey runs, and what the strip is
+            titled with** — the product is the caption beneath it.
+
+            A product publishes several services at once and a client who
+            buys it is boarded through every one of them, so a page with two
+            strips both headed "EduTrack ERP" would be two identical rows
+            carrying different progress. The service is what tells them
+            apart.
+
+            The **pinned** name, from the journey's own column rather than a
+            join, so it matches the tasks rendered beneath it even after the
+            catalogue has moved on.
         gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
         rag:
           oneOf:
@@ -19358,6 +19374,14 @@ components:
             not become two hundred client reads. The id is beside it for
             navigation; this is for the eye.
         product: { $ref: '#/components/schemas/ObProductRef' }
+        serviceName:
+          type: string
+          maxLength: 160
+          description: |
+            The Module Service this journey runs — "Standard SaaS
+            Onboarding", not "EduTrack ERP". A product publishes several at
+            once, each its own journey, so the product alone no longer
+            identifies which ribbon a reader is looking at.
         gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
         rag:
           oneOf:

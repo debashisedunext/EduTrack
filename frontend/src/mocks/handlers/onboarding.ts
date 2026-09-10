@@ -193,9 +193,15 @@ function stepDto(step: ObStep) {
 
 function journeyDto(journey: ObJourney, db: Db) {
   const done = journey.steps.filter((s) => s.status === 'DONE' || s.status === 'SKIPPED').length;
+  const template = db.obJourneyTemplates.find((t) => t.id === journey.templateId);
+  const product = productRef(journey.productId, db);
   return {
     id: journey.id,
-    product: productRef(journey.productId, db),
+    product,
+    // What the strip is titled with — the product is the caption. A fixture
+    // journey with no pinned template falls back to the product's name
+    // rather than rendering an untitled accordion.
+    serviceName: template?.name ?? product?.name ?? 'Onboarding',
     gateStatus: journey.gateStatus,
     rag: journeyRag(journey),
     percentComplete: journey.steps.length

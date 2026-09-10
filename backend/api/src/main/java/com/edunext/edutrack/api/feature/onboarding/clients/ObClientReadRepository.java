@@ -590,6 +590,15 @@ class ObClientReadRepository {
      * and the accordion needs the set to render any of it. Archived journeys
      * are excluded — an archived journey is a template version that was
      * replaced, and showing it beside its replacement would double every strip.
+     *
+     * <p><b>One row per Module Service, not per product.</b> A client who
+     * bought EduTrack ERP has one journey for each service the product
+     * publishes, so the product name no longer identifies a strip and
+     * {@code service_name} is what titles it. Ordered by the catalogue's own
+     * {@code sequence} first — the order plan §5.5 says journeys "instantiate
+     * and display" in — rather than by product name, which would interleave
+     * two products' services alphabetically and could put a service ahead of
+     * the one it is held behind.
      */
     List<JourneyStripRow> journeysOf(long clientId) {
         return jdbc.sql("""
@@ -599,6 +608,7 @@ class ObClientReadRepository {
                        p.id                 AS productId,
                        p.code               AS productCode,
                        p.name               AS productName,
+                       j.service_name       AS serviceName,
                        (SELECT COUNT(*) FROM ob_journey_steps ts WHERE ts.journey_id = j.id) AS stepCount,
                        (SELECT COUNT(*) FROM ob_journey_steps ds WHERE ds.journey_id = j.id
                          AND ds.status IN ('DONE', 'SKIPPED')) AS stepsSettled,
@@ -607,9 +617,10 @@ class ObClientReadRepository {
                        (SELECT %s FROM ob_journey_steps rs WHERE rs.journey_id = j.id) AS rag
                   FROM ob_journeys j
                   JOIN ob_products p ON p.id = j.product_id
+                  JOIN ob_journey_templates t ON t.id = j.template_id
                  WHERE j.ob_client_id = :id
                    AND j.archived_at IS NULL
-                 ORDER BY p.name, j.id
+                 ORDER BY t.sequence, p.name, j.service_name, j.id
                 """.formatted(ObStepRag.worstOverSteps("rs")))
                 .param("id", clientId).query(JOURNEY_MAPPER).list();
     }
@@ -747,8 +758,8 @@ class ObClientReadRepository {
     }
 
     record JourneyStripRow(long id, String gateStatus, Long heldByJourneyId, long productId,
-                      String productCode, String productName, int stepCount, int stepsSettled,
-                      int totalTatDays, String rag) {
+                      String productCode, String productName, String serviceName,
+                      int stepCount, int stepsSettled, int totalTatDays, String rag) {
     }
 
     record StepDotRow(long id, long journeyId, int sequence, String name, String status,
@@ -878,6 +889,7 @@ class ObClientReadRepository {
     private static final RowMapper<JourneyStripRow> JOURNEY_MAPPER = (rs, n) -> new JourneyStripRow(
             rs.getLong("id"), rs.getString("gateStatus"), nullableLong(rs, "heldByJourneyId"),
             rs.getLong("productId"), rs.getString("productCode"), rs.getString("productName"),
+            rs.getString("serviceName"),
             rs.getInt("stepCount"), rs.getInt("stepsSettled"), rs.getInt("totalTatDays"),
             rs.getString("rag"));
 
