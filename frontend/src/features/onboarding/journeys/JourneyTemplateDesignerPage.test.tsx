@@ -39,6 +39,10 @@ function renderDesigner(templateId = 2) {
             path="/onboarding/journey-templates/:templateId"
             element={<JourneyTemplateDesignerPage />}
           />
+          {/* Deleting a service navigates back to the catalogue — a real
+              destination, so the test does not have to read a route that
+              matched nothing as a pass. */}
+          <Route path="/onboarding/journey-templates" element={<p>Module Service catalogue</p>} />
         </Routes>
         <Toaster />
       </MemoryRouter>
@@ -52,6 +56,17 @@ const SLOW = { timeout: 5000 }
 async function openDesigner(templateId = 2) {
   renderDesigner(templateId)
   await screen.findByRole('table', { name: 'Services' }, SLOW)
+}
+
+/**
+ * For the service-level section — rename, move, delete — which is on the page
+ * whether or not the version has any steps. Template 3 (LMS) deliberately has
+ * none, so waiting on the table would wait forever; the header carries the
+ * service name either way.
+ */
+async function openService(templateId: number, name: string) {
+  renderDesigner(templateId)
+  await screen.findByRole('heading', { name, level: 1 }, SLOW)
 }
 
 const stepsTable = () => screen.getByRole('table', { name: 'Services' })
@@ -391,5 +406,178 @@ describe('the Publish button, by template state', () => {
 
     expect(await screen.findByText('No steps yet', undefined, SLOW)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Publish/ })).toBeDisabled()
+  })
+})
+
+/**
+ * C-124 · editing and deleting a whole Module Service.
+ *
+ * The rule these all turn on: a service a client has been boarded on can be
+ * neither renamed nor deleted, and the page says so before the admin clicks
+ * rather than after a `409`. The fixture journeys carry no `templateId`, so
+ * every seeded service starts unused and the in-use case is set up explicitly
+ * — which is the honest way round, since it makes the gate visible in the test
+ * rather than inherited from a fixture nobody reads.
+ */
+describe('editing a module service', () => {
+  it('renames every version of the service, not the version being viewed', async () => {
+    // A second version of the ERP service, so the rename has a chain to move
+    // rather than one row — the whole reason the route is chain-wide.
+    getDb().obJourneyTemplates.push({
+      id: 98, productId: 1, name: 'ERP Suite onboarding', version: 2, isActive: false,
+      sequence: 1, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
+    })
+    await openService(1, 'ERP Suite onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit ERP Suite onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Name'), {
+      target: { value: 'ERP Suite rollout' },
+    })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const templates = getDb().obJourneyTemplates
+      expect(templates.find((t) => t.id === 1)!.name).toBe('ERP Suite rollout')
+      // v2 moved too. A rename that touched only the viewed row would leave
+      // this one behind and the catalogue would draw two cards for one service.
+      expect(templates.find((t) => t.id === 98)!.name).toBe('ERP Suite rollout')
+    }, SLOW)
+  })
+
+  it('moves the service to another product', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Product'), { target: { value: '4' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.productId).toBe(4)
+    }, SLOW)
+  })
+
+  it('surfaces the server refusal when the new name is already taken', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    // Product 3 has no sibling, so move it onto product 1 under a name that
+    // product already sells — the collision the unique index would raise.
+    fireEvent.change(within(form).getByLabelText('Name'), {
+      target: { value: 'ERP Suite onboarding' },
+    })
+    fireEvent.change(within(form).getByLabelText('Product'), { target: { value: '1' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/Could not update that module service/, undefined, SLOW))
+      .toBeInTheDocument()
+    // Nothing moved. The refusal is the server's, and the page does not guess.
+    expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.name).toBe('LMS onboarding')
+  })
+
+  it('reopening the form discards an abandoned edit', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    let form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Half-typed' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '✎ Edit details' }))
+    form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    expect((within(form).getByLabelText('Name') as HTMLInputElement).value).toBe('LMS onboarding')
+  })
+})
+
+describe('deleting a module service', () => {
+  it('deletes every version of the service and returns to the catalogue', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete LMS onboarding' }, SLOW))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete service' }, SLOW))
+
+    await waitFor(() => {
+      const db = getDb()
+      expect(db.obJourneyTemplates.find((t) => t.id === 3)).toBeUndefined()
+      expect(db.obJourneyTemplateSteps.filter((s) => s.templateId === 3)).toHaveLength(0)
+    }, SLOW)
+    // The page it was deleted from no longer has a subject, so it is left.
+    expect(await screen.findByText('Module Service catalogue', undefined, SLOW)).toBeInTheDocument()
+  })
+
+  it('refuses while another service depends on it, naming the dependent', async () => {
+    // The fixture's "Enterprise (data migration)" waits on ERP Suite
+    // onboarding, so deleting the latter would leave a dangling dependency —
+    // fk_ob_journey_templates_depends_on is RESTRICT for exactly this.
+    await openService(1, 'ERP Suite onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete ERP Suite onboarding' }, SLOW))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete service' }, SLOW))
+
+    expect(
+      await screen.findByText(/cannot be deleted — Enterprise \(data migration\)/, undefined, SLOW),
+    ).toBeInTheDocument()
+    expect(getDb().obJourneyTemplates.find((t) => t.id === 1)).toBeDefined()
+  })
+
+  it('the confirmation can be dismissed without deleting anything', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete LMS onboarding' }, SLOW))
+    const dialog = await screen.findByRole('dialog', undefined, SLOW)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(getDb().obJourneyTemplates.find((t) => t.id === 3)).toBeDefined()
+  })
+})
+
+describe('a service a client is already on', () => {
+  /**
+   * The gate, from the service page's side. `serviceJourneyCount` is
+   * chain-wide, so pinning a journey to *any* version locks the service —
+   * including a retired v1 while the page shows v2, which is the case a
+   * per-row count would have got wrong.
+   */
+  function boardAClientOn(templateId: number) {
+    const client = getDb().obClients[0]
+    client.journeys[0].templateId = templateId
+  }
+
+  it('disables Edit details and Delete, and says how many clients are on it', async () => {
+    boardAClientOn(1)
+    await openService(1, 'ERP Suite onboarding')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '✎ Edit details' })).toBeDisabled()
+    }, SLOW)
+    expect(screen.getByRole('button', { name: 'Delete ERP Suite onboarding' })).toBeDisabled()
+    // Disabled *and* explained. A tooltip alone is invisible to a keyboard
+    // user tabbing past a disabled control.
+    expect(screen.getByText(/1 client journey has been instantiated/)).toBeInTheDocument()
+  })
+
+  it('locks the service through a retired version, not only the head', async () => {
+    getDb().obJourneyTemplates.push({
+      id: 97, productId: 3, name: 'LMS onboarding', version: 2, isActive: false,
+      sequence: 3, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
+    })
+    // The client is on v1; the page below is v2 of the same service.
+    boardAClientOn(3)
+    await openService(97, 'LMS onboarding')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete LMS onboarding' })).toBeDisabled()
+    }, SLOW)
+  })
+
+  it('leaves Begin revision offered — a new version is how it changes', async () => {
+    boardAClientOn(1)
+    await openService(1, 'ERP Suite onboarding')
+
+    // Not disabled: publishing over it is precisely the supported way to
+    // change a service somebody is on.
+    expect(screen.getByRole('button', { name: 'Begin revision' })).toBeEnabled()
   })
 })

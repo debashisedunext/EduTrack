@@ -3,36 +3,21 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { ApiError } from '@/api/http'
 import type { ObProduct } from '@/api/generated/model/obProduct'
-import type { ObJourneyTemplateStep } from '@/api/generated/model/obJourneyTemplateStep'
 import type { ObJourneyTemplateSummary } from '@/api/generated/model/obJourneyTemplateSummary'
-import type { Role } from '@/api/generated/model/role'
-import type { UserRef } from '@/api/generated/model'
-import { useListRoles } from '@/api/generated/masters/masters'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
 import { useListObJourneyTemplates } from '@/api/generated/onboarding-journeys/onboarding-journeys'
-import { useListUsers } from '@/api/generated/users/users'
 
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
-import {
-  Modal,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
-} from '@/components/ui/modal'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/use-toast'
 
 import { useCreateJourneyTemplate, useJourneyTemplate } from './journeyTemplateQueries'
 import { cycleFreeCandidates, moveTemplate } from './moduleServiceCatalogue'
 import {
-  useDeleteModuleService,
   useReorderModuleServiceCatalogue,
-  useUpdateModuleService,
   useUpdateModuleServiceDependsOn,
 } from './moduleServiceCatalogueQueries'
 
@@ -41,25 +26,30 @@ import {
  * per **service**, laid out to `docs/prototype/onboarding.html`'s `vTemplates()`:
  * page head with the versioning caption, a create card, a product filter
  * card, then a responsive card grid. `JourneyTemplateDesignerPage` is where a
- * single service's steps are edited; each card's "✎ Edit steps" opens it.
+ * single service is read and edited; clicking a card opens it.
  *
- * <h2>Two edits and a delete, and only one of them versions (C-124)</h2>
+ * <h2>A card is a summary, and the whole card is the link</h2>
  *
- * "Edit steps" is the versioning path: it opens the designer, and saving there
- * publishes v+1 so every in-flight client keeps the version they were boarded
- * on. "Edit details" and Delete are the other kind — they act on the whole
- * version chain in place, and are therefore refused outright the moment a
- * client is on the service. `serviceJourneyCount` on the row is that gate, so
- * the card can disable and explain rather than let an admin click into a
- * `409`. See `ModuleServiceAdmin` below.
+ * A card says what a service *is* — its position, product, step count, total
+ * TAT and state — and nothing about how it is built. It used to print every
+ * step as a line of text, which made a grid of five services a wall of forty
+ * lines nobody scanned; the count is the fact a catalogue is read for, and the
+ * steps themselves are one click away on the service's own page.
  *
- * <h2>The reorder is catalogue-wide, the picker is per-card</h2>
+ * Rename, move to another product and delete moved onto that page with it, in
+ * `ModuleServiceAdmin.tsx`. Two controls stayed, and both for the same reason
+ * — they are about a service's place *among the others*, which is a fact only
+ * this screen has: the ↑/↓ that sets `sequence`, and "Service depends on".
+ * Both sit above the card's link overlay on `relative z-10`, so they take
+ * their own clicks instead of opening the service.
+ *
+ * <h2>The reorder is catalogue-wide, not filter-wide</h2>
  *
  * `sequence` is one number shared by every active template, so the ↑/↓
  * buttons act on the *whole* catalogue's ordering, not the filtered view —
  * exactly the mockup's `msMove`, which reorders `TEMPLATES` regardless of
- * the filter. "Service depends on" is the opposite: one field on one
- * template, editable from any card.
+ * the filter. A card's disabled ↑ or ↓ therefore reflects its place in the
+ * unfiltered order, which is the order clients are actually boarded in.
  *
  * <h2>Create wires to the data layer's own `useCreateJourneyTemplate`</h2>
  *
@@ -81,10 +71,6 @@ export function ModuleServiceCataloguePage() {
   const navigate = useNavigate()
   const query = useListObProducts()
   const templates = useListObJourneyTemplates()
-  const users = useListUsers({ isActive: true, limit: 200 })
-  // Every role, not only the active ones: a step owned by a since-retired
-  // role still has to render its name rather than a bare code.
-  const roles = useListRoles()
   const [filterId, setFilterId] = React.useState<'ALL' | number>('ALL')
   const reorder = useReorderModuleServiceCatalogue()
   const create = useCreateJourneyTemplate()
@@ -107,8 +93,6 @@ export function ModuleServiceCataloguePage() {
   const allTemplates = templates.data?.data ?? []
 
   const products = query.data.data
-  const userList = users.data?.data ?? []
-  const roleList = roles.data?.data ?? []
   const productById = new Map(products.map((p) => [p.id, p]))
 
   /*
@@ -274,7 +258,8 @@ export function ModuleServiceCataloguePage() {
         </select>
         <span className="text-caption text-content-muted">
           Card order below is the service sequence — it drives the order journeys are instantiated
-          and shown for every new client. Use ↑ ↓ to re-sequence.
+          and shown for every new client. Use ↑ ↓ to re-sequence. Open a card to see and edit its
+          steps.
         </span>
       </div>
 
@@ -290,13 +275,10 @@ export function ModuleServiceCataloguePage() {
               key={service.id}
               service={service}
               product={productById.get(service.productId)}
-              products={products}
+              catalogueEntries={catalogueEntries}
               index={activeOrder.indexOf(service.id)}
               total={activeOrder.length}
               reordering={reorder.isPending}
-              catalogueEntries={catalogueEntries}
-              users={userList}
-              roles={roleList}
               onMove={move}
             />
           ))}
@@ -320,48 +302,40 @@ export function ModuleServiceCataloguePage() {
   )
 }
 
+/**
+ * One service, as a summary tile. The whole tile is the link to the service's
+ * own page — the heading carries a stretched `::after`, which is the one way
+ * to make a card clickable without wrapping the *card* in an `<a>` and burying
+ * its chips and buttons inside a link a screen reader then has to read as one
+ * label. The reorder buttons sit above that overlay on `z-10`.
+ */
 function ModuleServiceCard({
   service,
   product,
-  products,
+  catalogueEntries,
   index,
   total,
   reordering,
-  catalogueEntries,
-  users,
-  roles,
   onMove,
 }: {
   service: ObJourneyTemplateSummary
   /** Undefined only if the catalogue and the product list disagree — drawn as the id. */
   product: ObProduct | undefined
-  /** Every product, for the "Edit details" form's own picker. */
-  products: readonly ObProduct[]
+  /** Every active service, for the depends-on picker's cycle-free candidates. */
+  catalogueEntries: { activeTemplateId: number; dependsOnTemplateId: number | null; name: string }[]
   /** Position in the whole (unfiltered) active order, or -1 for a service that is not active. */
   index: number
   total: number
   reordering: boolean
-  catalogueEntries: { activeTemplateId: number; dependsOnTemplateId: number | null; name: string }[]
-  users: readonly UserRef[]
-  roles: readonly Role[]
   onMove: (templateId: number, direction: -1 | 1) => void
 }) {
   const hasActive = service.isActive
-  /**
-   * One detail read per active card, shared with the designer page's cache —
-   * it carries the version chip, the steps list and the `ETag` the
-   * depends-on `PUT` requires. The catalogue is "a handful of rows" by the
-   * contract's own exemption note, so this costs nothing a list this size
-   * would notice.
-   */
-  const detail = useJourneyTemplate(service.id)
-  const template = detail.data?.detail
   const dependsOnEntry = catalogueEntries.find(
     (c) => c.activeTemplateId === (service.dependsOnTemplateId ?? null),
   )
 
   return (
-    <li className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4 shadow-rest">
+    <li className="relative flex flex-col gap-2 rounded-card border border-border bg-surface p-4 shadow-rest transition-colors hover:border-primary focus-within:border-primary">
       <div className="flex flex-wrap items-center gap-2">
         {index >= 0 && (
           <Chip variant="neutral" className="tabular-nums" title="Service sequence">
@@ -369,10 +343,24 @@ function ModuleServiceCard({
           </Chip>
         )}
         {/* The service is the card's subject; the product is context on it. */}
-        <h3 className="m-0 text-h3 text-content">{service.name}</h3>
+        <h3 className="m-0 text-h3 text-content">
+          <Link
+            to={`/onboarding/journey-templates/${service.id}`}
+            /*
+              `after:absolute inset-0` stretches this link over the whole card,
+              so a click anywhere on the tile opens the service while the
+              accessible name stays just the service name.
+            */
+            className="rounded-control after:absolute after:inset-0 after:rounded-card hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {service.name}
+          </Link>
+        </h3>
         <Chip variant="info">v{service.version}</Chip>
         {hasActive && (
-          <span className="ml-auto inline-flex gap-1">
+          /* Above the card's link overlay — these edit the catalogue's order,
+             they do not open the service. */
+          <span className="relative z-10 ml-auto inline-flex gap-1">
             <Button
               type="button"
               variant="ghost"
@@ -402,6 +390,13 @@ function ModuleServiceCard({
           {product?.name ?? `Product ${service.productId}`}
         </Chip>
         {product && !product.isActive && <Chip variant="neutral">Product retired</Chip>}
+        {/*
+          The count, not the list. A catalogue answers "how big is this
+          service"; the steps themselves are on the page this card opens.
+        */}
+        <Chip variant="neutral" title="Services in this journey — open the card to see them">
+          ☰ {service.stepCount} step{service.stepCount === 1 ? '' : 's'}
+        </Chip>
         <Chip variant="info" title="Sum of this service's step TATs">
           ⏱ {service.totalTatDays}d total TAT
         </Chip>
@@ -438,315 +433,48 @@ function ModuleServiceCard({
       {hasActive && (
         <DependsOnPicker
           templateId={service.id}
-          productName={service.name}
+          serviceName={service.name}
           catalogueEntries={catalogueEntries}
         />
       )}
 
       {/*
-        The step list is drawn for every service, active or not — a draft is
-        precisely the thing somebody opens this page to check before
-        publishing it, and hiding its steps would make the card that most
-        needs reading the one that says least.
+        Named rather than left to be discovered by clicking: a tile whose only
+        controls belong to the catalogue has to say that the rest of it is a
+        way in.
       */}
-      <>
-        {template ? (
-          <StepSummaryList steps={template.steps} users={users} roles={roles} />
-        ) : (
-          <Skeleton className="h-16 w-full" />
-        )}
-      </>
-
-      <ModuleServiceAdmin
-        service={service}
-        products={products}
-        productName={product?.name ?? `Product ${service.productId}`}
-      />
+      <p className="m-0 text-caption text-content-muted">
+        {service.isActive
+          ? 'Open to read its steps, task lists and TATs — editing there publishes a new version.'
+          : 'Open to finish this draft and publish it.'}
+      </p>
     </li>
   )
 }
 
 /**
- * C-124 · the card's "Edit details" and Delete, and the one fact that gates
- * both.
+ * "Service depends on" — the cross-service dependency (plan §5.5), one field
+ * on one template, editable from any card.
  *
- * A Module Service is a version chain, and the server refuses to rename or
- * delete one the moment a client has been boarded on any version of it — see
- * `ObJourneyTemplateService#updateModuleService`. `serviceJourneyCount` is
- * that number, chain-wide, on every row of the chain, so the card can say so
- * before the admin clicks rather than after a `409`.
+ * <p>It stays on the catalogue rather than moving to the service's own page
+ * with the rename and the delete, because the choice it offers is *the other
+ * services*: setting it is a comparison, and this is the only screen where
+ * everything being compared is already on the page.
  *
- * Disabled *and* explained, never hidden: a control that vanishes reads as a
- * feature nobody built, and the admin is left looking for it. Naming the count
- * turns "why can't I delete this" into "three clients are on it", which is
- * something they can act on — retire it by publishing over it instead.
- */
-function ModuleServiceAdmin({
-  service,
-  products,
-  productName,
-}: {
-  service: ObJourneyTemplateSummary
-  products: readonly ObProduct[]
-  productName: string
-}) {
-  const detail = useJourneyTemplate(service.id)
-  const update = useUpdateModuleService()
-  const remove = useDeleteModuleService()
-
-  const [editing, setEditing] = React.useState(false)
-  const [confirmingDelete, setConfirmingDelete] = React.useState(false)
-  const [name, setName] = React.useState(service.name)
-  const [productId, setProductId] = React.useState<number>(service.productId)
-
-  const inUse = service.serviceJourneyCount > 0
-  const lockedReason = inUse
-    ? `${service.serviceJourneyCount} client journey${
-        service.serviceJourneyCount === 1 ? ' has' : 's have'
-      } been instantiated from this service — it can no longer be renamed or deleted. ` +
-      'Publish a new version to change it.'
-    : undefined
-
-  const openEditor = () => {
-    // Reset from the row every time rather than keeping whatever was typed and
-    // abandoned last time: a form that reopens holding a discarded edit is one
-    // Save away from applying a change nobody meant to make.
-    setName(service.name)
-    setProductId(service.productId)
-    setEditing(true)
-  }
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed) return
-    try {
-      await update.mutateAsync({
-        templateId: service.id,
-        name: trimmed,
-        productId,
-        etag: detail.data?.etag ?? null,
-      })
-      toast({ title: `${trimmed} updated` })
-      setEditing(false)
-    } catch (error) {
-      toast({
-        title: 'Could not update that module service',
-        description: problemDetail(error),
-        variant: 'danger',
-      })
-    }
-  }
-
-  const doDelete = async () => {
-    try {
-      await remove.mutateAsync({ templateId: service.id })
-      toast({ title: `${service.name} deleted` })
-      setConfirmingDelete(false)
-    } catch (error) {
-      // The dialog stays open. The refusal is nearly always "somebody was
-      // boarded on it while this page was open", and closing would hide the
-      // sentence that explains why the card is still there.
-      toast({
-        title: 'Could not delete that module service',
-        description: problemDetail(error),
-        variant: 'danger',
-      })
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-2 border-t border-border pt-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button asChild variant="secondary" size="sm">
-          <Link to={`/onboarding/journey-templates/${service.id}`}>
-            {service.isActive ? `✎ Edit steps (publishes v${service.version + 1})` : '✎ Open draft'}
-          </Link>
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={inUse || update.isPending}
-          title={lockedReason}
-          onClick={openEditor}
-        >
-          ✎ Edit details
-        </Button>
-        <Button
-          type="button"
-          variant="danger"
-          size="sm"
-          disabled={inUse || remove.isPending}
-          title={lockedReason}
-          aria-label={`Delete ${service.name}`}
-          onClick={() => setConfirmingDelete(true)}
-        >
-          🗑 Delete
-        </Button>
-      </div>
-
-      {/*
-        The explanation sits beside the disabled buttons rather than only in
-        their `title`: a tooltip is invisible to a keyboard user who tabs past
-        a disabled control, and this is the sentence that stops the card
-        reading as broken.
-      */}
-      {inUse && (
-        <p className="m-0 text-caption text-content-muted">
-          🔒 {lockedReason}
-        </p>
-      )}
-
-      {editing && (
-        <form
-          onSubmit={submit}
-          aria-label={`Edit ${service.name}`}
-          className="flex flex-col gap-2 rounded-control border border-border bg-subtle p-3"
-        >
-          <p className="m-0 text-caption text-content-muted">
-            Applies to every version of this service — v1 to v{service.version}.
-          </p>
-          <div className="flex flex-col gap-1 text-sm">
-            <label htmlFor={`ms-name-${service.id}`} className="font-medium text-content">
-              Name
-            </label>
-            <Input
-              id={`ms-name-${service.id}`}
-              value={name}
-              maxLength={160}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1 text-sm">
-            <label htmlFor={`ms-product-${service.id}`} className="font-medium text-content">
-              Product
-            </label>
-            <select
-              id={`ms-product-${service.id}`}
-              className="h-9 min-w-0 rounded-control border border-border bg-surface px-2 text-sm text-content"
-              value={productId}
-              onChange={(e) => setProductId(Number(e.target.value))}
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={update.isPending || !name.trim()}>
-              Save
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={update.isPending}
-              onClick={() => setEditing(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
-
-      <Modal
-        open={confirmingDelete}
-        onOpenChange={(next) => {
-          if (!next) setConfirmingDelete(false)
-        }}
-      >
-        <ModalContent>
-          <ModalHeader>
-            <ModalTitle>Delete {service.name}?</ModalTitle>
-            <ModalDescription>
-              This removes every version of the service — v1 to v{service.version} — under{' '}
-              {productName}, with each version's steps, checklists and document lists. No client
-              has been boarded on it, so nothing in flight is affected. It cannot be undone.
-            </ModalDescription>
-          </ModalHeader>
-          <ModalFooter>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={remove.isPending}
-              onClick={() => setConfirmingDelete(false)}
-            >
-              Cancel
-            </Button>
-            <Button variant="danger" size="sm" disabled={remove.isPending} onClick={doDelete}>
-              {remove.isPending ? 'Deleting…' : 'Delete service'}
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    </div>
-  )
-}
-
-/**
- * The mockup card's ordered steps list — one line per service:
- * `name · TATd · owner · ↳ after step n / ∥ parallel · ✍️ client sign-off`.
- */
-function StepSummaryList({
-  steps,
-  users,
-  roles,
-}: {
-  steps: ObJourneyTemplateStep[]
-  users: readonly UserRef[]
-  roles: readonly Role[]
-}) {
-  if (steps.length === 0) {
-    return <p className="m-0 text-caption text-content-muted">No services yet — open the designer to add them.</p>
-  }
-
-  const ownerOf = (step: ObJourneyTemplateStep): string => {
-    if (step.ownerUserId != null) {
-      return users.find((u) => u.id === step.ownerUserId)?.displayName ?? `user #${step.ownerUserId}`
-    }
-    if (!step.ownerRole) return 'Unassigned'
-    // The role master's name, falling back to the stored code — `owner_role`
-    // has no foreign key, so a deleted role leaves the code behind.
-    return roles.find((r) => r.code === step.ownerRole)?.name ?? step.ownerRole
-  }
-
-  return (
-    <ol className="my-1 flex list-decimal flex-col gap-1.5 pl-5 text-sm text-content">
-      {steps.map((step) => {
-        const depIndex = step.dependsOnStepId != null
-          ? steps.findIndex((s) => s.id === step.dependsOnStepId)
-          : -1
-        return (
-          <li key={step.id}>
-            {step.name}{' '}
-            <span className="text-caption text-content-muted">
-              · {step.tatDays}d · {ownerOf(step)} ·{' '}
-              {depIndex >= 0 ? `↳ after step ${depIndex + 1}` : '∥ parallel'}
-              {step.requiresSignoff && ' · ✍️ client sign-off'}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
-
-/**
- * Loads its own template detail purely for the `ETag` `PUT .../depends-on`
- * requires — `useJourneyTemplate`'s own cache, shared with the card around it
- * and the designer page if the same template is opened there in the same
- * session.
+ * <p>`relative z-10` lifts it above the card's stretched link, so the select
+ * takes its own clicks instead of opening the service underneath it.
+ *
+ * <p>Loads its own template detail purely for the `ETag` `PUT .../depends-on`
+ * requires — `useJourneyTemplate`'s own cache, shared with the designer page
+ * if the same template is opened there in the same session.
  */
 function DependsOnPicker({
   templateId,
-  productName,
+  serviceName,
   catalogueEntries,
 }: {
   templateId: number
-  productName: string
+  serviceName: string
   catalogueEntries: { activeTemplateId: number; dependsOnTemplateId: number | null; name: string }[]
 }) {
   const detail = useJourneyTemplate(templateId)
@@ -760,7 +488,7 @@ function DependsOnPicker({
     const dependsOnTemplateId = raw === '' ? null : Number(raw)
     try {
       await update.mutateAsync({ templateId, dependsOnTemplateId, etag: detail.data?.etag ?? null })
-      toast({ title: `${productName}'s dependency updated` })
+      toast({ title: `${serviceName}'s dependency updated` })
     } catch (error) {
       toast({
         title: 'Could not update that dependency',
@@ -774,8 +502,11 @@ function DependsOnPicker({
   // child of the card's flex column, and a shrinkable child inside an
   // unshrinkable parent still overflows.
   return (
-    <div className="flex min-w-0 items-center gap-2 text-sm">
-      <label htmlFor={`depends-on-${templateId}`} className="whitespace-nowrap font-medium text-content">
+    <div className="relative z-10 flex min-w-0 items-center gap-2 text-sm">
+      <label
+        htmlFor={`depends-on-${templateId}`}
+        className="whitespace-nowrap font-medium text-content"
+      >
         Service depends on
       </label>
       <select
