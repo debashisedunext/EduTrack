@@ -15,6 +15,21 @@ import {
 
 /** Everything outside tickets and the ribbon: auth, masters, clients, the rest. */
 
+/**
+ * A-116 · which platform modules this user holds. Every staff account is
+ * ticketing-shaped by default; ONBOARDING is additive, granted through
+ * `obModuleAccess` the same way the real `ModuleAccessGuard` reads it —
+ * revoked rows do not count.
+ */
+const modulesOf = (userId: number): ('TICKETING' | 'ONBOARDING')[] => {
+  const db = getDb();
+  const modules: ('TICKETING' | 'ONBOARDING')[] = ['TICKETING'];
+  if (db.obModuleAccess.some((g) => g.userId === userId && g.revokedAt == null)) {
+    modules.push('ONBOARDING');
+  }
+  return modules;
+};
+
 const me = () => {
   const db = getDb();
   const u = currentUser(db);
@@ -25,6 +40,7 @@ const me = () => {
     projectIds: u.projectIds,
     reporteeIds: db.users.filter((x) => x.reportingManagerId === u.id).map((x) => x.id),
     timezone: u.timezone,
+    modules: modulesOf(u.id),
   };
 };
 
@@ -186,6 +202,20 @@ const permissionsOf = (roleCode: string): string[] => {
 const LANDING: Record<string, string> = {
   ADMIN: '/dashboard', PM: '/dashboard', DEVELOPER: '/my-tasks',
   SUPPORT: '/tickets', QA: '/stages/queue', DEPLOYMENT: '/stages/queue',
+};
+
+/**
+ * A-116 · `LandingRoutes.forUser` on the backend, mirrored. A caller holding
+ * both modules lands on the launcher (`/launcher`); onboarding alone lands on
+ * its dashboard; everybody else keeps the role-based route above, unchanged.
+ */
+const landingRouteFor = (userId: number, roleCode: string): string => {
+  const modules = modulesOf(userId);
+  const onboarding = modules.includes('ONBOARDING');
+  const ticketing = modules.includes('TICKETING');
+  if (onboarding && ticketing) return '/launcher';
+  if (onboarding) return '/onboarding/dashboard';
+  return LANDING[roleCode];
 };
 
 // ── working calendar · S-14 (B-023) ─────────────────────────────────────────
@@ -1494,19 +1524,20 @@ export const restHandlers = [
       accessToken: `mock.${user.username}.token`,
       expiresIn: 900,
       mustChangePassword: false,
-      landingRoute: LANDING[user.role],
+      landingRoute: landingRouteFor(user.id, user.role),
       user: me(),
     });
   }),
-  http.post(url('/auth/refresh'), () =>
-    ok({
-      accessToken: `mock.${currentUser().username}.refreshed`,
+  http.post(url('/auth/refresh'), () => {
+    const user = currentUser();
+    return ok({
+      accessToken: `mock.${user.username}.refreshed`,
       expiresIn: 900,
       mustChangePassword: false,
-      landingRoute: LANDING[currentUser().role],
+      landingRoute: landingRouteFor(user.id, user.role),
       user: me(),
-    }),
-  ),
+    });
+  }),
   http.post(url('/auth/logout'), () => noContent()),
   // Always 202, known address or not — a different answer for unknown addresses
   // is a user-enumeration oracle.

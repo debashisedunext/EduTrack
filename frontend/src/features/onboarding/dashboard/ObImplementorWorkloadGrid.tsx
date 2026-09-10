@@ -62,11 +62,22 @@ export function ObImplementorWorkloadGrid({ onDrill }: ObImplementorWorkloadGrid
   const hasMore = data?.meta?.hasMore ?? false
 
   return (
-    <section aria-labelledby="ob-implementor-workload-heading" className="flex flex-col gap-2">
-      <h2 id="ob-implementor-workload-heading" className="text-base font-semibold text-content">
-        Implementor workload &amp; performance
-      </h2>
-
+    <section
+      aria-labelledby="ob-implementor-workload-heading"
+      className="overflow-hidden rounded-card border border-border bg-surface shadow-sm"
+    >
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-1 pt-3.5">
+        <h2
+          id="ob-implementor-workload-heading"
+          className="text-[11px] font-semibold uppercase tracking-[.08em] text-content-muted"
+        >
+          Implementor workload &amp; performance
+        </h2>
+        <span className="text-xs text-content-muted">
+          every implementor, including the bench — counts are the services they own
+        </span>
+      </div>
+      <div className="p-4 pt-2">
       {isPending ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 4 }, (_, i) => (
@@ -112,10 +123,11 @@ export function ObImplementorWorkloadGrid({ onDrill }: ObImplementorWorkloadGrid
       )}
 
       {hasMore && (
-        <p className="text-xs text-content-muted">
+        <p className="mt-2 text-xs text-content-muted">
           Showing the first {PAGE_LIMIT} implementors.
         </p>
       )}
+      </div>
     </section>
   )
 }

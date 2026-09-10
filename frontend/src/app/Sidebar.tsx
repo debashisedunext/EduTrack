@@ -141,14 +141,14 @@ const ONBOARDING_NAV: NavEntry[] = [
   },
   { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
   { section: 'Administration' },
-  { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
-  // C-123 · Module Service, the journey-template list this task built.
-  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
   // B-124 · Prerequisites master (OB-14) — the last of the design's nine
   // entries, added the day its screen landed, per the section comment above.
   { to: '/onboarding/prereq-master', label: 'Prerequisites master', icon: ClipboardList },
+  { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
   { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
   { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
+  // C-123 · Module Service, the journey-template list this task built.
+  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
 ]
 
 /** The module a path belongs to. The URL is the source of truth, not a store. */

@@ -92,7 +92,8 @@ describe('ObDashboardDrillPanel', () => {
   it('renders a row with its client, product, item, owner, due date and status', () => {
     renderPanel()
 
-    expect(screen.getByRole('button', { name: 'Horizon Retail' })).toBeInTheDocument()
+    expect(screen.getByText('Horizon Retail')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open →' })).toBeInTheDocument()
     expect(screen.getByText('ERP')).toBeInTheDocument()
     expect(screen.getByText('Data migration')).toBeInTheDocument()
     expect(screen.getByText('Meera Nair')).toBeInTheDocument()
@@ -119,7 +120,7 @@ describe('ObDashboardDrillPanel', () => {
     const onClose = vi.fn()
     renderPanel({ onClose })
 
-    await userEvent.click(screen.getByRole('button', { name: 'Horizon Retail' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Open →' }))
 
     expect(navigate).toHaveBeenCalledWith('/onboarding/clients/42')
     expect(onClose).toHaveBeenCalledTimes(1)

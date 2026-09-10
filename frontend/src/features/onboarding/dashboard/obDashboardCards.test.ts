@@ -21,7 +21,9 @@ describe('cardLook', () => {
    * bundle. Throwing would give back the whole board to gain nothing.
    */
   it('renders an unrecognised key rather than throwing', () => {
-    expect(cardLook('sales-pipeline')).toEqual({ label: 'sales-pipeline', unit: '', tone: 'neutral' })
+    expect(cardLook('sales-pipeline')).toEqual({
+      label: 'sales-pipeline', unit: '', caption: '', tone: 'neutral',
+    })
   })
 })
 
