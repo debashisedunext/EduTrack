@@ -114,8 +114,19 @@ public class ObProductService {
         // C-123 · one more batched read for the catalogue's own three fields —
         // ObJourneyTemplateRepository, not a fourth ObProductRepository query,
         // since sequence and dependsOnTemplateId live on the template row.
+        //
+        // A product publishes as many active templates as it sells Module
+        // Services (V20260910_0030), so the merge function is not decoration:
+        // `Collectors.toMap` throws IllegalStateException("Duplicate key") the
+        // moment a second one is published, and it throws inside
+        // GET /onboarding/products — the OB-04 wizard's product picker, which
+        // is how a client is created at all. Keeping the lowest `sequence`
+        // makes the three singular fields below describe the product's *first*
+        // service, which is the only honest thing they can describe; the
+        // catalogue reads listObJourneyTemplates and sees all of them.
         Map<Long, ObJourneyTemplate> activeTemplates = templates.findByProductIdInAndIsActiveTrue(ids).stream()
-                .collect(Collectors.toMap(ObJourneyTemplate::getProductId, t -> t));
+                .collect(Collectors.toMap(ObJourneyTemplate::getProductId, t -> t,
+                        (first, second) -> first.getSequence() <= second.getSequence() ? first : second));
 
         return rows.stream()
                 .map(row -> {
