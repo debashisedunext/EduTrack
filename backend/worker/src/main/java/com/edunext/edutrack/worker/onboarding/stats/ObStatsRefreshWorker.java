@@ -118,6 +118,11 @@ public class ObStatsRefreshWorker {
 
         ObStatsDay currentDay = ObStatsDay.of(today, zone);
         stats.refreshSummaryStock(currentDay, now, computedAt, props.amberShare());
+        // The same board once per narrowed caller. Its own transaction, after
+        // the org-wide one rather than inside it: the two answer different
+        // callers, and a scope pass that fails should leave the board every
+        // unrestricted role reads standing rather than roll it back with it.
+        stats.refreshScopeSummaryStock(currentDay, now, computedAt, props.amberShare());
         stats.refreshImplementorStock(currentDay, now, computedAt, props.amberShare());
 
         int days = 0;

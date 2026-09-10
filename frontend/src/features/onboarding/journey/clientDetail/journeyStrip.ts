@@ -114,6 +114,30 @@ export function ragLabel(rag: ObRag | null | undefined): string {
 }
 
 /**
+ * Which journey opens itself, the way the mockup's `vClient` does.
+ *
+ * `A.selJourney` picks "the first journey that is running and unfinished, else
+ * the first", expands it and selects a step — so the prototype never draws a
+ * ribbonless page. A product page that opened on a row of collapsed strips
+ * would be hiding the thing the screen is for.
+ *
+ * "Running" is past the gate, not held behind a sibling, and unfinished. A
+ * client whose first service is complete and whose second is mid-flight should
+ * open on the one somebody still has work in — and when nothing is running
+ * (everything finished, everything locked) the first strip opens anyway,
+ * because a page with a ribbon on it beats a page without one.
+ */
+export function defaultOpenJourneyId(
+  journeys: readonly Pick<ObJourneyStrip, 'id' | 'gateStatus' | 'heldByJourneyId' | 'percentComplete'>[],
+): number | undefined {
+  if (journeys.length === 0) return undefined
+  const running = journeys.find(
+    (j) => j.gateStatus !== 'LOCKED' && j.heldByJourneyId == null && (j.percentComplete ?? 0) < 100,
+  )
+  return (running ?? journeys[0]).id
+}
+
+/**
  * The prerequisites strip's own progress, §9's "gate chip + mandatory-progress
  * bar".
  *

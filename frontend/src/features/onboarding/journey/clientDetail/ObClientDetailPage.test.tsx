@@ -7,7 +7,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ObClientDetailPage } from './ObClientDetailPage'
 
 /**
- * C-110 · OB-05 against the mock server.
+ * C-110 · OB-05 against the mock server — the **client** half.
+ *
+ * The journeys, ribbons, step panels and §8 sign-offs moved to
+ * `ObClientProductPage` and are tested in its own file. What is asserted here
+ * is the client page as it stands: the gate, the product cards, the escalation
+ * banner, the LIVE banner and §9's closing pair.
  *
  * The seeded clients are the fixture, deliberately, because they are the ones
  * the rest of the module was built against:
@@ -216,191 +221,114 @@ describe('ObClientDetailPage', () => {
     })
   })
 
-  describe('the journey accordions', () => {
-    it('draws one per purchased product, with its own step dots', async () => {
+  /**
+   * §9's middle row, as one card per purchased product.
+   *
+   * The journey accordions, the ribbons, the step panels and §8's sign-off
+   * panel moved to `ObClientProductPage` and are tested there — the reasons
+   * are in `ObClientDetailPage`'s own docstring. What this page owes a reader
+   * now is the choice: which products, how each is doing, and a link that
+   * opens one.
+   */
+  describe('the product cards', () => {
+    it('draws one card per purchased product, each linking to that product', async () => {
       renderClient(1)
       await screen.findByText('GreenValley International School', undefined, SLOW)
 
-      const dotStrips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
-      expect(dotStrips).toHaveLength(2)
-      // The ERP journey seeds eight services, the attendance one five.
-      expect(within(dotStrips[0]).getAllByRole('img')).toHaveLength(8)
-      expect(within(dotStrips[1]).getAllByRole('img')).toHaveLength(5)
+      const products = within(
+        screen.getByRole('region', { name: 'Products' }),
+      ).getAllByRole('link')
+      expect(products).toHaveLength(2)
+      expect(products[0]).toHaveAttribute('href', '/onboarding/clients/1/products/1')
+      expect(products[1]).toHaveAttribute('href', '/onboarding/clients/1/products/2')
     })
 
     /**
-     * Every dot names its service, its state and its colour. Nine dots in
-     * three colours is exactly the chart CLAUDE.md's WCAG line exists to stop.
-     *
-     * Client 1's "Data Migration" step (`OB_CLIENT_ESCALATIONS` in the mock
-     * db) carries an open C-126 escalation, so its label carries that too —
-     * colour is never the only signal, and a red ring on a dot means nothing
-     * to a screen-reader user unless the name says why.
+     * A card is a link and its whole state has to be in its name: the figures
+     * inside it are colour and glyphs, and a reader tabbing the page hears
+     * only the accessible name.
      */
-    it('names every dot rather than leaving colour to carry it', async () => {
-      renderClient(8)
-      const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
-      const labels = within(strips[0])
-        .getAllByRole('img')
-        .map((dot) => dot.getAttribute('aria-label'))
-      expect(labels).toContain('5. Configuration & branding — Blocked · red')
-      expect(labels[0]).toMatch(/^1\. Kickoff call — Done/)
+    it('says how each product is doing in its own name', async () => {
+      renderClient(1)
+      await screen.findByText('GreenValley International School', undefined, SLOW)
+
+      expect(
+        screen.getByRole('link', { name: 'Open EduTrack ERP — 100% complete, all services settled' }),
+      ).toBeInTheDocument()
     })
 
     /**
-     * C-126 · Sunrise's "Data migration" step (journey 21, step 214) carries
-     * the fixture's one open `OB_CLIENT_ESCALATIONS` row — raised from the
-     * portal against the same breach `OB_ESCALATIONS`' L1/L2 rungs already
-     * fire on. Colour is never the only signal (the class-level note above),
-     * so an escalated dot's name has to say so too, not just ring red.
+     * A meter in services rather than a bar in percent — `PrereqAccordion`'s
+     * argument, for the same reason: this is a measurement of a known set, and
+     * "8 of 8" can be checked against what the reader can see while "100%"
+     * cannot.
      */
-    it('names an escalated step rather than leaving the red ring to carry it', async () => {
-      renderClient(2)
-      const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
-      const labels = await waitFor(() => {
-        const found = within(strips[0])
-          .getAllByRole('img')
-          .map((dot) => dot.getAttribute('aria-label'))
-        expect(found).toContain('4. Data migration — In progress · red — escalated, awaiting staff')
-        return found
-      }, SLOW)
-      expect(labels[0]).toMatch(/^1\. Kickoff call — Done/)
+    it('measures progress in services, not only as a bar', async () => {
+      renderClient(1)
+      const meter = await screen.findByRole('meter', { name: 'EduTrack ERP services complete' }, SLOW)
+      expect(meter).toHaveAttribute('aria-valuetext', '8 of 8 services complete')
+      expect(meter).toHaveAttribute('aria-valuemax', '8')
+    })
+
+    /** The licence is what the client is paying for, and a reader choosing
+     * between two products is choosing between two purchases. */
+    it('carries the licence the product was bought on', async () => {
+      renderClient(1)
+      const card = await screen.findByRole('link', { name: /Open EduTrack ERP/ }, SLOW)
+      expect(within(card).getByText(/Enterprise · 120 units/)).toBeInTheDocument()
     })
 
     /**
-     * A journey past the gate and held behind a sibling (plan §5.5) is not a
-     * journey with prerequisites pending. A reader told the wrong one goes and
-     * clears prerequisites that were already cleared.
+     * A locked gate and a sibling hold are different facts and OB-03's list
+     * already refuses to merge them. The card refuses too: a reader told the
+     * wrong one goes and clears prerequisites that were already cleared.
      */
-    it('tells a sibling hold apart from a locked gate, and names the sibling', async () => {
+    it('tells a locked gate apart from a sibling hold', async () => {
       renderClient(3)
       await screen.findByText('Horizon Academy', undefined, SLOW)
 
-      expect(await screen.findByText(/^Held for /, undefined, SLOW)).toBeInTheDocument()
-      expect(screen.queryByText('Prerequisites pending')).not.toBeInTheDocument()
+      const products = screen.getByRole('region', { name: 'Products' })
+      expect(within(products).getByText('Held for another service')).toBeInTheDocument()
+      expect(within(products).queryByText('Prerequisites pending')).not.toBeInTheDocument()
     })
 
-    it('shows a locked journey as prerequisites pending rather than as held', async () => {
+    it('shows a locked product as prerequisites pending rather than as held', async () => {
       renderClient(7)
       await screen.findByText('Little Scholars Preschool', undefined, SLOW)
 
-      expect(await screen.findAllByText('Prerequisites pending', undefined, SLOW)).not.toHaveLength(0)
-      expect(screen.queryByText(/^Held for /)).not.toBeInTheDocument()
+      const products = screen.getByRole('region', { name: 'Products' })
+      expect(within(products).getByText('Prerequisites pending')).toBeInTheDocument()
+      expect(within(products).queryByText('Held for another service')).not.toBeInTheDocument()
     })
 
     /**
-     * The contract splits the strip from the ribbon so "a client with six
-     * journeys does not pay for six ribbons on first paint". A collapsed
-     * accordion that fetched its ribbon anyway would keep the split on the
-     * wire and lose the whole benefit of it.
+     * C-126 · the product carrying an open escalation is the one to open
+     * first, and that is not derivable from RAG — Sunrise's migration is both
+     * breached and escalated, and plenty of breached services are neither.
      */
+    it('flags the product carrying an open escalation', async () => {
+      renderClient(2)
+      const card = await screen.findByRole('link', { name: /Open EduTrack ERP/ }, SLOW)
+      expect(await within(card).findByText('1 open escalation', undefined, SLOW)).toBeInTheDocument()
+    })
+
     /**
-     * The page opens one journey on first paint, the way the mockup's
-     * `vClient` does — a client detail page with no ribbon on it is missing
-     * the thing the screen is for.
-     *
-     * The contract this must not break is the *other* half: the journey read
-     * is per-journey and fired on expand, so "a client with six journeys does
-     * not pay for six ribbons on first paint". One open by default is one
-     * ribbon, not six — so the assertion is that exactly one is drawn, and
-     * the second arrives only when it is asked for.
+     * The contract splits the strip from the ribbon so that "a client with six
+     * journeys does not pay for six ribbons on first paint". With the ribbons
+     * a click away this page pays for **none** — the strongest form of that
+     * rule, and the one that regresses the moment somebody puts a ribbon back
+     * on a card to preview it.
      */
-    it('opens one journey on load, and fetches no other ribbon until it is expanded', async () => {
-      const user = userEvent.setup()
+    it('fetches no journey ribbon at all — the cards are the whole page', async () => {
       renderClient(1)
-      await screen.findByText('GreenValley International School', undefined, SLOW)
+      await screen.findByRole('region', { name: 'Products' }, SLOW)
+      await screen.findByRole('heading', { name: 'Client info' }, SLOW)
 
-      // GreenValley has two journeys. Exactly one ribbon, unasked.
-      expect(await screen.findAllByRole('list', { name: 'Journey steps' }, SLOW)).toHaveLength(1)
-
-      const collapsed = screen
-        .getAllByRole('button', { name: /complete/ })
-        .find((b) => b.getAttribute('aria-expanded') === 'false')
-      expect(collapsed).toBeDefined()
-
-      await user.click(collapsed!)
-      await waitFor(
-        async () => expect(await screen.findAllByRole('list', { name: 'Journey steps' })).toHaveLength(2),
-        SLOW,
-      )
-    }, 20000)
-
-    /**
-     * The reader lands on the journey's current state rather than on an empty
-     * panel asking them to pick a tile the ribbon has already centred on.
-     */
-    it('opens the step panel on the journey it is already showing', async () => {
-      renderClient(8)
-      await screen.findByText('Trinity College of Commerce', undefined, SLOW)
-
-      const panel = await screen.findByTestId('journey-step-panel', undefined, SLOW)
-      // Configuration & branding is the ERP journey's BLOCKED step and the one
-      // the ribbon centres on, so it is the one the panel should already be on.
-      expect(within(panel).getByText('5. Configuration & branding')).toBeInTheDocument()
-    }, 15000)
-
-    /**
-     * The running journey, not merely the first — a client whose first product
-     * is finished and whose second is mid-flight should open on the one
-     * somebody has work to do in.
-     */
-    it('opens the journey that is running rather than the first one listed', async () => {
-      renderClient(3)
-      await screen.findByText('Horizon Academy', undefined, SLOW)
-
-      const triggers = await screen.findAllByRole('button', { name: /complete/ }, SLOW)
-      const expanded = triggers.filter((t) => t.getAttribute('aria-expanded') === 'true')
-      expect(expanded).toHaveLength(1)
-      // Horizon's second journey is held behind its sibling, so the one that
-      // opens is the sibling that is actually moving.
-      expect(expanded[0]).toHaveAccessibleName(/^EduTrack ERP —/)
-    }, 15000)
-  })
-
-  /**
-   * §9's accordion UX rule, and the reason `useAnchoredToggle` exists:
-   *
-   * > expanding/collapsing or selecting a step never scrolls the page — scroll
-   * > position is preserved on all same-page interactions.
-   *
-   * jsdom performs no layout, so every `getBoundingClientRect` reads 0 and the
-   * correction is always a no-op here. What this can prove is the half that
-   * actually regresses: that nothing on the page *asks* the window to scroll.
-   * A `scrollIntoView` reintroduced into the ribbon — which is what OB-05
-   * would have inherited from C-109 — fails this immediately.
-   */
-  describe('the accordion never scrolls the page', () => {
-    it('asks nothing to scroll into view when a journey is expanded or a step selected', async () => {
-      const user = userEvent.setup()
-      const scrollIntoView = vi.fn()
-      const original = Element.prototype.scrollIntoView
-      Element.prototype.scrollIntoView = scrollIntoView
-
-      try {
-        renderClient(1)
-        await screen.findByText('GreenValley International School', undefined, SLOW)
-
-        // The page opens one journey itself, so its ribbon is already here.
-        await screen.findAllByRole('list', { name: 'Journey steps' }, SLOW)
-
-        // Selecting a step, then collapsing, then expanding again — the three
-        // interactions §9's rule is about.
-        const segments = screen.getAllByRole('button', { name: /^Step \d/ })
-        await user.click(segments[segments.length - 1])
-
-        const trigger = screen
-          .getAllByRole('button', { name: /complete/ })
-          .find((b) => b.getAttribute('aria-expanded') === 'true')!
-        await user.click(trigger)
-        await user.click(trigger)
-        await screen.findAllByRole('list', { name: 'Journey steps' }, SLOW)
-
-        expect(scrollIntoView).not.toHaveBeenCalled()
-      } finally {
-        Element.prototype.scrollIntoView = original
-      }
+      expect(screen.queryByRole('list', { name: 'Journey steps' })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('journey-step-panel')).not.toBeInTheDocument()
     })
   })
+
 
   /**
    * C-126 · Sunrise's "Data migration" step (journey 21, step 214) carries
@@ -408,7 +336,7 @@ describe('ObClientDetailPage', () => {
    * mock db) — the banner plan §4/§9 ask for, and resolve-and-acknowledge.
    */
   describe('escalations', () => {
-    it('shows the open escalation in a banner, and resolving it clears the banner and the dot', async () => {
+    it('shows the open escalation in a banner, and resolving it clears the banner', async () => {
       const user = userEvent.setup()
       renderClient(2)
       await screen.findByText('Sunrise EdTech Pvt Ltd', undefined, SLOW)
@@ -429,12 +357,15 @@ describe('ObClientDetailPage', () => {
         SLOW,
       )
 
-      const strips = await screen.findAllByRole('list', { name: 'Service status' }, SLOW)
-      const labels = within(strips[0])
-        .getAllByRole('img')
-        .map((dot) => dot.getAttribute('aria-label'))
-      expect(labels).toContain('4. Data migration — In progress · red')
-      expect(labels).not.toContain('4. Data migration — In progress · red — escalated, awaiting staff')
+      // The dialog closes only once the resolve has landed *and* the
+      // invalidated read has come back — `EscalationBanner` awaits both before
+      // it clears `resolving`. Waiting for it is what keeps this test from
+      // ending with its own write still in flight, which the next test then
+      // inherits.
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), SLOW)
+
+      // The dot that stops ringing red is on the product page, where the
+      // ribbon is — `ObClientProductPage.test.tsx` carries that half.
     })
 
     it('will not resolve with no note', async () => {
@@ -493,100 +424,6 @@ describe('ObClientDetailPage', () => {
 
       // Attachments are the card's one extra read, listed by name.
       expect(await screen.findByText('greenvalley-msa-signed.pdf', undefined, SLOW)).toBeInTheDocument()
-    })
-  })
-
-  /**
-   * §8, the staff half. The client-facing page is `PublicSignoffPage`; this is
-   * the side that asks, chases and withdraws.
-   */
-  describe('sign-off', () => {
-    /**
-     * GreenValley's ERP go-live is the seeded signed one — the sign-off behind
-     * its LIVE banner and its CSAT. A settled decision is not re-askable, so
-     * the panel reports it and offers the certificate rather than a button
-     * whose only outcome is the server's 422.
-     */
-    it('reports an accepted go-live and offers its certificate, with nothing to re-ask', async () => {
-      renderClient(1)
-      const panel = await screen.findByRole('region', { name: 'Go-live sign-off' }, SLOW)
-
-      // findBy, not getBy: the section mounts before its own sign-off read
-      // lands, and until then the status is a skeleton.
-      expect(await within(panel).findByText('✓ Accepted', undefined, SLOW)).toBeInTheDocument()
-      expect(within(panel).getByRole('link', { name: /Download the signed certificate/ }))
-        .toHaveAttribute('href', expect.stringContaining('/certificate'))
-      expect(within(panel).queryByRole('button', { name: /Request sign-off/ })).not.toBeInTheDocument()
-      expect(within(panel).queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument()
-    })
-
-    /**
-     * GreenValley's second journey is finished too and has never been asked,
-     * so it is the one that offers the request.
-     *
-     * `sentToContactId` is required rather than defaulted, and the contract
-     * says why: "the person who signs off a data migration is frequently not
-     * the person who signs the contract, and a default that is usually right
-     * is one nobody checks."
-     */
-    it('will not request a go-live until a contact is chosen, then chases it', async () => {
-      const user = userEvent.setup()
-      renderClient(1)
-      await screen.findByRole('region', { name: 'Go-live sign-off' }, SLOW)
-
-      // Expand the second journey — the one with no sign-off on it yet.
-      const collapsed = screen
-        .getAllByRole('button', { name: /complete/ })
-        .find((b) => b.getAttribute('aria-expanded') === 'false')!
-      await user.click(collapsed)
-
-      const panel = await waitFor(
-        () => {
-          const panels = screen.getAllByRole('region', { name: 'Go-live sign-off' })
-          const fresh = panels.find((p) => within(p).queryByText('Not requested'))
-          expect(fresh).toBeDefined()
-          return fresh!
-        },
-        SLOW,
-      )
-
-      const request = within(panel).getByRole('button', { name: /Request sign-off/ })
-      expect(request).toBeDisabled()
-
-      // By the option's own value — its label carries the designation too, and
-      // pinning the whole string here would make this test fail on a wording
-      // change it is not about.
-      const deepa = within(panel).getByRole('option', { name: /Deepa Kulkarni/ }) as HTMLOptionElement
-      await user.selectOptions(within(panel).getByLabelText('Send to'), deepa.value)
-      expect(request).toBeEnabled()
-
-      await user.click(request)
-
-      // The request lands and the panel switches to chasing it.
-      expect(await within(panel).findByText('Awaiting the client', undefined, SLOW)).toBeInTheDocument()
-      expect(within(panel).getByRole('button', { name: /Email the link again/ })).toBeInTheDocument()
-      // A second request would be the server's 409, so it is no longer offered.
-      expect(within(panel).queryByRole('button', { name: /Request sign-off/ })).not.toBeInTheDocument()
-
-      /**
-       * A withdrawal is on the record and needs its reason, the same call
-       * `PrereqReasonDialog` makes about a return: `cancelObSignoff` answers
-       * 422 for a blank one.
-       */
-      await user.click(within(panel).getByRole('button', { name: 'Withdraw' }))
-      expect(await screen.findByRole('button', { name: 'Withdraw the request' })).toBeDisabled()
-    })
-
-    /**
-     * Trinity's ERP journey is mid-flight, so its go-live would be the
-     * server's `ob-signoff-journey-incomplete` 422. The panel is absent rather
-     * than disabled — the same call the action bar makes about a transition
-     * the service refuses outright.
-     */
-    it('does not offer a go-live on a journey still in flight', async () => {
-      renderClient(8)
-      await screen.findByTestId('journey-step-panel', undefined, SLOW)
-      expect(screen.queryByRole('region', { name: 'Go-live sign-off' })).not.toBeInTheDocument()
     })
   })
 

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 
 import { portalLogin } from '@/api/generated/portal/portal'
-import { ApiError } from '@/api/http'
+import { ApiError, setAccessToken } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -42,6 +42,28 @@ export function PortalLoginPage() {
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null)
     try {
+      /*
+        Sign in anonymously, always.
+
+        `api/http.ts` holds ONE module-level access token and attaches it to
+        every generated call, staff or portal — see `portalAuthStore`'s note
+        on the shared slot. It is module state, so it outlives client-side
+        navigation: a staff user who opens /portal/login in the same tab
+        still has their own bearer token sitting in that slot, and the login
+        POST goes out carrying it.
+
+        The server then answers **404, not 401** — A-111's guard hides the
+        portal route tree from a non-client principal rather than confirming
+        it exists, which is the same no-existence-leak rule §2 applies to
+        out-of-scope ids. So the screen reports a failure that has nothing to
+        do with the credentials typed into it, and the client's own password
+        looks wrong. Verified against the running API: the identical request
+        is 200 with no Authorization header and 404 with a staff one.
+
+        Clearing the slot first costs nothing — a login is by definition an
+        anonymous call — and `signIn` fills it back in a line later.
+      */
+      setAccessToken(null)
       const response = await portalLogin(values)
       signIn(response.data)
       navigate(from ?? '/portal/choose', { replace: true })

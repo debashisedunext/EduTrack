@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as http from '@/api/http'
 import type { PortalLoginResult } from '@/api/generated/model/portalLoginResult'
 
-import { initialPortalAuthState, usePortalAuthStore } from './portalAuthStore'
+import { initialPortalAuthState, restorePortalSession, usePortalAuthStore } from './portalAuthStore'
 
 /**
  * A-130 · the portal session store — `authStore.test.ts`'s shape, one
@@ -21,7 +21,10 @@ const loginResult = (overrides: Partial<PortalLoginResult> = {}): PortalLoginRes
   ...overrides,
 })
 
-beforeEach(() => usePortalAuthStore.setState(initialPortalAuthState))
+beforeEach(() => {
+  usePortalAuthStore.setState(initialPortalAuthState)
+  sessionStorage.clear()
+})
 afterEach(() => vi.restoreAllMocks())
 
 it('signs in: authenticates, stores the client, and sets the shared access token', () => {
@@ -36,7 +39,60 @@ it('signs in: authenticates, stores the client, and sets the shared access token
   expect(setAccessToken).toHaveBeenCalledWith('portal.test.token')
 })
 
-it('starts anonymous — there is nothing to restore on a fresh load', () => {
+it('starts anonymous until a stored session is restored', () => {
+  expect(usePortalAuthStore.getState().status).toBe('anonymous')
+})
+
+/**
+ * The reload bug this persistence exists to fix: the portal signed the
+ * client out on every refresh, back button and returning link, because the
+ * token lived only in memory and A-130 ships no refresh cookie to rebuild it
+ * from. Storage is the only restore available until one exists.
+ */
+it('restores a live session after a reload, token and all', () => {
+  usePortalAuthStore.getState().signIn(loginResult())
+
+  // What a reload is, to a module: fresh store, empty token slot,
+  // sessionStorage the only thing that survived.
+  usePortalAuthStore.setState(initialPortalAuthState)
+  const setAccessToken = vi.spyOn(http, 'setAccessToken')
+
+  restorePortalSession()
+
+  const state = usePortalAuthStore.getState()
+  expect(state.status).toBe('authenticated')
+  expect(state.client?.username).toBe('northwind.ops')
+  expect(setAccessToken).toHaveBeenCalledWith('portal.test.token')
+})
+
+it('discards a stored session whose token has already expired', () => {
+  usePortalAuthStore.getState().signIn(loginResult({ expiresIn: -1 }))
+  usePortalAuthStore.setState(initialPortalAuthState)
+  const setAccessToken = vi.spyOn(http, 'setAccessToken')
+
+  restorePortalSession()
+
+  // Replaying it would put a guaranteed 401 behind every call on the page.
+  expect(usePortalAuthStore.getState().status).toBe('anonymous')
+  expect(setAccessToken).not.toHaveBeenCalled()
+})
+
+it('signing out leaves nothing for a later reload to restore', () => {
+  usePortalAuthStore.getState().signIn(loginResult())
+  usePortalAuthStore.getState().signOut()
+
+  usePortalAuthStore.setState(initialPortalAuthState)
+  restorePortalSession()
+
+  expect(usePortalAuthStore.getState().status).toBe('anonymous')
+})
+
+it('survives storage being unreadable rather than failing the page', () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('SecurityError: site data blocked')
+  })
+
+  expect(() => restorePortalSession()).not.toThrow()
   expect(usePortalAuthStore.getState().status).toBe('anonymous')
 })
 

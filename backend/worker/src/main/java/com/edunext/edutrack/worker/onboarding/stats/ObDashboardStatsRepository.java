@@ -350,6 +350,211 @@ public class ObDashboardStatsRepository {
         return rows;
     }
 
+    // ------------------------------------------------------------------
+    // ob_scope_dashboard_summary
+    // ------------------------------------------------------------------
+
+    /**
+     * Every (narrowed caller, journey) pair the caller may see, as A-112's two
+     * scope rules restated over this module's own tables.
+     *
+     * <p><b>Only OB_SALES and OB_STEP_OWNER appear.</b> The three unrestricted
+     * roles see every journey, which {@code ob_dashboard_summary} already
+     * counts, and storing them here as well would put the same figure in two
+     * tables and invite the two to disagree after a partial pass. Filtering
+     * {@code module_role} in the branch rather than afterwards also keeps this
+     * from becoming a cross product of every user against every journey.
+     *
+     * <p>Three branches rather than one with an {@code OR}, because an
+     * {@code OR} across two columns in a join condition cannot use either
+     * index. {@code UNION} — not {@code UNION ALL} — is doing real work: a step
+     * owner who is also the backup on a second step of the same journey would
+     * otherwise contribute that journey twice and double every one of their
+     * cards.
+     *
+     * <p>The backup owner counts as visibility for the reason
+     * {@code ObDashboardScope.journeyPredicate} gives at length: the backup
+     * exists to cover the step, so excluding them would under-report who is
+     * actually carrying it.
+     */
+    private static final String SCOPE_VISIBLE = """
+            SELECT uma.user_id AS scope_user_id, j.id AS journey_id
+              FROM user_module_access uma
+              JOIN ob_clients c ON c.created_by = uma.user_id
+              JOIN ob_journeys j ON j.ob_client_id = c.id AND j.archived_at IS NULL
+             WHERE uma.module = 'ONBOARDING' AND uma.revoked_at IS NULL
+               AND uma.module_role = 'OB_SALES'
+            UNION
+            SELECT uma.user_id, s.journey_id
+              FROM user_module_access uma
+              JOIN ob_journey_steps s ON s.owner_user_id = uma.user_id
+              JOIN ob_journeys j ON j.id = s.journey_id AND j.archived_at IS NULL
+             WHERE uma.module = 'ONBOARDING' AND uma.revoked_at IS NULL
+               AND uma.module_role = 'OB_STEP_OWNER'
+            UNION
+            SELECT uma.user_id, s.journey_id
+              FROM user_module_access uma
+              JOIN ob_journey_steps s ON s.backup_owner_user_id = uma.user_id
+              JOIN ob_journeys j ON j.id = s.journey_id AND j.archived_at IS NULL
+             WHERE uma.module = 'ONBOARDING' AND uma.revoked_at IS NULL
+               AND uma.module_role = 'OB_STEP_OWNER'""";
+
+    /**
+     * The current day's stock columns, once per narrowed caller — the fourth
+     * stock pass, and what lets OB-02 answer OB_SALES and OB_STEP_OWNER with a
+     * number instead of a sentence.
+     *
+     * <h2>Every statement here is {@link #refreshSummaryStock}'s, one GROUP BY
+     * column wider</h2>
+     *
+     * <p>Deliberately so. The two boards must mean the same thing — a Step
+     * Owner comparing their At Risk against their manager's is comparing the
+     * same arithmetic over a smaller set — so this method reuses
+     * {@link #OPEN}, {@link #OVERDUE} and {@link #AMBER} rather than restating
+     * them, and its {@code CASE} arms are copied verbatim. If the parent's
+     * bucket rule changes and this one does not, the boards diverge and each
+     * stays individually plausible, which is the failure A-108 warns about for
+     * the RAG columns and the reason those two rules live in one place.
+     *
+     * <h2>The unit is the journey the caller can see, not the step they own</h2>
+     *
+     * <p>A Step Owner's scope is "every step of a journey containing one of
+     * mine", not "my steps" — {@code ObDashboardScope.journeyPredicate} and
+     * {@code appliedScope}'s own wording. Counting only their own steps here
+     * would make each card disagree with the drill-down list it opens, since
+     * B-127's slide-over is scoped by that same predicate. A card whose number
+     * does not match the list behind it is worse than no number, and is the
+     * whole reason this table exists.
+     *
+     * <h2>A caller with nothing visible gets no row</h2>
+     *
+     * <p>Not a zeroed row. The migration's header carries the argument: a zero
+     * claims "nothing of yours is overdue", and B-121's service has to tell
+     * that apart from "you have not been given any services yet". The
+     * {@code GROUP BY} produces no group for an empty scope, which is exactly
+     * the behaviour wanted — noted because it looks like an omission.
+     *
+     * <p><b>Public deliberately</b>, for {@link #refreshSummaryStock}'s reason:
+     * Spring ignores {@code @Transactional} on a non-public method silently,
+     * which would autocommit the DELETE on its own and leave every narrowed
+     * caller reading in that window a board of sentences again.
+     *
+     * @return rows written by the journey pass
+     */
+    @Transactional
+    public int refreshScopeSummaryStock(ObStatsDay day, Instant now, Instant computedAt,
+                                        BigDecimal amberShare) {
+        jdbc.sql("DELETE FROM ob_scope_dashboard_summary WHERE stat_date = :day")
+                .param("day", day.date())
+                .update();
+
+        int rows = jdbc.sql("""
+                INSERT INTO ob_scope_dashboard_summary (
+                    stat_date, scope_user_id, product_id,
+                    journeys_total, journeys_locked, journeys_held,
+                    journeys_open_running, journeys_completed,
+                    rag_green, rag_amber, rag_red,
+                    computed_at)
+                SELECT :day, x.scope_user_id, x.product_id,
+                    COUNT(*),
+                    COALESCE(SUM(x.bucket = 'LOCKED'), 0),
+                    COALESCE(SUM(x.bucket = 'HELD'), 0),
+                    COALESCE(SUM(x.bucket = 'RUNNING'), 0),
+                    COALESCE(SUM(x.bucket = 'COMPLETED'), 0),
+                    COALESCE(SUM(x.bucket = 'RUNNING' AND x.rag = 'GREEN'), 0),
+                    COALESCE(SUM(x.bucket = 'RUNNING' AND x.rag = 'AMBER'), 0),
+                    COALESCE(SUM(x.bucket = 'RUNNING' AND x.rag = 'RED'), 0),
+                    :computedAt
+                FROM (
+                    SELECT v.scope_user_id, j.product_id,
+                        CASE
+                            WHEN j.completed_at IS NOT NULL THEN 'COMPLETED'
+                            WHEN j.gate_status = 'LOCKED' THEN 'LOCKED'
+                            WHEN j.held_by_journey_id IS NOT NULL
+                                 AND j.released_at IS NULL THEN 'HELD'
+                            ELSE 'RUNNING'
+                        END AS bucket,
+                        CASE
+                            WHEN EXISTS (
+                                SELECT 1 FROM ob_journey_steps s
+                                 WHERE s.journey_id = j.id AND %2$s) THEN 'RED'
+                            WHEN EXISTS (
+                                SELECT 1 FROM ob_journey_steps s
+                                 WHERE s.journey_id = j.id AND %3$s) THEN 'AMBER'
+                            ELSE 'GREEN'
+                        END AS rag
+                    FROM (%1$s) v
+                    JOIN ob_journeys j ON j.id = v.journey_id AND j.archived_at IS NULL
+                ) x
+                GROUP BY x.scope_user_id, x.product_id
+                """.formatted(SCOPE_VISIBLE, OVERDUE, AMBER))
+                .param("day", day.date())
+                .param("now", now)
+                .param("amberShare", amberShare)
+                .param("computedAt", computedAt)
+                .update();
+
+        jdbc.sql("""
+                UPDATE ob_scope_dashboard_summary d
+                  JOIN (
+                    SELECT v.scope_user_id, j.product_id,
+                        COALESCE(SUM(s.due_at >= :dayStart AND s.due_at < :dayEnd), 0) AS due_today,
+                        COALESCE(SUM(s.due_at >= :weekStart AND s.due_at < :weekEnd), 0) AS due_week,
+                        COALESCE(SUM(%2$s), 0) AS overdue
+                    FROM ob_journey_steps s
+                    JOIN ob_journeys j ON j.id = s.journey_id AND j.archived_at IS NULL
+                    JOIN (%1$s) v ON v.journey_id = j.id
+                    WHERE %3$s
+                    GROUP BY v.scope_user_id, j.product_id
+                  ) x ON x.scope_user_id = d.scope_user_id AND x.product_id = d.product_id
+                   SET d.steps_due_today     = x.due_today,
+                       d.steps_due_this_week = x.due_week,
+                       d.steps_overdue       = x.overdue
+                 WHERE d.stat_date = :day
+                """.formatted(SCOPE_VISIBLE, OVERDUE, OPEN))
+                .param("day", day.date())
+                .param("dayStart", day.start())
+                .param("dayEnd", day.end())
+                .param("weekStart", day.weekStart())
+                .param("weekEnd", day.weekEnd())
+                .param("now", now)
+                .update();
+
+        jdbc.sql("""
+                UPDATE ob_scope_dashboard_summary d
+                  JOIN (
+                    SELECT v.scope_user_id, j.product_id,
+                        COUNT(DISTINCT CASE WHEN EXISTS (
+                            SELECT 1 FROM ob_journey_steps s
+                             WHERE s.journey_id = j.id AND %2$s)
+                          THEN j.ob_client_id END) AS overdue_clients,
+                        COUNT(DISTINCT CASE WHEN c.overall_status = 'LIVE'
+                          THEN j.ob_client_id END) AS live_clients,
+                        COUNT(DISTINCT CASE WHEN c.overall_status = 'ONBOARDING'
+                          THEN j.ob_client_id END) AS onboarding_clients,
+                        COUNT(DISTINCT CASE WHEN EXISTS (
+                            SELECT 1 FROM ob_client_escalations e
+                             WHERE e.journey_id = j.id AND e.resolved_at IS NULL)
+                          THEN j.ob_client_id END) AS escalated_clients
+                    FROM ob_journeys j
+                    JOIN ob_clients c ON c.id = j.ob_client_id
+                    JOIN (%1$s) v ON v.journey_id = j.id
+                    WHERE j.archived_at IS NULL
+                    GROUP BY v.scope_user_id, j.product_id
+                  ) x ON x.scope_user_id = d.scope_user_id AND x.product_id = d.product_id
+                   SET d.clients_overdue    = x.overdue_clients,
+                       d.clients_live       = x.live_clients,
+                       d.clients_onboarding = x.onboarding_clients,
+                       d.clients_escalated  = x.escalated_clients
+                 WHERE d.stat_date = :day
+                """.formatted(SCOPE_VISIBLE, OVERDUE))
+                .param("day", day.date())
+                .param("now", now)
+                .update();
+
+        return rows;
+    }
+
     /**
      * One day's flow columns, upserted.
      *

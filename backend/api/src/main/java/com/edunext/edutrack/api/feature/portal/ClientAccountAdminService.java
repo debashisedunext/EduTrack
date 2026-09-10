@@ -74,6 +74,8 @@ public class ClientAccountAdminService {
     private final ObPrimaryContactReader clients;
     private final ObOutboxEnqueuer outbox;
     private final PasswordEncoder passwordEncoder;
+    private final PortalPasswordRules passwordRules;
+    private final PortalDevCredentialProperties devCredentials;
     private final Clock clock;
 
     ClientAccountAdminService(ClientAccountRepository accounts,
@@ -82,6 +84,8 @@ public class ClientAccountAdminService {
                               ObPrimaryContactReader clients,
                               ObOutboxEnqueuer outbox,
                               PasswordEncoder passwordEncoder,
+                              PortalPasswordRules passwordRules,
+                              PortalDevCredentialProperties devCredentials,
                               Clock clock) {
         this.accounts = accounts;
         this.tokens = tokens;
@@ -89,6 +93,8 @@ public class ClientAccountAdminService {
         this.clients = clients;
         this.outbox = outbox;
         this.passwordEncoder = passwordEncoder;
+        this.passwordRules = passwordRules;
+        this.devCredentials = devCredentials;
         this.clock = clock;
     }
 
@@ -140,11 +146,14 @@ public class ClientAccountAdminService {
                 client.contactEmail(),
                 actorUserId);
 
+        String devPassword = applyReadablePasswordIfEnabled(accountId);
+
         issueCredential(accountId, obClientId, client, username,
                 ClientCredentialTokens.PURPOSE_INITIAL,
                 ObNotificationEvent.CLIENT_LOGIN_CREATED, actorUserId);
 
-        return find(scope, obClientId).orElseThrow(() -> new ClientAccountNotFoundException(obClientId));
+        return with(find(scope, obClientId)
+                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), devPassword);
     }
 
     /**
@@ -164,11 +173,14 @@ public class ClientAccountAdminService {
         ClientAccountRow account = accounts.findByObClientId(obClientId)
                 .orElseThrow(() -> new ClientAccountNotFoundException(obClientId));
 
+        String devPassword = applyReadablePasswordIfEnabled(account.id());
+
         issueCredential(account.id(), obClientId, client, account.username(),
                 ClientCredentialTokens.PURPOSE_RESET,
                 ObNotificationEvent.CLIENT_PASSWORD_RESET, actorUserId);
 
-        return find(scope, obClientId).orElseThrow(() -> new ClientAccountNotFoundException(obClientId));
+        return with(find(scope, obClientId)
+                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), devPassword);
     }
 
     /**
@@ -287,7 +299,7 @@ public class ClientAccountAdminService {
     }
 
     private ClientAccountAdminDtos.Account toDto(ClientAccountRow row) {
-        return new ClientAccountAdminDtos.Account(
+        return ClientAccountAdminDtos.Account.withoutCredential(
                 row.id(),
                 row.username(),
                 row.displayName(),
@@ -297,5 +309,55 @@ public class ClientAccountAdminService {
                 row.lastLoginAt(),
                 row.lockedUntil(),
                 tokens.lastIssuedAt(row.id()).orElse(null));
+    }
+
+    /**
+     * Development deployments only: replace the unguessable placeholder with a
+     * password the operator can read back.
+     *
+     * <p>Returns {@code null} when the switch is off, which is the shipped
+     * behaviour and the reason this is one method called from two places
+     * rather than a condition written twice.
+     *
+     * <p><b>The credential path still runs either way.</b> The link is minted
+     * and queued as before, because switching the property off has to leave a
+     * working account behind rather than one whose only way in was suppressed
+     * on the day it was created — and because a demo of the onboarding flow
+     * should still be exercising the mail it is demonstrating.
+     *
+     * <p>{@code setPassword} clears {@code must_change_password} in the same
+     * statement — not because login enforces it ({@code PortalAuthService}
+     * checks the password, {@code is_active} and the lockout, and never that
+     * flag) but because leaving it set would have the panel report a pending
+     * change that nothing will ever ask for. The column is the panel's answer
+     * to "has this client chosen their own password", and after this it has
+     * been chosen, by the operator.
+     *
+     * <p>Called <em>before</em> the account is read back, so the response
+     * reports the {@code mustChangePassword} this actually left behind rather
+     * than the {@code true} the row was inserted with.
+     *
+     * @throws PortalAuthExceptions.WeakPortalPassword the configured password
+     *         would be refused by the portal's own rules. Checked here rather
+     *         than at startup so the failure names the request that wanted it,
+     *         and so a misconfigured demo box still serves every other route.
+     */
+    private String applyReadablePasswordIfEnabled(long accountId) {
+        if (!devCredentials.issuesReadablePassword()) {
+            return null;
+        }
+        String password = devCredentials.hasFixedPassword()
+                ? devCredentials.password()
+                : ClientCredentialTokens.readableDevPassword();
+        passwordRules.enforce(password);
+
+        accounts.setPassword(accountId, passwordEncoder.encode(password));
+        return password;
+    }
+
+    /** The account as read back, carrying {@code devPassword} only if one was set. */
+    private static ClientAccountAdminDtos.Account with(ClientAccountAdminDtos.Account account,
+                                                      String devPassword) {
+        return devPassword == null ? account : account.withDevPassword(devPassword);
     }
 }

@@ -136,6 +136,13 @@ public class ObModuleRoleRules {
         // ADMIN_ONLY every other journey-templates write above already carries.
         put(m, "PUT", "/api/v1/onboarding/journey-templates/order", ADMIN_ONLY);
         put(m, "PUT", "/api/v1/onboarding/journey-templates/{templateId}/depends-on", ADMIN_ONLY);
+        // C-124 · renaming a Module Service and deleting one, on the same
+        // ADMIN_ONLY line. Both act on the whole version chain rather than the
+        // row in the path, and the delete removes every version of a service
+        // with its steps — the two writes on this resource with the widest
+        // blast radius, so if any of the above is Admin-only these are.
+        put(m, "PATCH", "/api/v1/onboarding/journey-templates/{templateId}", ADMIN_ONLY);
+        put(m, "DELETE", "/api/v1/onboarding/journey-templates/{templateId}", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/journey-template-steps/{stepId}", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/docs", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/items", ADMIN_ONLY);

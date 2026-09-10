@@ -60,7 +60,11 @@ class PortalJourneyReader {
                           JOIN ob_products p ON p.id = j.product_id
                          WHERE j.ob_client_id = :id
                            AND j.archived_at IS NULL
-                         ORDER BY p.name, j.id
+                         -- The pinned instantiation order (V20260910_0930),
+                         -- so the client sees their strips in the same order
+                         -- staff do on OB-05, and an OB-07 reorder moves
+                         -- neither. Product name still breaks a tie.
+                         ORDER BY j.sequence, p.name, j.id
                         """.formatted(ObStepRag.worstOverSteps("rs")))
                 .param("id", obClientId)
                 .query((rs, n) -> new JourneyRow(

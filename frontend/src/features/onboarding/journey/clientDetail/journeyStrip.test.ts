@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  defaultOpenJourneyId,
   formatDays,
   formatTatUsage,
   journeyHold,
@@ -167,5 +168,44 @@ describe('prereqProgress', () => {
     })
     expect(progress.percent).toBe(100)
     expect(progress.isCleared).toBe(true)
+  })
+})
+
+describe('defaultOpenJourneyId', () => {
+  const j = (
+    id: number,
+    over: { gateStatus?: 'OPEN' | 'LOCKED'; heldByJourneyId?: number | null; percentComplete?: number } = {},
+  ) => ({
+    id,
+    gateStatus: over.gateStatus ?? ('OPEN' as const),
+    heldByJourneyId: over.heldByJourneyId ?? null,
+    percentComplete: over.percentComplete ?? 0,
+  })
+
+  it('opens nothing when there is nothing to open', () => {
+    expect(defaultOpenJourneyId([])).toBeUndefined()
+  })
+
+  /**
+   * The running one, not merely the first — a finished service followed by a
+   * mid-flight one should open on the one somebody still has work in.
+   */
+  it('opens the running journey rather than the first listed', () => {
+    expect(defaultOpenJourneyId([j(11, { percentComplete: 100 }), j(12)])).toBe(12)
+  })
+
+  it('skips a locked journey and one held behind a sibling', () => {
+    expect(defaultOpenJourneyId([j(11, { gateStatus: 'LOCKED' }), j(12)])).toBe(12)
+    expect(defaultOpenJourneyId([j(11, { heldByJourneyId: 9 }), j(12)])).toBe(12)
+  })
+
+  /**
+   * Nothing running is the finished client and the locked one, and both still
+   * get a ribbon: a page with one beats a page without one, which is the
+   * prototype's own behaviour.
+   */
+  it('falls back to the first journey when none is running', () => {
+    expect(defaultOpenJourneyId([j(11, { percentComplete: 100 }), j(12, { percentComplete: 100 })])).toBe(11)
+    expect(defaultOpenJourneyId([j(71, { gateStatus: 'LOCKED' })])).toBe(71)
   })
 })

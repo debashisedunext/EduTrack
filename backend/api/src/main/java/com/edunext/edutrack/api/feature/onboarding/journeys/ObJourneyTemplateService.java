@@ -674,6 +674,248 @@ public class ObJourneyTemplateService {
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // C-124 · editing and deleting a whole Module Service
+    // ══════════════════════════════════════════════════════════════════
+
+    /**
+     * Client journeys instantiated from each of these template versions,
+     * <b>chain-wide</b>: every row of one service carries the same total.
+     *
+     * <p>The catalogue's Edit and Delete controls are enabled or disabled by
+     * this number, and the card they sit on is the head of a version chain —
+     * so the honest figure for a card is the whole chain's, not the head row's.
+     * A service whose v1 carries three clients and whose v2 carries none is in
+     * use, and a per-row count would have said "0" on the card that draws the
+     * buttons.
+     *
+     * <p>Returned as a map keyed by every template id passed in, zeros
+     * included, so the caller never has to distinguish "no journeys" from "not
+     * asked about".
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, Long> journeyCountsByTemplate(List<ObJourneyTemplate> rows) {
+        if (rows.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = rows.stream().map(ObJourneyTemplate::getId).toList();
+        Map<Long, Long> perVersion = new HashMap<>();
+        for (ObJourneyTemplateRepository.TemplateTally tally : templates.countJourneysByTemplate(ids)) {
+            perVersion.put(tally.getTemplateId(), tally.getTally());
+        }
+
+        // Roll the per-version tallies up onto the (productId, name) chain,
+        // then hand every member of that chain the chain's own total.
+        Map<String, Long> perService = new HashMap<>();
+        for (ObJourneyTemplate row : rows) {
+            perService.merge(serviceKey(row), perVersion.getOrDefault(row.getId(), 0L), Long::sum);
+        }
+
+        Map<Long, Long> byTemplateId = new LinkedHashMap<>();
+        for (ObJourneyTemplate row : rows) {
+            byTemplateId.put(row.getId(), perService.getOrDefault(serviceKey(row), 0L));
+        }
+        return byTemplateId;
+    }
+
+    /**
+     * The catalogue card's "Edit details" — renames a Module Service, or moves
+     * it to another product, across <b>every version in its chain</b>.
+     *
+     * <p>A service is identified by {@code (product_id, name)}, exactly as
+     * {@code uq_ob_journey_templates_version} keys it. Renaming the one row the
+     * caller happened to click would therefore not rename the service: it would
+     * split one chain in two, leave {@link #beginRevision} numbering from a head
+     * that is no longer the head, and make the catalogue draw a second card for
+     * a service nobody created. So the write spans the chain, and the row id in
+     * the path only says <em>which</em> chain.
+     *
+     * <p><b>Refused outright once a client is on it</b> —
+     * {@link ModuleServiceInUseException} carries the argument, which is not
+     * only about deletion: {@code ob_journeys.service_name} is denormalised at
+     * instantiation and a service-level dependency is resolved by
+     * {@code (product, service name)} rather than by template id, so a rename
+     * underneath a live journey breaks a lookup that has no other key to fall
+     * back on.
+     *
+     * <p>This is deliberately <em>not</em> {@link #requireEditable}. That guard
+     * asks whether a version has been published, because publishing freezes the
+     * journey content a running instance renders from. A name and a product are
+     * catalogue metadata rather than journey content — the same distinction
+     * {@link #updateDependsOn} draws to justify working on a published row — so
+     * what gates this is whether anybody was ever boarded on it, not whether it
+     * was ever published. A published service nobody bought is renameable; an
+     * unpublished draft cannot have been bought at all.
+     */
+    @Transactional
+    public ObJourneyTemplate updateModuleService(long templateId, String name, Long productId) {
+        ObJourneyTemplate head = templates.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+
+        List<ObJourneyTemplate> chain = serviceChain(head);
+        requireUnused(head.getName(), chain);
+
+        String newName = name.trim();
+        long newProductId = productId == null ? head.getProductId() : productId;
+        if (newName.equals(head.getName()) && newProductId == head.getProductId()) {
+            return head;
+        }
+
+        /*
+          Checked before the loop rather than left to the unique index. The
+          write touches every version of the chain, so a collision discovered on
+          the third row aborts a transaction that has already renamed two — and
+          surfaces as an index name and a version number, which is not something
+          an admin can act on. See DuplicateModuleServiceNameException.
+        */
+        if (!templates.findByProductIdAndNameOrderByVersionAsc(newProductId, newName).isEmpty()) {
+            throw new DuplicateModuleServiceNameException(newProductId, newName);
+        }
+
+        for (ObJourneyTemplate version : chain) {
+            version.setName(newName);
+            version.setProductId(newProductId);
+            templates.save(version);
+        }
+        templates.flush();
+        return templates.findById(templateId).orElseThrow(() -> new TemplateNotFoundException(templateId));
+    }
+
+    /**
+     * The catalogue card's Delete — removes a Module Service and every version
+     * of it, with its steps, step items and step docs.
+     *
+     * <p>Three refusals, in the order the database would hit them if they were
+     * left to it, each replaced by one that names the thing the admin can
+     * actually change:
+     *
+     * <ol>
+     *   <li><b>A client is on it</b> — {@link ModuleServiceInUseException}.
+     *       {@code ob_journeys.template_id} is a RESTRICT foreign key, so this
+     *       would otherwise be {@code ERROR 1451}; more to the point, a journey
+     *       renders its steps from these very rows, and deleting them would
+     *       empty a running client's ribbon.</li>
+     *   <li><b>Another service depends on it</b> —
+     *       {@link ModuleServiceHasDependentsException}, for
+     *       {@code fk_ob_journey_templates_depends_on}'s own stated reason.</li>
+     *   <li>Steps depending on other steps, which is not a refusal but an
+     *       ordering problem — see below.</li>
+     * </ol>
+     *
+     * <p><b>Steps are deleted dependents-first, and this is the order
+     * {@code V20260903_1420} asks for by name.</b> That migration chose
+     * RESTRICT over CASCADE on {@code fk_ob_journey_template_steps_template}
+     * after measuring the alternative on MySQL 8.4: with CASCADE, deleting a
+     * template whose steps form a dependency chain fails with an error naming
+     * {@code fk_ob_journey_template_steps_depends_on} — a constraint on a
+     * different table than the one the caller asked about — while a template
+     * whose steps are all parallel deletes cleanly. Deletion working
+     * <em>except</em> when the admin used the feature OB-07 is built around is
+     * the worst available behaviour, so the migration made it fail the same way
+     * every time and left the ordering to this method.
+     *
+     * <p>Items and docs need no such care: their own foreign keys are
+     * {@code ON DELETE CASCADE} onto the step.
+     *
+     * <p>The chain's own {@code dependsOnTemplateId} values are cleared first.
+     * A dependency normally names another service, but nothing stops one
+     * version of a chain naming another, and the self-FK would refuse the
+     * delete over a reference that is about to be deleted too.
+     */
+    @Transactional
+    public void deleteModuleService(long templateId) {
+        ObJourneyTemplate head = templates.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+
+        List<ObJourneyTemplate> chain = serviceChain(head);
+        requireUnused(head.getName(), chain);
+
+        Set<Long> chainIds = new LinkedHashSet<>(chain.stream().map(ObJourneyTemplate::getId).toList());
+        List<String> dependents = templates.findByDependsOnTemplateIdIn(chainIds).stream()
+                .filter(other -> !chainIds.contains(other.getId()))
+                .map(ObJourneyTemplate::getName)
+                .distinct()
+                .toList();
+        if (!dependents.isEmpty()) {
+            throw new ModuleServiceHasDependentsException(head.getName(), dependents);
+        }
+
+        for (ObJourneyTemplate version : chain) {
+            if (version.getDependsOnTemplateId() != null) {
+                version.setDependsOnTemplateId(null);
+                templates.save(version);
+            }
+        }
+        templates.flush();
+
+        for (ObJourneyTemplate version : chain) {
+            deleteStepsOf(version.getId());
+        }
+        templates.deleteAll(chain);
+        templates.flush();
+    }
+
+    /**
+     * One version's steps, dependents first — {@code removeStep}'s refusal
+     * turned into an ordering, since here every step is going.
+     *
+     * <p>Peeling rather than reverse-sequence order: a dependency is supposed to
+     * name an earlier step and C-119 enforces that on the write path, but a
+     * delete that only works while that invariant holds is a delete that fails
+     * on exactly the data worth investigating. Peeling terminates on any acyclic
+     * graph, and the self-FK makes a cycle unrepresentable.
+     */
+    private void deleteStepsOf(long versionId) {
+        List<ObJourneyTemplateStep> remaining =
+                new ArrayList<>(steps.findByTemplateIdOrderBySequenceAsc(versionId));
+        while (!remaining.isEmpty()) {
+            Set<Long> stillPointedAt = new LinkedHashSet<>();
+            for (ObJourneyTemplateStep step : remaining) {
+                if (step.getDependsOnStepId() != null) {
+                    stillPointedAt.add(step.getDependsOnStepId());
+                }
+            }
+
+            List<ObJourneyTemplateStep> leaves = remaining.stream()
+                    .filter(step -> !stillPointedAt.contains(step.getId()))
+                    .toList();
+            if (leaves.isEmpty()) {
+                // Unreachable while the self-FK holds — a cycle cannot be
+                // stored. Fail loudly rather than spin forever.
+                throw new IllegalStateException(
+                        "journey template " + versionId + " has a cycle in depends_on_step_id");
+            }
+            steps.deleteAll(leaves);
+            steps.flush();
+            remaining.removeAll(leaves);
+        }
+    }
+
+    /** Every version sharing this row's {@code (productId, name)} — the service itself. */
+    private List<ObJourneyTemplate> serviceChain(ObJourneyTemplate head) {
+        return templates.findByProductIdAndNameOrderByVersionAsc(head.getProductId(), head.getName());
+    }
+
+    /** @throws ModuleServiceInUseException if any client was ever boarded on any version of the chain. */
+    private void requireUnused(String serviceName, List<ObJourneyTemplate> chain) {
+        List<Long> ids = chain.stream().map(ObJourneyTemplate::getId).toList();
+        long journeys = ids.isEmpty() ? 0L : templates.countJourneysForTemplates(ids);
+        if (journeys > 0) {
+            throw new ModuleServiceInUseException(serviceName, journeys);
+        }
+    }
+
+    /**
+     * {@code (productId, name)} as one map key — the exact key the OB-07 page
+     * groups its cards on, and the one {@code uq_ob_journey_templates_version}
+     * keys uniqueness on, so the three cannot drift apart about what "one
+     * service" means. Unambiguous despite the plain space: the prefix is
+     * always digits, so the first space is always the separator.
+     */
+    private static String serviceKey(ObJourneyTemplate row) {
+        return row.getProductId() + " " + row.getName();
+    }
+
     /** @throws TemplateNotEditableException if the template has ever been published. */
     private ObJourneyTemplate requireEditable(long templateId) {
         ObJourneyTemplate template = templates.findById(templateId)

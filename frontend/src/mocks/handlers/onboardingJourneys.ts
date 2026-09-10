@@ -168,6 +168,57 @@ function editabilityConflict(template: ObJourneyTemplateRow | undefined) {
   return null;
 }
 
+/**
+ * C-124 · every version of one *service* — `(productId, name)`, the key
+ * `uq_ob_journey_templates_version` uses and the key the catalogue page groups
+ * its cards on. The unit both the rename and the delete act on.
+ */
+function serviceChain(head: ObJourneyTemplateRow, db: Db): ObJourneyTemplateRow[] {
+  return db.obJourneyTemplates.filter(
+    (t) => t.productId === head.productId && t.name === head.name,
+  );
+}
+
+/**
+ * Client journeys instantiated from any version of a chain — the number that
+ * decides whether a Module Service can be edited or deleted at all.
+ *
+ * Archived journeys count, matching `countJourneysForTemplates`: a finished
+ * onboarding is as much evidence the service was sold as a running one, and
+ * its steps still render from the template rows a delete would remove.
+ */
+function journeysOnChain(chain: ObJourneyTemplateRow[], db: Db): number {
+  const ids = new Set(chain.map((t) => t.id));
+  return db.obClients.reduce(
+    (total, client) =>
+      total + client.journeys.filter((j) => j.templateId != null && ids.has(j.templateId)).length,
+    0,
+  );
+}
+
+/** The shared `409` both C-124 routes answer with — `ModuleServiceInUseException`'s shape. */
+function moduleServiceInUse(serviceName: string, journeyCount: number) {
+  return problem(409, 'module-service-in-use', 'Module Service is in use', {
+    detail: `"${serviceName}" cannot be edited or deleted — ${journeyCount} client journey`
+      + `${journeyCount === 1 ? ' has' : 's have'} already been instantiated from it. `
+      + 'Publish a new version instead.',
+    journeyCount,
+  });
+}
+
+/** `428`/`412`, or null when the precondition holds — the depends-on route's pair, shared. */
+function preconditionFailure(ifMatch: string | null, current: string) {
+  if (!ifMatch || !ifMatch.trim()) {
+    return problem(428, 'precondition-required',
+      'If-Match is required. GET the template first and send back its ETag.');
+  }
+  if (!ifMatchSatisfied(ifMatch, current)) {
+    return problem(412, 'precondition-failed',
+      'This template changed since you read it. Reload and reapply the change.');
+  }
+  return null;
+}
+
 // ── handlers ────────────────────────────────────────────────────────────────
 
 export const onboardingJourneyHandlers = [
@@ -200,6 +251,14 @@ export const onboardingJourneyHandlers = [
           publishedAt: t.publishedAt ?? null,
           stepCount: steps.length,
           totalTatDays: steps.reduce((sum, s) => sum + (s.tatDays ?? 0), 0),
+          /*
+            C-124 · chain-wide, so every row of one service reports the same
+            total. Measured over the whole `obJourneyTemplates` table rather
+            than over `rows`, because the productId filter above may have
+            narrowed the result — and the count a card disables its buttons by
+            must not depend on which filter the admin happens to have selected.
+          */
+          serviceJourneyCount: journeysOnChain(serviceChain(t, db), db),
         };
       });
     return ok(rows);
@@ -517,6 +576,104 @@ export const onboardingJourneyHandlers = [
     template.dependsOnTemplateId = dependsOnTemplateId;
     return ok(templateDto(template));
   }),
+
+  /*
+    C-124 · `updateObJourneyModuleService` — rename a Module Service, or move
+    it to another product.
+
+    Mirrors the server on the two things a screen built against this mock could
+    otherwise get wrong:
+
+    1. **Every version of the chain is renamed**, not the row in the path. A
+       service is `(productId, name)`, so a mock that renamed one row would let
+       the catalogue draw two cards for one service and nobody would notice
+       until the real backend did the right thing instead.
+    2. **`409` once a client is on it**, counted across the whole chain and
+       including archived journeys — `ModuleServiceInUseException`'s own rule.
+  */
+  http.patch(url('/onboarding/journey-templates/:templateId'), async ({ params, request }) => {
+    const db = getDb();
+    const template = db.obJourneyTemplates.find((t) => t.id === Number(params.templateId));
+    if (!template) return notFound('Journey template');
+
+    const detail = detailDto(template.id, db);
+    const precondition = preconditionFailure(request.headers.get('If-Match'), etagOf(detail!));
+    if (precondition) return precondition;
+
+    const body = (await request.json()) as { name?: string; productId?: number | null };
+    if (!body.name || !body.name.trim()) {
+      return validationFailed({ name: ['Name is required'] });
+    }
+
+    const chain = serviceChain(template, db);
+    const inUse = journeysOnChain(chain, db);
+    if (inUse > 0) {
+      return moduleServiceInUse(template.name, inUse);
+    }
+
+    const name = body.name.trim();
+    const productId = body.productId ?? template.productId;
+    const clash = db.obJourneyTemplates.some(
+      (t) => t.productId === productId && t.name === name && !chain.some((c) => c.id === t.id),
+    );
+    if (clash) {
+      return problem(409, 'conflict', 'Conflict', {
+        detail: `Product ${productId} already has a Module Service called "${name}" — two services a picker cannot tell apart.`,
+      });
+    }
+
+    for (const version of chain) {
+      version.name = name;
+      version.productId = productId;
+    }
+    return ok(templateDto(template));
+  }),
+
+  /*
+    C-124 · `deleteObJourneyModuleService` — the service and every version of
+    it, with each version's steps, items and docs.
+
+    No `If-Match`: the route takes none, for the reason its contract note
+    gives — there is no update to lose, and the race that matters is settled
+    server-side rather than by a tag.
+  */
+  http.delete(url('/onboarding/journey-templates/:templateId'), ({ params }) => {
+    const db = getDb();
+    const template = db.obJourneyTemplates.find((t) => t.id === Number(params.templateId));
+    if (!template) return notFound('Journey template');
+
+    const chain = serviceChain(template, db);
+    const inUse = journeysOnChain(chain, db);
+    if (inUse > 0) {
+      return moduleServiceInUse(template.name, inUse);
+    }
+
+    const chainIds = new Set(chain.map((t) => t.id));
+    const dependents = [
+      ...new Set(
+        db.obJourneyTemplates
+          .filter((t) => !chainIds.has(t.id) && t.dependsOnTemplateId != null
+            && chainIds.has(t.dependsOnTemplateId))
+          .map((t) => t.name),
+      ),
+    ];
+    if (dependents.length) {
+      return problem(409, 'module-service-has-dependents', 'Module Service has dependents', {
+        detail: `"${template.name}" cannot be deleted — ${dependents.join(', ')} depend on it; clear their "Service depends on" first.`,
+        dependentServiceNames: dependents,
+      });
+    }
+
+    const stepIds = new Set(
+      db.obJourneyTemplateSteps.filter((s) => chainIds.has(s.templateId)).map((s) => s.id),
+    );
+    db.obJourneyTemplateStepItems = db.obJourneyTemplateStepItems.filter((i) => !stepIds.has(i.stepId));
+    db.obJourneyTemplateStepDocs = db.obJourneyTemplateStepDocs.filter((d) => !stepIds.has(d.stepId));
+    db.obJourneyTemplateSteps = db.obJourneyTemplateSteps.filter((s) => !chainIds.has(s.templateId));
+    db.obJourneyTemplates = db.obJourneyTemplates.filter((t) => !chainIds.has(t.id));
+    return noContent();
+  }),
+
 
   http.delete(url('/onboarding/journey-template-steps/:stepId'), ({ params }) => {
     const db = getDb();

@@ -58,10 +58,26 @@ class ObDashboardService {
             "The latest refresh recorded nothing for this product. "
                     + "Choose another product, or check back after the next refresh.";
 
-    private final ObDashboardSummaryRepository summaries;
+    /**
+     * The scoped table has days, and none of them has a row for this caller.
+     *
+     * <p>A distinct sentence from {@link #NO_ROW_TODAY} because it is a
+     * distinct fact, and from a board of zeroes because a zero would claim
+     * nothing of theirs is overdue. The refresh writes no row for an empty
+     * scope precisely so this case is reachable; see the migration header.
+     */
+    private static final String NOTHING_IN_SCOPE =
+            "Nothing is in your scope yet — no services are assigned to you, "
+                    + "or none on the product you selected. "
+                    + "Your board fills as work is assigned to you.";
 
-    ObDashboardService(ObDashboardSummaryRepository summaries) {
+    private final ObDashboardSummaryRepository summaries;
+    private final ObScopeDashboardSummaryRepository scopedSummaries;
+
+    ObDashboardService(ObDashboardSummaryRepository summaries,
+                       ObScopeDashboardSummaryRepository scopedSummaries) {
         this.summaries = summaries;
+        this.scopedSummaries = scopedSummaries;
     }
 
     /**
@@ -94,22 +110,36 @@ class ObDashboardService {
     Rendered summary(CallerIdentity caller, Long productId) {
         ObDashboardScope scope = ObDashboardScope.of(caller);
 
-        if (!scope.unrestricted()) {
+        // No recognised onboarding role at all. A-111's gate means a real
+        // request never gets this far; the branch stays because a record whose
+        // behaviour depends on a guard elsewhere having run is one that
+        // misbehaves the day something calls it from a scheduled job.
+        if (scope.deniesEverything()) {
             return new Rendered(withoutFigures(scope, scope.unavailableReason()), null);
         }
 
-        List<LocalDate> days = summaries.recentDays(productId);
+        // Which table can answer this caller. The three unrestricted roles read
+        // the org-wide board; OB_SALES and OB_STEP_OWNER read the per-scope one
+        // the refresh writes a row of for each of them. Both carry the same
+        // columns and the same card arithmetic, so everything below this line
+        // is the same for either.
+        boolean narrowed = !scope.unrestricted();
+        List<LocalDate> days = narrowed
+                ? scopedSummaries.recentDays(productId)
+                : summaries.recentDays(productId);
         if (days.isEmpty()) {
             return new Rendered(withoutFigures(scope, NEVER_COMPUTED), null);
         }
 
-        Optional<ObDashboardSummaryRepository.Rollup> latest = summaries.rollup(days.get(0), productId);
+        Optional<ObDashboardSummaryRepository.Rollup> latest = rollup(scope, narrowed, days.get(0), productId);
         if (latest.isEmpty()) {
-            // A day the table lists, with no row for this product on it. Not
-            // the same claim as never-computed and not a board of zeroes
-            // either — a zero would say this product has no journeys, which is
-            // false about a product whose last row was written on Monday.
-            return new Rendered(withoutFigures(scope, NO_ROW_TODAY), null);
+            // A day the table lists, with no row on it. For the org-wide board
+            // that means this product contributed nothing; for a narrowed
+            // caller it means nothing is theirs yet. Neither is the
+            // never-computed claim and neither is a board of zeroes — a zero
+            // would say this product has no journeys, which is false about a
+            // product whose last row was written on Monday.
+            return new Rendered(withoutFigures(scope, narrowed ? NOTHING_IN_SCOPE : NO_ROW_TODAY), null);
         }
 
         // The previous *stored* day, and only when the latest one resolved —
@@ -117,7 +147,7 @@ class ObDashboardService {
         // was never read.
         Optional<ObDashboardSummaryRepository.Rollup> previous = days.size() < 2
                 ? Optional.empty()
-                : summaries.rollup(days.get(1), productId);
+                : rollup(scope, narrowed, days.get(1), productId);
 
         ObDashboardSummaryRepository.Rollup today = latest.get();
         List<ObDashboardCard> cards = new ArrayList<>(ObDashboardCardKey.values().length);
@@ -133,6 +163,25 @@ class ObDashboardService {
         ObDashboardSummary summary =
                 new ObDashboardSummary(List.copyOf(cards), today.computedAt(), scope.appliedScope());
         return new Rendered(summary, etagOf(scope, productId, today.computedAt()));
+    }
+
+    /**
+     * One day's counters from whichever table answers this caller.
+     *
+     * <p>The two repositories are deliberately not behind one interface. They
+     * differ in the question they can be asked — the scoped one needs a caller
+     * and the org-wide one has no place to put it — and an interface hiding
+     * that would let a future call site read the org-wide board for a narrowed
+     * caller with the compiler's blessing. Here the choice is one boolean, read
+     * once, beside the {@code recentDays} call that made the same choice.
+     */
+    private Optional<ObDashboardSummaryRepository.Rollup> rollup(ObDashboardScope scope,
+                                                                 boolean narrowed,
+                                                                 LocalDate day,
+                                                                 Long productId) {
+        return narrowed
+                ? scopedSummaries.rollup(day, scope.userId(), productId)
+                : summaries.rollup(day, productId);
     }
 
     /**
@@ -167,11 +216,31 @@ class ObDashboardService {
      *
      * <p>{@code productId} is in the hash because it changes the answer, and
      * the module role is in it because it changes who may have the answer.
+     *
+     * <h2>The caller's id is in it too, for a narrowed role only</h2>
+     *
+     * <p><b>Required since the scoped table landed, and it was not before.</b>
+     * Every narrowed caller used to receive a board of sentences and a null
+     * validator, so no two of them could collide. Now two Step Owners see
+     * genuinely different figures while sharing a role, a product filter and —
+     * because one refresh pass stamps every row it writes with one
+     * {@code computed_at} — the same instant. Without the id they would hash
+     * identically, and any shared cache between them would hand one the
+     * other's board: the exact disclosure {@link ObDashboardScope#unrestricted}
+     * exists to prevent, arriving through the validator instead of the query.
+     *
+     * <p>An unrestricted caller contributes a constant rather than their id.
+     * Their answer provably does not depend on who is asking — that is what
+     * unrestricted means — so an Admin and a Manager go on sharing one
+     * validator. The branch reads the same {@code unrestricted} flag that
+     * chooses the table, so the two cannot drift apart later: whoever changes
+     * which table a role reads changes this with it.
      */
     static String etagOf(ObDashboardScope scope, Long productId, Instant computedAt) {
         if (computedAt == null) {
             return null;
         }
-        return Integer.toHexString(Objects.hash(scope.moduleRole(), productId, computedAt));
+        long caller = scope.unrestricted() ? 0L : scope.userId();
+        return Integer.toHexString(Objects.hash(scope.moduleRole(), caller, productId, computedAt));
     }
 }

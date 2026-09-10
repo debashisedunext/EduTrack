@@ -115,6 +115,92 @@ describe('delete', () => {
   })
 })
 
+describe('edit', () => {
+  const openEditFor = async (name: string) => {
+    // Its own wait rather than the file's `rowFor`: this block renders the
+    // grid *and* a detail read behind a dialog, and the shared helper's
+    // default 1s is not enough for the second one under a full-file run.
+    const link = await screen.findByRole('link', { name }, { timeout: 5000 })
+    const row = link.closest('tr') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'Edit' }))
+    // The dialog seeds from the detail read, so nothing is editable until it
+    // lands — waiting on the name field is waiting on the ETag it was read with.
+    return await screen.findByRole('textbox', { name: /^name$/i })
+  }
+
+  it('renames a role and persists it', async () => {
+    renderPage()
+
+    const nameField = await openEditFor('Developer')
+    expect(nameField).toHaveValue('Developer')
+
+    fireEvent.change(nameField, { target: { value: 'Engineer' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save role' }))
+
+    expect(await screen.findByText('Engineer saved')).toBeInTheDocument()
+    const saved = getDb().roles.find((r) => r.code === 'DEVELOPER')
+    expect(saved?.name).toBe('Engineer')
+    // The code is untouched — it is what tokens and workflow rules carry.
+    expect(saved?.code).toBe('DEVELOPER')
+  })
+
+  it('deactivates a role without deleting it', async () => {
+    // The six cannot be deleted, so deactivating is the only way to take one
+    // out of the pickers — which makes it the edit that has to work.
+    renderPage()
+
+    await openEditFor('QA')
+    fireEvent.click(screen.getByRole('checkbox', { name: /active/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save role' }))
+
+    await screen.findByText('QA saved')
+    const saved = getDb().roles.find((r) => r.code === 'QA')
+    expect(saved?.isActive).toBe(false)
+    expect(saved).toBeDefined()
+  })
+
+  it('offers edit on a system role, which delete refuses', async () => {
+    // The six are undeletable, not unrenameable — RoleService.update accepts a
+    // patch to any of them. A test, because the two buttons sit side by side
+    // and the obvious mistake is to disable both.
+    renderPage()
+
+    const admin = await rowFor('Admin')
+    expect(within(admin).getByRole('button', { name: 'Edit' })).toBeEnabled()
+    expect(within(admin).getByRole('button', { name: 'Delete' })).toBeDisabled()
+  })
+
+  it('shows the code read-only, with the reason it cannot change', async () => {
+    renderPage()
+    await openEditFor('PM')
+
+    const code = screen.getByLabelText('Code')
+    expect(code).toHaveValue('PM')
+    expect(code).toBeDisabled()
+    expect(screen.getByText(/carried in access tokens/i)).toBeInTheDocument()
+  })
+
+  it("refuses a save over somebody else's edit, rather than overwriting it", async () => {
+    // The If-Match guard, end to end: the dialog holds the ETag it read, the
+    // role changes underneath, and the mock answers 412. Sending `*` — or no
+    // tag at all — would let this write land silently, which is exactly the
+    // lost update the tag exists to prevent.
+    renderPage()
+    await openEditFor('Support Desk')
+
+    const role = getDb().roles.find((r) => r.code === 'SUPPORT')!
+    role.description = 'Changed in another tab'
+
+    fireEvent.change(screen.getByRole('textbox', { name: /^name$/i }), {
+      target: { value: 'Service Desk' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save role' }))
+
+    expect(await screen.findByText('Somebody else changed this role')).toBeInTheDocument()
+    expect(getDb().roles.find((r) => r.code === 'SUPPORT')?.name).toBe('Support Desk')
+  })
+})
+
 describe('create', () => {
   it('creates a role with no permissions and says so', async () => {
     renderPage()

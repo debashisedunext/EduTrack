@@ -104,6 +104,42 @@ class ClientCredentialTokens {
         return ENCODER.encodeToString(raw);
     }
 
+    /**
+     * A password a person can read off a screen and type, for the development
+     * switch described by {@code PortalDevCredentialProperties}.
+     *
+     * <p><b>Shaped rather than random, because {@link PortalPasswordRules} has
+     * a shape.</b> The rules want upper, lower, a digit and a symbol; a random
+     * Base64 string satisfies them only by luck, and the failure mode of luck
+     * here is an account created with a password its own portal refuses — the
+     * exact dead end this switch exists to remove. The fixed {@code Demo-}
+     * prefix supplies the upper case, the lower case and the symbol, so only
+     * the entropy is left to chance.
+     *
+     * <p>Still {@link java.security.SecureRandom}: this ends up as a working
+     * credential on a running deployment, and "it is only a demo" is how a
+     * predictable password reaches something that turned out to matter. The
+     * alphabet excludes the characters people mistype from a screen — no O/0,
+     * no l/1/I — since being read aloud is the whole purpose.
+     */
+    static String readableDevPassword() {
+        StringBuilder password = new StringBuilder("Demo-");
+        for (int i = 0; i < DEV_PASSWORD_ENTROPY_CHARS; i++) {
+            password.append(DEV_PASSWORD_ALPHABET.charAt(RANDOM.nextInt(DEV_PASSWORD_ALPHABET.length())));
+        }
+        return password.append(RANDOM.nextInt(10)).toString();
+    }
+
+    /** Unambiguous when read off a screen: no O/0, no l/1/I. */
+    private static final String DEV_PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    /**
+     * Nine, which with the prefix and the trailing digit makes fifteen — over
+     * {@link PortalPasswordRules#MIN_LENGTH} with room to spare, so a later
+     * tightening of the minimum does not silently start rejecting these.
+     */
+    private static final int DEV_PASSWORD_ENTROPY_CHARS = 9;
+
     record Minted(String token, Instant expiresAt) {
     }
 }

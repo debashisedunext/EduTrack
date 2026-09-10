@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { HttpResponse, http } from 'msw'
+
+import { server } from '@/mocks/server'
 
 import { ObClientAccountPanel } from './ObClientAccountPanel'
 
@@ -93,5 +96,77 @@ describe('OB-05 client-account panel', () => {
     // The operator pressing "disable" believes they have closed the door. This
     // line is what makes that true on screen as well as on the server.
     expect(await screen.findByText(/invalidates any link already emailed/i)).toBeInTheDocument()
+  })
+
+  /**
+   * The development switch — `edutrack.portal.dev-credentials.enabled`.
+   *
+   * The mock has no such switch and should not grow one: it would be a second
+   * implementation of a server decision, and the panel's job is only to render
+   * whichever answer arrives. So these override the response directly.
+   */
+  describe('when the server is issuing readable passwords', () => {
+    function respondWithDevPassword(devPassword: string) {
+      server.use(
+        http.post('*/onboarding/clients/:obClientId/account', () =>
+          HttpResponse.json({
+            data: {
+              id: 99,
+              username: 'SUNRISEEDTEC.arjun',
+              displayName: 'Arjun Shetty',
+              email: 'arjun@sunrise.example',
+              isActive: true,
+              // Cleared by the same statement that set the password — a forced
+              // change would make the value below dead on arrival.
+              mustChangePassword: false,
+              lastLoginAt: null,
+              lockedUntil: null,
+              credentialSentAt: '2026-09-10T04:00:00Z',
+              devPassword,
+            },
+          }),
+        ),
+      )
+    }
+
+    it('shows the username and password together, marked as a development build', async () => {
+      const user = userEvent.setup()
+      respondWithDevPassword('Demo-abc23xyz9')
+      renderPanel(2)
+
+      await user.click(await screen.findByRole('button', { name: /create portal login/i }))
+
+      expect(await screen.findByText('Demo-abc23xyz9')).toBeInTheDocument()
+      expect(screen.getByText(/development build/i)).toBeInTheDocument()
+      // Both halves, or it is not something anybody can sign in with.
+      expect(screen.getAllByText('SUNRISEEDTEC.arjun').length).toBeGreaterThan(0)
+    })
+
+    it('says why it is on screen, so nobody reads it as normal behaviour', async () => {
+      const user = userEvent.setup()
+      respondWithDevPassword('Demo-abc23xyz9')
+      renderPanel(2)
+
+      await user.click(await screen.findByRole('button', { name: /create portal login/i }))
+
+      expect(await screen.findByText(/dev-credentials/i)).toBeInTheDocument()
+    })
+
+    /*
+      The guard that matters. `devPassword` is absent on every response from a
+      deployment that has not opted in, and the panel must render exactly what
+      it renders today — this fails if the field is ever defaulted to a value
+      rather than left null.
+    */
+    it('renders nothing extra when the field is absent, which is the shipped case', async () => {
+      const user = userEvent.setup()
+      renderPanel(2)
+
+      await user.click(await screen.findByRole('button', { name: /create portal login/i }))
+
+      await screen.findByRole('status')
+      expect(screen.queryByText(/development build/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^Demo-/)).not.toBeInTheDocument()
+    })
   })
 })

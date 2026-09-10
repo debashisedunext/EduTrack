@@ -15,6 +15,7 @@ import {
   getGetObJourneyQueryKey,
   getGetObJourneyStepQueryKey,
 } from '@/api/generated/onboarding-journeys/onboarding-journeys'
+import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { ReasonDialog } from '@/components/ui/reason-dialog'
@@ -115,7 +116,11 @@ export function SignoffPanel({ kind, journeyId, stepId, obClientId }: SignoffPan
 
   /** The server's refusal verbatim — `StepActionBar`'s rule, and its reason. */
   const onError = React.useCallback((error: unknown) => {
-    const problem = (error as { error?: { detail?: string; title?: string } })?.error
+    // `ApiError.problem`, not `.error` — see `StepActionBar`'s own note. The
+    // shape this used to read does not exist, so every refusal on this panel
+    // rendered as the fallback, including the 404 from `requestObSignoff`
+    // having no controller at all.
+    const problem = error instanceof ApiError ? error.problem : null
     toast({
       variant: 'danger',
       title: 'That did not go through',

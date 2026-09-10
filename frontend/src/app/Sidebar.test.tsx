@@ -132,6 +132,28 @@ describe('Sidebar · onboarding module', () => {
   })
 
   /**
+   * Module Service leads Administration.
+   *
+   * <p>Order is the only thing a nav array expresses, and nothing else in this
+   * file asserts any of it — so the section's arrangement was a property no
+   * test held, and a merge that reordered the array would have changed the
+   * screen silently. Pinned as a relative position rather than an index, so
+   * adding a tenth entry below does not fail this.
+   */
+  it('puts Module Service at the top of Administration', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    const adminLinks = ['Module Service', 'Prerequisites master', 'Roles & module access',
+      'TAT & escalation', 'Notification templates']
+      .map((label) => within(obNav()).getByRole('link', { name: label }))
+
+    const positions = adminLinks.map((link) => adminLinks[0].compareDocumentPosition(link))
+    // Every other Administration entry follows the first one in the document.
+    expect(positions.slice(1).every((mask) => (mask & Node.DOCUMENT_POSITION_FOLLOWING) !== 0))
+      .toBe(true)
+  })
+
+  /**
    * The path alone must not be enough. A caller without the grant gets 404s
    * from `ObModuleGuard` for every byte of data on these screens, so drawing
    * the module's navigation for them would be the frontend describing a module

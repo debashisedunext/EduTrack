@@ -30,13 +30,23 @@ import { Button } from '@/components/ui/button';
  * that the panel is broken, which is `ObDashboardCardTile`'s argument about
  * dead controls, applied here.
  *
- * ## Nothing on this panel is a credential
+ * ## Nothing on this panel is a credential — except under one switch
  *
  * The response carries no password, no hash and no link, so there is nothing
  * here to copy and paste. That is deliberate on the server (see
  * `ObClientAccountResponse`), and the screen states what actually happened —
  * "a link has been emailed to …" — rather than implying the operator now holds
  * something they must pass on.
+ *
+ * The exception is `devPassword`, which is null unless the server sets
+ * `edutrack.portal.dev-credentials.enabled` — and `PortalDevCredentialConfig`
+ * refuses to start with that outside a development profile. It exists because
+ * a demo database's mail transport is `logging`, so the link the paragraph
+ * above depends on arrives nowhere and the portal is unreachable.
+ *
+ * When it is present the panel says so in as many words, and shows it in an
+ * amber block rather than beside the username: a working client password
+ * rendered as ordinary panel content is one nobody reads twice.
  */
 export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
   const queryClient = useQueryClient();
@@ -77,6 +87,20 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
     ...onSettled('A fresh link has been emailed. Any earlier link no longer works.'),
   });
 
+  /*
+    The development switch's password, held for as long as the panel stays
+    mounted and no longer. It is on the create/reset response and on no read, so
+    navigating away is the same as never having seen it — which is the property
+    that keeps this from becoming a credential the panel stores.
+
+    Read from the mutation rather than from `account.data`, deliberately:
+    `onSettled` writes the whole response into the query cache, so a refetch of
+    `getObClientAccount` would replace it with the same account minus the
+    password. Sourcing it here means the display cannot outlive the action that
+    produced it.
+  */
+  const devPassword = create.data?.data.devPassword ?? reset.data?.data.devPassword ?? null;
+
   const setStatus = useMutation({
     mutationFn: (isActive: boolean) => setObClientAccountStatus(obClientId, { isActive }),
     ...onSettled(null),
@@ -110,6 +134,35 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
         <p role="status" className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
           {issued}
         </p>
+      ) : null}
+
+      {/*
+        Development builds only — `devPassword` is null on every deployment that
+        has not set `edutrack.portal.dev-credentials.enabled`, which the server
+        refuses to start with outside a development profile.
+
+        Stated as loudly as it is useful. A panel that showed a working client
+        password with no explanation would read as a feature, and the next
+        person to see it would reasonably assume production does this too.
+      */}
+      {devPassword ? (
+        <div
+          role="status"
+          className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+        >
+          <p className="m-0 font-semibold">Development build — sign-in details</p>
+          <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1">
+            <dt>Username</dt>
+            <dd className="font-mono">{create.data?.data.username ?? reset.data?.data.username}</dd>
+            <dt>Password</dt>
+            <dd className="font-mono">{devPassword}</dd>
+          </dl>
+          <p className="m-0 mt-2 text-xs">
+            Shown because this deployment sets{' '}
+            <code>edutrack.portal.dev-credentials</code>. It is not shown again once you
+            leave this page, and no production build ever shows it.
+          </p>
+        </div>
       ) : null}
 
       {account.isPending ? <p className="mt-3 text-sm text-content-muted">Loading…</p> : null}

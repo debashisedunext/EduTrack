@@ -158,6 +158,104 @@ describe('adding a step', () => {
   })
 })
 
+describe("the step owner comes from the Role Master", () => {
+  const openAddForm = async () => {
+    await openDesigner(2)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add step' }))
+    const form = screen.getByRole('form', { name: 'Add step' })
+    // The picker fills from `/masters/roles`, so the options are not there on
+    // the first paint. Waiting on a role name is waiting on that read.
+    await within(form).findByRole('option', { name: /Support Desk/ }, SLOW)
+    return form
+  }
+
+  const savedStep = (name: string) =>
+    getDb().obJourneyTemplateSteps.find((s) => s.templateId === 2 && s.name === name)
+
+  it('offers the roles an admin defined, not a free-text box', async () => {
+    // The whole point of the change: `owner_role` carries no foreign key, so a
+    // typed value was never checked against anything. A closed list of the
+    // master's own rows is the check.
+    const form = await openAddForm()
+    const owner = within(form).getByLabelText('Owner')
+
+    const offered = within(owner)
+      .getAllByRole('option')
+      .map((o) => o.textContent ?? '')
+    for (const role of getDb().roles.filter((r) => r.isActive)) {
+      expect(offered.some((text) => text.includes(role.name))).toBe(true)
+    }
+    expect(owner.tagName).toBe('SELECT')
+  })
+
+  it('fills the owner role from the id, without it being typed', async () => {
+    const form = await openAddForm()
+    const support = getDb().roles.find((r) => r.code === 'SUPPORT')!
+
+    fireEvent.change(within(form).getByLabelText('Owner'), {
+      target: { value: String(support.id) },
+    })
+
+    // Read-only and derived — the id is chosen, the code follows from it.
+    const roleField = within(form).getByLabelText('Owner role')
+    expect(roleField).toHaveValue('SUPPORT')
+    expect(roleField).toHaveAttribute('readonly')
+  })
+
+  it('writes the selected role code onto the step', async () => {
+    const form = await openAddForm()
+    const pm = getDb().roles.find((r) => r.code === 'PM')!
+
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Kickoff Call' } })
+    fireEvent.change(within(form).getByLabelText('TAT (working days)'), { target: { value: '1' } })
+    fireEvent.change(within(form).getByLabelText('Owner'), { target: { value: String(pm.id) } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Add step' }))
+
+    await screen.findByText('Kickoff Call added', undefined, SLOW)
+    // The code, not the id: `ob_journey_template_steps.owner_role` stores what
+    // the ribbon and the scanners match on.
+    expect(savedStep('Kickoff Call')?.ownerRole).toBe('PM')
+  })
+
+  it('leaves the owner unset when none is chosen', async () => {
+    const form = await openAddForm()
+
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Data Cleanup' } })
+    fireEvent.change(within(form).getByLabelText('TAT (working days)'), { target: { value: '3' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Add step' }))
+
+    await screen.findByText('Data Cleanup added', undefined, SLOW)
+    expect(savedStep('Data Cleanup')?.ownerRole ?? null).toBeNull()
+  })
+
+  it('offers a way to the Role Master when the wanted role is not listed', async () => {
+    // A closed list needs an answer to "mine is not here", on the form rather
+    // than left to be guessed — and in a new tab, because this form holds a
+    // half-written step that navigating away in place would discard.
+    const form = await openAddForm()
+
+    const link = within(form).getByRole('link', { name: /Role not listed/ })
+    expect(link).toHaveAttribute('href', '/masters/roles')
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('names the owning role rather than printing its code', async () => {
+    // A code is what the column stores; a name is what the admin typed into
+    // the master and expects to read back in the grid.
+    const db = getDb()
+    const step = db.obJourneyTemplateSteps.find((s) => s.templateId === 2)!
+    step.ownerUserId = null
+    step.ownerRole = 'SUPPORT'
+
+    await openDesigner(2)
+    // The role list is a second read; the table paints before it lands.
+    await waitFor(
+      () => expect(within(stepGroup(step.name)).getByText('Support Desk')).toBeInTheDocument(),
+      SLOW,
+    )
+  })
+})
+
 describe('removing a step', () => {
   it('removes a step nothing depends on', async () => {
     await openDesigner(2)

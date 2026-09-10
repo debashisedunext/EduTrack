@@ -28,6 +28,9 @@ class ObJourneyTemplateExceptionHandler {
     private static final URI CONFLICT = URI.create("https://edutrack/errors/conflict");
     private static final URI STEP_HAS_DEPENDENTS = URI.create("https://edutrack/errors/step-has-dependents");
     private static final URI TEMPLATE_HAS_NO_STEPS = URI.create("https://edutrack/errors/template-has-no-steps");
+    private static final URI MODULE_SERVICE_IN_USE = URI.create("https://edutrack/errors/module-service-in-use");
+    private static final URI MODULE_SERVICE_HAS_DEPENDENTS =
+            URI.create("https://edutrack/errors/module-service-has-dependents");
 
     /** No {@code ob_journey_templates}/{@code _steps}/{@code _step_items}/{@code _step_docs} row for the given id. */
     @ExceptionHandler({
@@ -61,7 +64,8 @@ class ObJourneyTemplateExceptionHandler {
     @ExceptionHandler({
             TemplateAlreadyPublishedException.class,
             TemplateNotEditableException.class,
-            TemplateNotActiveException.class
+            TemplateNotActiveException.class,
+            DuplicateModuleServiceNameException.class
     })
     ResponseEntity<ProblemDetail> handleConflict(RuntimeException e) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
@@ -124,6 +128,36 @@ class ObJourneyTemplateExceptionHandler {
         problem.setType(CONFLICT);
         problem.setTitle("That dependency would close a cycle");
         problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * C-124 · {@code 409}, carrying the count the OB-07 card shows.
+     *
+     * <p>Its own {@code type} rather than the generic {@code CONFLICT} one,
+     * because a client that wants to say <i>why</i> Edit and Delete are refused
+     * has to tell this apart from a name collision — and {@code journeyCount}
+     * is the number that sentence needs. {@code StepHasDependentsException}
+     * sets the same precedent one resource down.
+     */
+    @ExceptionHandler(ModuleServiceInUseException.class)
+    ResponseEntity<ProblemDetail> handleModuleServiceInUse(ModuleServiceInUseException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(MODULE_SERVICE_IN_USE);
+        problem.setTitle("Module Service is in use");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("journeyCount", e.journeyCount());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /** C-124 · {@code 409}, naming the services to re-point — {@code StepHasDependentsException}'s shape. */
+    @ExceptionHandler(ModuleServiceHasDependentsException.class)
+    ResponseEntity<ProblemDetail> handleModuleServiceHasDependents(ModuleServiceHasDependentsException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(MODULE_SERVICE_HAS_DEPENDENTS);
+        problem.setTitle("Module Service has dependents");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("dependentServiceNames", e.dependentServiceNames());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 }

@@ -63,6 +63,9 @@ const NotificationTemplateListPage = lazy(() =>
 const ObClientDetailPage = lazy(() =>
   import('./features/onboarding/journey/clientDetail/ObClientDetailPage').then((m) => ({ default: m.ObClientDetailPage })),
 )
+const ObClientProductPage = lazy(() =>
+  import('./features/onboarding/journey/clientDetail/ObClientProductPage').then((m) => ({ default: m.ObClientProductPage })),
+)
 const ObClientListPage = lazy(() =>
   import('./features/onboarding/clients/ObClientListPage').then((m) => ({ default: m.ObClientListPage })),
 )
@@ -672,6 +675,26 @@ export default function App() {
             <Route
               path="/onboarding/clients/:obClientId"
               element={withSuspense(<ObClientDetailPage />)}
+            />
+            {/*
+              OB-05's second half — one purchased product of one client, with
+              that product's journey ribbons and nothing else's.
+
+              A route rather than state on the page above, because a product is
+              a place people send each other: "look at KV Varanasi's biometric
+              rollout" has to be a URL. Nested under the client for the reason
+              the path reads — the product id means nothing without the client,
+              the page reads the client document to resolve it, and a browser
+              Back out of a step panel then lands on the client rather than on
+              the list.
+
+              `products` is a literal segment inside a parameterised one, which
+              cannot collide with anything: `:obClientId` binds one segment and
+              the client route has no children of its own.
+            */}
+            <Route
+              path="/onboarding/clients/:obClientId/products/:productId"
+              element={withSuspense(<ObClientProductPage />)}
             />
             {/* B-022 · S-15. One route, like S-11 and S-12: a template is six
                 fields, so create and edit are dialogs on the grid rather than a

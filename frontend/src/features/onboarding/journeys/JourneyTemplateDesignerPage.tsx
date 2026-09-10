@@ -4,7 +4,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '@/api/http'
 import type { ObJourneyTemplateDetail } from '@/api/generated/model/obJourneyTemplateDetail'
 import type { ObJourneyTemplateStep } from '@/api/generated/model/obJourneyTemplateStep'
+import type { Role } from '@/api/generated/model/role'
 import type { UserRef } from '@/api/generated/model'
+import { useListRoles } from '@/api/generated/masters/masters'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
 import { useListUsers } from '@/api/generated/users/users'
 
@@ -58,6 +60,22 @@ import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTempl
  * whose input would be silently dropped. Correcting a step is remove + add,
  * which the Order column and "+ Add step" cover. The mockup's editable
  * template-name input is out for the same reason: there is no rename route.
+ *
+ * <h2>A step's owner is picked from the Role Master, not typed</h2>
+ *
+ * <p>{@code ob_journey_template_steps.owner_role} is a plain {@code VARCHAR}
+ * with no foreign key to {@code roles.code} — the same "a typo would not fail
+ * loudly" note {@code workflow_stages.owner_role} carries. So the form offers a
+ * closed list of the active roles an admin defined in S-09 and stores the
+ * <em>code</em> of the row chosen, rather than accepting free text nothing
+ * checks. The picker's value is the role's <b>id</b> and the code is read off
+ * the selection: the id is what is chosen, the role follows from it, and the
+ * two cannot disagree.
+ *
+ * <p>The Default responsible column resolves a stored code back to the
+ * master's name, falling back to the code itself — a step written against a
+ * role that has since been deleted survives the delete, exactly because there
+ * is no foreign key.
  *
  * <h2>Most writes go immediately; only the order is staged</h2>
  *
@@ -120,6 +138,18 @@ function Designer({
   const products = useListObProducts()
   const users = useListUsers({ isActive: true, limit: 200 })
   const userList = users.data?.data ?? []
+  /*
+    The step owner is a role from the S-09 Role Master, so the picker offers
+    exactly what an admin has defined there and nothing else — `ownerRole`
+    carries no foreign key, which is why a free-text field let a typo through
+    silently. Active only in the picker; the full list is still what resolves
+    a code to a name on an existing step, since a step written before a role
+    was retired must still render it.
+  */
+  const activeRoles = useListRoles({ isActive: true })
+  const allRoles = useListRoles()
+  const roleOptions = activeRoles.data?.data ?? []
+  const roleList = allRoles.data?.data ?? []
 
   const [ordered, setOrdered] = React.useState<ObJourneyTemplateStep[] | null>(null)
   const [announcement, setAnnouncement] = React.useState('')
@@ -303,6 +333,7 @@ function Designer({
                 editable={editable}
                 allSteps={steps}
                 users={userList}
+                roles={roleList}
                 onMove={move}
                 onRemove={() => doRemoveStep(step)}
               />
@@ -335,6 +366,7 @@ function Designer({
         <AddStepForm
           templateId={templateId}
           steps={detail.steps}
+          roles={roleOptions}
           onClose={() => setAddingStep(false)}
         />
       )}
@@ -356,6 +388,7 @@ function StepRows({
   editable,
   allSteps,
   users,
+  roles,
   onMove,
   onRemove,
 }: {
@@ -366,6 +399,8 @@ function StepRows({
   editable: boolean
   allSteps: ObJourneyTemplateStep[]
   users: readonly UserRef[]
+  /** Every role, active or not — a retired one still has to render its name. */
+  roles: readonly Role[]
   onMove: (from: number, to: number) => void
   onRemove: () => void
 }) {
@@ -375,9 +410,17 @@ function StepRows({
   const dependsOn = depIndex >= 0
     ? `↳ ${depIndex + 1}. ${allSteps[depIndex].name}`
     : '∥ none — runs parallel'
+  /*
+    A role code is what the column stores; a role *name* is what an admin
+    typed into the master and expects to read back. Falling through to the
+    code covers a step written against a role that has since been deleted —
+    `owner_role` carries no foreign key, so that row survives the delete.
+  */
   const responsible = step.ownerUserId != null
     ? users.find((u) => u.id === step.ownerUserId)?.displayName ?? `user #${step.ownerUserId}`
-    : step.ownerRole ?? '—'
+    : step.ownerRole
+      ? roles.find((r) => r.code === step.ownerRole)?.name ?? step.ownerRole
+      : '—'
   const colSpan = editable ? 6 : 5
 
   return (
@@ -650,24 +693,33 @@ function StepDocChips({
 function AddStepForm({
   templateId,
   steps,
+  roles,
   onClose,
 }: {
   templateId: number
   steps: ObJourneyTemplateStep[]
+  /** Active roles from the S-09 master — the owner picker's only candidates. */
+  roles: readonly Role[]
   onClose: () => void
 }) {
   const addStep = useAddJourneyTemplateStep()
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [tatDays, setTatDays] = React.useState('')
-  const [ownerUserId, setOwnerUserId] = React.useState('')
-  const [ownerRole, setOwnerRole] = React.useState('')
+  const [ownerRoleId, setOwnerRoleId] = React.useState('')
   const [requiresSignoff, setRequiresSignoff] = React.useState(false)
   const [dependsOnStepId, setDependsOnStepId] = React.useState('')
   const [submitted, setSubmitted] = React.useState(false)
   const [serverErrors, setServerErrors] = React.useState<Record<string, string>>({})
 
   const tatValue = Number(tatDays)
+  /*
+    The picker's value is the role's **id**, and the code that `ownerRole`
+    actually stores is read off the selected row rather than typed. That is
+    the whole point of the change: the id is what is chosen, the role follows
+    from it, and the two cannot disagree.
+  */
+  const ownerRoleObj = roles.find((r) => String(r.id) === ownerRoleId)
   const errors: Record<string, string> = {}
   if (!name.trim()) errors.name = 'Name is required'
   if (!tatDays.trim() || !Number.isFinite(tatValue) || tatValue < 1) {
@@ -686,8 +738,7 @@ function AddStepForm({
           name: name.trim(),
           description: description.trim() || undefined,
           tatDays: tatValue,
-          ownerUserId: ownerUserId.trim() ? Number(ownerUserId) : undefined,
-          ownerRole: ownerRole.trim() || undefined,
+          ownerRole: ownerRoleObj?.code,
           requiresSignoff,
           dependsOnStepId: dependsOnStepId ? Number(dependsOnStepId) : undefined,
         },
@@ -754,27 +805,64 @@ function AddStepForm({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1 text-sm">
-          <label htmlFor="add-step-owner-user" className="font-medium text-content">
-            Owner user id
+        <div className="flex min-w-0 flex-col gap-1 text-sm">
+          <label htmlFor="add-step-owner-role-id" className="font-medium text-content">
+            Owner
           </label>
-          <Input
-            id="add-step-owner-user"
-            value={ownerUserId}
-            inputMode="numeric"
-            onChange={(e) => setOwnerUserId(e.target.value)}
-          />
+          <select
+            id="add-step-owner-role-id"
+            /*
+              `min-w-0` for the reason the catalogue's depends-on picker gives:
+              a <select> in a grid cell sizes to its widest <option> unless it
+              is allowed to shrink, and role names are arbitrary length.
+            */
+            className="h-9 min-w-0 truncate rounded-control border border-border bg-surface px-2 text-sm text-content"
+            value={ownerRoleId}
+            aria-describedby="add-step-owner-role-code"
+            onChange={(e) => setOwnerRoleId(e.target.value)}
+          >
+            <option value="">Unassigned — no owning role</option>
+            {roles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.id} · {role.name}
+              </option>
+            ))}
+          </select>
+          {/*
+            The picker is a closed list, so the answer to "the role I want is
+            not here" has to be on the form rather than left to be guessed —
+            S-09 is in the ticketing module and nothing in the Onboarding nav
+            leads to it. Opens in a new tab: this form holds unsaved state and
+            navigating away in place would discard a half-written step.
+          */}
+          <a
+            href="/masters/roles"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="self-start text-xs text-primary hover:underline"
+          >
+            Role not listed? Add or edit roles ↗
+          </a>
         </div>
-        <div className="flex flex-col gap-1 text-sm">
+        <div className="flex min-w-0 flex-col gap-1 text-sm">
           <label htmlFor="add-step-owner-role" className="font-medium text-content">
             Owner role
           </label>
+          {/*
+            Read-only, and shown rather than hidden: `ownerRole` is what the
+            step actually stores, so the form says which code the chosen id
+            resolves to instead of leaving the admin to trust that it did.
+          */}
           <Input
             id="add-step-owner-role"
-            value={ownerRole}
-            maxLength={40}
-            onChange={(e) => setOwnerRole(e.target.value)}
+            value={ownerRoleObj?.code ?? ''}
+            readOnly
+            placeholder="Follows the owner above"
+            className="bg-subtle text-content-muted"
           />
+          <span id="add-step-owner-role-code" className="text-xs text-content-muted">
+            Set automatically from the owner id — roles come from the Role master.
+          </span>
         </div>
       </div>
 

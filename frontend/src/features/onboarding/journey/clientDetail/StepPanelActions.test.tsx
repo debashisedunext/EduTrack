@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { Toaster } from '@/components/ui/toaster'
-import { ObClientDetailPage } from './ObClientDetailPage'
+import { ObClientProductPage } from './ObClientProductPage'
 
 /**
  * C-111 · OB-06's action surface, driven through OB-05 against the mock server.
@@ -22,14 +22,23 @@ import { ObClientDetailPage } from './ObClientDetailPage'
  * focus step is one the caller may act on. It also carries the only seeded
  * Task List in the module, with the two mandatory items unticked and the
  * optional one done, which is exactly the completion gate.
+ *
+ * **The page under it is now `ObClientProductPage`**, addressed as
+ * (client, product), since the journey accordions moved off the client page to
+ * one page per purchased product. Nothing about OB-06 changed with them — the
+ * accordion, the ribbon and the panel are the same components with the same
+ * props — so every assertion below is untouched.
  */
-function renderClient(id = 8) {
+function renderClient(id = 8, productId = 1) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/onboarding/clients/${id}`]}>
+      <MemoryRouter initialEntries={[`/onboarding/clients/${id}/products/${productId}`]}>
         <Routes>
-          <Route path="/onboarding/clients/:obClientId" element={<ObClientDetailPage />} />
+          <Route
+            path="/onboarding/clients/:obClientId/products/:productId"
+            element={<ObClientProductPage />}
+          />
         </Routes>
       </MemoryRouter>
       <Toaster />
@@ -62,7 +71,7 @@ vi.setConfig({ testTimeout: 20_000 })
  * working whichever journey the page decides to open.
  */
 async function openErpPanel(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByText('Trinity College of Commerce', undefined, SLOW)
+  await screen.findAllByText(/Trinity College of Commerce/, undefined, SLOW)
   const trigger = screen.getByRole('button', { name: /^EduTrack ERP —/ })
   if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger)
   return screen.findByTestId('journey-step-panel', undefined, SLOW)

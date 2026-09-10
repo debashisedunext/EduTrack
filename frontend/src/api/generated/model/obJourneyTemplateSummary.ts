@@ -76,4 +76,20 @@ derivable from the other fields; the alternative is the page
 fetching every service's full detail to render one chip.
  */
   totalTatDays: number;
+  /** C-124 · client journeys instantiated from **any version of this
+service**, archived ones included — the number `PATCH` and `DELETE`
+on this resource both refuse above zero.
+
+Chain-wide, not this version's own: every row of one service
+carries the same total. The catalogue card is the *head* of a
+version chain, so a service whose v1 carries three clients and
+whose v3 carries none is in use, and a per-row count would have
+reported `0` on the very card that draws the Edit and Delete
+buttons.
+
+On the row for `totalTatDays`'s reason — the page disables both
+controls by it, and without it the only way to find out is to let
+an admin click and answer `409`.
+ */
+  serviceJourneyCount: number;
 }

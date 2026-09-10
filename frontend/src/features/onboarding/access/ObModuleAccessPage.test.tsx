@@ -225,4 +225,33 @@ describe('OB-08 · roles and module access', () => {
       expect(within(select).getByRole('option', { name: label })).toBeInTheDocument()
     }
   })
+
+  /**
+   * The way across to where a role is actually defined.
+   *
+   * <p>This screen grants an existing role and cannot create one; the
+   * ticketing role master can. This is now the only header-level route to it —
+   * the Module Service catalogue's own button was removed in favour of it.
+   */
+  it('links to the role master, where roles are actually defined', () => {
+    renderPage()
+
+    expect(screen.getByRole('link', { name: /manage roles/i })).toHaveAttribute(
+      'href',
+      '/masters/roles',
+    )
+  })
+
+  /**
+   * `/masters/roles` is in the ticketing module. Navigating in place swaps the
+   * sidebar, and `ModuleSwitcher` renders nothing for somebody holding only
+   * ONBOARDING — so in place this is a one-way trip out of the module.
+   */
+  it('opens it in a new tab rather than leaving the module', () => {
+    renderPage()
+
+    const link = screen.getByRole('link', { name: /manage roles/i })
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
 })
