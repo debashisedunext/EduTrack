@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -51,6 +52,15 @@ class ObJourneyTemplateServiceTest {
     private final Map<Long, ObJourneyTemplateStep> stepRows = new LinkedHashMap<>();
     private final Map<Long, ObJourneyTemplateStepItem> itemRows = new LinkedHashMap<>();
     private final Map<Long, ObJourneyTemplateStepDoc> docRows = new LinkedHashMap<>();
+
+    /**
+     * C-124 · journeys instantiated per template version — {@code ob_journeys}
+     * as far as this service is concerned. It reads the count through
+     * {@code ObJourneyTemplateRepository}, never through
+     * {@code ObJourneyRepository}, which {@code ScopeGuardRulesTest} forbids
+     * feature code from touching at all.
+     */
+    private final Map<Long, Long> journeysByTemplate = new LinkedHashMap<>();
 
     private final AtomicLong templateIds = new AtomicLong();
     private final AtomicLong stepIds = new AtomicLong();
@@ -98,6 +108,50 @@ class ObJourneyTemplateServiceTest {
                         .filter(ObJourneyTemplate::isActive)
                         .sorted(Comparator.comparingInt(ObJourneyTemplate::getSequence))
                         .toList());
+
+        /*
+          C-124 · the chain, its dependents, and the usage tally. Backed by the
+          same in-memory maps as the rest — journeysByTemplate stands in for
+          ob_journeys, which this service never touches directly.
+        */
+        lenient().when(templates.findByProductIdAndNameOrderByVersionAsc(any(), any())).thenAnswer(inv ->
+                templateRows.values().stream()
+                        .filter(t -> t.getProductId().equals(inv.<Long>getArgument(0))
+                                && inv.<String>getArgument(1).equals(t.getName()))
+                        .sorted(Comparator.comparingInt(ObJourneyTemplate::getVersion))
+                        .toList());
+        lenient().when(templates.findByDependsOnTemplateIdIn(any())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            return templateRows.values().stream()
+                    .filter(t -> t.getDependsOnTemplateId() != null
+                            && ids.contains(t.getDependsOnTemplateId()))
+                    .toList();
+        });
+        lenient().when(templates.countJourneysForTemplates(any())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            return ids.stream().mapToLong(id -> journeysByTemplate.getOrDefault(id, 0L)).sum();
+        });
+        lenient().when(templates.countJourneysByTemplate(any())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            // Absent rather than zero for a version nothing was boarded against,
+            // which is what a GROUP BY actually returns.
+            return ids.stream()
+                    .filter(journeysByTemplate::containsKey)
+                    .map(id -> tally(id, journeysByTemplate.get(id)))
+                    .toList();
+        });
+        lenient().doAnswer(inv -> {
+            for (ObJourneyTemplate t : inv.<Iterable<ObJourneyTemplate>>getArgument(0)) {
+                templateRows.remove(t.getId());
+            }
+            return null;
+        }).when(templates).deleteAll(any());
+        lenient().doAnswer(inv -> {
+            for (ObJourneyTemplateStep step : inv.<Iterable<ObJourneyTemplateStep>>getArgument(0)) {
+                stepRows.remove(step.getId());
+            }
+            return null;
+        }).when(steps).deleteAll(any());
 
         lenient().when(steps.save(any())).thenAnswer(inv -> {
             ObJourneyTemplateStep s = inv.getArgument(0);
@@ -669,6 +723,37 @@ class ObJourneyTemplateServiceTest {
     }
 
     /** Bypasses createTemplate/publish — an active row with no steps, for the two C-123 nested groups below. */
+    /** One version of a named service under {@link #PRODUCT}. */
+    private ObJourneyTemplate version(String name, int version, boolean active) {
+        ObJourneyTemplate t = new ObJourneyTemplate();
+        t.setProductId(PRODUCT);
+        t.setName(name);
+        t.setVersion(version);
+        t.setActive(active);
+        t.setSequence(0);
+        return templates.save(t);
+    }
+
+    /** Board {@code count} clients on one template version. */
+    private void journeysOn(long templateId, long count) {
+        journeysByTemplate.put(templateId, count);
+    }
+
+    /** The grouped-count projection, as an anonymous implementation. */
+    private static ObJourneyTemplateRepository.TemplateTally tally(Long templateId, long count) {
+        return new ObJourneyTemplateRepository.TemplateTally() {
+            @Override
+            public Long getTemplateId() {
+                return templateId;
+            }
+
+            @Override
+            public long getTally() {
+                return count;
+            }
+        };
+    }
+
     private ObJourneyTemplate activeTemplate(long productId, int sequence, Long dependsOnTemplateId) {
         ObJourneyTemplate t = new ObJourneyTemplate();
         t.setProductId(productId);
@@ -795,4 +880,188 @@ class ObJourneyTemplateServiceTest {
                     .isInstanceOf(CatalogueReorderMismatchException.class);
         }
     }
+
+    /**
+     * C-124 · editing and deleting a whole Module Service.
+     *
+     * <p>The measure of this block is {@code renameMovesEveryVersionOfTheChain}
+     * and {@code aClientOnARetiredVersionStillLocksTheService}. Both describe
+     * the same mistake from two sides: treating the row named in the call as
+     * the service. A rename that moved one row would split a chain in two; a
+     * usage check that asked only about the head would report a service as
+     * unused while a client is boarded on its v1, and let the delete through.
+     */
+    @Nested
+    @DisplayName("editing and deleting a Module Service")
+    class ModuleServiceAdmin {
+
+        @Test
+        @DisplayName("a rename moves every version of the chain, not the row that was named")
+        void renameMovesEveryVersionOfTheChain() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, false);
+            ObJourneyTemplate other = version("Enterprise", 1, false);
+
+            service.updateModuleService(v2.getId(), "Standard onboarding", null);
+
+            assertThat(templateRows.get(v1.getId()).getName()).isEqualTo("Standard onboarding");
+            assertThat(templateRows.get(v2.getId()).getName()).isEqualTo("Standard onboarding");
+            // A different service under the same product is untouched — the
+            // chain is (productId, name), not the product.
+            assertThat(templateRows.get(other.getId()).getName()).isEqualTo("Enterprise");
+        }
+
+        @Test
+        @DisplayName("a rename can move the service to another product")
+        void renameCanRepointTheProduct() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+
+            service.updateModuleService(v1.getId(), "Standard SaaS Onboarding", 999L);
+
+            assertThat(templateRows.get(v1.getId()).getProductId()).isEqualTo(999L);
+        }
+
+        @Test
+        @DisplayName("renaming to a name the product already sells is refused")
+        void duplicateNameRefused() {
+            version("Standard SaaS Onboarding", 1, true);
+            ObJourneyTemplate enterprise = version("Enterprise", 1, false);
+
+            assertThatThrownBy(() ->
+                    service.updateModuleService(enterprise.getId(), "Standard SaaS Onboarding", null))
+                    .isInstanceOf(DuplicateModuleServiceNameException.class);
+        }
+
+        @Test
+        @DisplayName("renaming to the name it already has writes nothing and is not a collision")
+        void renamingToItsOwnNameIsANoOp() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+
+            ObJourneyTemplate result = service.updateModuleService(
+                    v1.getId(), "Standard SaaS Onboarding", null);
+
+            assertThat(result.getName()).isEqualTo("Standard SaaS Onboarding");
+        }
+
+        @Test
+        @DisplayName("a published service nobody has bought can still be renamed")
+        void publishedButUnusedIsRenameable() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            v1.setPublishedAt(Instant.parse("2026-09-01T09:00:00Z"));
+            templates.save(v1);
+
+            service.updateModuleService(v1.getId(), "Standard onboarding", null);
+
+            // Deliberately not requireEditable: a name is catalogue metadata,
+            // not the journey content publishing freezes.
+            assertThat(templateRows.get(v1.getId()).getName()).isEqualTo("Standard onboarding");
+        }
+
+        @Test
+        @DisplayName("a rename is refused once a client is on the service")
+        void renameRefusedWhileInUse() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            journeysOn(v1.getId(), 3);
+
+            assertThatThrownBy(() -> service.updateModuleService(v1.getId(), "Anything", null))
+                    .isInstanceOf(ModuleServiceInUseException.class)
+                    .hasMessageContaining("3 client journeys");
+        }
+
+        @Test
+        @DisplayName("a delete removes every version of the service, with its steps")
+        void deleteRemovesTheWholeChain() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
+            ObJourneyTemplate survivor = version("Enterprise", 1, false);
+            service.addStep(v1.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
+            service.addStep(v2.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
+
+            service.deleteModuleService(v2.getId());
+
+            assertThat(templateRows).containsOnlyKeys(survivor.getId());
+            assertThat(stepRows).isEmpty();
+        }
+
+        /**
+         * The ordering {@code V20260903_1420} chose RESTRICT over CASCADE to
+         * force. A delete that removed steps in load order would leave a step
+         * something still points at, which the composite self-FK refuses.
+         */
+        @Test
+        @DisplayName("steps are removed dependents-first, so a dependency chain deletes cleanly")
+        void chainedStepsDeleteInDependencyOrder() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            ObJourneyTemplateStep first =
+                    service.addStep(v1.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
+            ObJourneyTemplateStep second = service.addStep(
+                    v1.getId(), "Provisioning", null, 4, null, "DEPLOYMENT", null, false, first.getId());
+            service.addStep(v1.getId(), "Migration", null, 8, null, "DEVELOPER", null, false, second.getId());
+
+            service.deleteModuleService(v1.getId());
+
+            assertThat(stepRows).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a delete is refused while another service depends on it, naming it")
+        void deleteRefusedWhileDependedOn() {
+            ObJourneyTemplate standard = version("Standard SaaS Onboarding", 1, true);
+            ObJourneyTemplate enterprise = version("Enterprise", 1, true);
+            enterprise.setDependsOnTemplateId(standard.getId());
+            templates.save(enterprise);
+
+            assertThatThrownBy(() -> service.deleteModuleService(standard.getId()))
+                    .isInstanceOf(ModuleServiceHasDependentsException.class)
+                    .hasMessageContaining("Enterprise");
+        }
+
+        @Test
+        @DisplayName("a delete is refused once a client is on the service")
+        void deleteRefusedWhileInUse() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            journeysOn(v1.getId(), 1);
+
+            assertThatThrownBy(() -> service.deleteModuleService(v1.getId()))
+                    .isInstanceOf(ModuleServiceInUseException.class)
+                    .hasMessageContaining("1 client journey has");
+            assertThat(templateRows).containsKey(v1.getId());
+        }
+
+        /**
+         * The case a per-row count gets wrong. The client sits on v1 while the
+         * catalogue card draws v2, so a check against the row that was clicked
+         * would find nothing and delete a service somebody is being onboarded
+         * through.
+         */
+        @Test
+        @DisplayName("a client on a retired version still locks the service")
+        void aClientOnARetiredVersionStillLocksTheService() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
+            journeysOn(v1.getId(), 2);
+
+            assertThatThrownBy(() -> service.deleteModuleService(v2.getId()))
+                    .isInstanceOf(ModuleServiceInUseException.class);
+        }
+
+        @Test
+        @DisplayName("the catalogue tally is chain-wide, so every version reports its service's total")
+        void journeyCountsAreChainWide() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
+            ObJourneyTemplate other = version("Enterprise", 1, true);
+            journeysOn(v1.getId(), 2);
+
+            Map<Long, Long> counts = service.journeyCountsByTemplate(
+                    List.of(v1, v2, other));
+
+            assertThat(counts.get(v1.getId())).isEqualTo(2L);
+            // v2 carries none of its own; the card drawn from it must still
+            // report the service as in use.
+            assertThat(counts.get(v2.getId())).isEqualTo(2L);
+            assertThat(counts.get(other.getId())).isZero();
+        }
+    }
+
 }

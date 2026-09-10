@@ -141,14 +141,21 @@ const ONBOARDING_NAV: NavEntry[] = [
   },
   { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
   { section: 'Administration' },
+  /*
+    C-123 · Module Service leads the section, because it is the one entry the
+    others are configured *against*: a Module Service is what a client buys,
+    what a journey is instantiated from, and what every prerequisite, TAT and
+    notification below it is ultimately attached to. Somebody setting the
+    module up starts here, and somebody returning to change how onboarding
+    behaves is most often changing a service.
+  */
+  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
   // B-124 · Prerequisites master (OB-14) — the last of the design's nine
   // entries, added the day its screen landed, per the section comment above.
   { to: '/onboarding/prereq-master', label: 'Prerequisites master', icon: ClipboardList },
   { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
   { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
   { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
-  // C-123 · Module Service, the journey-template list this task built.
-  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
 ]
 
 /** The module a path belongs to. The URL is the source of truth, not a store. */

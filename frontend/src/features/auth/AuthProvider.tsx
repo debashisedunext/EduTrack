@@ -144,6 +144,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * family, which under A-024's rotation looks like reuse.
    */
   React.useEffect(() => {
+    /*
+      🔴 Not on the client portal, and this is a correctness guard rather than
+      an optimisation.
+
+      This provider is mounted above the router (`main.tsx`), so it mounts on
+      `/portal/**` too — where there is no staff session and never will be. The
+      refresh below then 401s, which is the *normal* answer here, and the
+      `.catch` signs out. `authStore.signOut()` calls `setAccessToken(null)`,
+      and `api/http.ts` holds ONE process-wide token shared by both shells — so
+      that null lands on the portal session `PortalAuthProvider` restored
+      synchronously a moment earlier.
+
+      The symptom is a portal client reloading any page and watching it shimmer
+      forever: the restore worked, the token was wiped out from under it, and
+      every subsequent query went out unauthenticated. Signing out and back in
+      "fixed" it only because sign-in then ran after this had already failed.
+
+      `portalAuthStore` names the assumption this breaks — "safe only because
+      the staff shell and the portal shell are mutually exclusive route trees
+      that are never mounted together". They are not; this provider spans both.
+
+      `window.location` rather than `useLocation`, because this component sits
+      above `BrowserRouter` and has no router context. Read at mount, which is
+      the right moment: the portal is a separate top-level path, and a page
+      that loads under `/portal` has no staff session to restore however it is
+      navigated afterwards.
+
+      The durable fix is a second token slot in `http.ts` keyed by principal —
+      Stream D's file, and worth raising rather than widening from here.
+    */
+    if (window.location.pathname.startsWith('/portal')) return;
+
     let cancelled = false;
 
     startupRefresh()

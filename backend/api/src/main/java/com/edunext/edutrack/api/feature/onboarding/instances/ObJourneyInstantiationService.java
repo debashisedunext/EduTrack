@@ -71,6 +71,7 @@ public class ObJourneyInstantiationService {
     private final ObJourneyTemplateStepItemRepository templateStepItems;
     private final PurchasedProductAccess purchasedProducts;
     private final ObJourneyStepLifecycleService stepLifecycle;
+    private final ObDemoStepDocumentSeeder demoDocuments;
 
     public ObJourneyInstantiationService(ObJourneyRepository journeys,
                                           ObJourneyStepRepository journeySteps,
@@ -79,7 +80,8 @@ public class ObJourneyInstantiationService {
                                           ObJourneyTemplateStepRepository templateSteps,
                                           ObJourneyTemplateStepItemRepository templateStepItems,
                                           PurchasedProductAccess purchasedProducts,
-                                          ObJourneyStepLifecycleService stepLifecycle) {
+                                          ObJourneyStepLifecycleService stepLifecycle,
+                                          ObDemoStepDocumentSeeder demoDocuments) {
         this.journeys = journeys;
         this.journeySteps = journeySteps;
         this.journeyStepItems = journeyStepItems;
@@ -88,6 +90,7 @@ public class ObJourneyInstantiationService {
         this.templateStepItems = templateStepItems;
         this.purchasedProducts = purchasedProducts;
         this.stepLifecycle = stepLifecycle;
+        this.demoDocuments = demoDocuments;
     }
 
     /**
@@ -146,6 +149,15 @@ public class ObJourneyInstantiationService {
         journey.setProductId(productId);
         journey.setServiceName(template.getName());
         journey.setTemplateId(template.getId());
+        // The catalogue position, pinned at birth on ObJourney#getSequence()'s
+        // own reasoning: OB-07's up/down control renumbers every active
+        // template, and read live that would reorder the ribbons of every
+        // school already boarded — mid-journey, under owners working the
+        // strips in the order they were handed. Copied here, the catalogue
+        // still drives the order journeys instantiate in (this loop's own
+        // ordering) and the order the next school is boarded in; it stops
+        // driving the order of a school boarded before the swap.
+        journey.setSequence(template.getSequence());
 
         // Plan §5.3 item 3: "products bought after gate-open instantiate
         // directly OPEN." A client's gate opens for every journey at once
@@ -266,6 +278,13 @@ public class ObJourneyInstantiationService {
             clone.setRequiresSignoff(source.isRequiresSignoff());
             ObJourneyStep savedClone = journeySteps.save(clone);
             sourceToClonedStepId.put(source.getId(), savedClone.getId());
+
+            // No-op unless edutrack.onboarding.demo-data.pre-satisfy-step-documents
+            // is set, which only a development profile may set. See the seeder:
+            // no route anywhere creates a STEP-owned attachment, so without it a
+            // step with a required document cannot be completed by anyone.
+            demoDocuments.satisfyRequiredDocuments(
+                    source.getId(), savedClone.getId(), savedClone.getOwnerUserId());
 
             for (ObJourneyTemplateStepItem item : templateStepItems.findByStepIdOrderBySequenceAsc(source.getId())) {
                 ObJourneyStepItem itemClone = new ObJourneyStepItem();

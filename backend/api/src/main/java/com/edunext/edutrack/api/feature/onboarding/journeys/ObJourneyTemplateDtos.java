@@ -69,6 +69,22 @@ final class ObJourneyTemplateDtos {
     record UpdateDependsOnRequest(Long dependsOnTemplateId) {
     }
 
+    /**
+     * C-124 · the catalogue card's "Edit details" — the whole Module Service,
+     * every version of it, not the one row named in the path.
+     *
+     * @param name      the service's new name; the same name it already has is
+     *                  accepted and writes nothing
+     * @param productId the product it belongs to. Optional: omitted or
+     *                  {@code null} leaves it where it is, so a caller renaming
+     *                  a service does not have to know its product id to avoid
+     *                  moving it.
+     */
+    record UpdateModuleServiceRequest(
+            @NotBlank @Size(max = 160) String name,
+            Long productId) {
+    }
+
     record AddStepItemRequest(
             @NotBlank @Size(max = 300) String label,
             boolean mandatory) {
@@ -119,13 +135,39 @@ final class ObJourneyTemplateDtos {
      * card shows both and neither is derivable from the summary — the
      * alternative is the page fetching the full detail of every service on the
      * catalogue to render a chip.
+     *
+     * <p>C-124 · {@code serviceJourneyCount} is the same argument for the Edit
+     * and Delete controls: both are refused server-side once a client has been
+     * boarded on the service, and without the figure on the row the page could
+     * only find that out by letting an admin click and answering {@code 409}.
+     * It is deliberately <b>chain-wide</b> rather than this version's own —
+     * every row of one service carries the same total — because the card the
+     * buttons sit on is the head of a chain, and a service whose v1 carries
+     * three clients is in use however empty its v3 is.
      */
     record TemplateSummary(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
-            Long dependsOnTemplateId, Instant publishedAt, int stepCount, int totalTatDays) {
+            Long dependsOnTemplateId, Instant publishedAt, int stepCount, int totalTatDays,
+            long serviceJourneyCount) {
     }
 
-    record TemplateListResponse(List<TemplateSummary> data) {
+    /*
+      Named ObJourneyTemplateListResponse for the reason spelled out on
+      ObJourneyTemplateResponse forty lines above, which turns out to have been
+      the live problem and not a hypothetical one: springdoc names an OpenAPI
+      schema component from a Java class's simple name, and `TemplateListResponse`
+      was the simple name of *three* records — this one,
+      NotificationTemplateDtos.TemplateListResponse (B-022) and
+      ObTemplateDtos.TemplateListResponse (B-113). One silently overwrote the
+      others in the served component registry, so `GET /onboarding/journey-templates`
+      advertised the notification-template shape: ContractConformanceTest read it
+      as serving `bodyTemplate`, `channel`, `recipients` and friends while serving
+      none of its own declared fields.
+
+      The contract has always called this schema ObJourneyTemplateListResponse.
+      Only the Java name was ambiguous.
+    */
+    record ObJourneyTemplateListResponse(List<TemplateSummary> data) {
     }
 
     record StepItem(Long id, int sequence, String label, boolean mandatory) {

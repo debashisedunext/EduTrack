@@ -19,6 +19,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -54,6 +55,21 @@ class ClientAccountAdminServiceTest {
     private PasswordEncoder encoder;
     private ClientAccountAdminService service;
 
+    /**
+     * The service under one setting of the development credential switch.
+     *
+     * <p>A factory rather than a mutable field, so a test that turns the switch
+     * on cannot leave it on for the next one. {@code new
+     * PortalDevCredentialProperties(null, null)} is the shipped shape — the
+     * compact constructor supplies the defaults — which is what every test that
+     * does not mention the switch gets.
+     */
+    private ClientAccountAdminService serviceWith(PortalDevCredentialProperties devCredentials) {
+        return new ClientAccountAdminService(accounts, tokens, credentials, clients, outbox,
+                encoder, new PortalPasswordRules(), devCredentials,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
     @BeforeEach
     void setUp() {
         accounts = mock(ClientAccountRepository.class);
@@ -63,8 +79,7 @@ class ClientAccountAdminServiceTest {
         encoder = mock(PasswordEncoder.class);
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         credentials = new ClientCredentialTokens(tokens, clock);
-        service = new ClientAccountAdminService(accounts, tokens, credentials, clients, outbox,
-                encoder, clock);
+        service = serviceWith(new PortalDevCredentialProperties(null, null));
 
         when(encoder.encode(anyString())).thenReturn("$argon2id$fake");
         when(clients.find(any(), eq(OB_CLIENT))).thenReturn(Optional.of(
@@ -286,6 +301,116 @@ class ClientAccountAdminServiceTest {
             assertThatExceptionOfType(ClientAccountNotFoundException.class)
                     .isThrownBy(() -> service.setActive(SALES, OB_CLIENT, false));
             verify(accounts, never()).setActive(anyLong(), any(Boolean.class));
+        }
+    }
+
+    /**
+     * {@code edutrack.portal.dev-credentials} — the switch that lets a demo
+     * sign in as a client whose credential mail went to the logging transport.
+     *
+     * <p>The first test here is the one that matters most and is the one about
+     * the default: everything else in this file already runs with the switch
+     * off, and this states the consequence rather than leaving it implied
+     * across thirty assertions that happen not to mention a password.
+     */
+    @Nested
+    @DisplayName("the development credential switch")
+    class DevCredentials {
+
+        @Test
+        @DisplayName("off by default: no password is set and none is returned")
+        void offByDefault() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
+
+            ClientAccountAdminDtos.Account account = service.create(ADMIN, OB_CLIENT, ACTOR);
+
+            assertThat(account.devPassword()).isNull();
+            // The placeholder is still encoded on insert; what must not happen
+            // is the second write that replaces it with something knowable.
+            verify(accounts, never()).setPassword(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("on: creating sets a readable password and returns it once")
+        void onReturnsPassword() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(false)));
+            ClientAccountAdminService enabled =
+                    serviceWith(new PortalDevCredentialProperties(true, null));
+
+            ClientAccountAdminDtos.Account account = enabled.create(ADMIN, OB_CLIENT, ACTOR);
+
+            assertThat(account.devPassword()).isNotBlank();
+            verify(accounts).setPassword(eq(ACCOUNT), anyString());
+        }
+
+        @Test
+        @DisplayName("a generated password satisfies the portal's own rules")
+        void generatedPasswordIsAccepted() {
+            // The failure this pins is an account created with a password its
+            // own login screen refuses — the dead end the switch exists to
+            // remove, reachable if the generator ever loses its shape.
+            for (int i = 0; i < 200; i++) {
+                assertThatNoException().isThrownBy(
+                        () -> new PortalPasswordRules().enforce(
+                                ClientCredentialTokens.readableDevPassword()));
+            }
+        }
+
+        @Test
+        @DisplayName("a configured password is shared, so a demo types one thing")
+        void fixedPasswordIsUsed() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(false)));
+            ClientAccountAdminService enabled =
+                    serviceWith(new PortalDevCredentialProperties(true, "Demo-Passw0rd!"));
+
+            assertThat(enabled.create(ADMIN, OB_CLIENT, ACTOR).devPassword())
+                    .isEqualTo("Demo-Passw0rd!");
+        }
+
+        @Test
+        @DisplayName("a configured password the portal would refuse fails the request, not startup")
+        void weakFixedPasswordIsRefused() {
+            when(accounts.findByObClientId(OB_CLIENT)).thenReturn(Optional.empty());
+            ClientAccountAdminService enabled =
+                    serviceWith(new PortalDevCredentialProperties(true, "short"));
+
+            assertThatExceptionOfType(PortalAuthExceptions.WeakPortalPassword.class)
+                    .isThrownBy(() -> enabled.create(ADMIN, OB_CLIENT, ACTOR));
+        }
+
+        @Test
+        @DisplayName("the credential link is still minted and mailed, switch or no switch")
+        void credentialPathStillRuns() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(false)));
+            ClientAccountAdminService enabled =
+                    serviceWith(new PortalDevCredentialProperties(true, null));
+
+            enabled.create(ADMIN, OB_CLIENT, ACTOR);
+
+            // Switching the property off must leave a working account behind,
+            // not one whose only way in was suppressed on the day it was made.
+            verify(tokens).insert(anyLong(), anyString(), anyString(), any(), any());
+            verify(outbox).enqueue(any());
+        }
+
+        @Test
+        @DisplayName("reset issues a readable password too, or a demo can never recover one")
+        void resetAlsoIssuesOne() {
+            when(accounts.findByObClientId(OB_CLIENT)).thenReturn(Optional.of(row(false)));
+            ClientAccountAdminService enabled =
+                    serviceWith(new PortalDevCredentialProperties(true, null));
+
+            assertThat(enabled.resetPassword(ADMIN, OB_CLIENT, ACTOR).devPassword()).isNotBlank();
+        }
+
+        private ClientAccountRow row(boolean mustChangePassword) {
+            return new ClientAccountRow(ACCOUNT, "NORTHWIND.meena", "$argon2id$fake", null,
+                    OB_CLIENT, "Meena Raghavan", "meena@northwind.example", true,
+                    mustChangePassword, 0, null, null);
         }
     }
 }

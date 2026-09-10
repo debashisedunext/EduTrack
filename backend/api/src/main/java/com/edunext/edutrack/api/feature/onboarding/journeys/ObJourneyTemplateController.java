@@ -10,7 +10,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * C-102 · OB-07 journey template designer — {@code /onboarding/journey-templates},
@@ -94,16 +97,30 @@ class ObJourneyTemplateController {
                     Every version of every service, newest first within each — the \
                     catalogue draws the head of each chain and an admin reviewing \
                     history wants the retired rows too, so this filters neither.""")
-    ObJourneyTemplateDtos.TemplateListResponse list(
+    ObJourneyTemplateDtos.ObJourneyTemplateListResponse list(
             @RequestParam(name = "productId", required = false) Long productId) {
 
-        List<ObJourneyTemplateDtos.TemplateSummary> rows = service.listTemplates(productId).stream()
+        List<ObJourneyTemplate> templates = service.listTemplates(productId);
+        /*
+          C-124 · one grouped count for the whole page rather than one per card.
+          Chain-wide, so the head row a card is drawn from reports its service's
+          total and not its own version's — see journeyCountsByTemplate.
+
+          Note this is measured over the rows this call returns, which the
+          productId filter may have narrowed. That is the right scope: the
+          filter narrows by product, and a service never spans two products, so
+          a chain is either wholly in the result or wholly out of it.
+        */
+        Map<Long, Long> journeyCounts = service.journeyCountsByTemplate(templates);
+
+        List<ObJourneyTemplateDtos.TemplateSummary> rows = templates.stream()
                 .map(t -> new ObJourneyTemplateDtos.TemplateSummary(
                         t.getId(), t.getProductId(), t.getName(), t.getVersion(), t.isActive(),
                         t.getSequence(), t.getDependsOnTemplateId(), t.getPublishedAt(),
-                        service.stepCount(t.getId()), service.totalTatDays(t.getId())))
+                        service.stepCount(t.getId()), service.totalTatDays(t.getId()),
+                        journeyCounts.getOrDefault(t.getId(), 0L)))
                 .toList();
-        return new ObJourneyTemplateDtos.TemplateListResponse(rows);
+        return new ObJourneyTemplateDtos.ObJourneyTemplateListResponse(rows);
     }
 
     @GetMapping(value = "/journey-templates/{templateId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -270,6 +287,102 @@ class ObJourneyTemplateController {
                  @Valid @RequestBody ObJourneyTemplateDtos.ReorderStepsRequest request) {
         requirePrecondition(templateId, ifMatch);
         service.reorderSteps(templateId, request.stepIds());
+    }
+
+    /**
+     * C-124 · "Edit details" on an OB-07 catalogue card — rename a Module
+     * Service, or move it to another product.
+     *
+     * <p><b>The path names one version; the write moves the whole chain.</b> A
+     * service is {@code (product_id, name)}, so renaming the single row an
+     * admin happened to click would split one service into two rather than
+     * rename it — {@code ObJourneyTemplateService#updateModuleService} has the
+     * full argument.
+     *
+     * <p>{@code PATCH} rather than {@code PUT}: {@code productId} is optional
+     * and omitting it means "leave it where it is", which is a merge of the
+     * fields given, not a replacement of the resource.
+     */
+    @PatchMapping(value = "/journey-templates/{templateId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "updateObJourneyModuleService",
+            summary = "Rename a Module Service, or move it to another product (OB-07)",
+            description = """
+                    Applies to **every version of the service**, not the version named in \
+                    the path — a service is identified by `(productId, name)`, so renaming \
+                    one row would split the chain rather than rename it.
+
+                    `409` once any client journey has been instantiated from any version of \
+                    it: `ob_journeys.service_name` is denormalised at instantiation and a \
+                    service-level dependency is resolved by `(product, service name)`, so a \
+                    rename underneath a live journey breaks a lookup with no other key. \
+                    `serviceJourneyCount` on the catalogue row is how a page knows this \
+                    before the admin clicks. `409` also if the target product already has a \
+                    service by that name.
+
+                    Note this is *not* gated on `publishedAt`. A name and a product are \
+                    catalogue metadata rather than journey content — the same distinction \
+                    `PUT .../depends-on` draws — so what gates it is whether anybody was \
+                    ever boarded on it.
+
+                    `If-Match` is required, not optional — `428` without one, `412` if it \
+                    does not match. Read the tag from \
+                    `GET /onboarding/journey-templates/{templateId}`.""")
+    ObJourneyTemplateDtos.ObJourneyTemplateResponse updateModuleService(
+            @PathVariable long templateId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ObJourneyTemplateDtos.UpdateModuleServiceRequest request) {
+        requirePrecondition(templateId, ifMatch);
+        ObJourneyTemplate updated = service.updateModuleService(templateId, request.name(), request.productId());
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(updated);
+    }
+
+    /**
+     * C-124 · Delete on an OB-07 catalogue card — the Module Service and every
+     * version of it, with its steps, items and docs.
+     *
+     * <p>Chain-wide for {@code updateModuleService}'s reason: deleting the head
+     * alone would leave the catalogue drawing a card for a service whose only
+     * remaining rows are retired versions.
+     *
+     * <p>No {@code If-Match}. The precondition on the routes above protects a
+     * <em>lost update</em> — two admins editing the same row, the second
+     * silently overwriting the first. There is no update to lose here, and the
+     * one race worth refusing is a client boarding between the read and the
+     * delete, which the tag cannot see: {@code serviceJourneyCount} is
+     * deliberately not part of the detail, so it does not move the tag, so a
+     * required {@code If-Match} would answer {@code 412} for edits that are
+     * irrelevant while still missing the one that matters. The usage check runs
+     * inside the delete's own transaction, which is where that race is actually
+     * settled.
+     */
+    @DeleteMapping(value = "/journey-templates/{templateId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(operationId = "deleteObJourneyModuleService",
+            summary = "Delete a Module Service and all its versions (OB-07)",
+            description = """
+                    Removes **every version** of the service named by `templateId`, with \
+                    each version's steps, step items and step docs. Chain-wide for the same \
+                    reason as `PATCH`: a service is `(productId, name)`, and deleting the \
+                    head alone would leave a card drawing retired versions of a service \
+                    nobody can reach.
+
+                    Refused with `409` if either is true:
+
+                    - **a client is on it** — any journey instantiated from any version, \
+                      archived or not. A journey renders its steps from these rows; \
+                      deleting them empties a running client's ribbon. Retire the service \
+                      by publishing over it instead.
+                    - **another service depends on it** — the problem document names them \
+                      in `dependentServiceNames`. Clear their "Service depends on" first; \
+                      `fk_ob_journey_templates_depends_on` is RESTRICT precisely so a \
+                      service cannot be deleted out from under one that waits on it.
+
+                    No `If-Match`: there is no update to lose, and the race worth refusing \
+                    is a client boarding mid-delete, which the usage check inside the \
+                    transaction settles and an `ETag` could not see.""")
+    void deleteModuleService(@PathVariable long templateId) {
+        service.deleteModuleService(templateId);
     }
 
     // ------------------------------------------------------------------

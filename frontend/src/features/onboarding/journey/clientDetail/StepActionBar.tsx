@@ -11,6 +11,7 @@ import {
   useResumeObJourneyStep,
   useStartObJourneyStep,
 } from '@/api/generated/onboarding-journeys/onboarding-journeys'
+import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/use-toast'
 
@@ -80,13 +81,23 @@ export function StepActionBar({ step, hold, gate, canAct }: StepActionBarProps) 
    * something friendlier would be inventing a reason.
    */
   const onError = React.useCallback((error: unknown) => {
-    const detail =
-      (error as { error?: { detail?: string; title?: string } })?.error?.detail ??
-      (error as { error?: { title?: string } })?.error?.title
+    /*
+      `ApiError` exposes the RFC 9457 body as `problem`, not as `error`. This
+      read used to be `error.error.detail`, a property that does not exist on
+      anything the generated client throws — so `detail` was always undefined
+      and every refusal, from a 404 on an unbuilt route to a 422 naming the
+      exact gate that held, rendered as the same generic sentence.
+
+      That defeated the whole point of the rule this handler exists to keep:
+      surface the server's own words, because `signoffMissing` is a gate this
+      screen cannot see and its `detail` is the only accurate account of it.
+    */
+    const problem = error instanceof ApiError ? error.problem : null
     toast({
       variant: 'danger',
       title: 'That did not go through',
-      description: detail ?? 'The server refused the change. Reload and try again.',
+      description:
+        problem?.detail ?? problem?.title ?? 'The server refused the change. Reload and try again.',
     })
   }, [])
 

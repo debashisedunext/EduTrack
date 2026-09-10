@@ -191,4 +191,45 @@ class ObJourneyTemplateControllerTest {
 
         verify(service, never()).reorderSteps(anyLong(), org.mockito.ArgumentMatchers.anyList());
     }
+
+    @Test
+    @DisplayName("C-124 · the rename is refused (428) without an If-Match, before the service is called")
+    void updateModuleServiceWithoutIfMatchRefused() {
+        stubDetailFor(1L, template(1L, false), List.of(step(10L, 1L, 1, null)));
+
+        assertThatThrownBy(() -> controller.updateModuleService(1L, null,
+                new ObJourneyTemplateDtos.UpdateModuleServiceRequest("Renamed", null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode().value()).isEqualTo(428));
+
+        verify(service, never()).updateModuleService(anyLong(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("C-124 · the rename delegates name and productId once the precondition holds")
+    void updateModuleServiceDelegates() {
+        stubDetailFor(1L, template(1L, false), List.of(step(10L, 1L, 1, null)));
+        when(service.updateModuleService(1L, "Renamed", 42L)).thenReturn(template(1L, false));
+
+        controller.updateModuleService(1L, "*",
+                new ObJourneyTemplateDtos.UpdateModuleServiceRequest("Renamed", 42L));
+
+        verify(service).updateModuleService(1L, "Renamed", 42L);
+    }
+
+    /**
+     * The asymmetry is deliberate and worth pinning: {@code PATCH} requires a
+     * precondition and {@code DELETE} takes none. A tag derived from the
+     * template's content cannot see the race a delete actually cares about — a
+     * client boarding between the read and the call — so requiring one would
+     * refuse edits that do not matter while still missing the one that does.
+     */
+    @Test
+    @DisplayName("C-124 · the delete takes no If-Match and delegates straight through")
+    void deleteModuleServiceDelegates() {
+        controller.deleteModuleService(1L);
+
+        verify(service).deleteModuleService(1L);
+    }
 }

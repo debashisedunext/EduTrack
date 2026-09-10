@@ -5,7 +5,10 @@ step update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
 
 | File | What it is |
 |---|---|
-| `ObClientDetailPage.tsx` | The route page — header, the accordion stack, the one directory read the ribbons resolve owners from. |
+| `ObClientDetailPage.tsx` | The client route page — header, the prerequisites gate, one card per purchased product, and §9's closing pair. |
+| `ObClientProductPage.tsx` | One purchased product — `/onboarding/clients/:obClientId/products/:productId`. The journey accordions, and the one directory read their ribbons resolve owners from. |
+| `ObProductCard.tsx` | A product as a card, in A-116's launcher shape. |
+| `productGroups.ts` | The fold from journeys to products, and the figures a card prints. Pure. |
 | `ObAccordion.tsx` | One accordion: an always-visible strip, a region that mounts on expand, and the anchoring below. |
 | `useAnchoredToggle.ts` | §9's "never scrolls the page", made mechanical. |
 | `PrereqAccordion.tsx` | The gate — chip, mandatory-progress meter, task rows with verify / return / waive. |
@@ -20,6 +23,51 @@ step update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
 | `stepActions.ts` | Who may act, what each status permits, and the completion gate. Pure. |
 | `journeyStrip.ts` | TAT bands, holds, RAG presentation, prerequisite progress. Pure. |
 | `ribbonSteps.ts` | The one translation between `ObJourneyStepView` and the ribbon's own vocabulary. Pure. |
+
+## OB-05 is two screens: the client, then one product at a time
+
+**This is a deviation from plan §9 and it is recorded here rather than
+implied.** §9's OB-05 row orders the page *prerequisites accordion on top → one
+journey accordion per purchased product → client portal access + client info*,
+and that middle row was written when a purchased product meant one journey.
+
+It no longer does. A product publishes **any number of Module Services at
+once** (plan §20, and the multi-service change that implemented it), a client is
+boarded through one journey per service of every product they bought, and the
+live corpus already seeds ERP's *Enterprise (with data migration audit)* service
+live beside its standard one. So a client with two products carries five or six
+accordions, and the screen stopped answering the question people open it with —
+*how is the ERP going* — because the ERP's answer was interleaved with the
+biometric rollout's.
+
+| Screen | Route | What it answers |
+|---|---|---|
+| `ObClientDetailPage` | `/onboarding/clients/:obClientId` | *Which product?* The gate, a card per purchased product, the closing pair, the stitched timeline. |
+| `ObClientProductPage` | `/onboarding/clients/:obClientId/products/:productId` | *How is it going?* That product's journeys — ribbons, step panels, sign-offs — and nothing else's. |
+
+Three things this preserves rather than changes:
+
+- **§9's ordering inside each page.** The gate is still above everything on the
+  client page, because nothing below it can move while it is locked, and the
+  product page says so rather than drawing live-looking ribbons over a locked
+  gate.
+- **The strip/ribbon split.** The contract splits them so "a client with six
+  journeys does not pay for six ribbons on first paint". The client page now
+  pays for **none**, which is the strongest form of that rule; its test asserts
+  exactly that.
+- **Cross-product sibling holds.** `JourneyAccordion` is handed *every* journey
+  of the client as `siblings`, not only the product's, because a service-level
+  dependency crosses products (plan §5.5) — Horizon's biometric rollout is held
+  behind its ERP journey and has to be able to name it from a page the ERP is
+  not on.
+
+The one thing deliberately **not** carried onto the product page is
+`ClientCommunicationsPanel`. It is the *client-level stitched* view by
+construction — "everything said to this client, across every service" — and its
+read is client-scoped with an optional per-journey filter. Mounting it under one
+product would either lie about its scope or need a product filter the contract
+does not carry. Per-service communications are already in the step panel, where
+C-112 put them.
 
 ## Why this is not in `features/onboarding/clients/`
 

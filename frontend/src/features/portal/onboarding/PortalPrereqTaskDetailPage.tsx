@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 
 import {
   addPortalPrereqComment,
+  getGetPortalOnboardingHomeQueryKey,
   getGetPortalPrereqTaskQueryKey,
   getListPortalPrereqCommentsQueryKey,
   submitPortalPrereqTask,
@@ -58,7 +59,20 @@ export function PortalPrereqTaskDetailPage() {
 
   const task = data.data
 
-  const refetch = () => queryClient.invalidateQueries({ queryKey: getGetPortalPrereqTaskQueryKey(prereqTaskId) })
+  /**
+   * Both reads that this page can change, not only its own.
+   *
+   * Submitting a task moves it out of the home page's outstanding list and
+   * changes the progress meter above it, and uploading a file changes the
+   * same counts. Invalidating only the task detail left CP-03 serving its
+   * cached copy: the client submitted, went back, and the row still read
+   * "Pending with client" until they reloaded hard enough to drop the cache
+   * — which reads as the submission having been lost.
+   */
+  const refetch = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: getGetPortalPrereqTaskQueryKey(prereqTaskId) }),
+    queryClient.invalidateQueries({ queryKey: getGetPortalOnboardingHomeQueryKey() }),
+  ])
 
   const onSubmitForVerification = async () => {
     setSubmitting(true)

@@ -11,7 +11,6 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -193,13 +192,30 @@ class ObClientReadRepository {
                         AND (os.owner_user_id = :ownerId
                              OR os.backup_owner_user_id = :ownerId)))
                AND (:gateStatus IS NULL OR %s = :gateStatus)
-               AND (:cursorDate IS NULL
-                    OR c.onboarding_date < :cursorDate
-                    OR (c.onboarding_date = :cursorDate AND c.id < :cursorId))
+               AND (:cursorId IS NULL OR c.id < :cursorId)
             """;
 
+    /**
+     * Newest client first, where "newest" means most recently <em>created</em>.
+     *
+     * <p>This used to order by {@code onboarding_date DESC, id DESC}, and the
+     * difference is not cosmetic: {@code onboarding_date} is the boarding date
+     * an operator types into the wizard, not when the row was written. A client
+     * created today and boarded last month therefore appeared partway down a
+     * list the person who just created it was staring at, which reads as the
+     * save having failed.
+     *
+     * <p>{@code id} rather than {@code created_at}: the column is
+     * {@code AUTO_INCREMENT}, so descending id <em>is</em> creation order, and
+     * it is the one value guaranteed unique — which makes the keyset cursor a
+     * single column instead of a pair, with no ties to break and no
+     * same-timestamp rows to skip or repeat across a page boundary.
+     *
+     * <p>The boarding date is still what the list <em>shows</em>. Only the
+     * order changed.
+     */
     private static final String ORDER_AND_LIMIT = """
-             ORDER BY c.onboarding_date DESC, c.id DESC
+             ORDER BY c.id DESC
              LIMIT :limit
             """;
 
@@ -278,15 +294,16 @@ class ObClientReadRepository {
                 .param("productId", productId)
                 .param("salesPersonId", salesPersonId)
                 .param("ownerId", ownerId)
-                // B-104 · the LocalDate itself, not Date.valueOf(..). The
-                // keyset cursor is compared against c.onboarding_date, which is
-                // the same DATE column localDate() reads — and java.sql.Date
-                // carries an instant, so binding one lets the driver convert it
-                // through a zone on the way out. That is A-067's defect on the
-                // bind side, and while the read was ALSO shifted the two
-                // cancelled; fixing only the read would have left page two
-                // starting a day off. See localDate()'s note.
-                .param("cursorDate", decoded == null ? null : LocalDate.parse(decoded.sortKey()))
+                // The keyset is `c.id` alone now — see ORDER_AND_LIMIT. B-104's
+                // note here was about binding the cursor's LocalDate without
+                // letting java.sql.Date shift it through a zone; with the sort
+                // no longer keyed on a DATE column there is nothing to shift,
+                // and that whole class of defect leaves with it.
+                //
+                // `sortKey` is still carried in the encoded cursor and is
+                // deliberately unread: cursors already issued to a running
+                // client keep decoding, and the page they resume is decided by
+                // the id they also carry.
                 .param("cursorId", decoded == null ? null : decoded.id())
                 .param("limit", fetchSize);
         if (rag != null && !rag.isBlank()) {
@@ -594,11 +611,20 @@ class ObClientReadRepository {
      * <p><b>One row per Module Service, not per product.</b> A client who
      * bought EduTrack ERP has one journey for each service the product
      * publishes, so the product name no longer identifies a strip and
-     * {@code service_name} is what titles it. Ordered by the catalogue's own
-     * {@code sequence} first — the order plan §5.5 says journeys "instantiate
-     * and display" in — rather than by product name, which would interleave
-     * two products' services alphabetically and could put a service ahead of
-     * the one it is held behind.
+     * {@code service_name} is what titles it. Ordered by {@code sequence}
+     * first — the order plan §5.5 says journeys "instantiate and display"
+     * in — rather than by product name, which would interleave two products'
+     * services alphabetically and could put a service ahead of the one it is
+     * held behind.
+     *
+     * <p><b>{@code j.sequence}, not the template's</b>, and the join to
+     * {@code ob_journey_templates} that read it is gone with it
+     * ({@code V20260910_0930}). The template's column is catalogue state: an
+     * admin reordering two Module Services in OB-07 was reshuffling the
+     * strips of every school already running them, mid-journey. The journey
+     * carries the position it was instantiated with, so a swap changes the
+     * next school boarded and leaves this one as its owners have been
+     * reading it.
      */
     List<JourneyStripRow> journeysOf(long clientId) {
         return jdbc.sql("""
@@ -617,10 +643,9 @@ class ObClientReadRepository {
                        (SELECT %s FROM ob_journey_steps rs WHERE rs.journey_id = j.id) AS rag
                   FROM ob_journeys j
                   JOIN ob_products p ON p.id = j.product_id
-                  JOIN ob_journey_templates t ON t.id = j.template_id
                  WHERE j.ob_client_id = :id
                    AND j.archived_at IS NULL
-                 ORDER BY t.sequence, p.name, j.service_name, j.id
+                 ORDER BY j.sequence, p.name, j.service_name, j.id
                 """.formatted(ObStepRag.worstOverSteps("rs")))
                 .param("id", clientId).query(JOURNEY_MAPPER).list();
     }
@@ -972,10 +997,12 @@ class ObClientReadRepository {
             return null;
         }
         try {
-            Cursor decoded = Cursor.decode(cursor);
-            LocalDate.parse(decoded.sortKey());
-            return decoded;
-        } catch (IllegalArgumentException | DateTimeParseException e) {
+            // No longer validated as a date: the sort key is `c.id` and the
+            // sortKey text is not read. A cursor issued before that change
+            // still decodes, and still resumes at the right row, because the
+            // id half is what the predicate uses.
+            return Cursor.decode(cursor);
+        } catch (IllegalArgumentException e) {
             return null;
         }
     }

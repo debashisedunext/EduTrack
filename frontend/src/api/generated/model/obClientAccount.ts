@@ -49,6 +49,7 @@ the database rejects mutation independently via triggers and grants.
 import type { ObClientAccountLastLoginAt } from './obClientAccountLastLoginAt';
 import type { ObClientAccountLockedUntil } from './obClientAccountLockedUntil';
 import type { ObClientAccountCredentialSentAt } from './obClientAccountCredentialSentAt';
+import type { ObClientAccountDevPassword } from './obClientAccountDevPassword';
 
 /**
  * B-126 · a client's portal login as the OB-05 panel sees it.
@@ -101,4 +102,22 @@ The outbox owns delivery, and a panel claiming a mail arrived would
 be asserting something this feature cannot see.
  */
   credentialSentAt?: ObClientAccountCredentialSentAt;
+  /** **Null in the product, and the only field here that is ever a
+credential.**
+
+Populated on `createObClientAccount` and
+`resetObClientAccountPassword` only when
+`edutrack.portal.dev-credentials.enabled` is set, which the
+application refuses to start with outside a development profile.
+When it is set, the account's password is replaced with this value
+and `mustChangePassword` is cleared, so the operator can sign in as
+the client immediately.
+
+It exists for demos against a database of invented clients whose
+mail transport is `logging` — where the credential link the real
+flow depends on arrives nowhere, and there is otherwise no way to
+reach the portal at all. The schema note above still describes what
+is true of every deployment that has not opted in.
+ */
+  devPassword?: ObClientAccountDevPassword;
 }

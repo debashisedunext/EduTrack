@@ -5,7 +5,7 @@ a time).
 
 | File | What it is |
 |---|---|
-| `RoleListPage.tsx` | The grid, plus create and delete |
+| `RoleListPage.tsx` | The grid, plus create, edit and delete |
 | `RolePermissionsPage.tsx` | Identity fields and the matrix for one role |
 | `permissionMatrix.ts` | Grouping, toggling and dirty-checking — pure, no React |
 | `roleQueries.ts` | The data layer |
@@ -38,6 +38,27 @@ never reach "all" is a control nobody trusts.
 delete that is going to be refused should be visibly going to be refused before
 it is clicked. Discovering the count only in the error is how an admin ends up
 clicking it four times to see whether anything changed.
+
+## Edit is on both screens, deliberately
+
+The grid's Edit dialog and `RolePermissionsPage`'s identity section write the
+same `PATCH` with the same `If-Match`. Two entry points rather than one because
+renaming a role, fixing its description or deactivating it are what an admin
+comes to the *grid* to do, and routing them through the matrix page means
+loading eighteen capability checkboxes to change a word. The detail page keeps
+its copy because the code, the resource count and the matrix are already on
+screen there.
+
+Both seed their fields from the **detail read**, never from a cached grid row.
+`If-Match` only guards anything if the tag and the values sent with it describe
+the same version of the role; seeding from a stale list row and attaching a
+freshly-fetched tag would send a write that cannot 412 straight over somebody
+else's edit — precisely the lost update the tag exists to catch.
+
+Edit is offered on a system role, where delete is not. The six are undeletable,
+not unrenameable — `RoleService.update` accepts a patch to any of them, and only
+the code is immutable (`ImmutableRoleCodeException`), which is why the dialog
+shows it disabled with the reason rather than leaving it out.
 
 ## Two saves, one `ETag`
 

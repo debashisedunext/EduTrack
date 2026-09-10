@@ -62,6 +62,26 @@ public class ObJourney {
     @Column(name = "template_id", nullable = false)
     private Long templateId;
 
+    /**
+     * Where this journey sits among the client's others — the catalogue
+     * {@code sequence} of the template it was instantiated from, copied at
+     * birth and never updated.
+     *
+     * <p>Written once, exactly like {@link #templateId} and
+     * {@link #serviceName}, and for the same reason those are pinned rather
+     * than joined: {@code ob_journey_templates.sequence} is catalogue state
+     * that an admin reorders in OB-07 long after schools have been boarded.
+     * Reading it live (which {@code journeysOf} did until
+     * {@code V20260910_0930}) meant swapping two Module Services reshuffled
+     * the ribbons of every client already running them, mid-journey.
+     *
+     * <p>The catalogue still decides the order journeys <em>instantiate</em>
+     * in and the order the next client is boarded in. It no longer decides
+     * the order of a client boarded before the swap.
+     */
+    @Column(name = "sequence", nullable = false)
+    private int sequence;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "gate_status", nullable = false, length = 10)
     private ObGateStatus gateStatus = ObGateStatus.LOCKED;
@@ -134,6 +154,14 @@ public class ObJourney {
 
     public void setTemplateId(Long templateId) {
         this.templateId = templateId;
+    }
+
+    public int getSequence() {
+        return sequence;
+    }
+
+    public void setSequence(int sequence) {
+        this.sequence = sequence;
     }
 
     public ObGateStatus getGateStatus() {

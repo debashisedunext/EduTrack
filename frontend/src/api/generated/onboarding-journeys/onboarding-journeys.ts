@@ -78,6 +78,7 @@ import type {
   ObJourneyArchiveRequest,
   ObJourneyDetailResponse,
   ObJourneyListResponse,
+  ObJourneyModuleServiceUpdateRequest,
   ObJourneyStepDetailResponse,
   ObJourneyStepItemResponse,
   ObJourneyStepItemUpdateRequest,
@@ -405,6 +406,195 @@ export function useGetObJourneyTemplate<TData = Awaited<ReturnType<typeof getObJ
 
 
 /**
+ * The catalogue card's "Edit details".
+
+**Applies to every version of the service, not the version named in
+the path.** A service is identified by `(productId, name)` — exactly
+what `uq_ob_journey_templates_version` keys on — so renaming the one
+row an admin happened to click would split one chain into two rather
+than rename it: `beginRevision` would number from a head that is no
+longer the head, and the catalogue would draw a second card for a
+service nobody created. The `templateId` in the path only says *which*
+service.
+
+`productId` is optional; omitting it leaves the service where it is,
+so renaming does not require knowing a product id.
+
+**`409` once any client is on it** — any journey instantiated from any
+version, archived or not. `ob_journeys.service_name` is denormalised at
+instantiation and a service-level dependency is resolved by
+`(product, service name)` rather than by template id (deliberately, so
+a hold survives its dependency publishing a new version), so a rename
+underneath a live journey breaks a lookup with no other key to fall
+back on. The problem document carries `journeyCount`;
+`ObJourneyTemplateSummary.serviceJourneyCount` is how a page knows
+before the admin clicks. `409` also if the target product already has a
+service by that name.
+
+Note this is **not** gated on `publishedAt`, unlike the step routes. A
+name and a product are catalogue metadata rather than journey content —
+the same distinction `PUT .../depends-on` draws to justify working on a
+published row — so what gates it is whether anybody was ever boarded on
+it. A published service nobody bought is renameable; an unpublished
+draft cannot have been bought at all.
+
+`If-Match` is required, not optional — `428` without one, `412` if it
+does not match. Read the tag from
+`GET /onboarding/journey-templates/{templateId}`.
+
+ * @summary Rename a Module Service, or move it to another product (OB-07)
+ */
+export const updateObJourneyModuleService = (
+    templateId: number,
+    obJourneyModuleServiceUpdateRequest: ObJourneyModuleServiceUpdateRequest,
+ ) => {
+      
+      
+      return http<ObJourneyTemplateResponse>(
+      {url: `/onboarding/journey-templates/${templateId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyModuleServiceUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObJourneyModuleServiceMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyModuleService>>, TError,{templateId: number;data: ObJourneyModuleServiceUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyModuleService>>, TError,{templateId: number;data: ObJourneyModuleServiceUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObJourneyModuleService'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObJourneyModuleService>>, {templateId: number;data: ObJourneyModuleServiceUpdateRequest}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  updateObJourneyModuleService(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObJourneyModuleServiceMutationResult = NonNullable<Awaited<ReturnType<typeof updateObJourneyModuleService>>>
+    export type UpdateObJourneyModuleServiceMutationBody = ObJourneyModuleServiceUpdateRequest
+    export type UpdateObJourneyModuleServiceMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse
+
+    /**
+ * @summary Rename a Module Service, or move it to another product (OB-07)
+ */
+export const useUpdateObJourneyModuleService = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyModuleService>>, TError,{templateId: number;data: ObJourneyModuleServiceUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObJourneyModuleService>>,
+        TError,
+        {templateId: number;data: ObJourneyModuleServiceUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObJourneyModuleServiceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The catalogue card's Delete. Removes **every version** of the service
+named by `templateId`, with each version's steps, step items and step
+docs — chain-wide for `PATCH`'s reason: deleting the head alone would
+leave the catalogue drawing a card for a service whose only remaining
+rows are retired versions.
+
+Refused with `409` if either holds:
+
+- **a client is on it** — any journey instantiated from any version,
+  archived or not. A journey renders its steps from these very rows, so
+  deleting them empties a running client's ribbon; and a finished
+  onboarding is as much evidence the service was sold as a running one.
+  Retire the service by publishing over it instead. The problem
+  document carries `journeyCount`.
+- **another service depends on it** — the problem document names them in
+  `dependentServiceNames`. Clear their "Service depends on" first;
+  `fk_ob_journey_templates_depends_on` is RESTRICT precisely so a
+  service cannot be deleted out from under one waiting on it.
+
+No `If-Match`, unlike `PATCH`. A precondition protects a *lost update*,
+and there is no update to lose here. The one race worth refusing is a
+client boarding between the read and the delete, which the tag cannot
+see — `serviceJourneyCount` is deliberately not part of the detail, so
+it does not move the tag — so a required `If-Match` would answer `412`
+for edits that do not matter while still missing the one that does. The
+usage check runs inside the delete's own transaction, which is where
+that race is settled.
+
+ * @summary Delete a Module Service and all its versions (OB-07)
+ */
+export const deleteObJourneyModuleService = (
+    templateId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/journey-templates/${templateId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteObJourneyModuleServiceMutationOptions = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObJourneyModuleService>>, TError,{templateId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteObJourneyModuleService>>, TError,{templateId: number}, TContext> => {
+
+const mutationKey = ['deleteObJourneyModuleService'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteObJourneyModuleService>>, {templateId: number}> = (props) => {
+          const {templateId} = props ?? {};
+
+          return  deleteObJourneyModuleService(templateId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteObJourneyModuleServiceMutationResult = NonNullable<Awaited<ReturnType<typeof deleteObJourneyModuleService>>>
+    
+    export type DeleteObJourneyModuleServiceMutationError = ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Delete a Module Service and all its versions (OB-07)
+ */
+export const useDeleteObJourneyModuleService = <TError = ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObJourneyModuleService>>, TError,{templateId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteObJourneyModuleService>>,
+        TError,
+        {templateId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteObJourneyModuleServiceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Steps, items and docs are cloned — including each item's `mandatory`
 flag, carried forward rather than reset to the column default — and
 `dependsOnStepId` re-pointed at the clones. The source version is

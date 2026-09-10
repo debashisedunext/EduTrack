@@ -76,14 +76,31 @@ class ObDashboardSummaryIT {
 
     private long erp;
     private long biometric;
+    private long owner;
 
     @BeforeEach
     void seed() {
+        jdbc.update("DELETE FROM ob_scope_dashboard_summary");
         jdbc.update("DELETE FROM ob_dashboard_summary");
         jdbc.update("DELETE FROM ob_products WHERE code LIKE 'IT_OBDASH_%'");
 
         erp = insertProduct("IT_OBDASH_ERP", "ERP");
         biometric = insertProduct("IT_OBDASH_BIO", "Biometric");
+
+        // ob_scope_dashboard_summary.scope_user_id carries a foreign key to
+        // users, so the narrowed cases need a real row to point at rather than
+        // the invented id the mocked unit tests can get away with.
+        jdbc.update("INSERT IGNORE INTO roles (code, name, is_system) "
+                + "VALUES ('IT_OBDASH_ROLE', 'OB Dashboard Fixture', 0)");
+        jdbc.update("""
+                INSERT IGNORE INTO users (emp_code, username, email, password_hash, full_name,
+                                          role_id, timezone, is_active, must_change_password)
+                VALUES ('OBDASH01', 'its.obdash.owner', 'its.obdash.owner@edunext.test',
+                        'not-a-real-hash', 'Dashboard Fixture Owner',
+                        (SELECT id FROM roles WHERE code = 'IT_OBDASH_ROLE'), 'Asia/Kolkata', 1, 0)
+                """);
+        owner = jdbc.queryForObject(
+                "SELECT id FROM users WHERE username = 'its.obdash.owner'", Long.class);
     }
 
     // ── the arithmetic that is exact ────────────────────────────────────────
@@ -288,26 +305,97 @@ class ObDashboardSummaryIT {
                         assertThat(one.unavailableReason()).contains("No summary has been computed"));
     }
 
-    // ── the scope the table cannot answer ───────────────────────────────────
+    // ── the narrowed scopes, from their own table ───────────────────────────
 
     /**
-     * The board is full of numbers and a Step Owner still gets none of them.
-     * With a container in play this is worth asserting against real rows rather
-     * than a mock: the failure it guards is a narrowed caller being handed the
-     * org-wide figures, which would look entirely correct on screen.
+     * <b>The assertion this whole class exists to make now.</b> Both tables
+     * hold figures for the same day and the same product, and they disagree on
+     * purpose: 40 org-wide against 9 for this caller. A Step Owner must read 9.
+     *
+     * <p>The failure it guards is a narrowed caller being handed the org-wide
+     * board, which would look entirely correct on screen and would disclose the
+     * size of the book to somebody scoped out of most of it. Worth a container
+     * rather than a mock precisely because the mocked version cannot tell "read
+     * the right table" from "read the right rows".
      */
     @Test
-    @DisplayName("a Step Owner is not handed the org-wide board even when one exists")
-    void aNarrowedRoleNeverSeesTheUnscopedNumbers() {
+    @DisplayName("a Step Owner reads their own figures, never the org-wide ones")
+    void aNarrowedRoleReadsTheScopedTable() {
         insertRow(WEDNESDAY, erp, row -> row.put("journeys_open_running", 40));
+        insertScopedRow(WEDNESDAY, owner, erp, row -> {
+            row.put("journeys_open_running", 9);
+            row.put("rag_amber", 2);
+            row.put("rag_red", 1);
+        });
 
         var summary = dashboard.summary(stepOwner(), null).summary();
 
+        assertThat(count(summary.cards(), ObDashboardCardKey.ONGOING_PROJECTS)).isEqualTo(9);
+        assertThat(count(summary.cards(), ObDashboardCardKey.AT_RISK)).isEqualTo(3);
+        assertThat(summary.cards()).allSatisfy(one ->
+                assertThat(one.unavailableReason()).isNull());
+        assertThat(summary.appliedScope()).isEqualTo("journeys containing your services");
+    }
+
+    /**
+     * One Step Owner's row is not another's. The table is keyed by caller, so
+     * this is the one way the feature can leak — and an id passed wrongly would
+     * still return a plausible board.
+     */
+    @Test
+    @DisplayName("one narrowed caller cannot read another's row")
+    void scopedRowsAreKeyedByCaller() {
+        insertScopedRow(WEDNESDAY, owner, erp, row -> row.put("journeys_open_running", 9));
+
+        var summary = dashboard.summary(caller("OB_STEP_OWNER", owner + 1_000), null).summary();
+
         assertThat(summary.cards()).allSatisfy(one -> {
             assertThat(one.count()).isZero();
-            assertThat(one.unavailableReason()).isNotBlank();
+            assertThat(one.unavailableReason()).contains("Nothing is in your scope yet");
         });
-        assertThat(summary.appliedScope()).isEqualTo("journeys containing your services");
+    }
+
+    /**
+     * The refresh writes no row for a caller with nothing visible, so that
+     * "nothing is yours yet" stays separable from "the job has never run" — and
+     * neither is a board of zeroes, which would claim nothing of theirs is
+     * overdue. Asserted with the org-wide board deliberately full, so a
+     * regression that fell back to it would fail here rather than look right.
+     */
+    @Test
+    @DisplayName("a narrowed caller with no row is told so, not shown zeroes or everyone else's")
+    void aNarrowedCallerWithNothingInScopeIsToldSo() {
+        insertRow(WEDNESDAY, erp, row -> row.put("journeys_open_running", 40));
+        insertScopedRow(WEDNESDAY, owner, erp, row -> row.put("journeys_open_running", 9));
+
+        var rendered = dashboard.summary(caller("OB_STEP_OWNER", owner + 1_000), null);
+
+        assertThat(rendered.summary().computedAt()).isNull();
+        assertThat(rendered.summary().cards()).allSatisfy(one -> {
+            assertThat(one.count()).isZero();
+            assertThat(one.unavailableReason()).contains("Nothing is in your scope yet");
+            assertThat(one.unavailableReason()).doesNotContain("No summary has been computed");
+        });
+    }
+
+    /**
+     * Both tables carry the same three client-counted columns as
+     * {@code COUNT(DISTINCT client)} within a product, so summing the product
+     * rows over-counts a multi-product client on either. One rule, so
+     * {@code countIsUpperBound} keeps one meaning on the wire.
+     */
+    @Test
+    @DisplayName("the client-counted cards are upper bounds on the scoped board too")
+    void theScopedBoardOverstatesTheSameThreeCards() {
+        insertScopedRow(WEDNESDAY, owner, erp, row -> row.put("clients_overdue", 1));
+        insertScopedRow(WEDNESDAY, owner, biometric, row -> row.put("clients_overdue", 1));
+
+        var cards = dashboard.summary(stepOwner(), null).summary().cards();
+
+        assertThat(cards).filteredOn(one -> one.key().isClientCounted())
+                .allMatch(ObDashboardCard::countIsUpperBound);
+        assertThat(cards).filteredOn(one -> !one.key().isClientCounted())
+                .noneMatch(ObDashboardCard::countIsUpperBound);
     }
 
     // ── every card the enum declares is projected by the SQL ────────────────
@@ -351,6 +439,24 @@ class ObDashboardSummaryIT {
                         .toArray());
     }
 
+    /** {@link #insertRow}, one key column wider. Same defaults, same reason. */
+    private void insertScopedRow(LocalDate day, long scopeUserId, long productId,
+                                 java.util.function.Consumer<Map<String, Object>> overrides) {
+        Map<String, Object> row = new java.util.LinkedHashMap<>();
+        row.put("computed_at", "2026-09-02 06:00:00.000000");
+        overrides.accept(row);
+
+        String columns = String.join(", ", row.keySet());
+        String placeholders = String.join(", ", java.util.Collections.nCopies(row.size(), "?"));
+        jdbc.update("INSERT INTO ob_scope_dashboard_summary "
+                        + "(stat_date, scope_user_id, product_id, " + columns + ") "
+                        + "VALUES (?, ?, ?, " + placeholders + ")",
+                java.util.stream.Stream.concat(
+                                java.util.stream.Stream.of(day, scopeUserId, productId),
+                                row.values().stream())
+                        .toArray());
+    }
+
     private static long count(List<ObDashboardCard> cards, ObDashboardCardKey key) {
         return cards.stream().filter(one -> one.key() == key).findFirst().orElseThrow().count();
     }
@@ -359,12 +465,16 @@ class ObDashboardSummaryIT {
         return caller("OB_MANAGER");
     }
 
-    private static CallerIdentity stepOwner() {
-        return caller("OB_STEP_OWNER");
+    private CallerIdentity stepOwner() {
+        return caller("OB_STEP_OWNER", owner);
     }
 
     private static CallerIdentity caller(String moduleRole) {
+        return caller(moduleRole, 42);
+    }
+
+    private static CallerIdentity caller(String moduleRole, long userId) {
         return new CallerIdentity(
-                42, "SUPPORT", List.of(), List.of("ONBOARDING"), Map.of("ONBOARDING", moduleRole));
+                userId, "SUPPORT", List.of(), List.of("ONBOARDING"), Map.of("ONBOARDING", moduleRole));
     }
 }

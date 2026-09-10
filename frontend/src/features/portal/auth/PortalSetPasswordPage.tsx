@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 
 import { describePortalCredentialLink, redeemPortalCredentialLink } from '@/api/generated/portal/portal'
 import type { PortalCredentialLink } from '@/api/generated/model/portalCredentialLink'
-import { ApiError } from '@/api/http'
+import { ApiError, setAccessToken } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -47,6 +47,12 @@ export function PortalSetPasswordPage() {
     if (!token) return
     let cancelled = false
     setLoading(true)
+    // Both credential-link calls are anonymous by definition, and `http.ts`
+    // has one token slot shared with the staff shell — a staff session open
+    // in this tab would attach its bearer token and A-111's guard would
+    // answer 404, reporting the client's link as invalid when it is fine.
+    // Same reason `PortalLoginPage` clears it before signing in.
+    setAccessToken(null)
     describePortalCredentialLink(token)
       .then((response) => {
         if (!cancelled) setLink(response.data)
@@ -131,6 +137,7 @@ function RedeemForm({
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null)
     try {
+      setAccessToken(null)
       await redeemPortalCredentialLink(token, { password: values.password })
       onDone()
     } catch (error) {

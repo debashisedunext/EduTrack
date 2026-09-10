@@ -50,39 +50,44 @@ the shape ticketing already landed on with `client_daily_stats`. Both are
 Stream A migrations plus a B-120 pass. Raised in `STREAM-B-MASTERS.md` under
 B-121.
 
-## 🔴 Two of the five module roles cannot be answered from this table at all
+## The other two module roles read a different table
 
 `OnboardingScopeResolver` narrows **OB_SALES** to "journeys whose client they
-created" and **OB_STEP_OWNER** to "journeys containing their steps". The
-summary table has no scope dimension — there is no column to intersect either
+created" and **OB_STEP_OWNER** to "journeys containing their steps".
+`ob_dashboard_summary` has no scope dimension — no column to intersect either
 predicate against — and CLAUDE.md forbids answering a dashboard by counting the
 journey tables live.
 
-So the contract's "scoped by A-112's `OnboardingScopeResolver` like every other
-read" and CLAUDE.md's "never a live `COUNT(*)` for dashboards" cannot both hold
-for those two roles. This is a real conflict between a contract requirement and
-the only permitted storage, not a filter left off.
+B-121 shipped those two roles seven cards carrying `unavailableReason` and
+logged the fix as the Stream A migration it needed, rather than breaking one of
+the two rules quietly. **That migration has landed:
+`ob_scope_dashboard_summary`**, the same stock columns keyed
+`(stat_date, scope_user_id, product_id)`, written by a fourth pass of B-120 for
+each live OB_SALES / OB_STEP_OWNER grant. `ObScopeDashboardSummaryRepository`
+reads it; `ObDashboardService` picks the table off `scope.unrestricted()`.
 
-B-121 resolves it by **saying so on the wire**: those two roles get seven cards
-carrying `unavailableReason` and an `appliedScope` naming what they can see.
-The two quiet alternatives are both worse.
+The two quiet alternatives that were rejected then are still the wrong answers,
+and knowing why is what keeps them from creeping back:
 
-- Return the org-wide numbers. Every other read they make is narrowed, so the
-  board would disagree with the client list beside it and with the slide-over
-  it opens — and it discloses the size of the book to somebody scoped out of
-  most of it.
+- Return the org-wide numbers — i.e. make `unrestricted()` true for these
+  roles. Every other read they make is narrowed, so the board would disagree
+  with the client list beside it and with the slide-over it opens, and it
+  discloses the size of the book to somebody scoped out of most of it. This is
+  the tempting one-line "fix" when a card looks empty; `ObDashboardScopeTest`
+  pins it shut.
 - Return zeroes. A zero renders as "nothing is overdue", which is a factual
-  claim about the data and is false. A-056 settled this exact question for the
-  ticketing widgets a Developer's table cannot serve, and the answer was words
-  rather than an empty chart.
+  claim about the data and is false. A caller with genuinely nothing in scope
+  gets a sentence saying so — the refresh writes no row for an empty scope
+  precisely so the service can tell that apart from "the job has never run".
 
-The fix is a scope dimension on the summary table. Same follow-up entry.
+Three cards still carry `countIsUpperBound` on the all-products board, for both
+tables and for the same reason as the section above: a distinct client count
+cannot be summed across product rows. One rule for both tables, deliberately.
 
-`TodayStatsRepository` records the same shape of gap one module over —
-`resource_daily_stats` has no project column, so a PM's "my project's
+`TodayStatsRepository` records the shape of gap this used to be, one module
+over — `resource_daily_stats` has no project column, so a PM's "my project's
 resources" is approximated by membership, and the approximation is written
-down. The difference here is that no approximation exists: "clients I created"
-has no proxy among these columns.
+down. **That one is still open.**
 
 ## Smaller decisions worth not re-litigating
 

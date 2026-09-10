@@ -145,6 +145,25 @@ edutrack:
     send-hour: ${REPORTS_SEND_HOUR:6}
     sweep-interval: PT5M
 
+  portal:
+    # Hand the operator a client's portal password instead of mailing them a
+    # link. Off, and the default is the product: ClientAccountAdminDtos gives
+    # the argument for why a credential is normally absent from that response,
+    # and every word of it still holds when this is on.
+    #
+    # PortalDevCredentialConfig refuses to start if this is true outside the
+    # local / dev-noauth / fixtures profiles, so setting the env var alone on a
+    # production box fails loudly rather than quietly exposing passwords.
+    #
+    # For a demo:  PORTAL_DEV_CREDENTIALS=true, with the local profile active.
+    dev-credentials:
+      enabled: ${PORTAL_DEV_CREDENTIALS:false}
+      # Blank means one password is generated per account, which is the safer
+      # of the two. Set a value to share one across every client a demo
+      # creates — it must pass the portal's own rules (12+ characters, upper,
+      # lower, a digit and a symbol) or the request that needed it is refused.
+      password: ${PORTAL_DEV_CREDENTIALS_PASSWORD:}
+
   jwt:
     # A-022 · HS256. NimbusJwtEncoder rejects anything under 256 bits, so this
     # placeholder is deliberately long — shortening it fails startup, not login.
@@ -259,6 +278,22 @@ edutrack:
       encryption-key: ${TOTP_ENCRYPTION_KEY:local-dev-only-totp-encryption-key-change-me-in-every-other-environment}
 
   onboarding:
+    demo-data:
+      # Attach a placeholder against every required document on every step of
+      # every journey instantiated from here on. Off by default.
+      #
+      # It stands in for a gap rather than a preference: no route anywhere
+      # creates a STEP-owned attachment, so a service whose template declares a
+      # required document cannot be completed through any screen, in any
+      # environment. Until that upload surface exists, this is what makes a
+      # journey walkable end to end.
+      #
+      # ObDemoDataConfig refuses to start with this on outside the
+      # local / dev-noauth / fixtures profiles.
+      #
+      # For a demo:  OB_DEMO_PRE_SATISFY_DOCS=true
+      pre-satisfy-step-documents: ${OB_DEMO_PRE_SATISFY_DOCS:false}
+
     pan:
       # A-113 · PAN is identity, not a financial field (Onboarding plan §1.1),
       # and §11 requires it encrypted, masked to the last four, and every

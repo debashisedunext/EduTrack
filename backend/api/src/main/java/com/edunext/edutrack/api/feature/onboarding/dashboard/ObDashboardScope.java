@@ -12,8 +12,7 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  * inside one service is a rule that drifts the moment a second reader appears.
  * B-127's slide-over and B-128's grids are those readers.
  *
- * <h2>🔴 The summary table has no scope dimension, and two of the five roles
- * therefore cannot be answered from it</h2>
+ * <h2>The scope dimension landed, and two of the five roles moved tables</h2>
  *
  * <p>{@code ob_dashboard_summary} is keyed {@code (stat_date, product_id)}
  * (A-108). A-112's {@code OnboardingScopeResolver} narrows OB_SALES to
@@ -22,12 +21,10 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  * pre-aggregate can express — there is no column to intersect against — and
  * CLAUDE.md forbids answering a dashboard by counting the journey tables live.
  *
- * <p>So this is not a filter that has been left off. It is a genuine conflict
- * between a contract requirement ({@code getObDashboardSummary}: "Scoped by
- * A-112's {@code OnboardingScopeResolver} like every other read") and the only
- * storage the rules permit, and B-121 resolves it by <b>saying so on the
- * wire</b> rather than by picking one of the two rules to break quietly. The
- * two ways it could have been broken quietly are both worse:
+ * <p>B-121 shipped those two roles a board of seven {@code unavailableReason}
+ * sentences and recorded the fix as the Stream A migration it needed, rather
+ * than picking one of the two rules to break quietly. Both quiet options were
+ * worse and both still are:
  *
  * <ul>
  *   <li>Return the org-wide numbers to a Step Owner. Every other read they
@@ -40,15 +37,23 @@ import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
  *       and the answer was words rather than an empty chart.</li>
  * </ul>
  *
- * <p>The real fix is a scope dimension on the summary table, which is a Stream
- * A migration and a B-120 change. Named in the backlog rather than left for a
- * bug report; {@link #unavailableReason()} is what the screen shows meanwhile.
+ * <p>{@code ob_scope_dashboard_summary} is that migration: the same stock
+ * columns keyed {@code (stat_date, scope_user_id, product_id)}, written by a
+ * fourth pass of B-120 for each live OB_SALES and OB_STEP_OWNER grant. So both
+ * roles now read real figures, {@link #unavailableReason()} has nothing to say
+ * about either, and {@link ObScopeDashboardSummaryRepository} is what answers
+ * them.
  *
- * <p>{@code TodayStatsRepository} records the same shape of gap one module
- * over — {@code resource_daily_stats} has no project column, so a PM's
- * "my project's resources" is approximated by membership and the approximation
- * is written down. The difference here is that no approximation is available:
- * "clients I created" has no proxy among these columns at all.
+ * <p><b>{@link #unrestricted()} did not change and must not.</b> It is still
+ * false for both roles — it is the flag that keeps them off the org-wide
+ * table, and the third option above is exactly what flipping it would do.
+ * "Answerable" and "unrestricted" are independent, and this class is where
+ * they are kept apart.
+ *
+ * <p>{@code TodayStatsRepository} records the shape of gap this used to be,
+ * one module over — {@code resource_daily_stats} has no project column, so a
+ * PM's "my project's resources" is approximated by membership and the
+ * approximation is written down. That one is still open.
  *
  * <h2>B-127 widened this with {@code userId} and two SQL predicates</h2>
  *
@@ -157,23 +162,34 @@ record ObDashboardScope(boolean unrestricted, String moduleRole, long userId) {
      * is A-056's stated reason for putting {@code unavailableReason} on the
      * wire at all.
      *
+     * <h2>OB_SALES and OB_STEP_OWNER used to get a sentence here and no longer
+     * do</h2>
+     *
+     * <p>They were unanswerable while {@code ob_dashboard_summary} was the
+     * only store: keyed {@code (stat_date, product_id)}, it had no column to
+     * intersect "clients you created" or "journeys containing your steps"
+     * against. {@code ob_scope_dashboard_summary} is that column, so both roles
+     * now read real figures from a table written for them and this method has
+     * nothing to say about either. The class header carries what changed.
+     *
+     * <p>What has <em>not</em> changed is {@link #unrestricted()}. It is still
+     * false for both, and it must stay false: it is what keeps them off the
+     * org-wide table, and flipping it to make the cards fill would hand a Step
+     * Owner the whole book with nothing on screen looking wrong. The two facts
+     * are independent — answerable is not the same as unrestricted — which is
+     * why this method no longer branches on the role at all.
+     *
      * <p><b>A caller with no onboarding grant never reaches this.</b> A-111's
-     * gate answers 404 for them, so "nothing" is not a sentence this method
-     * has to produce for a real request — it is here because a record whose
-     * behaviour depends on a guard elsewhere having run is a record that
+     * gate answers 404 for them, so the remaining sentence is not one this
+     * method has to produce for a real request — it is here because a record
+     * whose behaviour depends on a guard elsewhere having run is a record that
      * misbehaves the day somebody calls it from a scheduled job.
      */
     String unavailableReason() {
-        if (unrestricted) {
+        if (!deniesEverything()) {
             return null;
         }
-        return switch (moduleRole) {
-            case OB_SALES, OB_STEP_OWNER -> "The board counts " + appliedScope()
-                    + ", and the summary it reads is stored per product with no scope "
-                    + "dimension — so this card cannot be narrowed to you yet. "
-                    + "The lists below are scoped correctly.";
-            default -> "You hold no onboarding role, so there is nothing to count.";
-        };
+        return "You hold no onboarding role, so there is nothing to count.";
     }
 
     /** B-127 · the named parameter {@link #journeyPredicate} and {@link #clientPredicate} bind {@link #userId} under. */

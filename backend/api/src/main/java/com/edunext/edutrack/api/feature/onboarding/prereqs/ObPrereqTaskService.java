@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
@@ -350,7 +351,16 @@ public class ObPrereqTaskService {
         ObPrereqHistory entry = new ObPrereqHistory();
         entry.setObClientId(task.getObClientId());
         entry.setPrereqTaskId(task.getId());
-        entry.setOccurredAt(Instant.now());
+        // Truncated to microseconds, the precision DATETIME(6) stores, because
+        // the row and its hash have to be computed from the same value —
+        // TicketWriteService, TransitionService, CloseService and ReopenService
+        // all truncate at their own call sites for this reason.
+        //
+        // Untruncated, ObPrereqJournal rejects the append outright on any JVM
+        // whose clock is finer than a microsecond (every Windows one), which
+        // took every prerequisite transition to a 500 and left the gate — and
+        // so every journey behind it — unable to open at all.
+        entry.setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
         entry.setActorType(actorType);
         entry.setActorUserId(actorType == ObPrereqActorType.STAFF ? userId : null);
         entry.setActorContactId(actorType == ObPrereqActorType.CLIENT ? contactId : null);

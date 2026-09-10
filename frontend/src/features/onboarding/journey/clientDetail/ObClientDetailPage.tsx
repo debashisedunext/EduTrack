@@ -8,7 +8,6 @@ import {
   useGetObClient,
   useGetObClientPrereqs,
 } from '@/api/generated/onboarding/onboarding'
-import { useListUsers } from '@/api/generated/users/users'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,22 +15,45 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ObClientAccountPanel } from '../../clients/ObClientAccountPanel'
 import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
 import { EscalationBanner } from './EscalationBanner'
-import { JourneyAccordion } from './JourneyAccordion'
 import { ObClientInfoCard } from './ObClientInfoCard'
+import { ObProductCard } from './ObProductCard'
 import { PrereqAccordion } from './PrereqAccordion'
 import { ragLabel, ragVariant } from './journeyStrip'
+import { groupJourneysByProduct } from './productGroups'
 import { useOpenEscalations } from './useOpenEscalations'
 
 /**
  * C-110 · OB-05, the onboarding client detail page — `/onboarding/clients/:obClientId`.
  *
- * <h2>The page is the accordion stack</h2>
+ * <h2>The page is the gate, then a card per purchased product</h2>
  *
  * Onboarding-Module-Plan.md §9 orders it: **prerequisites accordion on top →
  * one journey accordion per purchased product → client portal access + client
  * info**. The order is the argument. While the gate is locked nothing below it
  * can move — journeys are drawn in full with no clock running (plan §5.2) — so
  * the only actionable thing on the page is at the top of it.
+ *
+ * <h2>The journey accordions moved to a page per product — a §9 deviation</h2>
+ *
+ * §9's middle row was written when a purchased product meant one journey. It no
+ * longer does: a product publishes **any number of Module Services at once**
+ * (plan §20, and the multi-service change that implemented it), a client is
+ * boarded through one journey per service of every product they bought, and so
+ * a client with two products can carry six accordions. The page then stopped
+ * answering the question people open it with — *how is the ERP going* — because
+ * the ERP's three strips were interleaved with the biometric rollout's.
+ *
+ * So this page answers **which product**, one {@link ObProductCard} each, and
+ * {@link ObClientProductPage} answers **how is it going** for the one that was
+ * clicked. The cards are A-116's launcher cards, deliberately: "pick the thing
+ * you are going to work in" is a question this platform already has a shape
+ * for, and a client's products are that question one level down.
+ *
+ * Everything §9 puts on this page is still on it, in §9's order — the gate
+ * above the products because nothing below it can move while it is locked, the
+ * closing pair and the stitched timeline below them. What changed is that a
+ * journey ribbon is now one click away instead of three scrolls away, and it is
+ * a click that produces **a URL somebody can send**.
  *
  * <h2>PAN is not in the header</h2>
  *
@@ -93,22 +115,22 @@ export function ObClientDetailPage() {
   const prereqs = useGetObClientPrereqs(obClientId, { query: { enabled: Number.isFinite(obClientId) } })
 
   /**
-   * One directory read for the whole page, the pattern `ClientListPage` and
-   * `AnalyticsTab` already use.
+   * The user directory is **no longer read here**.
    *
-   * Every journey read returns owners as ids on the contract's own convention,
-   * and every expanded ribbon needs names. Fetching per accordion would mean
-   * one request per product for a list that is identical each time; fetching
-   * here means React Query serves the second accordion from cache.
+   * It was one read for the whole page while the ribbons were on it: every
+   * journey read returns owners as ids, and one directory fetch served every
+   * accordion from cache. No ribbon renders on this page any more, so the
+   * fetch moved to `ObClientProductPage` — keeping it here would be a
+   * 200-row request every reader pays for and only the ones who click a card
+   * ever use.
    */
-  const users = useListUsers({ isActive: true, limit: 200 })
-  const userList = users.data?.data ?? []
 
   const detail = client.data?.data
   // Memoised rather than defaulted inline: a fresh `[]` on every render would
-  // re-run `defaultJourneyId` below each time, and with it the accordion the
-  // page decides to open.
+  // re-group the products below each time, handing every card a new object
+  // identity for no change in what it draws.
   const journeys = React.useMemo(() => detail?.journeys ?? [], [detail?.journeys])
+  const products = React.useMemo(() => groupJourneysByProduct(journeys), [journeys])
   const gate = prereqs.data?.data
 
   // The header docstring above: B-126's queryKey, so the panel's fetch and
@@ -126,74 +148,22 @@ export function ObClientDetailPage() {
   const { escalations, openEscalationStepIds } = useOpenEscalations(obClientId)
 
   /**
-   * Which accordions are open, as a set of keys.
-   *
-   * A set rather than a single id: §9's rule is about *an* accordion expanding
-   * without moving the page, not about them being mutually exclusive, and a
-   * client comparing two products wants both ribbons at once.
-   */
-  const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set())
-  const [touchedJourneys, setTouchedJourneys] = React.useState(false)
-  const [touchedPrereqs, setTouchedPrereqs] = React.useState(false)
-
-  /**
-   * One journey opens itself, the way the mockup's `vClient` does.
-   *
-   * `A.selJourney` picks "the first journey that is running and unfinished,
-   * else the first", expands it and selects a step — so the prototype never
-   * draws this page without a ribbon on it. Ours began with an empty set,
-   * which meant the common case (a client with one product) opened on a row
-   * of collapsed strips and no ribbon anywhere, and the ribbon is the screen.
-   *
-   * Derived rather than seeded into state, for `prereqsOpen`'s reason: the
-   * journeys arrive one render *after* the page mounts, so an initialiser
-   * would run against an empty list and open nothing. Once the reader has
-   * touched any accordion their set wins outright — including when they close
-   * the one this opened, which a re-derived default would fight them over.
-   */
-  const defaultJourneyId = React.useMemo(() => {
-    if (journeys.length === 0) return undefined
-    const running = journeys.find(
-      (j) => j.gateStatus !== 'LOCKED' && j.heldByJourneyId == null && (j.percentComplete ?? 0) < 100,
-    )
-    return (running ?? journeys[0]).id
-  }, [journeys])
-
-  const isJourneyOpen = (journeyId: number) =>
-    touchedJourneys ? open.has(`journey-${journeyId}`) : journeyId === defaultJourneyId
-
-  const setOpenState = React.useCallback((key: string, isOpen: boolean) => {
-    setOpen((current) => {
-      const next = new Set(current)
-      if (isOpen) next.add(key)
-      else next.delete(key)
-      return next
-    })
-  }, [])
-
-  const toggle = React.useCallback(
-    (key: string) => setOpen((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    }),
-    [],
-  )
-
-  /**
    * "Defaults open until the gate clears, collapsed after" — §9, derived
    * rather than stored.
    *
    * Derived, because the gate can clear *while the page is open*: verifying the
    * last mandatory task flips it, and a remembered default would leave the
-   * checklist expanded over journeys that just came alive. Once the reader has
+   * checklist expanded over products that just came alive. Once the reader has
    * touched it themselves, their choice wins — a screen that re-collapsed a
-   * section somebody deliberately opened would be arguing with them.
+   * section somebody deliberately opened would be arguing with them, which is
+   * what `null` means here and why this is not a plain boolean.
+   *
+   * One override rather than the set of accordion keys this page used to keep:
+   * the gate is the only accordion left on it. The set moved to
+   * `ObClientProductPage`, where several ribbons can be open at once.
    */
-  const prereqsOpen = touchedPrereqs
-    ? open.has('prereqs')
-    : gate?.gateStatus === 'LOCKED'
+  const [prereqsOverride, setPrereqsOverride] = React.useState<boolean | null>(null)
+  const prereqsOpen = prereqsOverride ?? gate?.gateStatus === 'LOCKED'
 
   if (client.isError) {
     return (
@@ -273,7 +243,11 @@ export function ObClientDetailPage() {
                 detail.rag && <Chip variant={ragVariant(detail.rag)}>{ragLabel(detail.rag)}</Chip>
               )}
               <div className="mt-1.5 text-caption text-content-muted">
-                {journeys.length} product {journeys.length === 1 ? 'journey' : 'journeys'}
+                {/* Products, not journeys: the cards below are one per product
+                    and a header counting six where a reader can see two would
+                    be the page disagreeing with itself. The journey count is
+                    on each card, where it belongs to something. */}
+                {products.length} {products.length === 1 ? 'product' : 'products'}
               </div>
             </div>
           </header>
@@ -295,13 +269,11 @@ export function ObClientDetailPage() {
               prereqs={gate}
               isOpen={prereqsOpen}
               onToggle={() => {
-                // Written from what is on screen, not toggled in the set. The
+                // Written from what is on screen, not flipped blindly. The
                 // first click happens while the open state is still derived
-                // from the gate, so a blind toggle of a key that was never
-                // added would *open* an accordion the reader is trying to
-                // close.
-                setTouchedPrereqs(true)
-                setOpenState('prereqs', !prereqsOpen)
+                // from the gate, so negating a stale `false` would *open* the
+                // accordion the reader is trying to close.
+                setPrereqsOverride(!prereqsOpen)
               }}
             />
           )}
@@ -315,40 +287,49 @@ export function ObClientDetailPage() {
             </div>
           )}
 
-          {journeys.length === 0 ? (
-            <EmptyState
-              title="No journeys"
-              description="This client has no purchased products, so there is nothing to onboard yet."
-            />
-          ) : (
-            journeys.map((journey) => (
-              <JourneyAccordion
-                key={journey.id}
-                journey={journey}
-                siblings={journeys}
-                users={userList}
-                obClientId={obClientId}
-                openEscalationStepIds={openEscalationStepIds}
-                isOpen={isJourneyOpen(journey.id)}
-                onToggle={() => {
-                  // Seed the set from what is on screen before the first
-                  // toggle, exactly as the prerequisites accordion does: a
-                  // blind toggle of a key that was never added would *open*
-                  // the accordion the reader is trying to close.
-                  if (!touchedJourneys) {
-                    setTouchedJourneys(true)
-                    setOpen(
-                      journey.id === defaultJourneyId
-                        ? new Set()
-                        : new Set([`journey-${defaultJourneyId}`, `journey-${journey.id}`]),
-                    )
-                    return
-                  }
-                  toggle(`journey-${journey.id}`)
-                }}
-              />
-            ))
-          )}
+          {/*
+            §9's middle row, one card per purchased product — see the page
+            docstring for why the ribbons are a click away rather than here.
+
+            A heading rather than a bare grid: the cards are a navigation
+            choice, and a row of links under nothing would leave a screen
+            reader tabbing into products with no announcement of what the group
+            is. The count is on the heading because "2 products" is the fact a
+            reader checks against what the client actually bought.
+          */}
+          <section aria-labelledby="ob-client-products">
+            <h2 id="ob-client-products" className="m-0 text-base font-semibold text-content">
+              Products
+            </h2>
+            <p className="m-0 mt-0.5 text-caption text-content-muted">
+              {products.length === 0
+                ? 'Nothing bought yet.'
+                : `${products.length} purchased ${products.length === 1 ? 'product' : 'products'} · open one to work its journey ribbons.`}
+            </p>
+
+            {products.length === 0 ? (
+              <div className="mt-3">
+                <EmptyState
+                  title="No journeys"
+                  description="This client has no purchased products, so there is nothing to onboard yet."
+                />
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-4">
+                {products.map((group) => (
+                  <ObProductCard
+                    key={group.product.id}
+                    obClientId={obClientId}
+                    group={group}
+                    application={(detail.applications ?? []).find(
+                      (a) => a.product?.id === group.product.id,
+                    )}
+                    openEscalationStepIds={openEscalationStepIds}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
           {/* §9's closing pair — B-126's panel on the left, the info card on
               the right. The panel is Stream B's component, mounted here as

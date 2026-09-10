@@ -170,11 +170,44 @@ export function ObModuleAccessPage() {
 
   return (
     <div className="p-6">
-      <h1 className="text-lg font-semibold text-content">Roles &amp; module access</h1>
-      <p className="mt-1 max-w-2xl text-caption text-content-muted">
-        A person&apos;s onboarding role is independent of their ticketing role. Every grant and
-        withdrawal is recorded with who did it and when.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-content">Roles &amp; module access</h1>
+          <p className="mt-1 max-w-2xl text-caption text-content-muted">
+            A person&apos;s onboarding role is independent of their ticketing role. Every grant and
+            withdrawal is recorded with who did it and when.
+          </p>
+        </div>
+
+        {/*
+          This screen grants an existing role; it does not define one. The
+          ticketing role master is where a role is created, renamed or given
+          permissions, and somebody who arrives here to "add a role" needs to
+          be there instead — so the way across is on the screen rather than in
+          a sentence telling them to go and find it.
+
+          A new tab, and an <a> rather than a <Link>, for the reason
+          `ModuleServiceCataloguePage` worked out first: `/masters/roles` is in
+          the *other* module, so navigating in place swaps the sidebar for the
+          ticketing one — and `ModuleSwitcher` renders nothing for a user who
+          holds only ONBOARDING, making an in-place link a trip with no way
+          back. A second tab leaves this one where it was.
+
+          It can 403 for a non-Admin — `/masters/roles` is Admin-only, and this
+          screen is not. Rendered anyway: the onboarding roles here are a
+          different vocabulary from the platform ones, so this page cannot tell
+          who may open it (the same reason its own rows are ungated), and a
+          hidden link would leave an Admin with no route across.
+        */}
+        <a
+          href="/masters/roles"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control border border-border bg-surface px-3 text-sm font-medium text-content transition-colors hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Manage roles ↗
+        </a>
+      </div>
 
       {error && (
         <p role="alert" className="mt-4 rounded-card border border-danger p-3 text-sm text-danger-text">

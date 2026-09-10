@@ -61,6 +61,12 @@ export function useJourneyTemplate(templateId: number | null) {
 
 function invalidate(queryClient: ReturnType<typeof useQueryClient>, templateId: number) {
   void queryClient.invalidateQueries({ queryKey: JOURNEY_TEMPLATE_KEY(templateId) })
+  // Creating, revising or publishing a version changes what the Module
+  // Service catalogue lists — `is_active` moves between rows and a new
+  // service appears — and that page reads `useListObJourneyTemplates()`, a
+  // different query. Without this it keeps showing the version it loaded
+  // with until a manual reload.
+  void queryClient.invalidateQueries({ queryKey: ['/onboarding/journey-templates'] })
 }
 
 /**

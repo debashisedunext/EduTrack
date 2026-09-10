@@ -84,7 +84,8 @@ export const listObJourneyTemplatesResponse = zod.object({
   "dependsOnTemplateId": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish(),
   "stepCount": zod.number().describe('How many services this journey has — the card\'s step list length.'),
-  "totalTatDays": zod.number().describe('Σ of the step TATs in working days — what a journey for this\nservice costs. On the row because the card shows it and it is not\nderivable from the other fields; the alternative is the page\nfetching every service\'s full detail to render one chip.\n')
+  "totalTatDays": zod.number().describe('Σ of the step TATs in working days — what a journey for this\nservice costs. On the row because the card shows it and it is not\nderivable from the other fields; the alternative is the page\nfetching every service\'s full detail to render one chip.\n'),
+  "serviceJourneyCount": zod.number().describe('C-124 · client journeys instantiated from \*\*any version of this\nservice\*\*, archived ones included — the number `PATCH` and `DELETE`\non this resource both refuse above zero.\n\nChain-wide, not this version\'s own: every row of one service\ncarries the same total. The catalogue card is the \*head\* of a\nversion chain, so a service whose v1 carries three clients and\nwhose v3 carries none is in use, and a per-row count would have\nreported `0` on the very card that draws the Edit and Delete\nbuttons.\n\nOn the row for `totalTatDays`\'s reason — the page disables both\ncontrols by it, and without it the only way to find out is to let\nan admin click and answer `409`.\n')
 }).describe('One Module Service as the OB-07 catalogue lists it.'))
 })
 
@@ -192,6 +193,115 @@ export const getObJourneyTemplateResponse = zod.object({
 }).describe('`ob_journey_template_steps` — a Service within a Module Service.')),
   "parallelGroups": zod.array(zod.array(zod.number())).describe('Computed, not stored — a topological layering of\n`dependsOnStepId`. Layer 0 (`parallelGroups[0]`) is every\nstep with no dependency; layer N is every step whose entire\ndependency chain is N hops deep. Everything inside one inner\narray could be in progress on the same journey at once.\n')
 }))
+})
+
+/**
+ * The catalogue card's "Edit details".
+
+**Applies to every version of the service, not the version named in
+the path.** A service is identified by `(productId, name)` — exactly
+what `uq_ob_journey_templates_version` keys on — so renaming the one
+row an admin happened to click would split one chain into two rather
+than rename it: `beginRevision` would number from a head that is no
+longer the head, and the catalogue would draw a second card for a
+service nobody created. The `templateId` in the path only says *which*
+service.
+
+`productId` is optional; omitting it leaves the service where it is,
+so renaming does not require knowing a product id.
+
+**`409` once any client is on it** — any journey instantiated from any
+version, archived or not. `ob_journeys.service_name` is denormalised at
+instantiation and a service-level dependency is resolved by
+`(product, service name)` rather than by template id (deliberately, so
+a hold survives its dependency publishing a new version), so a rename
+underneath a live journey breaks a lookup with no other key to fall
+back on. The problem document carries `journeyCount`;
+`ObJourneyTemplateSummary.serviceJourneyCount` is how a page knows
+before the admin clicks. `409` also if the target product already has a
+service by that name.
+
+Note this is **not** gated on `publishedAt`, unlike the step routes. A
+name and a product are catalogue metadata rather than journey content —
+the same distinction `PUT .../depends-on` draws to justify working on a
+published row — so what gates it is whether anybody was ever boarded on
+it. A published service nobody bought is renameable; an unpublished
+draft cannot have been bought at all.
+
+`If-Match` is required, not optional — `428` without one, `412` if it
+does not match. Read the tag from
+`GET /onboarding/journey-templates/{templateId}`.
+
+ * @summary Rename a Module Service, or move it to another product (OB-07)
+ */
+export const updateObJourneyModuleServiceParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+})
+
+export const updateObJourneyModuleServiceHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObJourneyModuleServiceBodyNameMax = 160;
+
+
+
+export const updateObJourneyModuleServiceBody = zod.object({
+  "name": zod.string().max(updateObJourneyModuleServiceBodyNameMax).describe('The service\'s new name, applied to every version of it. The name it\nalready has is accepted and writes nothing.\n'),
+  "productId": zod.number().nullish().describe('The product it belongs to. Omitted or `null` leaves it where it is,\nso a caller renaming a service does not need to know its product id\nto avoid moving it.\n')
+}).describe('C-124 · the OB-07 catalogue card\'s \"Edit details\".')
+
+export const updateObJourneyModuleServiceResponseDataNameMax = 160;
+
+
+
+export const updateObJourneyModuleServiceResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "name": zod.string().max(updateObJourneyModuleServiceResponseDataNameMax),
+  "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
+  "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
+  "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
+  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "publishedBy": zod.number().nullish(),
+  "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
+}).describe('`ob_journey_templates` — a Module Service, and one version of it.')
+})
+
+/**
+ * The catalogue card's Delete. Removes **every version** of the service
+named by `templateId`, with each version's steps, step items and step
+docs — chain-wide for `PATCH`'s reason: deleting the head alone would
+leave the catalogue drawing a card for a service whose only remaining
+rows are retired versions.
+
+Refused with `409` if either holds:
+
+- **a client is on it** — any journey instantiated from any version,
+  archived or not. A journey renders its steps from these very rows, so
+  deleting them empties a running client's ribbon; and a finished
+  onboarding is as much evidence the service was sold as a running one.
+  Retire the service by publishing over it instead. The problem
+  document carries `journeyCount`.
+- **another service depends on it** — the problem document names them in
+  `dependentServiceNames`. Clear their "Service depends on" first;
+  `fk_ob_journey_templates_depends_on` is RESTRICT precisely so a
+  service cannot be deleted out from under one waiting on it.
+
+No `If-Match`, unlike `PATCH`. A precondition protects a *lost update*,
+and there is no update to lose here. The one race worth refusing is a
+client boarding between the read and the delete, which the tag cannot
+see — `serviceJourneyCount` is deliberately not part of the detail, so
+it does not move the tag — so a required `If-Match` would answer `412`
+for edits that do not matter while still missing the one that does. The
+usage check runs inside the delete's own transaction, which is where
+that race is settled.
+
+ * @summary Delete a Module Service and all its versions (OB-07)
+ */
+export const deleteObJourneyModuleServiceParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
 })
 
 /**

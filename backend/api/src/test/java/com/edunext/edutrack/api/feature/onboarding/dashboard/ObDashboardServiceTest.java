@@ -40,7 +40,9 @@ class ObDashboardServiceTest {
     private static final Instant COMPUTED = Instant.parse("2026-09-02T06:00:00Z");
 
     private final ObDashboardSummaryRepository repository = mock(ObDashboardSummaryRepository.class);
-    private final ObDashboardService service = new ObDashboardService(repository);
+    private final ObScopeDashboardSummaryRepository scopedRepository =
+            mock(ObScopeDashboardSummaryRepository.class);
+    private final ObDashboardService service = new ObDashboardService(repository, scopedRepository);
 
     // ── the counts ──────────────────────────────────────────────────────────
 
@@ -145,31 +147,92 @@ class ObDashboardServiceTest {
         assertThat(cards).noneMatch(ObDashboardCard::countIsUpperBound);
     }
 
-    // ── the two scopes the table cannot answer ──────────────────────────────
+    // ── the two narrowed scopes, answered from their own table ──────────────
 
     /**
-     * A Step Owner's board is not merely unfiltered — it is unanswerable from
-     * the only source CLAUDE.md permits. The two quiet alternatives are worse:
-     * org-wide numbers disagree with every other read they make, and zeroes
-     * claim nothing is overdue.
+     * The property that matters most in this file: a narrowed caller's figures
+     * come from {@code ob_scope_dashboard_summary} and the org-wide table is
+     * <b>never touched</b>. Reading the org-wide board for a Step Owner would
+     * disclose the size of the book to somebody scoped out of most of it, and
+     * nothing on screen would look wrong — so the absence of that call is
+     * asserted rather than inferred from the numbers.
      */
     @Test
-    @DisplayName("a narrowed role gets seven sentences and the database is not touched")
-    void aNarrowedScopeIsToldRatherThanApproximated() {
+    @DisplayName("a narrowed role is answered from the scoped table, never the org-wide one")
+    void aNarrowedScopeReadsItsOwnTable() {
+        givenScopedDays(List.of(WEDNESDAY));
+        givenScopedRollup(WEDNESDAY, counts(6, 5, 4, 3, 2, 1, 0));
+
         var rendered = service.summary(stepOwner(), null);
+
+        assertThat(rendered.summary().cards()).extracting(ObDashboardCard::count)
+                .containsExactly(6L, 5L, 4L, 3L, 2L, 1L, 0L);
+        assertThat(rendered.summary().cards())
+                .allSatisfy(one -> assertThat(one.unavailableReason()).isNull());
+        assertThat(rendered.summary().appliedScope())
+                .isEqualTo("journeys containing your services");
+        assertThat(rendered.summary().computedAt()).isEqualTo(COMPUTED);
+        verifyNoInteractions(repository);
+    }
+
+    /**
+     * The scoped table is keyed by caller, so the caller has to reach the
+     * query. Passing the wrong id — or none — would hand one Step Owner
+     * another's board, which is the one way this feature can leak.
+     */
+    @Test
+    void the_scoped_read_is_keyed_by_the_caller() {
+        givenScopedDays(List.of(WEDNESDAY));
+        givenScopedRollup(WEDNESDAY, counts(1, 0, 0, 0, 0, 0, 0));
+
+        service.summary(stepOwner(), 3L);
+
+        verify(scopedRepository).rollup(WEDNESDAY, 42L, 3L);
+    }
+
+    /**
+     * Days exist, this caller has no row. The refresh writes none for an empty
+     * scope on purpose, so that "nothing is yours yet" stays separable from
+     * "the job has never run" — and neither is a board of zeroes, which would
+     * claim nothing of theirs is overdue.
+     */
+    @Test
+    void a_caller_with_nothing_in_scope_is_told_so_rather_than_shown_zeroes() {
+        givenScopedDays(List.of(WEDNESDAY));
+        when(scopedRepository.rollup(eq(WEDNESDAY), eq(42L), any())).thenReturn(Optional.empty());
+
+        var summary = service.summary(stepOwner(), null).summary();
+
+        assertThat(summary.computedAt()).isNull();
+        assertThat(summary.cards()).allSatisfy(one -> {
+            assertThat(one.count()).isZero();
+            assertThat(one.unavailableReason()).contains("Nothing is in your scope yet");
+            assertThat(one.unavailableReason()).doesNotContain("No summary has been computed");
+        });
+    }
+
+    /**
+     * A caller holding the module but no recognised role in it. A-111's gate
+     * answers 404 before this in production; the branch exists so the service
+     * does not depend on a guard elsewhere having run, and no query is issued
+     * because none would have helped.
+     */
+    @Test
+    @DisplayName("an unrecognised module role gets seven sentences and no query")
+    void anUnrecognisedRoleIsToldRatherThanApproximated() {
+        var rendered = service.summary(caller("TICKETING_MEMBER"), null);
 
         assertThat(rendered.summary().cards())
                 .hasSize(ObDashboardCardKey.values().length)
                 .allSatisfy(one -> {
-                    assertThat(one.unavailableReason()).isNotBlank();
+                    assertThat(one.unavailableReason()).contains("no onboarding role");
                     assertThat(one.count()).isZero();
                     assertThat(one.countIsUpperBound()).isFalse();
                 });
         assertThat(rendered.summary().computedAt()).isNull();
-        assertThat(rendered.summary().appliedScope())
-                .isEqualTo("journeys containing your services");
-        // No query would have helped, so none is issued.
+        assertThat(rendered.etag()).isNull();
         verifyNoInteractions(repository);
+        verifyNoInteractions(scopedRepository);
     }
 
     /**
@@ -179,7 +242,7 @@ class ObDashboardServiceTest {
      */
     @Test
     void an_unavailable_board_carries_no_validator() {
-        assertThat(service.summary(stepOwner(), null).etag()).isNull();
+        assertThat(service.summary(caller("TICKETING_MEMBER"), null).etag()).isNull();
     }
 
     // ── before the first refresh ────────────────────────────────────────────
@@ -260,6 +323,39 @@ class ObDashboardServiceTest {
                 .isNotEqualTo(ObDashboardService.etagOf(scope, null, COMPUTED.plusSeconds(300)));
     }
 
+    /**
+     * Two Step Owners share a role, a product filter and — because one refresh
+     * pass stamps every row it writes with one instant — a {@code computedAt},
+     * while seeing genuinely different figures. Before the scoped table they
+     * both received a null validator and could not collide; now the caller has
+     * to be in the hash, or a cache shared between them hands one the other's
+     * board. The disclosure `unrestricted` exists to prevent, arriving through
+     * the validator instead of through the query.
+     */
+    @Test
+    @DisplayName("two narrowed callers never share a validator")
+    void narrowedCallersDoNotShareAnEtag() {
+        var one = new ObDashboardScope(false, "OB_STEP_OWNER", 42L);
+        var other = new ObDashboardScope(false, "OB_STEP_OWNER", 77L);
+
+        assertThat(ObDashboardService.etagOf(one, null, COMPUTED))
+                .isNotEqualTo(ObDashboardService.etagOf(other, null, COMPUTED));
+    }
+
+    /**
+     * The mirror of the case above. An unrestricted caller's board provably
+     * does not depend on who is asking, so two of them go on sharing a
+     * validator rather than fragmenting every cache entry by user id.
+     */
+    @Test
+    void two_unrestricted_callers_still_share_a_validator() {
+        var one = new ObDashboardScope(true, "OB_ADMIN", 42L);
+        var other = new ObDashboardScope(true, "OB_ADMIN", 77L);
+
+        assertThat(ObDashboardService.etagOf(one, null, COMPUTED))
+                .isEqualTo(ObDashboardService.etagOf(other, null, COMPUTED));
+    }
+
     // ── fixtures ────────────────────────────────────────────────────────────
 
     private void givenDays(List<LocalDate> days) {
@@ -268,6 +364,15 @@ class ObDashboardServiceTest {
 
     private void givenRollup(LocalDate day, Map<ObDashboardCardKey, Long> counts) {
         when(repository.rollup(eq(day), any()))
+                .thenReturn(Optional.of(new ObDashboardSummaryRepository.Rollup(day, COMPUTED, counts)));
+    }
+
+    private void givenScopedDays(List<LocalDate> days) {
+        when(scopedRepository.recentDays(any())).thenReturn(days);
+    }
+
+    private void givenScopedRollup(LocalDate day, Map<ObDashboardCardKey, Long> counts) {
+        when(scopedRepository.rollup(eq(day), eq(42L), any()))
                 .thenReturn(Optional.of(new ObDashboardSummaryRepository.Rollup(day, COMPUTED, counts)));
     }
 

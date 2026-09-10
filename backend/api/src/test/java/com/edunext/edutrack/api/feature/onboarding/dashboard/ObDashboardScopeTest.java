@@ -49,19 +49,29 @@ class ObDashboardScopeTest {
                 .isEqualTo(ObDashboardScope.of(caller("OB_MANAGER")).unrestricted());
     }
 
+    /**
+     * The two narrowed roles are answerable now that
+     * {@code ob_scope_dashboard_summary} exists, so they carry no sentence —
+     * but they are still <em>narrowed</em>, and that is the half worth pinning.
+     *
+     * <p>The failure this guards is the quiet one: {@code unrestricted}
+     * returning true here would hand a Step Owner the org-wide board and
+     * nothing on screen would look wrong. Making the cards fill by flipping
+     * this flag is the tempting shortcut, and it is a disclosure rather than a
+     * fix.
+     */
     @ParameterizedTest
     @ValueSource(strings = {"OB_SALES", "OB_STEP_OWNER"})
-    @DisplayName("a narrowed role is told the board cannot be narrowed, not shown everyone's")
-    void narrowedRolesGetWordsRatherThanNumbers(String role) {
+    @DisplayName("a narrowed role stays narrowed, and is answered from its own table")
+    void narrowedRolesAreScopedButAnswerable(String role) {
         ObDashboardScope scope = ObDashboardScope.of(caller(role));
 
         assertThat(scope.unrestricted()).isFalse();
-        // The failure this pins is the quiet one: `unrestricted` returning true
-        // here would hand a Step Owner the org-wide board and nothing on screen
-        // would look wrong.
-        assertThat(scope.unavailableReason())
-                .contains("no scope dimension")
-                .contains(scope.appliedScope());
+        assertThat(scope.deniesEverything()).isFalse();
+        // No sentence: ObDashboardService reads the per-scope table for these
+        // two rather than telling them the board cannot be narrowed.
+        assertThat(scope.unavailableReason()).isNull();
+        assertThat(scope.appliedScope()).isNotEqualTo("nothing");
     }
 
     @Test

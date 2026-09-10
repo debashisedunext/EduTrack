@@ -970,13 +970,20 @@ public class OnboardingFixture {
                     : instantFor(spec.startSerial(), STEP_START_TIME, zone, anchor);
         }
 
+        // `sequence` is read off the template rather than carried in the spec
+        // (V20260910_0930): the corpus has no opinion about catalogue order,
+        // and the column's DEFAULT 0 would flatten every seeded strip onto one
+        // position, leaving OB-05's accordion ordered by product name alone.
         long journeyId = insert("""
-                INSERT INTO ob_journeys (ob_client_id, product_id, service_name, template_id, gate_status,
-                                         gate_opened_at, gate_opened_by, held_by_journey_id, started_at,
-                                         completed_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ob_journeys (ob_client_id, product_id, service_name, template_id, sequence,
+                                         gate_status, gate_opened_at, gate_opened_by, held_by_journey_id,
+                                         started_at, completed_at)
+                     VALUES (?, ?, ?, ?,
+                             COALESCE((SELECT t.sequence FROM ob_journey_templates t WHERE t.id = ?), 0),
+                             ?, ?, ?, ?, ?, ?)
                 """,
                 clientId, productIds.get(templateSpec.productKey()), templateSpec.name(),
+                template.templateId(),
                 template.templateId(),
                 spec.gateOpen() ? "OPEN" : "LOCKED",
                 gateOpenedAt == null ? null : Timestamp.from(gateOpenedAt),
