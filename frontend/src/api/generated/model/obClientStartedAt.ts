@@ -46,41 +46,13 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObProductRef } from './obProductRef';
-import type { ObClientCurrentStepDueAt } from './obClientCurrentStepDueAt';
 
 /**
- * The OB-02/OB-03 caption "2 journeys · ERP step 4/8 · Data migration",
-as data: where the client's **first (primary) journey** currently
-stands. Follows `ObStepDot`'s idiom rather than reusing it — the dot
-carries `sequence`, which cannot honestly render as "step i of n"
-without the total, and adding the total to the dot would put a
-journey-level fact on every dot of every strip. Like the dot, it
-carries nothing the client portal must not see.
+ * OB-03's "Start Date" — when the primary journey's earliest step
+actually began. Null while that journey is still gate-locked and
+nothing has ever activated. Unlike `currentStep`, this stays
+populated once a finished journey has no current step left to
+name.
 
  */
-export interface ObClientCurrentStep {
-  /** The primary journey's product, so the caption can name it. */
-  product?: ObProductRef;
-  name: string;
-  /** This step's own due date — OB-03's "Expected Completion" column.
-Calendar-derived and stored when the step activates, not computed
-on read. Shares this whole object's null cases: gate-locked, held
-behind a sibling, or finished.
- */
-  dueAt?: ObClientCurrentStepDueAt;
-  /**
-   * **1-based position** of this service within its journey's
-sequence — the `4` of "step 4/8". Deliberately not
-`ObStepDot.sequence`, which is the template's ordering key and is
-neither promised contiguous nor promised to start at 1.
-
-   * @minimum 1
-   */
-  stepIndex: number;
-  /**
-   * How many services the journey has — the `8` of "step 4/8".
-   * @minimum 1
-   */
-  stepTotal: number;
-}
+export type ObClientStartedAt = string | null;

@@ -132,6 +132,7 @@ class ObClientService {
                 ObClientDtos.UserRef.of(row.summary().salesPersonId(), row.summary().salesPersonName()),
                 contacts.stream().filter(ObClientDtos.ObContact::isPrimary).findFirst().orElse(null),
                 row.summary().liveAt(),
+                row.summary().startedAt(),
                 row.summary().hasPortalLogin(),
                 row.description(),
                 row.address(),
@@ -269,7 +270,7 @@ class ObClientService {
             byClient.put(row.obClientId(), new ObClientDtos.ObClientCurrentStep(
                     new ObClientDtos.ObProductRef(row.productId(), row.productCode(),
                             row.productName()),
-                    row.stepName(), row.stepIndex(), row.stepTotal()));
+                    row.stepName(), row.dueAt(), row.stepIndex(), row.stepTotal()));
         }
         return byClient;
     }
@@ -290,7 +291,7 @@ class ObClientService {
                 row.id(), row.name(), row.onboardingDate(), row.status(), row.rag(), row.gateStatus(),
                 row.journeyCount(), row.journeysComplete(), currentStep, products,
                 ObClientDtos.UserRef.of(row.salesPersonId(), row.salesPersonName()),
-                primary, row.liveAt(), row.hasPortalLogin());
+                primary, row.liveAt(), row.startedAt(), row.hasPortalLogin());
     }
 
     /**

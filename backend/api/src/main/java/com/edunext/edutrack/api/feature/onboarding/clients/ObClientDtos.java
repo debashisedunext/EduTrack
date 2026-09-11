@@ -151,8 +151,12 @@ final class ObClientDtos {
      *                  template's ordering key and is neither promised
      *                  contiguous nor promised to start at 1
      * @param stepTotal how many services the journey has
+     * @param dueAt     this step's own due date — OB-03's "Expected
+     *                  Completion" column, calendar-derived and stored
+     *                  rather than computed on read. Shares this whole
+     *                  object's null cases: gate-locked, held, or finished
      */
-    record ObClientCurrentStep(ObProductRef product, String name, int stepIndex, int stepTotal) {
+    record ObClientCurrentStep(ObProductRef product, String name, Instant dueAt, int stepIndex, int stepTotal) {
     }
 
     /**
@@ -165,12 +169,17 @@ final class ObClientDtos {
      * @param currentStep where the primary journey stands, or null while that
      *                    journey is gate-locked, held behind a sibling, or
      *                    finished — OB-03 already has words for those states
+     * @param startedAt   OB-03's "Start Date" — when the primary journey's
+     *                    earliest step actually began, null while it is
+     *                    still gate-locked and nothing has ever activated.
+     *                    Unlike {@code currentStep}, stays populated once a
+     *                    finished journey has no current step left to name
      */
     record ObClientSummary(long id, String name, LocalDate onboardingDate, String status,
                            String rag, String gateStatus, int journeyCount, int journeysComplete,
                            ObClientCurrentStep currentStep,
                            List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
-                           Instant liveAt, boolean hasPortalLogin) {
+                           Instant liveAt, Instant startedAt, boolean hasPortalLogin) {
     }
 
     /**
@@ -192,7 +201,7 @@ final class ObClientDtos {
                           String rag, String gateStatus, int journeyCount, int journeysComplete,
                           ObClientCurrentStep currentStep,
                           List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
-                          Instant liveAt, boolean hasPortalLogin,
+                          Instant liveAt, Instant startedAt, boolean hasPortalLogin,
                           String description, String address, String licenseType, String pan,
                           String statusReason, List<ObContact> contacts, List<ObApplication> applications,
                           List<ObRequirement> requirements, List<ObJourneyStrip> journeys,

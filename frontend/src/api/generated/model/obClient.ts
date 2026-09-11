@@ -54,6 +54,7 @@ import type { ObProductRef } from './obProductRef';
 import type { UserRef } from './userRef';
 import type { ObContact } from './obContact';
 import type { ObClientLiveAt } from './obClientLiveAt';
+import type { ObClientStartedAt } from './obClientStartedAt';
 
 /**
  * The OB-03 list row. No PAN and no address: identity data belongs to the
@@ -93,6 +94,13 @@ breaking.
   salesPerson?: UserRef;
   primaryContact?: ObContact;
   liveAt?: ObClientLiveAt;
+  /** OB-03's "Start Date" — when the primary journey's earliest step
+actually began. Null while that journey is still gate-locked and
+nothing has ever activated. Unlike `currentStep`, this stays
+populated once a finished journey has no current step left to
+name.
+ */
+  startedAt?: ObClientStartedAt;
   /** Whether a `client_accounts` row exists for this client. **Not
 whether one should** — creation is always an explicit staff action
 (plan §2.3), so `false` is the ordinary state of a boarded client

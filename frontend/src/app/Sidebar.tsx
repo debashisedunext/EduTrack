@@ -128,7 +128,7 @@ const ONBOARDING_NAV: NavEntry[] = [
   { to: '/onboarding/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   {
     to: '/onboarding/clients',
-    label: 'Clients',
+    label: 'Projects',
     icon: Building2,
     // Stays lit on a client's detail page, which is where following a row goes.
     isActive: (p) => p.startsWith('/onboarding/clients') && p !== '/onboarding/clients/new',
