@@ -29,8 +29,9 @@ function renderBoard() {
 
 /**
  * MSW adds latency and the suite is heavily parallel — `ClientListPage.test.tsx`'s
- * convention. Widened from 5000: the RAG board and "Where it's stuck" panel add
- * five more concurrent requests to the page's first paint, and the slowest of
+ * convention. Widened from 5000: the RAG board, part of the default Summary
+ * tab, adds three more concurrent requests to the page's first paint (the
+ * other three tabs mount, and fetch, only once selected), and the slowest of
  * them is what this budget has to cover.
  */
 const SLOW = { timeout: 10000 }
@@ -128,5 +129,42 @@ describe('ObDashboardPage', () => {
 
     expect(await screen.findByRole('heading', { name: "This week's deadlines" }, SLOW))
       .toBeInTheDocument()
+  }, SLOW.timeout)
+
+  /**
+   * The four tabs, in plan §9's own order — mirroring `DashboardPage`'s
+   * Today's Progress / Ticket Overview / Weekly Progress / Analytics strip.
+   */
+  it('shows the four tabs, Summary selected by default', async () => {
+    renderBoard()
+
+    await screen.findByText('Ongoing projects', undefined, SLOW)
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Summary',
+      "Where it's stuck",
+      'Delayed projects',
+      'Implementor workload & performance',
+    ])
+    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+  }, SLOW.timeout)
+
+  /**
+   * Each of the other three tabs mounts the standalone panel it already had —
+   * this only proves the wiring, since `ObDashboardStuckPanel`,
+   * `ObDelayedProjectsGrid` and `ObImplementorWorkloadGrid` cover their own
+   * content in their own test files.
+   */
+  it('switches to the Delayed projects tab and mounts its grid', async () => {
+    renderBoard()
+
+    await screen.findByText('Ongoing projects', undefined, SLOW)
+    await userEvent.click(screen.getByRole('tab', { name: 'Delayed projects' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Delayed projects' }, SLOW),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Onboarding summary' })).not.toBeInTheDocument()
   }, SLOW.timeout)
 })
