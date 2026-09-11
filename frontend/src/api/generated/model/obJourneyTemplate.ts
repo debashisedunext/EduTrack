@@ -46,7 +46,6 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObJourneyTemplateDependsOnTemplateId } from './obJourneyTemplateDependsOnTemplateId';
 import type { ObJourneyTemplatePublishedBy } from './obJourneyTemplatePublishedBy';
 import type { ObJourneyTemplatePublishedAt } from './obJourneyTemplatePublishedAt';
 
@@ -72,11 +71,16 @@ publish — which this flag alone does not distinguish from
   isActive: boolean;
   /** Service order on the OB-07 catalogue — the `↑/↓` control one level up, over products rather than steps. */
   sequence: number;
-  /** Cross-product service dependency (plan §5.5) — e.g. Biometric
-Device Rollout after the ERP service. Cycle-freedom here is
-enforced by C-123, not by this table's foreign key alone.
+  /** Cross-product service dependencies (plan §5.5) — e.g. Biometric
+Device Rollout after the ERP service *and* the network survey.
+Ascending, empty for a service that runs unheld.
+
+Rows of `ob_journey_template_dependencies` since
+`V20260911_1100`, not a column on the template. Cycle-freedom is
+enforced by C-123: the table's `CHECK` refuses only the one-hop
+case, and no constraint can perform the transitive walk.
  */
-  dependsOnTemplateId?: ObJourneyTemplateDependsOnTemplateId;
+  dependsOnTemplateIds?: number[];
   publishedBy?: ObJourneyTemplatePublishedBy;
   /** Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it. */
   publishedAt?: ObJourneyTemplatePublishedAt;

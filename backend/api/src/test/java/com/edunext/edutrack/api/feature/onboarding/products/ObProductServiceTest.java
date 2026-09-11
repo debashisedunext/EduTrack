@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.products;
 
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObProduct;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository;
@@ -119,11 +120,11 @@ class ObProductServiceTest {
 
     private final FakeRepository repository = new FakeRepository();
     // C-123 · unrelated to this class's own tests, which predate the
-    // catalogue enrichment — a bare mock answers empty to the one batch
-    // read this service makes of it, exactly like a product with no active
-    // template.
-    private final ObProductService service =
-            new ObProductService(repository, mock(ObJourneyTemplateRepository.class));
+    // catalogue enrichment — bare mocks answer empty to the two batch reads
+    // this service makes of them, exactly like a product with no active
+    // template and so no dependency set to read.
+    private final ObProductService service = new ObProductService(repository,
+            mock(ObJourneyTemplateRepository.class), mock(ObJourneyTemplateDependencyRepository.class));
 
     private static ObProductDtos.WriteRequest write(String code, String name, Boolean active) {
         return new ObProductDtos.WriteRequest(code, name, active);
@@ -304,7 +305,8 @@ class ObProductServiceTest {
                 return List.of();
             }
         };
-        ObProductService counted = new ObProductService(counting, mock(ObJourneyTemplateRepository.class));
+        ObProductService counted = new ObProductService(counting,
+                mock(ObJourneyTemplateRepository.class), mock(ObJourneyTemplateDependencyRepository.class));
         for (int i = 0; i < 5; i++) {
             counted.create(write("P" + i, "Product " + i, null), null);
         }

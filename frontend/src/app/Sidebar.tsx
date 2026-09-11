@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
-  Building2, PlusCircle, Timer, Mail, ShieldCheck, Layers, ClipboardList,
+  Building2, PlusCircle, Timer, Mail, ShieldCheck, Layers, ClipboardList, Milestone, Package,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -128,7 +128,7 @@ const ONBOARDING_NAV: NavEntry[] = [
   { to: '/onboarding/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   {
     to: '/onboarding/clients',
-    label: 'Projects',
+    label: 'Clients',
     icon: Building2,
     // Stays lit on a client's detail page, which is where following a row goes.
     isActive: (p) => p.startsWith('/onboarding/clients') && p !== '/onboarding/clients/new',
@@ -150,9 +150,31 @@ const ONBOARDING_NAV: NavEntry[] = [
     behaves is most often changing a service.
   */
   { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
+  /*
+    OB-07 · Products — what a Module Service is written *for*. Directly under
+    Module Service rather than above it, although a product logically comes
+    first: Module Service leads the section by decision (see the comment on
+    it), and a product is only ever configured so that a service can be
+    written for it, so the two sit as a pair with the one somebody returns to
+    most on top. Creating a product here is what makes it appear in the
+    Module Service form's "For product" picker.
+  */
+  { to: '/onboarding/products', label: 'Products', icon: Package },
   // B-124 · Prerequisites master (OB-14) — the last of the design's nine
   // entries, added the day its screen landed, per the section comment above.
   { to: '/onboarding/prereq-master', label: 'Prerequisites master', icon: ClipboardList },
+  /*
+    OB-15 · Implementation Stage — the tenth entry, and the first past the
+    design's nine. Added on the same rule the section comment sets rather than
+    as an exception to it: the screen exists, so the row does.
+
+    Placed after Prerequisites master and before the two access/behaviour
+    entries below, because it belongs to the same group as the two above it —
+    Module Service, prerequisites and implementation stages are the *vocabulary*
+    an onboarding is configured from, while roles, TAT and templates configure
+    how the module behaves around it.
+  */
+  { to: '/onboarding/implementation-stages', label: 'Implementation Stage', icon: Milestone },
   { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
   { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
   { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },

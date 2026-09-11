@@ -834,6 +834,16 @@ final class PermissionMatrix {
     private static final String WRITE_OB_PRODUCT = """
             {"code":"MATRIX_FIXTURE","name":"Matrix Fixture Product"}""";
 
+    /**
+     * OB-15 · {@code ObImplementationStageWriteRequest}: {@code name} is
+     * {@code @NotBlank}. {@code sequence} is omitted deliberately — absent
+     * means "say nothing about order", which is the shape a body reaching this
+     * matrix should take: a fixture that reordered the master would make the
+     * outcome of one role's request depend on which role ran before it.
+     */
+    private static final String WRITE_OB_IMPLEMENTATION_STAGE = """
+            {"name":"Matrix Fixture Stage"}""";
+
     /** C-102 · {@code AddStepItemRequest}: {@code label} is {@code @NotBlank}. */
     private static final String ADD_JOURNEY_TEMPLATE_STEP_ITEM = """
             {"label":"Matrix Fixture Item","mandatory":true}""";
@@ -2253,6 +2263,27 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/products/{obProductId}"),
             everyRole("POST", "/api/v1/onboarding/products", WRITE_OB_PRODUCT),
             everyRole("PATCH", "/api/v1/onboarding/products/{obProductId}", WRITE_OB_PRODUCT),
+
+            // ── OB-15 · implementation stage master ───────────────────────────
+            //
+            // isAuthenticated() on all four, and the block above carries the
+            // argument unchanged rather than a new one: the contract says "OB
+            // Admin" for the two writes, OB Admin is a *module* role
+            // (user_module_access.module_role), and this matrix speaks only
+            // blueprint §2's six platform roles. ObModuleRoleFilter applies the
+            // module rule from ObModuleRoleRules, where these four routes are
+            // declared ADMIN_ONLY on the writes and EVERY_ROLE on the reads.
+            //
+            // So every one of the six platform roles reaches these routes, each
+            // needing the ONBOARDING grant first. Encoding a platform-role
+            // restriction here would assert a rule nobody has decided and put a
+            // second enforcement point beside the one that ships.
+            everyRole("GET", "/api/v1/onboarding/implementation-stages"),
+            everyRole("GET", "/api/v1/onboarding/implementation-stages/{stageId}"),
+            everyRole("POST", "/api/v1/onboarding/implementation-stages",
+                    WRITE_OB_IMPLEMENTATION_STAGE),
+            everyRole("PATCH", "/api/v1/onboarding/implementation-stages/{stageId}",
+                    WRITE_OB_IMPLEMENTATION_STAGE),
 
             // ── C-102 · OB-07 journey template designer ───────────────────────
             //

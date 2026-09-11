@@ -116,7 +116,7 @@ describe('Sidebar · onboarding module', () => {
   it('swaps to the onboarding navigation on an onboarding route', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Dashboard', 'Projects', 'New client', 'Reports', 'TAT & escalation']) {
+    for (const label of ['Dashboard', 'Clients', 'New client', 'Reports', 'TAT & escalation']) {
       expect(within(obNav()).getByRole('link', { name: label })).toBeInTheDocument()
     }
     // The ticketing entries are gone, not merely pushed down.
@@ -143,8 +143,8 @@ describe('Sidebar · onboarding module', () => {
   it('puts Module Service at the top of Administration', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    const adminLinks = ['Module Service', 'Prerequisites master', 'Roles & module access',
-      'TAT & escalation', 'Notification templates']
+    const adminLinks = ['Module Service', 'Products', 'Prerequisites master',
+      'Roles & module access', 'TAT & escalation', 'Notification templates']
       .map((label) => within(obNav()).getByRole('link', { name: label }))
 
     const positions = adminLinks.map((link) => adminLinks[0].compareDocumentPosition(link))
@@ -183,15 +183,15 @@ describe('Sidebar · onboarding module', () => {
       'aria-current',
       'page',
     )
-    expect(within(obNav()).getByRole('link', { name: 'Projects' })).not.toHaveAttribute(
+    expect(within(obNav()).getByRole('link', { name: 'Clients' })).not.toHaveAttribute(
       'aria-current',
     )
   })
 
-  it('keeps Projects current on a client detail page', () => {
+  it('keeps Clients current on a client detail page', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/clients/42')
 
-    expect(within(obNav()).getByRole('link', { name: 'Projects' })).toHaveAttribute(
+    expect(within(obNav()).getByRole('link', { name: 'Clients' })).toHaveAttribute(
       'aria-current',
       'page',
     )
@@ -222,5 +222,25 @@ describe('Sidebar · onboarding module', () => {
 
     expect(within(obNav()).getByRole('link', { name: 'Module Service' }))
         .toHaveAttribute('href', '/onboarding/journey-templates')
+  })
+
+  // OB-15 · the tenth Administration row, on the same rule as the nine above:
+  // the screen exists, so the row does.
+  it('offers Implementation Stage', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
+
+    expect(within(obNav()).getByRole('link', { name: 'Implementation Stage' }))
+        .toHaveAttribute('href', '/onboarding/implementation-stages')
+  })
+
+  /**
+   * The row belongs to the Onboarding module, not to ticketing. Asserted
+   * because the two navigations are separate lists in one file, and an entry
+   * added to the wrong constant renders perfectly — on the wrong screen.
+   */
+  it('does not offer Implementation Stage in the ticketing rail', () => {
+    renderSidebarAs(OB_ADMIN, '/dashboard')
+
+    expect(screen.queryByRole('link', { name: 'Implementation Stage' })).not.toBeInTheDocument()
   })
 })

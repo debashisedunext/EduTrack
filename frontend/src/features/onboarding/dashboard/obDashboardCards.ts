@@ -69,6 +69,41 @@ const LOOK: Record<ObDashboardCardKey, CardLook> = {
 }
 
 /**
+ * Cards the board receives and does not draw.
+ *
+ * `live` is a count of clients who have *finished* onboarding — the one card on
+ * the board that is not a call to action, and the one nobody was opening. The
+ * board is read to find what needs work today, and the row now fits on a single
+ * line without it.
+ *
+ * Filtered here rather than asked for differently: `GET /onboarding/dashboard/
+ * summary` sends all seven in `ObDashboardCardKey` order, that shape is the
+ * contract, and the drill-over still resolves `live` through {@link cardLook}
+ * if anything links to it. This is a display decision and it stays on the
+ * display side.
+ */
+const HIDDEN_KEYS: ReadonlySet<string> = new Set<ObDashboardCardKey>(['live'])
+
+/**
+ * The cards the board draws, in the order the server sent them.
+ *
+ * Unknown keys survive on purpose — the same tolerance {@link cardLook} has. A
+ * server newer than this bundle should add a card to the row, not have it
+ * silently dropped by a filter that only knows last month's enum.
+ */
+export function visibleCards<T extends { key: string }>(cards: readonly T[]): T[] {
+  return cards.filter((card) => !HIDDEN_KEYS.has(card.key))
+}
+
+/**
+ * How many tiles the row is expected to hold — what the loading skeleton draws,
+ * so nothing reflows when the real numbers land. Derived from the two maps
+ * above rather than typed as a literal: hiding a second card would otherwise
+ * leave a skeleton one tile too wide until somebody noticed.
+ */
+export const VISIBLE_CARD_COUNT = Object.keys(LOOK).filter((key) => !HIDDEN_KEYS.has(key)).length
+
+/**
  * How one card is labelled.
  *
  * **Tolerant, on purpose.** The key is a closed enum in the contract, so an

@@ -43,6 +43,15 @@ import java.time.Instant;
  * never {@code !isActive} — the second would reopen a retired version to
  * editing, which is precisely the in-flight-journey corruption this table
  * exists to prevent.
+ *
+ * <h2>The service-level dependency is not a field here</h2>
+ *
+ * <p>It was {@code depends_on_template_id} on this row until
+ * {@code V20260911_1100}, and is now {@link ObJourneyTemplateDependency} —
+ * a service waits behind a <em>set</em> of others, which a column could not
+ * hold. Nothing else about the row moved, but a reader looking for the
+ * dependency on the entity and not finding it is looking in the place it
+ * used to be.
  */
 @Entity
 @Table(name = "ob_journey_templates")
@@ -66,10 +75,6 @@ public class ObJourneyTemplate {
 
     @Column(name = "sequence", nullable = false)
     private int sequence;
-
-    /** Cross-product, cycle-freedom enforced by the service layer (C-123), not here. */
-    @Column(name = "depends_on_template_id")
-    private Long dependsOnTemplateId;
 
     @Column(name = "published_by")
     private Long publishedBy;
@@ -134,14 +139,6 @@ public class ObJourneyTemplate {
 
     public void setSequence(int sequence) {
         this.sequence = sequence;
-    }
-
-    public Long getDependsOnTemplateId() {
-        return dependsOnTemplateId;
-    }
-
-    public void setDependsOnTemplateId(Long dependsOnTemplateId) {
-        this.dependsOnTemplateId = dependsOnTemplateId;
     }
 
     public Long getPublishedBy() {

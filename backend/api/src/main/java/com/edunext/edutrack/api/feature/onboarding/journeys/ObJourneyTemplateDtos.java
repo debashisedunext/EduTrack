@@ -29,11 +29,17 @@ final class ObJourneyTemplateDtos {
 
     // ── requests ──────────────────────────────────────────────────────
 
+    /**
+     * @param dependsOnTemplateIds the services this one waits behind — a set,
+     *                             not one id, since {@code V20260911_1100}.
+     *                             Omitted or {@code null} is the same as an
+     *                             empty list: a service that runs unheld.
+     */
     record CreateTemplateRequest(
             @NotNull Long productId,
             @NotBlank @Size(max = 160) String name,
             int sequence,
-            Long dependsOnTemplateId) {
+            List<@NotNull Long> dependsOnTemplateIds) {
     }
 
     record AddStepRequest(
@@ -65,8 +71,18 @@ final class ObJourneyTemplateDtos {
     record ReorderCatalogueRequest(@NotEmpty List<@NotNull Long> templateIds) {
     }
 
-    /** C-123 · the catalogue's "Service depends on" picker. {@code null} clears the dependency. */
-    record UpdateDependsOnRequest(Long dependsOnTemplateId) {
+    /**
+     * C-123 · the catalogue's "Depends on" picker, which is multi-select.
+     *
+     * @param dependsOnTemplateIds the caller's whole desired set, not a delta
+     *                             — an empty list clears every dependency and
+     *                             the service runs unheld. Not
+     *                             {@code @NotEmpty} for exactly that reason:
+     *                             "nothing" is a legal answer here, where on
+     *                             {@code ReorderCatalogueRequest} above it
+     *                             would be a caller who forgot the body.
+     */
+    record UpdateDependsOnRequest(@NotNull List<@NotNull Long> dependsOnTemplateIds) {
     }
 
     /**
@@ -97,13 +113,23 @@ final class ObJourneyTemplateDtos {
 
     // ── responses ─────────────────────────────────────────────────────
 
+    /**
+     * @param dependsOnTemplateIds the services this one waits behind,
+     *                             ascending. Passed in rather than read off
+     *                             {@link ObJourneyTemplate}: the dependency
+     *                             set lives in its own table since
+     *                             {@code V20260911_1100}, so the entity alone
+     *                             cannot answer for it and a {@code static of}
+     *                             taking only the entity would silently
+     *                             report every service as unheld.
+     */
     record Template(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
-            Long dependsOnTemplateId, Long publishedBy, Instant publishedAt) {
+            List<Long> dependsOnTemplateIds, Long publishedBy, Instant publishedAt) {
 
-        static Template of(ObJourneyTemplate t) {
+        static Template of(ObJourneyTemplate t, List<Long> dependsOnTemplateIds) {
             return new Template(t.getId(), t.getProductId(), t.getName(), t.getVersion(), t.isActive(),
-                    t.getSequence(), t.getDependsOnTemplateId(), t.getPublishedBy(), t.getPublishedAt());
+                    t.getSequence(), dependsOnTemplateIds, t.getPublishedBy(), t.getPublishedAt());
         }
     }
 
@@ -116,8 +142,8 @@ final class ObJourneyTemplateDtos {
     // fields on someone else's endpoint. ContractConformanceTest caught this
     // exact collision.
     record ObJourneyTemplateResponse(Template data) {
-        static ObJourneyTemplateResponse of(ObJourneyTemplate t) {
-            return new ObJourneyTemplateResponse(Template.of(t));
+        static ObJourneyTemplateResponse of(ObJourneyTemplate t, List<Long> dependsOnTemplateIds) {
+            return new ObJourneyTemplateResponse(Template.of(t, dependsOnTemplateIds));
         }
     }
 
@@ -136,18 +162,23 @@ final class ObJourneyTemplateDtos {
      * alternative is the page fetching the full detail of every service on the
      * catalogue to render a chip.
      *
-     * <p>C-124 · {@code serviceJourneyCount} is the same argument for the Edit
-     * and Delete controls: both are refused server-side once a client has been
-     * boarded on the service, and without the figure on the row the page could
-     * only find that out by letting an admin click and answering {@code 409}.
-     * It is deliberately <b>chain-wide</b> rather than this version's own —
+     * <p>C-124 · {@code serviceJourneyCount} is the same argument for Delete
+     * and for the product picker inside Edit: both are refused server-side once
+     * a client has been boarded on the service, and without the figure on the
+     * row the page could only find that out by letting an admin click and
+     * answering {@code 409}. <b>The name is not one of them</b> — a rename
+     * carries its journeys with it and is always allowed — so a page that
+     * disables the whole Edit form on this number is disabling too much; it is
+     * the product field, not the form, that the count speaks for.
+     *
+     * <p>It is deliberately <b>chain-wide</b> rather than this version's own —
      * every row of one service carries the same total — because the card the
      * buttons sit on is the head of a chain, and a service whose v1 carries
      * three clients is in use however empty its v3 is.
      */
     record TemplateSummary(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
-            Long dependsOnTemplateId, Instant publishedAt, int stepCount, int totalTatDays,
+            List<Long> dependsOnTemplateIds, Instant publishedAt, int stepCount, int totalTatDays,
             long serviceJourneyCount) {
     }
 
@@ -214,7 +245,7 @@ final class ObJourneyTemplateDtos {
      */
     record TemplateDetail(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
-            Long dependsOnTemplateId, Long publishedBy, Instant publishedAt,
+            List<Long> dependsOnTemplateIds, Long publishedBy, Instant publishedAt,
             List<StepDetail> steps, List<List<Long>> parallelGroups) {
     }
 

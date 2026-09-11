@@ -46,9 +46,14 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObJourneyTemplateDependsOnRequestDependsOnTemplateId } from './obJourneyTemplateDependsOnRequestDependsOnTemplateId';
 
 export interface ObJourneyTemplateDependsOnRequest {
-  /** Null clears the dependency: the service runs unheld from journey start. */
-  dependsOnTemplateId: ObJourneyTemplateDependsOnRequestDependsOnTemplateId;
+  /** The whole desired set, not a delta — every service this one waits
+behind, each named once. An empty list clears every dependency
+and the service runs unheld from journey start.
+
+Required but not `minItems: 1`: "nothing" is a legal answer here,
+where an absent body would be a caller who forgot one.
+ */
+  dependsOnTemplateIds: number[];
 }

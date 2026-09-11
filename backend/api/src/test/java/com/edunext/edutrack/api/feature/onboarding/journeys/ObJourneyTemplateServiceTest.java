@@ -1,6 +1,9 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyId;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
@@ -17,9 +20,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /**
  * C-101 · {@link ObJourneyTemplateService}. The four repositories are mocked
@@ -62,18 +69,37 @@ class ObJourneyTemplateServiceTest {
      */
     private final Map<Long, Long> journeysByTemplate = new LinkedHashMap<>();
 
+    /**
+     * C-124 · the {@code service_name} those journeys carry, per template
+     * version — {@code ob_journeys}' denormalised copy of the service name,
+     * which a rename has to re-stamp or leave two lookups resolving a name
+     * nothing holds any more.
+     */
+    private final Map<Long, String> journeyServiceNameByTemplate = new LinkedHashMap<>();
+
     private final AtomicLong templateIds = new AtomicLong();
     private final AtomicLong stepIds = new AtomicLong();
     private final AtomicLong itemIds = new AtomicLong();
     private final AtomicLong docIds = new AtomicLong();
 
+    /**
+     * The service dependency graph — {@code ob_journey_template_dependencies}
+     * as far as this service is concerned, since {@code V20260911_1100} moved
+     * it off the template row. A {@code LinkedHashSet} of the pair, because
+     * the pair is the table's primary key: a fake that let the same edge in
+     * twice would hide exactly the duplicate {@code replaceEdges} collapses.
+     */
+    private final Set<ObJourneyTemplateDependencyId> dependencyRows = new LinkedHashSet<>();
+
     private final ObJourneyTemplateRepository templates = mock(ObJourneyTemplateRepository.class);
+    private final ObJourneyTemplateDependencyRepository dependencies =
+            mock(ObJourneyTemplateDependencyRepository.class);
     private final ObJourneyTemplateStepRepository steps = mock(ObJourneyTemplateStepRepository.class);
     private final ObJourneyTemplateStepItemRepository stepItems = mock(ObJourneyTemplateStepItemRepository.class);
     private final ObJourneyTemplateStepDocRepository stepDocs = mock(ObJourneyTemplateStepDocRepository.class);
 
     private final ObJourneyTemplateService service =
-            new ObJourneyTemplateService(templates, steps, stepItems, stepDocs);
+            new ObJourneyTemplateService(templates, dependencies, steps, stepItems, stepDocs);
 
     @BeforeEach
     void wireFakes() {
@@ -87,6 +113,7 @@ class ObJourneyTemplateServiceTest {
         });
         lenient().when(templates.saveAndFlush(any())).thenAnswer(inv -> templates.save(inv.getArgument(0)));
         lenient().when(templates.findById(any())).thenAnswer(inv -> Optional.ofNullable(templateRows.get(inv.<Long>getArgument(0))));
+        lenient().when(templates.existsById(any())).thenAnswer(inv -> templateRows.containsKey(inv.<Long>getArgument(0)));
         lenient().when(templates.existsByProductId(any())).thenAnswer(inv ->
                 templateRows.values().stream().anyMatch(t -> t.getProductId().equals(inv.<Long>getArgument(0))));
         // Keyed on the service, not the product: a fake that still answered
@@ -120,16 +147,70 @@ class ObJourneyTemplateServiceTest {
                                 && inv.<String>getArgument(1).equals(t.getName()))
                         .sorted(Comparator.comparingInt(ObJourneyTemplate::getVersion))
                         .toList());
-        lenient().when(templates.findByDependsOnTemplateIdIn(any())).thenAnswer(inv -> {
+        lenient().when(templates.findByIdIn(any())).thenAnswer(inv -> {
             java.util.Collection<Long> ids = inv.getArgument(0);
-            return templateRows.values().stream()
-                    .filter(t -> t.getDependsOnTemplateId() != null
-                            && ids.contains(t.getDependsOnTemplateId()))
+            return templateRows.values().stream().filter(t -> ids.contains(t.getId())).toList();
+        });
+
+        /*
+          The dependency graph, backed by `dependencyRows`. Every read is
+          derived from that one set rather than stubbed per test, so an edge
+          written through `updateDependsOn` is visible to the cycle walk that
+          runs on the next call — which is the whole behaviour under test, and
+          is precisely what per-test stubbing would fake away.
+        */
+        lenient().when(dependencies.save(any())).thenAnswer(inv -> {
+            ObJourneyTemplateDependency edge = inv.getArgument(0);
+            dependencyRows.add(edge.getId());
+            return edge;
+        });
+        lenient().when(dependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(any()))
+                .thenAnswer(inv -> {
+                    Long templateId = inv.getArgument(0);
+                    return dependencyRows.stream()
+                            .filter(id -> id.getTemplateId().equals(templateId))
+                            .sorted(Comparator.comparing(ObJourneyTemplateDependencyId::getDependsOnTemplateId))
+                            .map(id -> new ObJourneyTemplateDependency(
+                                    id.getTemplateId(), id.getDependsOnTemplateId()))
+                            .toList();
+                });
+        lenient().when(dependencies.findByIdTemplateIdIn(any())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            return dependencyRows.stream()
+                    .filter(id -> ids.contains(id.getTemplateId()))
+                    .map(id -> new ObJourneyTemplateDependency(
+                            id.getTemplateId(), id.getDependsOnTemplateId()))
                     .toList();
         });
+        lenient().when(dependencies.findByIdDependsOnTemplateIdIn(any())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            return dependencyRows.stream()
+                    .filter(id -> ids.contains(id.getDependsOnTemplateId()))
+                    .map(id -> new ObJourneyTemplateDependency(
+                            id.getTemplateId(), id.getDependsOnTemplateId()))
+                    .toList();
+        });
+        lenient().doAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            dependencyRows.removeIf(id -> ids.contains(id.getTemplateId()));
+            return null;
+        }).when(dependencies).deleteByIdTemplateIdIn(any());
         lenient().when(templates.countJourneysForTemplates(any())).thenAnswer(inv -> {
             java.util.Collection<Long> ids = inv.getArgument(0);
             return ids.stream().mapToLong(id -> journeysByTemplate.getOrDefault(id, 0L)).sum();
+        });
+        lenient().when(templates.renameServiceOnJourneys(any(), any())).thenAnswer(inv -> {
+            String name = inv.getArgument(0);
+            java.util.Collection<Long> ids = inv.getArgument(1);
+            int stamped = 0;
+            for (Long id : ids) {
+                long onThisVersion = journeysByTemplate.getOrDefault(id, 0L);
+                if (onThisVersion > 0) {
+                    journeyServiceNameByTemplate.put(id, name);
+                    stamped += (int) onThisVersion;
+                }
+            }
+            return stamped;
         });
         lenient().when(templates.countJourneysByTemplate(any())).thenAnswer(inv -> {
             java.util.Collection<Long> ids = inv.getArgument(0);
@@ -734,9 +815,14 @@ class ObJourneyTemplateServiceTest {
         return templates.save(t);
     }
 
-    /** Board {@code count} clients on one template version. */
+    /**
+     * Board {@code count} clients on one template version, each journey
+     * carrying that version's service name as {@code ob_journeys} denormalises
+     * it at instantiation.
+     */
     private void journeysOn(long templateId, long count) {
         journeysByTemplate.put(templateId, count);
+        journeyServiceNameByTemplate.put(templateId, templateRows.get(templateId).getName());
     }
 
     /** The grouped-count projection, as an anonymous implementation. */
@@ -754,49 +840,117 @@ class ObJourneyTemplateServiceTest {
         };
     }
 
-    private ObJourneyTemplate activeTemplate(long productId, int sequence, Long dependsOnTemplateId) {
+    private ObJourneyTemplate activeTemplate(long productId, int sequence, Long... dependsOnTemplateIds) {
         ObJourneyTemplate t = new ObJourneyTemplate();
         t.setProductId(productId);
         t.setName("Product " + productId);
         t.setVersion(1);
         t.setActive(true);
         t.setSequence(sequence);
-        t.setDependsOnTemplateId(dependsOnTemplateId);
-        return templates.save(t);
+        ObJourneyTemplate saved = templates.save(t);
+        /*
+          Written straight into the graph rather than through
+          `updateDependsOn`. A fixture that used the method under test to build
+          its own preconditions could not set up a graph the method refuses —
+          and the cycle tests below exist to reach exactly those.
+        */
+        for (Long dependsOn : dependsOnTemplateIds) {
+            dependencyRows.add(new ObJourneyTemplateDependencyId(saved.getId(), dependsOn));
+        }
+        return saved;
+    }
+
+    /** What {@code templateId} waits behind, ascending — the picker's own read. */
+    private List<Long> dependsOn(long templateId) {
+        return service.dependsOnTemplateIds(templateId);
     }
 
     @Nested
-    @DisplayName("updateDependsOn — C-123's cycle-free picker")
+    @DisplayName("updateDependsOn — C-123's cycle-free multi-select picker")
     class UpdateDependsOn {
 
         @Test
         @DisplayName("names a valid dependency")
         void namesAValidDependency() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
-            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate biometric = activeTemplate(2, 1);
 
-            ObJourneyTemplate updated = service.updateDependsOn(biometric.getId(), erp.getId());
+            service.updateDependsOn(biometric.getId(), List.of(erp.getId()));
 
-            assertThat(updated.getDependsOnTemplateId()).isEqualTo(erp.getId());
+            assertThat(dependsOn(biometric.getId())).containsExactly(erp.getId());
         }
 
         @Test
-        @DisplayName("null clears an existing dependency")
-        void nullClears() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+        @DisplayName("a service can wait behind several others at once")
+        void severalDependenciesAtOnce() {
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate network = activeTemplate(2, 1);
+            ObJourneyTemplate biometric = activeTemplate(3, 2);
+
+            service.updateDependsOn(biometric.getId(), List.of(erp.getId(), network.getId()));
+
+            assertThat(dependsOn(biometric.getId()))
+                    .containsExactlyInAnyOrder(erp.getId(), network.getId());
+        }
+
+        @Test
+        @DisplayName("the list is the whole set, so dropping one leaves the others")
+        void replacesRatherThanAdds() {
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate network = activeTemplate(2, 1);
+            ObJourneyTemplate survey = activeTemplate(3, 2);
+            ObJourneyTemplate biometric = activeTemplate(4, 3, erp.getId(), network.getId());
+
+            service.updateDependsOn(biometric.getId(), List.of(network.getId(), survey.getId()));
+
+            assertThat(dependsOn(biometric.getId()))
+                    .containsExactlyInAnyOrder(network.getId(), survey.getId());
+        }
+
+        @Test
+        @DisplayName("re-sending an unchanged set is accepted, not a duplicate-key failure")
+        void resendingTheSameSetIsIdempotent() {
+            // The picker sends its whole selection on every change, so most
+            // saves re-declare edges the template already has. Without the
+            // flush between the delete and the inserts this is the call that
+            // collides on the (template_id, depends_on_template_id) key.
+            ObJourneyTemplate erp = activeTemplate(1, 0);
             ObJourneyTemplate biometric = activeTemplate(2, 1, erp.getId());
 
-            ObJourneyTemplate updated = service.updateDependsOn(biometric.getId(), null);
+            service.updateDependsOn(biometric.getId(), List.of(erp.getId()));
 
-            assertThat(updated.getDependsOnTemplateId()).isNull();
+            assertThat(dependsOn(biometric.getId())).containsExactly(erp.getId());
+        }
+
+        @Test
+        @DisplayName("a repeated id in one request is one edge, not a refusal")
+        void duplicatesInTheRequestCollapse() {
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate biometric = activeTemplate(2, 1);
+
+            service.updateDependsOn(biometric.getId(), List.of(erp.getId(), erp.getId()));
+
+            assertThat(dependsOn(biometric.getId())).containsExactly(erp.getId());
+        }
+
+        @Test
+        @DisplayName("an empty list clears every dependency")
+        void emptyListClears() {
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate network = activeTemplate(2, 1);
+            ObJourneyTemplate biometric = activeTemplate(3, 2, erp.getId(), network.getId());
+
+            service.updateDependsOn(biometric.getId(), List.of());
+
+            assertThat(dependsOn(biometric.getId())).isEmpty();
         }
 
         @Test
         @DisplayName("a template cannot depend on itself")
         void directSelfCycleRefused() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
 
-            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), erp.getId()))
+            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), List.of(erp.getId())))
                     .isInstanceOf(TemplateDependencyCycleException.class);
         }
 
@@ -804,26 +958,81 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("a transitive cycle is refused, not just a direct one")
         void transitiveCycleRefused() {
             // A -> B -> C already. Pointing C back at A would close the loop.
-            ObJourneyTemplate a = activeTemplate(1, 0, null);
+            ObJourneyTemplate a = activeTemplate(1, 0);
             ObJourneyTemplate b = activeTemplate(2, 1, a.getId());
             ObJourneyTemplate c = activeTemplate(3, 2, b.getId());
 
-            assertThatThrownBy(() -> service.updateDependsOn(a.getId(), c.getId()))
+            assertThatThrownBy(() -> service.updateDependsOn(a.getId(), List.of(c.getId())))
                     .isInstanceOf(TemplateDependencyCycleException.class);
 
             // C depending on B (already true) is not itself a cycle to be
             // refused a second, unrelated time.
-            assertThat(service.updateDependsOn(c.getId(), b.getId()).getDependsOnTemplateId())
-                    .isEqualTo(b.getId());
+            service.updateDependsOn(c.getId(), List.of(b.getId()));
+            assertThat(dependsOn(c.getId())).containsExactly(b.getId());
+        }
+
+        @Test
+        @DisplayName("a cycle down the second branch of a fork is refused")
+        void cycleThroughTheSecondBranchRefused() {
+            /*
+              This is the case a chain walk cannot see, and the reason
+              requireNoCycle is a breadth-first search rather than a cursor.
+
+                  fork ──▶ harmless
+                       └─▶ middle ──▶ a
+
+              Pointing `a` at `fork` closes a → fork → middle → a. A walk that
+              followed only the first edge out of each node would reach
+              `harmless`, run out, and report success.
+            */
+            ObJourneyTemplate a = activeTemplate(1, 0);
+            ObJourneyTemplate middle = activeTemplate(2, 1, a.getId());
+            ObJourneyTemplate harmless = activeTemplate(3, 2);
+            ObJourneyTemplate fork = activeTemplate(4, 3, harmless.getId(), middle.getId());
+
+            assertThatThrownBy(() -> service.updateDependsOn(a.getId(), List.of(fork.getId())))
+                    .isInstanceOf(TemplateDependencyCycleException.class);
+        }
+
+        @Test
+        @DisplayName("a legal id alongside a cycling one writes nothing at all")
+        void oneBadIdRejectsTheWholeSet() {
+            // Validated in full before anything is written, so the outcome
+            // does not depend on which order the picker sent the ids in.
+            ObJourneyTemplate a = activeTemplate(1, 0);
+            ObJourneyTemplate dependent = activeTemplate(2, 1, a.getId());
+            ObJourneyTemplate innocent = activeTemplate(3, 2);
+
+            assertThatThrownBy(() -> service.updateDependsOn(
+                    a.getId(), List.of(innocent.getId(), dependent.getId())))
+                    .isInstanceOf(TemplateDependencyCycleException.class);
+
+            assertThat(dependsOn(a.getId())).isEmpty();
         }
 
         @Test
         @DisplayName("naming an unknown template is refused, not silently accepted")
         void unknownDependencyRefused() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
 
-            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), 999L))
+            assertThatThrownBy(() -> service.updateDependsOn(erp.getId(), List.of(999L)))
                     .isInstanceOf(TemplateNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("a revision inherits the whole dependency set, not the first of it")
+        void revisionClonesTheWholeSet() {
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate network = activeTemplate(2, 1);
+            ObJourneyTemplate biometric = activeTemplate(3, 2, erp.getId(), network.getId());
+
+            ObJourneyTemplate draft = service.beginRevision(biometric.getId(), 7L);
+
+            assertThat(dependsOn(draft.getId()))
+                    .containsExactlyInAnyOrder(erp.getId(), network.getId());
+            // And the source is untouched — the draft holds its own rows.
+            assertThat(dependsOn(biometric.getId()))
+                    .containsExactlyInAnyOrder(erp.getId(), network.getId());
         }
     }
 
@@ -834,9 +1043,9 @@ class ObJourneyTemplateServiceTest {
         @Test
         @DisplayName("renumbers every active template 0..N-1 in the caller's order")
         void renumbers() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
-            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
-            ObJourneyTemplate lms = activeTemplate(3, 2, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate biometric = activeTemplate(2, 1);
+            ObJourneyTemplate lms = activeTemplate(3, 2);
 
             service.reorderCatalogue(List.of(lms.getId(), erp.getId(), biometric.getId()));
 
@@ -848,8 +1057,8 @@ class ObJourneyTemplateServiceTest {
         @Test
         @DisplayName("a product with only a draft template is not part of the reorder")
         void draftOnlyTemplateExcluded() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
-            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate biometric = activeTemplate(2, 1);
             ObJourneyTemplate draftOnly = service.createTemplate(3, "New Service", 0, null, ADMIN);
 
             // draftOnly's product has never had an active version, so it is
@@ -863,8 +1072,8 @@ class ObJourneyTemplateServiceTest {
         @Test
         @DisplayName("a repeated id is refused")
         void duplicateRefused() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
-            ObJourneyTemplate biometric = activeTemplate(2, 1, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            ObJourneyTemplate biometric = activeTemplate(2, 1);
 
             assertThatThrownBy(() -> service.reorderCatalogue(List.of(erp.getId(), erp.getId())))
                     .isInstanceOf(CatalogueReorderMismatchException.class);
@@ -873,8 +1082,8 @@ class ObJourneyTemplateServiceTest {
         @Test
         @DisplayName("a set that is not exactly the active catalogue is refused")
         void mismatchedSetRefused() {
-            ObJourneyTemplate erp = activeTemplate(1, 0, null);
-            activeTemplate(2, 1, null);
+            ObJourneyTemplate erp = activeTemplate(1, 0);
+            activeTemplate(2, 1);
 
             assertThatThrownBy(() -> service.reorderCatalogue(List.of(erp.getId())))
                     .isInstanceOf(CatalogueReorderMismatchException.class);
@@ -957,15 +1166,103 @@ class ObJourneyTemplateServiceTest {
             assertThat(templateRows.get(v1.getId()).getName()).isEqualTo("Standard onboarding");
         }
 
+        /**
+         * The rule this screen turns on, and the one that changed: a service 49
+         * clients are on is the one most worth being able to correct, not the
+         * one to freeze. Nothing about being in use gates an edit any more —
+         * only {@code deleteModuleService} still asks.
+         */
         @Test
-        @DisplayName("a rename is refused once a client is on the service")
-        void renameRefusedWhileInUse() {
+        @DisplayName("a rename goes through however many clients are on the service")
+        void renameAllowedWhileInUse() {
             ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
             journeysOn(v1.getId(), 3);
 
-            assertThatThrownBy(() -> service.updateModuleService(v1.getId(), "Anything", null))
-                    .isInstanceOf(ModuleServiceInUseException.class)
-                    .hasMessageContaining("3 client journeys");
+            service.updateModuleService(v1.getId(), "Standard onboarding", null);
+
+            assertThat(templateRows.get(v1.getId()).getName()).isEqualTo("Standard onboarding");
+        }
+
+        /**
+         * The half a rename would be wrong without. {@code ob_journeys}
+         * denormalises {@code service_name}, and both
+         * {@code uq_ob_journeys_client_service} and the dependency hold resolve
+         * a service by it — left holding the old string, a dependent journey
+         * starts unheld and a client can be boarded twice onto one service.
+         */
+        @Test
+        @DisplayName("a rename re-stamps the journeys boarded on every version of the chain")
+        void renameCarriesItsJourneysWithIt() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
+            ObJourneyTemplate other = version("Enterprise", 1, true);
+            journeysOn(v1.getId(), 2);
+            journeysOn(v2.getId(), 1);
+            journeysOn(other.getId(), 1);
+
+            service.updateModuleService(v2.getId(), "Standard onboarding", null);
+
+            assertThat(journeyServiceNameByTemplate.get(v1.getId())).isEqualTo("Standard onboarding");
+            assertThat(journeyServiceNameByTemplate.get(v2.getId())).isEqualTo("Standard onboarding");
+            // Another service's journeys are no business of this rename.
+            assertThat(journeyServiceNameByTemplate.get(other.getId())).isEqualTo("Enterprise");
+        }
+
+        @Test
+        @DisplayName("a rename to the same name re-stamps nothing")
+        void renameToTheSameNameTouchesNoJourney() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            journeysOn(v1.getId(), 3);
+
+            service.updateModuleService(v1.getId(), "Standard SaaS Onboarding", null);
+
+            verify(templates, never()).renameServiceOnJourneys(any(), any());
+        }
+
+        @Test
+        @DisplayName("the product can be re-filed too, however many clients are on it")
+        void productMoveAllowedWhileInUse() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            journeysOn(v1.getId(), 3);
+
+            service.updateModuleService(v1.getId(), "Standard SaaS Onboarding", 999L);
+
+            assertThat(templateRows.get(v1.getId()).getProductId()).isEqualTo(999L);
+        }
+
+        /**
+         * The half that deliberately does <em>not</em> travel. A journey's
+         * product is half of {@code fk_ob_journeys_application} — the client's
+         * own purchase — so re-stamping it would claim a sale that never
+         * happened. The templates move; the journeys keep recording what was
+         * actually bought.
+         */
+        @Test
+        @DisplayName("a move re-files the templates without touching what the client bought")
+        void productMoveLeavesTheJourneysWhereTheyWereBought() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
+            journeysOn(v1.getId(), 3);
+
+            service.updateModuleService(v1.getId(), "Standard onboarding", 999L);
+
+            assertThat(templateRows.get(v1.getId()).getProductId()).isEqualTo(999L);
+            // The rename still reaches them; only the product does not.
+            assertThat(journeyServiceNameByTemplate.get(v1.getId())).isEqualTo("Standard onboarding");
+        }
+
+        @Test
+        @DisplayName("both fields move in one call, on a service clients are on")
+        void renameAndMoveTogetherWhileInUse() {
+            ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
+            ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
+            journeysOn(v1.getId(), 2);
+
+            service.updateModuleService(v2.getId(), "Standard onboarding", 999L);
+
+            assertThat(templateRows.get(v1.getId()).getName()).isEqualTo("Standard onboarding");
+            assertThat(templateRows.get(v1.getId()).getProductId()).isEqualTo(999L);
+            assertThat(templateRows.get(v2.getId()).getName()).isEqualTo("Standard onboarding");
+            assertThat(templateRows.get(v2.getId()).getProductId()).isEqualTo(999L);
         }
 
         @Test
@@ -1008,8 +1305,7 @@ class ObJourneyTemplateServiceTest {
         void deleteRefusedWhileDependedOn() {
             ObJourneyTemplate standard = version("Standard SaaS Onboarding", 1, true);
             ObJourneyTemplate enterprise = version("Enterprise", 1, true);
-            enterprise.setDependsOnTemplateId(standard.getId());
-            templates.save(enterprise);
+            service.updateDependsOn(enterprise.getId(), List.of(standard.getId()));
 
             assertThatThrownBy(() -> service.deleteModuleService(standard.getId()))
                     .isInstanceOf(ModuleServiceHasDependentsException.class)

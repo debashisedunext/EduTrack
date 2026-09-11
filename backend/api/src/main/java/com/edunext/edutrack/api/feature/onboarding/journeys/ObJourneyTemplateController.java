@@ -112,11 +112,20 @@ class ObJourneyTemplateController {
           a chain is either wholly in the result or wholly out of it.
         */
         Map<Long, Long> journeyCounts = service.journeyCountsByTemplate(templates);
+        /*
+          The dependency sets for the whole page in one statement, on
+          journeyCounts' own reasoning one line up: a set per row read lazily
+          would be a query per card, and the catalogue draws every version of
+          every service.
+        */
+        Map<Long, List<Long>> dependsOn = service.dependsOnByTemplate(
+                templates.stream().map(ObJourneyTemplate::getId).toList());
 
         List<ObJourneyTemplateDtos.TemplateSummary> rows = templates.stream()
                 .map(t -> new ObJourneyTemplateDtos.TemplateSummary(
                         t.getId(), t.getProductId(), t.getName(), t.getVersion(), t.isActive(),
-                        t.getSequence(), t.getDependsOnTemplateId(), t.getPublishedAt(),
+                        t.getSequence(), dependsOn.getOrDefault(t.getId(), List.of()),
+                        t.getPublishedAt(),
                         service.stepCount(t.getId()), service.totalTatDays(t.getId()),
                         journeyCounts.getOrDefault(t.getId(), 0L)))
                 .toList();
@@ -158,7 +167,7 @@ class ObJourneyTemplateController {
 
         return new ObJourneyTemplateDtos.TemplateDetail(
                 template.getId(), template.getProductId(), template.getName(), template.getVersion(),
-                template.isActive(), template.getSequence(), template.getDependsOnTemplateId(),
+                template.isActive(), template.getSequence(), service.dependsOnTemplateIds(templateId),
                 template.getPublishedBy(), template.getPublishedAt(), stepDetails, parallelGroups);
     }
 
@@ -175,8 +184,9 @@ class ObJourneyTemplateController {
             @Valid @RequestBody ObJourneyTemplateDtos.CreateTemplateRequest request) {
         ObJourneyTemplate created = service.createTemplate(
                 request.productId(), request.name(), request.sequence(),
-                request.dependsOnTemplateId(), CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(created);
+                request.dependsOnTemplateIds(), CallerIdentityAccess.requireUserId(caller));
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(
+                created, service.dependsOnTemplateIds(created.getId()));
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/revisions",
@@ -190,7 +200,8 @@ class ObJourneyTemplateController {
                     not the product's currently active version.""")
     ObJourneyTemplateDtos.ObJourneyTemplateResponse beginRevision(Authentication caller, @PathVariable long templateId) {
         ObJourneyTemplate draft = service.beginRevision(templateId, CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(draft);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(
+                draft, service.dependsOnTemplateIds(draft.getId()));
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/publish",
@@ -204,7 +215,8 @@ class ObJourneyTemplateController {
                     already been published once.""")
     ObJourneyTemplateDtos.ObJourneyTemplateResponse publish(Authentication caller, @PathVariable long templateId) {
         ObJourneyTemplate published = service.publish(templateId, CallerIdentityAccess.requireUserId(caller));
-        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(published);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(
+                published, service.dependsOnTemplateIds(published.getId()));
     }
 
     @PostMapping(value = "/journey-templates/{templateId}/steps",
@@ -249,12 +261,15 @@ class ObJourneyTemplateController {
     @Operation(operationId = "updateObJourneyTemplateDependsOn",
             summary = "The catalogue's \"Service depends on\" picker (C-123)",
             description = """
-                    `dependsOnTemplateId: null` clears the dependency — the service runs \
-                    unheld from journey start. Cross-product is allowed; a cycle is not — \
-                    `409` naming the template if the chosen dependency already depends, \
-                    directly or transitively, on this one. Works on a draft or the active \
-                    version alike: unlike a step's fields, this is catalogue metadata, not \
-                    journey content an in-flight instantiation has pinned.
+                    `dependsOnTemplateIds` is the caller's whole desired set, not a delta: \
+                    every service this one waits behind, each named once. An empty list \
+                    clears every dependency and the service runs unheld from journey \
+                    start. Cross-product is allowed; a cycle is not — `409` naming the \
+                    offending template if any chosen dependency already depends, directly \
+                    or transitively, on this one, and `404` if one of them does not exist. \
+                    Works on a draft or the active version alike: unlike a step's fields, \
+                    this is catalogue metadata, not journey content an in-flight \
+                    instantiation has pinned.
 
                     `If-Match` is required, not optional — `428` without one, `412` if it \
                     does not match the template's current tag. Read the tag from \
@@ -264,8 +279,9 @@ class ObJourneyTemplateController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody ObJourneyTemplateDtos.UpdateDependsOnRequest request) {
         requirePrecondition(templateId, ifMatch);
-        ObJourneyTemplate updated = service.updateDependsOn(templateId, request.dependsOnTemplateId());
-        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(updated);
+        ObJourneyTemplate updated = service.updateDependsOn(templateId, request.dependsOnTemplateIds());
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(
+                updated, service.dependsOnTemplateIds(templateId));
     }
 
     @PutMapping(value = "/journey-templates/{templateId}/steps/order",
@@ -297,7 +313,8 @@ class ObJourneyTemplateController {
      * service is {@code (product_id, name)}, so renaming the single row an
      * admin happened to click would split one service into two rather than
      * rename it — {@code ObJourneyTemplateService#updateModuleService} has the
-     * full argument.
+     * full argument, and the journeys boarded on the chain are re-stamped with
+     * it so nothing is left resolving the old name.
      *
      * <p>{@code PATCH} rather than {@code PUT}: {@code productId} is optional
      * and omitting it means "leave it where it is", which is a merge of the
@@ -312,18 +329,25 @@ class ObJourneyTemplateController {
                     the path — a service is identified by `(productId, name)`, so renaming \
                     one row would split the chain rather than rename it.
 
-                    `409` once any client journey has been instantiated from any version of \
-                    it: `ob_journeys.service_name` is denormalised at instantiation and a \
-                    service-level dependency is resolved by `(product, service name)`, so a \
-                    rename underneath a live journey breaks a lookup with no other key. \
+                    **A rename is always allowed**, however many clients are on the \
+                    service. `ob_journeys.service_name` is denormalised at instantiation \
+                    and a service-level dependency resolves by `(product, service name)`, \
+                    so the rename re-stamps every journey of the chain in the same \
+                    transaction and both lookups keep matching. Correcting the name of a \
+                    service clients are already on is the case this route exists for.
+
+                    **`409` on a product move once a client is on it.** A journey's \
+                    `productId` is the key to that client's purchase \
+                    (`fk_ob_journeys_application`), not a copy of where the catalogue files \
+                    the service, so it cannot follow. The two fields are judged separately: \
+                    a request that renames *and* moves is refused for the move alone. \
                     `serviceJourneyCount` on the catalogue row is how a page knows this \
                     before the admin clicks. `409` also if the target product already has a \
                     service by that name.
 
                     Note this is *not* gated on `publishedAt`. A name and a product are \
                     catalogue metadata rather than journey content — the same distinction \
-                    `PUT .../depends-on` draws — so what gates it is whether anybody was \
-                    ever boarded on it.
+                    `PUT .../depends-on` draws.
 
                     `If-Match` is required, not optional — `428` without one, `412` if it \
                     does not match. Read the tag from \
@@ -334,7 +358,8 @@ class ObJourneyTemplateController {
             @Valid @RequestBody ObJourneyTemplateDtos.UpdateModuleServiceRequest request) {
         requirePrecondition(templateId, ifMatch);
         ObJourneyTemplate updated = service.updateModuleService(templateId, request.name(), request.productId());
-        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(updated);
+        return ObJourneyTemplateDtos.ObJourneyTemplateResponse.of(
+                updated, service.dependsOnTemplateIds(templateId));
     }
 
     /**

@@ -9,6 +9,8 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
@@ -69,6 +71,8 @@ class ObJourneyInstantiationServiceTest {
     private final ObJourneyStepRepository journeySteps = mock(ObJourneyStepRepository.class);
     private final ObJourneyStepItemRepository journeyStepItems = mock(ObJourneyStepItemRepository.class);
     private final ObJourneyTemplateRepository templates = mock(ObJourneyTemplateRepository.class);
+    private final ObJourneyTemplateDependencyRepository templateDependencies =
+            mock(ObJourneyTemplateDependencyRepository.class);
     private final ObJourneyTemplateStepRepository templateSteps = mock(ObJourneyTemplateStepRepository.class);
     private final ObJourneyTemplateStepItemRepository templateStepItems = mock(ObJourneyTemplateStepItemRepository.class);
     private final PurchasedProductAccess purchasedProducts = mock(PurchasedProductAccess.class);
@@ -76,8 +80,8 @@ class ObJourneyInstantiationServiceTest {
     private final ObDemoStepDocumentSeeder demoStepDocumentSeeder = mock(ObDemoStepDocumentSeeder.class);
 
     private final ObJourneyInstantiationService service = new ObJourneyInstantiationService(
-            journeys, journeySteps, journeyStepItems, templates, templateSteps, templateStepItems, purchasedProducts,
-            stepLifecycle, demoStepDocumentSeeder);
+            journeys, journeySteps, journeyStepItems, templates, templateDependencies, templateSteps,
+            templateStepItems, purchasedProducts, stepLifecycle, demoStepDocumentSeeder);
 
     @BeforeEach
     void wireFakes() {
@@ -431,26 +435,35 @@ class ObJourneyInstantiationServiceTest {
         private static final long DEPENDENCY_TEMPLATE = 701L;
         private static final long DEPENDENT_PRODUCT = 502L;
         private static final long DEPENDENT_TEMPLATE = 702L;
+        private static final long SECOND_DEPENDENCY_PRODUCT = 503L;
+        private static final long SECOND_DEPENDENCY_TEMPLATE = 703L;
 
-        private ObJourneyTemplate stubTemplate(long productId, long templateId, Long dependsOnTemplateId) {
+        private ObJourneyTemplate stubTemplate(long productId, long templateId, Long... dependsOnTemplateIds) {
             ObJourneyTemplate t = new ObJourneyTemplate();
             t.setId(templateId);
             t.setProductId(productId);
             t.setVersion(1);
             t.setActive(true);
             t.setName("Service of product " + productId);
-            t.setDependsOnTemplateId(dependsOnTemplateId);
             lenient().when(templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId))
                     .thenReturn(List.of(t));
             lenient().when(templates.findById(templateId)).thenReturn(Optional.of(t));
             lenient().when(templateSteps.findByTemplateIdOrderBySequenceAsc(templateId)).thenReturn(List.of());
+            // The dependency set now lives in its own table, so it is stubbed
+            // on the dependency repository rather than set on the row.
+            lenient().when(templateDependencies
+                            .findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(templateId))
+                    .thenReturn(java.util.Arrays.stream(dependsOnTemplateIds)
+                            .sorted()
+                            .map(dependsOn -> new ObJourneyTemplateDependency(templateId, dependsOn))
+                            .toList());
             return t;
         }
 
         @Test
         @DisplayName("instantiates held when the client's dependency journey is still running")
         void heldWhileDependencyRunning() {
-            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
             ObJourney dependency = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
@@ -462,7 +475,7 @@ class ObJourneyInstantiationServiceTest {
         @Test
         @DisplayName("instantiates unheld — vacuous — when the client never bought the dependency's product")
         void vacuousWhenDependencyNeverBought() {
-            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
             ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
@@ -473,7 +486,7 @@ class ObJourneyInstantiationServiceTest {
         @Test
         @DisplayName("instantiates unheld when the client's dependency journey has already completed")
         void vacuousWhenDependencyCompleted() {
-            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
             stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
 
             ObJourney dependency = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
@@ -485,21 +498,58 @@ class ObJourneyInstantiationServiceTest {
         }
 
         @Test
-        @DisplayName("a template with no dependsOnTemplateId never holds, regardless of sibling journeys")
+        @DisplayName("a template with no declared dependency never holds, regardless of sibling journeys")
         void noDependencyDeclaredNeverHolds() {
-            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
             service.instantiate(CLIENT, DEPENDENCY_PRODUCT);
 
-            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, null);
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE);
             ObJourney dependent = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
 
             assertThat(dependent.getHeldByJourneyId()).isNull();
         }
 
         @Test
+        @DisplayName("with two dependencies, both running journeys are reported and the lower id is held on")
+        void holdsBehindTheFirstOfSeveral() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
+            stubTemplate(SECOND_DEPENDENCY_PRODUCT, SECOND_DEPENDENCY_TEMPLATE);
+            ObJourneyTemplate dependent = stubTemplate(
+                    DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE, SECOND_DEPENDENCY_TEMPLATE);
+
+            ObJourney first = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
+            ObJourney second = only(service.instantiate(CLIENT, SECOND_DEPENDENCY_PRODUCT));
+            ObJourney held = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
+
+            // `held_by_journey_id` is one column and holds the first
+            // outstanding holder — ObJourneyDependencyRelease re-points it at
+            // the other when this one completes.
+            assertThat(held.getHeldByJourneyId()).isEqualTo(first.getId());
+            assertThat(service.holdingJourneysFor(CLIENT, dependent))
+                    .containsExactly(first.getId(), second.getId());
+        }
+
+        @Test
+        @DisplayName("a dependency already finished is skipped, and the unfinished one still holds")
+        void skipsTheFinishedDependency() {
+            stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
+            stubTemplate(SECOND_DEPENDENCY_PRODUCT, SECOND_DEPENDENCY_TEMPLATE);
+            stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE,
+                    DEPENDENCY_TEMPLATE, SECOND_DEPENDENCY_TEMPLATE);
+
+            ObJourney finished = only(service.instantiate(CLIENT, DEPENDENCY_PRODUCT));
+            finished.setCompletedAt(Instant.now());
+            ObJourney running = only(service.instantiate(CLIENT, SECOND_DEPENDENCY_PRODUCT));
+
+            ObJourney held = only(service.instantiate(CLIENT, DEPENDENT_PRODUCT));
+
+            assertThat(held.getHeldByJourneyId()).isEqualTo(running.getId());
+        }
+
+        @Test
         @DisplayName("instantiateAll orders by template sequence, so the dependency exists before the dependent")
         void instantiateAllOrdersBySequence() {
-            ObJourneyTemplate dependency = stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE, null);
+            ObJourneyTemplate dependency = stubTemplate(DEPENDENCY_PRODUCT, DEPENDENCY_TEMPLATE);
             ObJourneyTemplate dependent = stubTemplate(DEPENDENT_PRODUCT, DEPENDENT_TEMPLATE, DEPENDENCY_TEMPLATE);
             // Lower sequence instantiates first — the catalogue lists a
             // dependency before what depends on it, and instantiation order

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -82,6 +83,25 @@ public class ObStepJournal {
         lockJourneyFor(entry.getJourneyId());
         chain(entry, previousRowHash(entry.getJourneyId()));
         return history.insert(entry);
+    }
+
+    /**
+     * One step's own narrative, oldest first — {@code TicketJournal#historyFor}'s
+     * exact precedent one module over, and the sanctioned door for reading
+     * {@code ob_step_history} for the identical reason it is the door for
+     * writing it: a class holding {@link ObStepHistoryRepository} directly is
+     * one edit away from calling something {@code AppendOnlyRulesTest} cannot
+     * see coming, and the rule is stated over the dependency, not the verb.
+     *
+     * <p>⚠ Added for the onboarding history read — Divyansh's C-112, not this
+     * package's own task — on {@link #append}'s precedent for widening this
+     * door rather than cutting a new one. Flagged for his sign-off rather than
+     * added quietly, per CLAUDE.md.
+     */
+    @Transactional(readOnly = true)
+    public List<ObStepHistory> historyFor(Long stepId) {
+        require(stepId != null, "a step id is required to read step history");
+        return history.findByStepIdOrderByIdAsc(stepId);
     }
 
     /**

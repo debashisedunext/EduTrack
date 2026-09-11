@@ -224,6 +224,8 @@ public class ObJourneyStepLifecycleService {
         step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
         step.setStartedAt(startedAt);
         step.setDueAt(computeDueAt(startedAt, step.getTatDays()));
+        appendStatusHistory(journey, step, "STEP_ACTIVATED",
+                ObJourneyStepStatus.PENDING, ObJourneyStepStatus.IN_PROGRESS, callerId, "status", null);
         return step;
     }
 
@@ -249,8 +251,11 @@ public class ObJourneyStepLifecycleService {
         requireStatus(step, "complete", ObJourneyStepStatus.IN_PROGRESS);
         requireCompletionGate(step);
 
+        ObJourney journey = requireJourney(step);
         step.setStatus(ObJourneyStepStatus.DONE);
         step.setFinishedAt(Instant.now());
+        appendStatusHistory(journey, step, "COMPLETED",
+                ObJourneyStepStatus.IN_PROGRESS, ObJourneyStepStatus.DONE, callerId, "status", null);
         activateEligibleSteps(step.getJourneyId());
         settleJourney(step.getJourneyId());
         return step;
@@ -519,9 +524,19 @@ public class ObJourneyStepLifecycleService {
         requireOwnership(step, callerId);
         requireStatus(step, "block", ObJourneyStepStatus.IN_PROGRESS);
 
+        ObJourney journey = requireJourney(step);
         step.setStatus(ObJourneyStepStatus.BLOCKED);
         step.setBlockedReasonCode(reasonCode);
         step.setBlockedNote(note);
+        // `resume()` clears blockedReasonCode/blockedNote off the step row the
+        // moment it reopens, which is correct for "what is blocking it right
+        // now" but erases "what blocked it and why" the instant the answer
+        // stops mattering to the ribbon. This row is where that survives —
+        // fieldName carries reasonCode (BLOCKED is the one event type here
+        // that has one; every other lifecycle event uses fieldName="status",
+        // where it says nothing beyond what fromStatus/toStatus already do).
+        appendStatusHistory(journey, step, "BLOCKED",
+                ObJourneyStepStatus.IN_PROGRESS, ObJourneyStepStatus.BLOCKED, callerId, reasonCode, note);
         return step;
     }
 
@@ -544,7 +559,10 @@ public class ObJourneyStepLifecycleService {
         requireOwnership(step, callerId);
         requireStatus(step, "mark waiting-on-client", ObJourneyStepStatus.IN_PROGRESS);
 
+        ObJourney journey = requireJourney(step);
         step.setStatus(ObJourneyStepStatus.WAITING_ON_CLIENT);
+        appendStatusHistory(journey, step, "WAITING_ON_CLIENT",
+                ObJourneyStepStatus.IN_PROGRESS, ObJourneyStepStatus.WAITING_ON_CLIENT, callerId, "status", null);
 
         ObStepClockEvent paused = new ObStepClockEvent();
         paused.setStepId(step.getId());
@@ -587,9 +605,12 @@ public class ObJourneyStepLifecycleService {
             throw new InvalidStepTransitionException(stepId, "resume", previousStatus);
         }
 
+        ObJourney journey = requireJourney(step);
         step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
         step.setBlockedReasonCode(null);
         step.setBlockedNote(null);
+        appendStatusHistory(journey, step, "RESUMED",
+                previousStatus, ObJourneyStepStatus.IN_PROGRESS, callerId, "status", null);
 
         if (previousStatus == ObJourneyStepStatus.WAITING_ON_CLIENT) {
             Instant resumedAt = Instant.now();
@@ -957,6 +978,13 @@ public class ObJourneyStepLifecycleService {
         }
     }
 
+    /** The step's own journey — {@link #skip}'s own inline lookup, named once for the four other transitions that now also need it to write a history row. */
+    private ObJourney requireJourney(ObJourneyStep step) {
+        return journeys.findById(step.getJourneyId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "journey step " + step.getId() + " points at journey " + step.getJourneyId() + " which does not exist"));
+    }
+
     /**
      * C-119 · plan §5.6's "manual start of a step whose dependency is
      * incomplete is refused, naming the blocking step." {@code
@@ -1128,6 +1156,33 @@ public class ObJourneyStepLifecycleService {
      * unhashed entry; the lock, the chain tail and the hash are the
      * journal's job.
      */
+    /**
+     * The five plain status transitions — start, block, waiting-on-client,
+     * resume, complete — one {@code ob_step_history} row each, on {@link
+     * #appendSkippedHistory}'s exact shape. {@code skip} and {@code
+     * revertOnClientObjection} keep their own named methods below: a skip
+     * carries a moderator override {@link #requireModerator} already checked
+     * and an objection carries a client actor neither of these five ever do,
+     * so folding either in here would blur what this method can assume about
+     * its caller.
+     */
+    private void appendStatusHistory(ObJourney journey, ObJourneyStep step, String eventType,
+                                      ObJourneyStepStatus previousStatus, ObJourneyStepStatus newStatus,
+                                      long actorId, String fieldName, String remarks) {
+        ObStepHistory entry = new ObStepHistory();
+        entry.setJourneyId(journey.getId());
+        entry.setStepId(step.getId());
+        entry.setObClientId(journey.getObClientId());
+        entry.setEventType(eventType);
+        entry.setFieldName(fieldName);
+        entry.setOldValue(previousStatus == null ? null : previousStatus.name());
+        entry.setNewValue(newStatus.name());
+        entry.setActorId(actorId);
+        entry.setActorType("USER");
+        entry.setRemarks(remarks);
+        stepJournal.append(entry);
+    }
+
     private void appendSkippedHistory(ObJourney journey, ObJourneyStep step, ObJourneyStepStatus previousStatus,
                                        long actorId, String reason) {
         ObStepHistory entry = new ObStepHistory();

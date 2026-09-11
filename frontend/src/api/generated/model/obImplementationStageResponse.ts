@@ -46,11 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObImplementationStage } from './obImplementationStage';
 
-/**
- * Cross-product service dependency (plan §5.5) — e.g. Biometric
-Device Rollout after the ERP service. Cycle-freedom here is
-enforced by C-123, not by this table's foreign key alone.
-
- */
-export type ObJourneyTemplateDependsOnTemplateId = number | null;
+export interface ObImplementationStageResponse {
+  data: ObImplementationStage;
+}

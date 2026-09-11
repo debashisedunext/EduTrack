@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.feature.onboarding.products;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObProduct;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository;
@@ -39,10 +41,13 @@ public class ObProductService {
 
     private final ObProductRepository products;
     private final ObJourneyTemplateRepository templates;
+    private final ObJourneyTemplateDependencyRepository dependencies;
 
-    ObProductService(ObProductRepository products, ObJourneyTemplateRepository templates) {
+    ObProductService(ObProductRepository products, ObJourneyTemplateRepository templates,
+            ObJourneyTemplateDependencyRepository dependencies) {
         this.products = products;
         this.templates = templates;
+        this.dependencies = dependencies;
     }
 
     @Transactional(readOnly = true)
@@ -113,7 +118,8 @@ public class ObProductService {
         Map<Long, Long> journeys = tally(products.countJourneysByProduct(ids));
         // C-123 · one more batched read for the catalogue's own three fields —
         // ObJourneyTemplateRepository, not a fourth ObProductRepository query,
-        // since sequence and dependsOnTemplateId live on the template row.
+        // since `sequence` lives on the template row and the dependency set
+        // hangs off it.
         //
         // A product publishes as many active templates as it sells Module
         // Services (V20260910_0030), so the merge function is not decoration:
@@ -127,6 +133,18 @@ public class ObProductService {
         Map<Long, ObJourneyTemplate> activeTemplates = templates.findByProductIdInAndIsActiveTrue(ids).stream()
                 .collect(Collectors.toMap(ObJourneyTemplate::getProductId, t -> t,
                         (first, second) -> first.getSequence() <= second.getSequence() ? first : second));
+
+        /*
+          And one batched read of their dependency sets. Keyed by *template*
+          id, not product id — the map above has already picked one template
+          per product, so the two are looked up in sequence rather than
+          merged.
+        */
+        Map<Long, List<Long>> dependsOn = dependencies.findByIdTemplateIdIn(
+                        activeTemplates.values().stream().map(ObJourneyTemplate::getId).toList()).stream()
+                .collect(Collectors.groupingBy(ObJourneyTemplateDependency::getTemplateId,
+                        Collectors.mapping(ObJourneyTemplateDependency::getDependsOnTemplateId,
+                                Collectors.toList())));
 
         return rows.stream()
                 .map(row -> {
@@ -142,7 +160,8 @@ public class ObProductService {
                             Math.toIntExact(journeys.getOrDefault(row.getId(), 0L)),
                             active == null ? null : active.getId(),
                             active == null ? null : active.getSequence(),
-                            active == null ? null : active.getDependsOnTemplateId());
+                            active == null ? List.<Long>of()
+                                    : dependsOn.getOrDefault(active.getId(), List.of()));
                 })
                 .toList();
     }

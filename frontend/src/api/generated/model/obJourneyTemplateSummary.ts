@@ -46,7 +46,6 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObJourneyTemplateSummaryDependsOnTemplateId } from './obJourneyTemplateSummaryDependsOnTemplateId';
 import type { ObJourneyTemplateSummaryPublishedAt } from './obJourneyTemplateSummaryPublishedAt';
 
 /**
@@ -66,7 +65,7 @@ sit at v1 — `uq_ob_journey_templates_version` is keyed on
   /** True for at most one service per product, across all of them. */
   isActive: boolean;
   sequence: number;
-  dependsOnTemplateId?: ObJourneyTemplateSummaryDependsOnTemplateId;
+  dependsOnTemplateIds?: number[];
   publishedAt?: ObJourneyTemplateSummaryPublishedAt;
   /** How many services this journey has — the card's step list length. */
   stepCount: number;
@@ -77,19 +76,21 @@ fetching every service's full detail to render one chip.
  */
   totalTatDays: number;
   /** C-124 · client journeys instantiated from **any version of this
-service**, archived ones included — the number `PATCH` and `DELETE`
-on this resource both refuse above zero.
+service**, archived ones included — the number `DELETE` refuses
+above zero. **`PATCH` does not consult it at all**, so a page that
+disables its edit form by this number is disabling something the
+server would have accepted: it speaks for Delete, and for warning
+that a product move leaves these journeys where they were bought.
 
 Chain-wide, not this version's own: every row of one service
 carries the same total. The catalogue card is the *head* of a
 version chain, so a service whose v1 carries three clients and
 whose v3 carries none is in use, and a per-row count would have
-reported `0` on the very card that draws the Edit and Delete
-buttons.
+reported `0` on the very card that draws the Delete button.
 
-On the row for `totalTatDays`'s reason — the page disables both
-controls by it, and without it the only way to find out is to let
-an admin click and answer `409`.
+On the row for `totalTatDays`'s reason — the page disables Delete
+by it, and without it the only way to find out is to let an admin
+click and answer `409`.
  */
   serviceJourneyCount: number;
 }

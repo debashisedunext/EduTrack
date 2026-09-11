@@ -204,7 +204,19 @@ class SchemaIntegrationIT {
                                 // line, but the paragraphs above ask for the name
                                 // and the point of naming them is that a
                                 // *missing* table says which one.
-                                "import_mapping_presets");
+                                "import_mapping_presets",
+                                // OB-15 · the implementation stage master.
+                                //
+                                // The first `ob_*` table named here, and the
+                                // absence of its neighbours is not a claim that
+                                // they do not exist — the onboarding module's
+                                // tables were simply never added to this list.
+                                // Named anyway, because the paragraphs above ask
+                                // for it and the protection is per-name: this
+                                // one is now a table whose disappearance says so
+                                // by name, which is strictly better than the
+                                // module's current zero.
+                                "ob_implementation_stages");
             }
             // Named, not counted — taking the same correction A-029 already
             // applied to the table assertion above. "expected: 8 but was: 10"

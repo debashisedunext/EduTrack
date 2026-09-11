@@ -78,6 +78,14 @@ const NewObClientWizardPage = lazy(() =>
 const ObNotificationCentrePage = lazy(() =>
   import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
 )
+const ObImplementationStagePage = lazy(() =>
+  import('./features/onboarding/implementationstages/ObImplementationStagePage').then((m) => ({
+    default: m.ObImplementationStagePage,
+  })),
+)
+const ObProductMasterPage = lazy(() =>
+  import('./features/onboarding/products/ObProductMasterPage').then((m) => ({ default: m.ObProductMasterPage })),
+)
 const ObPrereqMasterPage = lazy(() =>
   import('./features/onboarding/prereqmaster/ObPrereqMasterPage').then((m) => ({ default: m.ObPrereqMasterPage })),
 )
@@ -585,6 +593,28 @@ export default function App() {
               A-129.
             */}
             <Route path="/onboarding/prereq-master" element={withSuspense(<ObPrereqMasterPage />)} />
+            {/*
+              OB-15 · the implementation stage master. Beside the other
+              Administration routes and outside `/masters/**` for the reason
+              every one of them states — the Onboarding module's screens are
+              disjoint from the ticketing masters (plan §1.2). Sidebar.tsx's
+              Administration section gains its row in the same task, which is
+              the rule that section's own comment sets: a screen is absent from
+              the nav until it exists, and appears there the day it does.
+            */}
+            <Route
+              path="/onboarding/implementation-stages"
+              element={withSuspense(<ObImplementationStagePage />)}
+            />
+            {/*
+              OB-07 · the Products master — the catalogue Module Services are
+              written for and clients buy. Beside the other Administration
+              routes and outside `/masters/**` for the reason every one of
+              them states: the Onboarding module's screens are disjoint from
+              the ticketing masters (plan §1.2). Creating and editing are OB
+              Admin writes; `ObModuleRoleRules` refuses everyone else.
+            */}
+            <Route path="/onboarding/products" element={withSuspense(<ObProductMasterPage />)} />
             {/*
               A-117 · OB-08. Its own route rather than a tab on `/onboarding/settings`:
               that screen configures the module's behaviour (thresholds, the escalation

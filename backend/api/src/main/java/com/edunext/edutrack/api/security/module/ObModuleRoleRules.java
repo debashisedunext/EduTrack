@@ -125,6 +125,18 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/products", ADMIN_ONLY);
         put(m, "PATCH", "/api/v1/onboarding/products/{obProductId}", ADMIN_ONLY);
 
+        // OB-15 · the implementation stage master, split exactly as the product
+        // catalogue above is and for the same two reasons. The writes are the
+        // org's vocabulary — renaming or retiring a stage changes what every
+        // other role sees in a picker, which is Admin's call. The reads are
+        // everybody's, because a vocabulary nobody can list is a picker that
+        // cannot render: whoever ends up choosing a stage has to be able to see
+        // the choices, and that is not a role this master gets to narrow.
+        put(m, "GET", "/api/v1/onboarding/implementation-stages", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/implementation-stages/{stageId}", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/implementation-stages", ADMIN_ONLY);
+        put(m, "PATCH", "/api/v1/onboarding/implementation-stages/{stageId}", ADMIN_ONLY);
+
         put(m, "GET", "/api/v1/onboarding/journey-templates", EVERY_ROLE);
         put(m, "GET", "/api/v1/onboarding/journey-templates/{templateId}", EVERY_ROLE);
         put(m, "POST", "/api/v1/onboarding/journey-templates", ADMIN_ONLY);

@@ -49,7 +49,6 @@ the database rejects mutation independently via triggers and grants.
 import type { ObProductTotalTatDays } from './obProductTotalTatDays';
 import type { ObProductActiveTemplateId } from './obProductActiveTemplateId';
 import type { ObProductTemplateSequence } from './obProductTemplateSequence';
-import type { ObProductDependsOnTemplateId } from './obProductDependsOnTemplateId';
 
 /**
  * `ob_products` — the catalogue journey templates bind to.
@@ -94,10 +93,14 @@ display order (plan §5 item 5). Null when there is no active
 template.
  */
   templateSequence?: ObProductTemplateSequence;
-  /** C-123 · the active template's `dependsOnTemplateId` — the other
-Module Service this one is held behind (plan §5 item 5), or null
-for one that runs unheld. Also null when there is no active
-template to have declared one.
+  /** C-123 · the active template's `dependsOnTemplateIds` — the other
+Module Services this one is held behind (plan §5 item 5). Empty
+for a service that runs unheld, and empty rather than absent when
+there is no active template to have declared anything: a caller
+deciding whether to draw a chain icon wants one branch, not two.
+
+A single nullable `dependsOnTemplateId` until `V20260911_1100`
+made the dependency a set.
  */
-  dependsOnTemplateId?: ObProductDependsOnTemplateId;
+  dependsOnTemplateIds?: number[];
 }

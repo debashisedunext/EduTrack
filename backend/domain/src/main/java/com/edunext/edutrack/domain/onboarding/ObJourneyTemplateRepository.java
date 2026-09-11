@@ -1,6 +1,7 @@
 package com.edunext.edutrack.domain.onboarding;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -83,16 +84,17 @@ public interface ObJourneyTemplateRepository extends JpaRepository<ObJourneyTemp
     List<ObJourneyTemplate> findByProductIdAndNameOrderByVersionAsc(Long productId, String name);
 
     /**
-     * Templates declaring a service-level dependency on any of these versions.
+     * The versions named by a set of ids, in one statement — what a delete
+     * turns the reverse dependency edges it found into, so its refusal can
+     * name the services that hold the one being deleted rather than their ids.
      *
-     * <p>What a delete has to consult before it runs.
-     * {@code fk_ob_journey_templates_depends_on} is RESTRICT rather than
-     * CASCADE — "a service other services depend on cannot be deleted out from
-     * under them", in {@code V20260903_1420}'s own words — so without this the
-     * delete surfaces as a raw {@code ERROR 1451} naming a constraint instead
-     * of as a refusal naming the services that hold it.
+     * <p>Replaces {@code findByDependsOnTemplateIdIn}: the dependency left
+     * this table for {@code ob_journey_template_dependencies} in
+     * {@code V20260911_1100}, so the reverse lookup is
+     * {@code ObJourneyTemplateDependencyRepository.findByIdDependsOnTemplateIdIn}
+     * and this is only the name resolution that follows it.
      */
-    List<ObJourneyTemplate> findByDependsOnTemplateIdIn(java.util.Collection<Long> templateIds);
+    List<ObJourneyTemplate> findByIdIn(java.util.Collection<Long> templateIds);
 
     /**
      * How many client journeys were instantiated from any of these template
@@ -133,6 +135,45 @@ public interface ObJourneyTemplateRepository extends JpaRepository<ObJourneyTemp
             group by j.templateId
             """)
     List<TemplateTally> countJourneysByTemplate(@Param("templateIds") java.util.Collection<Long> templateIds);
+
+    /**
+     * C-124 · re-stamp {@code ob_journeys.service_name} on every journey
+     * boarded on any version of one service — the other half of a rename.
+     *
+     * <p>{@code service_name} is denormalised onto the journey at
+     * instantiation ({@code V20260910_0030}), because the fact that has to be
+     * unique — "one live journey per client per service" — cannot be
+     * expressed by an index spanning a join. It is also the key two lookups
+     * resolve a service by: {@code uq_ob_journeys_client_service}, and the
+     * dependency hold, which matches {@code (product, service name)} rather
+     * than a template id so it survives the dependency publishing a new
+     * version.
+     *
+     * <p>That is exactly why the column has to move with the name rather than
+     * why the name cannot move. A rename that left these rows holding the old
+     * string would break both lookups — a dependent journey would start
+     * unheld, and the uniqueness guard would stop recognising a client's
+     * existing journey and let a second one in beside it. Renaming the chain
+     * and re-stamping its journeys in the same transaction leaves both
+     * matching, which is what makes a rename safe on a service clients are
+     * already on.
+     *
+     * <p>A bulk update rather than a row-per-journey save: a service with
+     * hundreds of clients is ordinary, the new name is the same for all of
+     * them, and none of these entities is loaded here. It lives on the
+     * <em>template</em> repository rather than {@code ObJourneyRepository}
+     * because {@code ScopeGuardRulesTest} forbids feature code from touching
+     * that interface at all — {@link #countJourneysForTemplates} above reads
+     * the same table from here for the same reason. Scope is not weakened by
+     * the exception: this is an admin write over a whole service, not a read
+     * of one client's rows.
+     *
+     * @return how many journeys were re-stamped
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ObJourney j set j.serviceName = :name where j.templateId in :templateIds")
+    int renameServiceOnJourneys(@Param("name") String name,
+                                @Param("templateIds") java.util.Collection<Long> templateIds);
 
     /**
      * One row of the grouped count above, keyed by template version.

@@ -81,12 +81,18 @@ const stepGroup = (name: string) =>
     .getAllByRole('rowgroup')
     .find((group) => within(group).queryByText(name))!
 
-/** The step names in displayed table order — the first cell of each body row. */
+/**
+ * The step names in displayed table order — the first cell of each body row,
+ * which is the Service column. Note that displayed order is **tree** order,
+ * depth-first: a step is drawn under the step it depends on whatever its
+ * position in the flat sequence, so this only reflects a reorder when the
+ * two steps moved are siblings.
+ */
 const displayedStepNames = () =>
   within(stepsTable())
     .getAllByRole('rowgroup')
     .slice(1) // drop the thead
-    .map((group) => within(group).getAllByRole('cell')[1].textContent ?? '')
+    .map((group) => within(group).getAllByRole('cell')[0].textContent ?? '')
 
 const savedStepNames = (templateId: number) =>
   getDb()
@@ -117,12 +123,48 @@ describe('the step list renders a draft template', () => {
     expect(screen.getByText(/across 2 services/)).toBeInTheDocument()
   })
 
-  it('names what a step depends on, and calls out a parallel one', async () => {
+  it('nests a step under the one it waits for, and calls out a parallel one', async () => {
     await openDesigner(2)
-    expect(within(stepGroup('Device Rollout')).getByText('∥ none — runs parallel')).toBeInTheDocument()
+    // The dependency is no longer a cell naming a row number — it is the
+    // nesting itself. Only a root says anything, because indentation cannot
+    // say "waits for nothing", and null means parallel rather than first.
     expect(
-      within(stepGroup('Attendance Policy Mapping')).getByText('↳ 1. Device Rollout'),
+      within(stepGroup('Device Rollout')).getByText('No dependency, runs in parallel'),
     ).toBeInTheDocument()
+    expect(
+      within(stepGroup('Attendance Policy Mapping')).queryByText('No dependency, runs in parallel'),
+    ).not.toBeInTheDocument()
+    // Indentation says "waits for that one" to the eye and nothing at all to
+    // a screen reader, so the name the removed column printed is still there.
+    expect(
+      within(stepGroup('Attendance Policy Mapping')).getByText('Waits for Device Rollout'),
+    ).toBeInTheDocument()
+  })
+
+  it('schedules each step from the day its predecessor ends', async () => {
+    await openDesigner(2)
+    // Device Rollout is 6 working days and runs from the start; Attendance
+    // Policy Mapping waits for it, so it cannot begin before day 7.
+    expect(within(stepGroup('Device Rollout')).getByText('Day 1–6')).toBeInTheDocument()
+    expect(within(stepGroup('Attendance Policy Mapping')).getByText('Day 7–9')).toBeInTheDocument()
+    expect(screen.getByText('Plan runs to day 9')).toBeInTheDocument()
+  })
+
+  it('collapses a step, taking its tasks and its subtree with it', async () => {
+    await openDesigner(2)
+    expect(screen.getByText('Confirm device count against the purchase order')).toBeInTheDocument()
+    expect(displayedStepNames()).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Device Rollout' }))
+
+    expect(
+      screen.queryByText('Confirm device count against the purchase order'),
+    ).not.toBeInTheDocument()
+    // Attendance Policy Mapping hangs off Device Rollout, so it goes too.
+    expect(displayedStepNames()).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Device Rollout' }))
+    expect(displayedStepNames()).toHaveLength(2)
   })
 })
 
@@ -297,6 +339,15 @@ describe('removing a step', () => {
 
 describe('reordering is staged, then saved in one request with If-Match', () => {
   it('moves a step without saving it', async () => {
+    /*
+      Cut the dependency first, so the two steps are siblings. The tree draws
+      a step under the one it waits for whatever the sequence says, so a
+      parent and its child never swap on screen however they are reordered —
+      sibling order is the part of the sequence the tree can show, and the
+      part the ↑/↓ pair is worth driving against.
+    */
+    getDb().obJourneyTemplateSteps.find((s) => s.name === 'Attendance Policy Mapping')!
+      .dependsOnStepId = null
     await openDesigner(2)
     fireEvent.click(screen.getByRole('button', { name: 'Move Attendance Policy Mapping up' }))
 
@@ -425,7 +476,7 @@ describe('editing a module service', () => {
     // rather than one row — the whole reason the route is chain-wide.
     getDb().obJourneyTemplates.push({
       id: 98, productId: 1, name: 'ERP Suite onboarding', version: 2, isActive: false,
-      sequence: 1, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
+      sequence: 1, dependsOnTemplateIds: [], publishedBy: null, publishedAt: null,
     })
     await openService(1, 'ERP Suite onboarding')
 
@@ -545,23 +596,72 @@ describe('a service a client is already on', () => {
     client.journeys[0].templateId = templateId
   }
 
-  it('disables Edit details and Delete, and says how many clients are on it', async () => {
+  /**
+   * The reason this screen exists: a service 49 clients are on is exactly the
+   * one worth being able to correct. The server renames the chain and
+   * re-stamps the `service_name` those journeys denormalise, in one
+   * transaction, so nothing is left resolving the old one.
+   */
+  it('still renames a service clients are on', async () => {
+    boardAClientOn(1)
+    await openService(1, 'ERP Suite onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit ERP Suite onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Name'), {
+      target: { value: 'ERP Suite implementation' },
+    })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(getDb().obJourneyTemplates.find((tpl) => tpl.id === 1)!.name)
+        .toBe('ERP Suite implementation')
+    }, SLOW)
+  })
+
+  it('disables Delete, and says how many clients are on it', async () => {
     boardAClientOn(1)
     await openService(1, 'ERP Suite onboarding')
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '✎ Edit details' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Delete ERP Suite onboarding' })).toBeDisabled()
     }, SLOW)
-    expect(screen.getByRole('button', { name: 'Delete ERP Suite onboarding' })).toBeDisabled()
     // Disabled *and* explained. A tooltip alone is invisible to a keyboard
     // user tabbing past a disabled control.
     expect(screen.getByText(/1 client journey has been instantiated/)).toBeInTheDocument()
   })
 
+  /**
+   * The product moves too. What does *not* move is the journeys' own
+   * `productId` — half of `fk_ob_journeys_application`, the client's own
+   * purchase — so the form says so rather than leaving an admin to discover it
+   * on a client detail page a week later.
+   */
+  it('re-files the service under another product, leaving the journeys where they were bought',
+    async () => {
+      boardAClientOn(3)
+      await openService(3, 'LMS onboarding')
+
+      fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+      const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+      const product = within(form).getByLabelText('Product')
+      expect(within(form).getByLabelText('Name')).toBeEnabled()
+      expect(product).toBeEnabled()
+      expect(within(form).getByText(/stay under the product their client bought/))
+        .toBeInTheDocument()
+
+      fireEvent.change(product, { target: { value: '2' } })
+      fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => {
+        expect(getDb().obJourneyTemplates.find((tpl) => tpl.id === 3)!.productId).toBe(2)
+      }, SLOW)
+    })
+
   it('locks the service through a retired version, not only the head', async () => {
     getDb().obJourneyTemplates.push({
       id: 97, productId: 3, name: 'LMS onboarding', version: 2, isActive: false,
-      sequence: 3, dependsOnTemplateId: null, publishedBy: null, publishedAt: null,
+      sequence: 3, dependsOnTemplateIds: [], publishedBy: null, publishedAt: null,
     })
     // The client is on v1; the page below is v2 of the same service.
     boardAClientOn(3)
@@ -579,5 +679,134 @@ describe('a service a client is already on', () => {
     // Not disabled: publishing over it is precisely the supported way to
     // change a service somebody is on.
     expect(screen.getByRole('button', { name: 'Begin revision' })).toBeEnabled()
+  })
+})
+
+/**
+ * C-124 · Edit details grew two more fields once name and product stopped
+ * being the only writable facts on an unused service — the catalogue's own
+ * position and its cross-service dependency, both already editable from the
+ * OB-07 card, now reachable from the same form as the rename.
+ *
+ * Fixture note: template 1 (ERP, product 1) is active at sequence 1; template
+ * 4 (Enterprise, product 1) is active at sequence 2 and depends on template 1;
+ * template 3 (LMS, product 3) is active at sequence 3 and also depends on
+ * template 1. Template 2 (Biometric Attendance, product 2) is the one draft.
+ */
+describe('editing a module service — position and dependency', () => {
+  it('offers Position and Depends on for the active version', async () => {
+    await openService(1, 'ERP Suite onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit ERP Suite onboarding' }, SLOW)
+
+    expect(within(form).getByLabelText('Position in catalogue')).toBeInTheDocument()
+    expect(
+      within(form).getByRole('button', { name: /Services ERP Suite onboarding depends on/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('hides them for a draft, explaining why instead', async () => {
+    await openService(2, 'Biometric Attendance onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit Biometric Attendance onboarding' }, SLOW)
+
+    expect(within(form).queryByLabelText('Position in catalogue')).not.toBeInTheDocument()
+    expect(
+      within(form).queryByRole('button', { name: /depends on/ }),
+    ).not.toBeInTheDocument()
+    expect(within(form).getByText(/apply only to this service's active version/)).toBeInTheDocument()
+  })
+
+  it('excludes candidates that already depend on this service, directly or transitively', async () => {
+    // ERP Suite (1) is depended on by both Enterprise (4) and LMS (3) — either
+    // one becoming its dependency would close a cycle, so neither may appear.
+    await openService(1, 'ERP Suite onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit ERP Suite onboarding' }, SLOW)
+    fireEvent.click(
+      within(form).getByRole('button', { name: /Services ERP Suite onboarding depends on/ }),
+    )
+
+    expect(screen.queryByRole('option', { name: 'Enterprise (data migration)' }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'LMS onboarding' })).not.toBeInTheDocument()
+  })
+
+  it('moves the service to a new position in the catalogue', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Position in catalogue'), { target: { value: '1' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const active = getDb()
+        .obJourneyTemplates.filter((t) => t.isActive)
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((t) => t.id)
+      expect(active).toEqual([3, 1, 4])
+    }, SLOW)
+  })
+
+  /** Ticks one option of the form's multi-select "Depends on" picker. */
+  async function tickDependency(form: HTMLElement, serviceName: string) {
+    fireEvent.click(
+      within(form).getByRole('button', { name: /Services .* depends on/ }),
+    )
+    fireEvent.click(await screen.findByRole('option', { name: serviceName }, SLOW))
+  }
+
+  it('adds a second dependency, keeping the one already held', async () => {
+    // LMS already waits for ERP Suite (template 1). Ticking Enterprise must
+    // add to that set, not replace it — the whole point of the multi-select,
+    // and the assertion a single-select would still pass without.
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    await tickDependency(form, 'Enterprise (data migration)')
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(getDb().obJourneyTemplates.find((t) => t.id === 3)!.dependsOnTemplateIds)
+        .toEqual([1, 4])
+    }, SLOW)
+  })
+
+  it('unticking the last dependency clears it back to parallel', async () => {
+    await openService(4, 'Enterprise (data migration)')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit Enterprise (data migration)' }, SLOW)
+    await tickDependency(form, 'ERP Suite onboarding')
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(getDb().obJourneyTemplates.find((t) => t.id === 4)!.dependsOnTemplateIds).toEqual([])
+    }, SLOW)
+  })
+
+  it('renaming and repositioning in the same save both land', async () => {
+    await openService(3, 'LMS onboarding')
+
+    fireEvent.click(await screen.findByRole('button', { name: '✎ Edit details' }, SLOW))
+    const form = await screen.findByRole('form', { name: 'Edit LMS onboarding' }, SLOW)
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'LMS rollout' } })
+    fireEvent.change(within(form).getByLabelText('Position in catalogue'), { target: { value: '1' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const db = getDb()
+      expect(db.obJourneyTemplates.find((t) => t.id === 3)!.name).toBe('LMS rollout')
+      const active = db.obJourneyTemplates
+        .filter((t) => t.isActive)
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((t) => t.id)
+      expect(active).toEqual([3, 1, 4])
+    }, SLOW)
   })
 })

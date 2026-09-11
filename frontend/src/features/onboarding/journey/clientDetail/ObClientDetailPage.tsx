@@ -16,7 +16,6 @@ import { ObClientAccountPanel } from '../../clients/ObClientAccountPanel'
 import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
 import { EscalationBanner } from './EscalationBanner'
 import { ObClientInfoCard } from './ObClientInfoCard'
-import { ObProductCard } from './ObProductCard'
 import { PrereqAccordion } from './PrereqAccordion'
 import { ragLabel, ragVariant } from './journeyStrip'
 import { groupJourneysByProduct } from './productGroups'
@@ -25,15 +24,15 @@ import { useOpenEscalations } from './useOpenEscalations'
 /**
  * C-110 · OB-05, the onboarding client detail page — `/onboarding/clients/:obClientId`.
  *
- * <h2>The page is the gate, then a card per purchased product</h2>
+ * <h2>The page is the gate, then the closing pair</h2>
  *
  * Onboarding-Module-Plan.md §9 orders it: **prerequisites accordion on top →
- * one journey accordion per purchased product → client portal access + client
- * info**. The order is the argument. While the gate is locked nothing below it
- * can move — journeys are drawn in full with no clock running (plan §5.2) — so
- * the only actionable thing on the page is at the top of it.
+ * the journey surface → client portal access + client info**. The order is the
+ * argument. While the gate is locked nothing below it can move — journeys are
+ * drawn in full with no clock running (plan §5.2) — so the only actionable
+ * thing on the page is at the top of it.
  *
- * <h2>The journey accordions moved to a page per product — a §9 deviation</h2>
+ * <h2>The journey surface is a page per product — a §9 deviation</h2>
  *
  * §9's middle row was written when a purchased product meant one journey. It no
  * longer does: a product publishes **any number of Module Services at once**
@@ -43,17 +42,12 @@ import { useOpenEscalations } from './useOpenEscalations'
  * answering the question people open it with — *how is the ERP going* — because
  * the ERP's three strips were interleaved with the biometric rollout's.
  *
- * So this page answers **which product**, one {@link ObProductCard} each, and
- * {@link ObClientProductPage} answers **how is it going** for the one that was
- * clicked. The cards are A-116's launcher cards, deliberately: "pick the thing
- * you are going to work in" is a question this platform already has a shape
- * for, and a client's products are that question one level down.
- *
- * Everything §9 puts on this page is still on it, in §9's order — the gate
- * above the products because nothing below it can move while it is locked, the
- * closing pair and the stitched timeline below them. What changed is that a
- * journey ribbon is now one click away instead of three scrolls away, and it is
- * a click that produces **a URL somebody can send**.
+ * So {@link ObClientProductPage} answers **how is it going** for one product at
+ * a time, at a URL somebody can send. This page no longer carries a product
+ * chooser of its own: the list page's Products Bought column links straight
+ * into a product's ribbons, which is the click a reader already makes, and a
+ * second grid of the same links here was a row of cards restating what the
+ * header already counts.
  *
  * <h2>PAN is not in the header</h2>
  *
@@ -127,8 +121,7 @@ export function ObClientDetailPage() {
 
   const detail = client.data?.data
   // Memoised rather than defaulted inline: a fresh `[]` on every render would
-  // re-group the products below each time, handing every card a new object
-  // identity for no change in what it draws.
+  // re-group the products on each pass for no change in what the header says.
   const journeys = React.useMemo(() => detail?.journeys ?? [], [detail?.journeys])
   const products = React.useMemo(() => groupJourneysByProduct(journeys), [journeys])
   const gate = prereqs.data?.data
@@ -145,7 +138,7 @@ export function ObClientDetailPage() {
 
   // C-126 · this client's open escalations — the banner below and the red
   // ring on each journey's step dots both read from the one call.
-  const { escalations, openEscalationStepIds } = useOpenEscalations(obClientId)
+  const { escalations } = useOpenEscalations(obClientId)
 
   /**
    * "Defaults open until the gate clears, collapsed after" — §9, derived
@@ -243,10 +236,10 @@ export function ObClientDetailPage() {
                 detail.rag && <Chip variant={ragVariant(detail.rag)}>{ragLabel(detail.rag)}</Chip>
               )}
               <div className="mt-1.5 text-caption text-content-muted">
-                {/* Products, not journeys: the cards below are one per product
-                    and a header counting six where a reader can see two would
-                    be the page disagreeing with itself. The journey count is
-                    on each card, where it belongs to something. */}
+                {/* Products, not journeys: a client with two products can
+                    carry six journeys, and "6" is not the number anyone opens
+                    this page holding. The journey counts live on the product
+                    pages, where each belongs to something. */}
                 {products.length} {products.length === 1 ? 'product' : 'products'}
               </div>
             </div>
@@ -286,50 +279,6 @@ export function ObClientDetailPage() {
               Reload the page to try again.
             </div>
           )}
-
-          {/*
-            §9's middle row, one card per purchased product — see the page
-            docstring for why the ribbons are a click away rather than here.
-
-            A heading rather than a bare grid: the cards are a navigation
-            choice, and a row of links under nothing would leave a screen
-            reader tabbing into products with no announcement of what the group
-            is. The count is on the heading because "2 products" is the fact a
-            reader checks against what the client actually bought.
-          */}
-          <section aria-labelledby="ob-client-products">
-            <h2 id="ob-client-products" className="m-0 text-base font-semibold text-content">
-              Products
-            </h2>
-            <p className="m-0 mt-0.5 text-caption text-content-muted">
-              {products.length === 0
-                ? 'Nothing bought yet.'
-                : `${products.length} purchased ${products.length === 1 ? 'product' : 'products'} · open one to work its journey ribbons.`}
-            </p>
-
-            {products.length === 0 ? (
-              <div className="mt-3">
-                <EmptyState
-                  title="No journeys"
-                  description="This client has no purchased products, so there is nothing to onboard yet."
-                />
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-4">
-                {products.map((group) => (
-                  <ObProductCard
-                    key={group.product.id}
-                    obClientId={obClientId}
-                    group={group}
-                    application={(detail.applications ?? []).find(
-                      (a) => a.product?.id === group.product.id,
-                    )}
-                    openEscalationStepIds={openEscalationStepIds}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
 
           {/* §9's closing pair — B-126's panel on the left, the info card on
               the right. The panel is Stream B's component, mounted here as
