@@ -7,7 +7,6 @@ step update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
 |---|---|
 | `ObClientDetailPage.tsx` | The client route page — header, the prerequisites gate, one card per purchased product, and §9's closing pair. |
 | `ObClientProductPage.tsx` | One purchased product — `/onboarding/clients/:obClientId/products/:productId`. The journey accordions, and the one directory read their ribbons resolve owners from. |
-| `ObProductCard.tsx` | A product as a card, in A-116's launcher shape. |
 | `productGroups.ts` | The fold from journeys to products, and the figures a card prints. Pure. |
 | `ObAccordion.tsx` | One accordion: an always-visible strip, a region that mounts on expand, and the anchoring below. |
 | `useAnchoredToggle.ts` | §9's "never scrolls the page", made mechanical. |

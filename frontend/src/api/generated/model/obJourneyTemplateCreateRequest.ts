@@ -46,12 +46,12 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObJourneyTemplateCreateRequestDependsOnTemplateId } from './obJourneyTemplateCreateRequestDependsOnTemplateId';
 
 export interface ObJourneyTemplateCreateRequest {
   productId: number;
   /** @maxLength 160 */
   name: string;
   sequence: number;
-  dependsOnTemplateId?: ObJourneyTemplateCreateRequestDependsOnTemplateId;
+  /** Omitted is the same as empty: a service that runs unheld. */
+  dependsOnTemplateIds?: number[];
 }

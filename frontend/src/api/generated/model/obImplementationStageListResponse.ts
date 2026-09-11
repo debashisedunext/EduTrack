@@ -46,5 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObImplementationStage } from './obImplementationStage';
 
-export type ObJourneyTemplateCreateRequestDependsOnTemplateId = number | null;
+export interface ObImplementationStageListResponse {
+  data: ObImplementationStage[];
+}

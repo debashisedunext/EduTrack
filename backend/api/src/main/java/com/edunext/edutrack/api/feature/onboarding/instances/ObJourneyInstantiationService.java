@@ -9,6 +9,8 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
@@ -36,9 +38,11 @@ import java.util.Map;
  *
  * <ul>
  *   <li><b>Service-level dependency (C-123) is resolved here, released
- *       elsewhere.</b> {@link ObJourney#getHeldByJourneyId()} is set from the
- *       template's {@code depends_on_template_id} at birth; clearing it when
- *       the holder completes is {@link ObJourneyDependencyRelease}'s.</li>
+ *       elsewhere.</b> {@link ObJourney#getHeldByJourneyId()} is set at birth
+ *       from the template's dependency set; clearing it when the holder
+ *       completes — and re-pointing it at the next outstanding one, since a
+ *       service may wait behind several — is
+ *       {@link ObJourneyDependencyRelease}'s.</li>
  *   <li><b>No role→user resolution.</b> A template step's {@code ownerRole}
  *       is never consulted — there is no per-client role→user resolver
  *       anywhere yet (OB-08's "Responsibility" admin, not built). Only a
@@ -67,6 +71,7 @@ public class ObJourneyInstantiationService {
     private final ObJourneyStepRepository journeySteps;
     private final ObJourneyStepItemRepository journeyStepItems;
     private final ObJourneyTemplateRepository templates;
+    private final ObJourneyTemplateDependencyRepository templateDependencies;
     private final ObJourneyTemplateStepRepository templateSteps;
     private final ObJourneyTemplateStepItemRepository templateStepItems;
     private final PurchasedProductAccess purchasedProducts;
@@ -77,6 +82,7 @@ public class ObJourneyInstantiationService {
                                           ObJourneyStepRepository journeySteps,
                                           ObJourneyStepItemRepository journeyStepItems,
                                           ObJourneyTemplateRepository templates,
+                                          ObJourneyTemplateDependencyRepository templateDependencies,
                                           ObJourneyTemplateStepRepository templateSteps,
                                           ObJourneyTemplateStepItemRepository templateStepItems,
                                           PurchasedProductAccess purchasedProducts,
@@ -86,6 +92,7 @@ public class ObJourneyInstantiationService {
         this.journeySteps = journeySteps;
         this.journeyStepItems = journeyStepItems;
         this.templates = templates;
+        this.templateDependencies = templateDependencies;
         this.templateSteps = templateSteps;
         this.templateStepItems = templateStepItems;
         this.purchasedProducts = purchasedProducts;
@@ -173,12 +180,22 @@ public class ObJourneyInstantiationService {
             journey.setGateStatus(ObGateStatus.LOCKED);
         }
 
-        // C-123 · plan §5.5: a service that depends on another module service
-        // instantiates normally but stays held — no step activates, no clock
-        // runs — until this client's journey from the dependency completes.
-        // Vacuous when the client never bought the dependency's product, or
-        // already finished it: the journey starts as if it had no dependency.
-        journey.setHeldByJourneyId(holdingJourneyFor(obClientId, template));
+        /*
+          C-123 · plan §5.5: a service that depends on other module services
+          instantiates normally but stays held — no step activates, no clock
+          runs — until this client's journeys from those dependencies
+          complete. Vacuous when the client never bought a dependency's
+          product, or already finished it: the journey starts as if it had
+          none.
+
+          Only the *first* outstanding holder is written, because
+          `held_by_journey_id` is one column. That is not a shortcut around
+          the set: ObJourneyDependencyRelease re-points it at the next one
+          still running when this holder completes, and only clears it when
+          none is left. The column is a cursor over the set, not the set.
+        */
+        journey.setHeldByJourneyId(holdingJourneysFor(obClientId, template).stream()
+                .findFirst().orElse(null));
 
         ObJourney saved = journeys.save(journey);
         cloneSteps(template.getId(), saved.getId());
@@ -217,31 +234,45 @@ public class ObJourneyInstantiationService {
     }
 
     /**
-     * The journey this one waits behind, or {@code null}.
+     * Every journey of this client that {@code template} is still waiting
+     * behind — empty when nothing holds it.
      *
-     * <p>The dependency is declared between <em>template versions</em>
-     * ({@code depends_on_template_id}) but held between <em>journeys</em>, and
-     * it resolves through the dependency's <b>service</b> rather than its row:
-     * the client's live journey for that (product, service name) pair — if
-     * there is one — is the holder.
+     * <p>The dependency is declared between <em>template versions</em> (rows
+     * of {@code ob_journey_template_dependencies}) but held between
+     * <em>journeys</em>, and each edge resolves through the dependency's
+     * <b>service</b> rather than its row: the client's live journey for that
+     * (product, service name) pair — if there is one — is a holder.
      *
      * <p>Resolving by row id would hold only until the dependency published a
      * new version, at which point the client's journey would be pinned to v2
      * while the declaration still named v1, and every dependent journey would
      * start unheld.
+     *
+     * <p>An edge holds nothing at all when the client never bought that
+     * product (no journey to wait for), or already finished it (nothing left
+     * to wait for). Both are skipped rather than treated as an unsatisfied
+     * dependency, which is the behaviour the single-dependency version had
+     * and the only one that lets a partially-purchased client board.
+     *
+     * <p>Ordered by journey id, so "the first outstanding holder" is a stable
+     * choice rather than whatever the optimiser returned. It only decides
+     * which holder's completion wakes this journey up first; the journey is
+     * released when the <em>last</em> of them finishes either way.
      */
-    private Long holdingJourneyFor(long obClientId, ObJourneyTemplate template) {
-        Long dependsOn = template.getDependsOnTemplateId();
-        if (dependsOn == null) {
-            return null;
+    List<Long> holdingJourneysFor(long obClientId, ObJourneyTemplate template) {
+        List<Long> holders = new ArrayList<>();
+        for (ObJourneyTemplateDependency edge
+                : templateDependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(template.getId())) {
+            templates.findById(edge.getDependsOnTemplateId())
+                    .flatMap(dependency -> journeys
+                            .findFirstByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNullOrderByIdDesc(
+                                    obClientId, dependency.getProductId(), dependency.getName()))
+                    .filter(holder -> holder.getCompletedAt() == null)
+                    .map(ObJourney::getId)
+                    .ifPresent(holders::add);
         }
-        return templates.findById(dependsOn)
-                .flatMap(dependency -> journeys
-                        .findFirstByObClientIdAndProductIdAndServiceNameAndArchivedAtIsNullOrderByIdDesc(
-                                obClientId, dependency.getProductId(), dependency.getName()))
-                .filter(holder -> holder.getCompletedAt() == null)
-                .map(ObJourney::getId)
-                .orElse(null);
+        holders.sort(Comparator.naturalOrder());
+        return holders;
     }
 
     /**

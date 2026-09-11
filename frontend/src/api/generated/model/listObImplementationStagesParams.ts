@@ -47,7 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
+export type ListObImplementationStagesParams = {
 /**
- * Null clears the dependency: the service runs unheld from journey start.
+ * Omit for the whole master, which is what OB-15 asks for. `true` is
+what a picker elsewhere would ask for — only live stages are
+choosable.
+
  */
-export type ObJourneyTemplateDependsOnRequestDependsOnTemplateId = number | null;
+isActive?: boolean;
+};

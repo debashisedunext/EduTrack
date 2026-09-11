@@ -68,9 +68,13 @@ import type {
 import type {
   ConflictResponse,
   GetObPrereqTemplateParams,
+  ListObImplementationStagesParams,
   ListObModuleAccessParams,
   ListObNotificationTemplatesParams,
   ListObProductsParams,
+  ObImplementationStageListResponse,
+  ObImplementationStageResponse,
+  ObImplementationStageWriteRequest,
   ObModuleAccessGrantRequest,
   ObModuleAccessListResponse,
   ObModuleAccessResponse,
@@ -460,6 +464,375 @@ export const useUpdateObProduct = <TError = ValidationFailedResponse | ObModuleG
       > => {
 
       const mutationOptions = getUpdateObProductMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `ob_implementation_stages` — the vocabulary an implementation is
+described in. Seeded with Configuration, Data Migration, Reports,
+Training, Communication and Third Party Integration, and extended from
+the screen rather than by a release: **these are values, not an enum**,
+which is why the field on every schema below is a plain string and not
+a closed list.
+
+Ordered by `sequence`, 1-based and contiguous across the whole master.
+The server owns that numbering — see the `PATCH`.
+
+**Not paginated**, on the `/masters/task-types` argument that
+`/onboarding/products` already reuses: a handful of rows, and the screen
+draws the whole list because a position is only meaningful beside its
+neighbours. The exemption is recorded in `check-conventions.py`.
+
+`isActive: false` stages are returned and marked rather than filtered.
+Retiring is the only way a stage goes away, and a retired one keeps its
+slot so that bringing it back puts it where it was.
+
+ * @summary The implementation stage master (OB-15)
+ */
+export const listObImplementationStages = (
+    params?: ListObImplementationStagesParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObImplementationStageListResponse>(
+      {url: `/onboarding/implementation-stages`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObImplementationStagesQueryKey = (params?: ListObImplementationStagesParams,) => {
+    return [
+    `/onboarding/implementation-stages`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObImplementationStagesQueryOptions = <TData = Awaited<ReturnType<typeof listObImplementationStages>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObImplementationStagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObImplementationStagesQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObImplementationStages>>> = ({ signal }) => listObImplementationStages(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObImplementationStagesQueryResult = NonNullable<Awaited<ReturnType<typeof listObImplementationStages>>>
+export type ListObImplementationStagesQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObImplementationStages<TData = Awaited<ReturnType<typeof listObImplementationStages>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObImplementationStagesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObImplementationStages>>,
+          TError,
+          Awaited<ReturnType<typeof listObImplementationStages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObImplementationStages<TData = Awaited<ReturnType<typeof listObImplementationStages>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementationStagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObImplementationStages>>,
+          TError,
+          Awaited<ReturnType<typeof listObImplementationStages>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObImplementationStages<TData = Awaited<ReturnType<typeof listObImplementationStages>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementationStagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The implementation stage master (OB-15)
+ */
+
+export function useListObImplementationStages<TData = Awaited<ReturnType<typeof listObImplementationStages>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObImplementationStagesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObImplementationStages>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObImplementationStagesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * OB Admin only. `name` is unique case-insensitively, and the service
+refuses a duplicate with a field-keyed `409` rather than letting the
+index refuse it with a message naming a MySQL constraint.
+
+**Omit `sequence` to append**, which is what the "New stage" button
+does. Supplying one inserts at that position and renumbers everything
+after it.
+
+ * @summary Add an implementation stage (OB-15) — OB Admin
+ */
+export const createObImplementationStage = (
+    obImplementationStageWriteRequest: ObImplementationStageWriteRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObImplementationStageResponse>(
+      {url: `/onboarding/implementation-stages`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obImplementationStageWriteRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateObImplementationStageMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObImplementationStage>>, TError,{data: ObImplementationStageWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createObImplementationStage>>, TError,{data: ObImplementationStageWriteRequest}, TContext> => {
+
+const mutationKey = ['createObImplementationStage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createObImplementationStage>>, {data: ObImplementationStageWriteRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createObImplementationStage(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateObImplementationStageMutationResult = NonNullable<Awaited<ReturnType<typeof createObImplementationStage>>>
+    export type CreateObImplementationStageMutationBody = ObImplementationStageWriteRequest
+    export type CreateObImplementationStageMutationError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse
+
+    /**
+ * @summary Add an implementation stage (OB-15) — OB Admin
+ */
+export const useCreateObImplementationStage = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObImplementationStage>>, TError,{data: ObImplementationStageWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createObImplementationStage>>,
+        TError,
+        {data: ObImplementationStageWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateObImplementationStageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+per CONVENTIONS.md §5 — the gap `GET /masters/task-types/{taskTypeId}`
+closed for its own master.
+
+The tag is taken over the content, `sequence` included. Somebody else
+moving this stage while an edit form is open changes the position that
+form is showing, so the position it is about to send means something
+different from what its author intended — which is exactly the save
+worth refusing.
+
+ * @summary One implementation stage (OB-15)
+ */
+export const getObImplementationStage = (
+    stageId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObImplementationStageResponse>(
+      {url: `/onboarding/implementation-stages/${stageId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObImplementationStageQueryKey = (stageId?: number,) => {
+    return [
+    `/onboarding/implementation-stages/${stageId}`
+    ] as const;
+    }
+
+    
+export const getGetObImplementationStageQueryOptions = <TData = Awaited<ReturnType<typeof getObImplementationStage>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObImplementationStageQueryKey(stageId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObImplementationStage>>> = ({ signal }) => getObImplementationStage(stageId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(stageId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObImplementationStageQueryResult = NonNullable<Awaited<ReturnType<typeof getObImplementationStage>>>
+export type GetObImplementationStageQueryError = void | UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObImplementationStage<TData = Awaited<ReturnType<typeof getObImplementationStage>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ stageId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObImplementationStage>>,
+          TError,
+          Awaited<ReturnType<typeof getObImplementationStage>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObImplementationStage<TData = Awaited<ReturnType<typeof getObImplementationStage>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObImplementationStage>>,
+          TError,
+          Awaited<ReturnType<typeof getObImplementationStage>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObImplementationStage<TData = Awaited<ReturnType<typeof getObImplementationStage>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One implementation stage (OB-15)
+ */
+
+export function useGetObImplementationStage<TData = Awaited<ReturnType<typeof getObImplementationStage>>, TError = void | UnauthorizedResponse | ObModuleGatedResponse>(
+ stageId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObImplementationStage>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObImplementationStageQueryOptions(stageId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * OB Admin only. Renaming to this stage's own name is fine — the
+duplicate check ignores the row being edited, so the round trip of
+opening the form, changing the position and saving does not fail on a
+name nobody touched.
+
+**`sequence` is a position the caller wants, not a column value to
+store.** The server moves this row there and renumbers the master 1..N,
+so the number that comes back is not necessarily the one that went in,
+and **rows this response does not describe have moved** — everything
+between the old position and the new one shifts by one. Refetch the
+list rather than patching a cache from this body. Out-of-range
+positions are clamped rather than refused: `400` means last, which is
+what somebody typing it into a position box intends.
+
+Setting `isActive: false` **retires the stage from the pickers and
+changes nothing else**. It keeps its slot in the list, and anything
+already recorded against it keeps rendering. There is no delete route:
+a value that has been used somewhere has to stay resolvable.
+
+ * @summary Rename, reorder or retire an implementation stage (OB-15) — OB Admin
+ */
+export const updateObImplementationStage = (
+    stageId: number,
+    obImplementationStageWriteRequest: ObImplementationStageWriteRequest,
+ ) => {
+      
+      
+      return http<ObImplementationStageResponse>(
+      {url: `/onboarding/implementation-stages/${stageId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obImplementationStageWriteRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObImplementationStageMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObImplementationStage>>, TError,{stageId: number;data: ObImplementationStageWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObImplementationStage>>, TError,{stageId: number;data: ObImplementationStageWriteRequest}, TContext> => {
+
+const mutationKey = ['updateObImplementationStage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObImplementationStage>>, {stageId: number;data: ObImplementationStageWriteRequest}> = (props) => {
+          const {stageId,data} = props ?? {};
+
+          return  updateObImplementationStage(stageId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObImplementationStageMutationResult = NonNullable<Awaited<ReturnType<typeof updateObImplementationStage>>>
+    export type UpdateObImplementationStageMutationBody = ObImplementationStageWriteRequest
+    export type UpdateObImplementationStageMutationError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Rename, reorder or retire an implementation stage (OB-15) — OB Admin
+ */
+export const useUpdateObImplementationStage = <TError = ValidationFailedResponse | ObModuleGatedResponse | ConflictResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObImplementationStage>>, TError,{stageId: number;data: ObImplementationStageWriteRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObImplementationStage>>,
+        TError,
+        {stageId: number;data: ObImplementationStageWriteRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObImplementationStageMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

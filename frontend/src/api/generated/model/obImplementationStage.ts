@@ -47,4 +47,24 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type ObJourneyTemplateSummaryDependsOnTemplateId = number | null;
+export interface ObImplementationStage {
+  id: number;
+  /** @maxLength 120 */
+  name: string;
+  /**
+   * 1-based display position, contiguous across the whole master,
+retired rows included.
+
+**The server owns this.** It is renumbered on every write, so the
+value read back after a save is not necessarily the one that was
+sent. It is also not an identifier: address a stage by `id`.
+
+   * @minimum 1
+   */
+  sequence: number;
+  /** Retired stages stay in the list, in their own slot, and drop out of
+the pickers. There is no delete — a value that has been used
+somewhere has to stay resolvable.
+ */
+  isActive: boolean;
+}

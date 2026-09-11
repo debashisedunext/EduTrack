@@ -63,8 +63,15 @@ export function ObDashboardCardTile({ card, onOpen }: ObDashboardCardTileProps) 
 
   const body = (
     <>
-      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.08em] text-[color:var(--text-secondary)]">
-        {label}
+      {/*
+        `tracking-[.06em]` and a tight leading, not the old `.08em`: the row is
+        now six equal shares of the width rather than six fixed 190px tiles, so
+        a label has less room on a narrow screen and the widest of them —
+        "This week's deadlines" — has to wrap inside the tile rather than set
+        its width.
+      */}
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase leading-tight tracking-[.06em] text-[color:var(--text-secondary)]">
+        <span className="min-w-0 break-words">{label}</span>
         {card.countIsUpperBound && (
           <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 normal-case" />
         )}
@@ -102,9 +109,12 @@ export function ObDashboardCardTile({ card, onOpen }: ObDashboardCardTileProps) 
     </>
   )
 
+  // `min-w-0` is what lets the tile shrink below its content's intrinsic width
+  // now that the row is equal shares rather than fixed 190px tracks; `px-4`
+  // buys back the eight pixels that costs a narrow tile.
   const shell =
-    'rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] shadow-sm px-5 py-4 ' +
-    'flex h-full w-full flex-col gap-1 text-left min-h-[6.5rem]'
+    'rounded-card border border-[color:var(--border)] bg-[color:var(--bg-surface)] shadow-sm px-4 py-4 ' +
+    'flex h-full w-full min-w-0 flex-col gap-1 text-left min-h-[6.5rem]'
 
   if (!interactive) {
     return (

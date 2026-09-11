@@ -2,6 +2,7 @@ import { delay, http } from 'msw';
 import { dashboardTabHandlers } from './dashboardTabs';
 import { fileHandlers } from './files';
 import { onboardingHandlers } from './onboarding';
+import { obImplementationStageHandlers } from './onboardingImplementationStages';
 import { onboardingJourneyInstanceHandlers } from './onboardingJourneyInstances';
 import { onboardingJourneyHandlers } from './onboardingJourneys';
 import { obAdminHandlers } from './onboardingAdmin';
@@ -48,6 +49,9 @@ export const handlers = [
   // ticketing route, so position here is presentation only — the module's
   // whole premise is that its paths, tables and schemas are disjoint.
   ...onboardingHandlers,
+  // OB-15 · the implementation stage master. Its own file because it carries
+  // the renumbering rule; see onboardingImplementationStages.ts.
+  ...obImplementationStageHandlers,
   // C-102 · the OB-07 template designer's own routes. See onboardingJourneys.ts.
   ...onboardingJourneyHandlers,
   // C-104 · the step-lifecycle routes. See onboardingJourneyInstances.ts.

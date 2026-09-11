@@ -1,6 +1,8 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
@@ -13,7 +15,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -46,7 +52,7 @@ import java.util.Set;
  *       it supersedes (if any) is retired in the same transaction.</li>
  * </ol>
  *
- * <p>Cross-template dependency cycles ({@code dependsOnTemplateId}) are out
+ * <p>Cross-template dependency cycles ({@code ObJourneyTemplateDependency}) are out
  * of scope here — the migration's own comments assign that to C-123, since
  * it is not expressible as a database constraint. The "earlier step in this
  * template" rule on {@code dependsOnStepId} is C-119's: {@link #addStep}
@@ -60,15 +66,18 @@ import java.util.Set;
 public class ObJourneyTemplateService {
 
     private final ObJourneyTemplateRepository templates;
+    private final ObJourneyTemplateDependencyRepository dependencies;
     private final ObJourneyTemplateStepRepository steps;
     private final ObJourneyTemplateStepItemRepository stepItems;
     private final ObJourneyTemplateStepDocRepository stepDocs;
 
     public ObJourneyTemplateService(ObJourneyTemplateRepository templates,
+                                     ObJourneyTemplateDependencyRepository dependencies,
                                      ObJourneyTemplateStepRepository steps,
                                      ObJourneyTemplateStepItemRepository stepItems,
                                      ObJourneyTemplateStepDocRepository stepDocs) {
         this.templates = templates;
+        this.dependencies = dependencies;
         this.steps = steps;
         this.stepItems = stepItems;
         this.stepDocs = stepDocs;
@@ -101,16 +110,25 @@ public class ObJourneyTemplateService {
      */
     @Transactional
     public ObJourneyTemplate createTemplate(long productId, String name, int sequence,
-                                             Long dependsOnTemplateId, long createdBy) {
+                                             List<Long> dependsOnTemplateIds, long createdBy) {
         ObJourneyTemplate template = new ObJourneyTemplate();
         template.setProductId(productId);
         template.setName(name);
         template.setVersion(1);
         template.setActive(false);
         template.setSequence(sequence);
-        template.setDependsOnTemplateId(dependsOnTemplateId);
         template.setCreatedBy(createdBy);
-        return templates.save(template);
+        ObJourneyTemplate saved = templates.save(template);
+        /*
+          After the save, not before: a dependency row names this template by
+          id and there is no id until the insert has happened. `replaceEdges`
+          runs its full validation anyway rather than trusting a create to be
+          safe — the existence check is the half that matters here, since a
+          brand-new row has no dependents and so cannot be in a cycle.
+        */
+        templates.flush();
+        replaceEdges(saved.getId(), dependsOnTemplateIds);
+        return saved;
     }
 
     /**
@@ -151,9 +169,26 @@ public class ObJourneyTemplateService {
         draft.setVersion(nextVersion);
         draft.setActive(false);
         draft.setSequence(active.getSequence());
-        draft.setDependsOnTemplateId(active.getDependsOnTemplateId());
         draft.setCreatedBy(editorUserId);
         ObJourneyTemplate savedDraft = templates.save(draft);
+        templates.flush();
+
+        /*
+          The dependency set is cloned onto the draft, exactly as the single
+          `dependsOnTemplateId` used to be copied across. Cloned rather than
+          shared: the draft is a separate template version and the picker can
+          be pointed at something else while it is still a draft, which must
+          not reach back and change what the active version waits for.
+
+          Not routed through `replaceEdges`: the source's set is already known
+          cycle-free, and re-validating it would fail the revision rather than
+          the edit that introduced a problem, if one ever could.
+        */
+        for (ObJourneyTemplateDependency edge
+                : dependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(active.getId())) {
+            dependencies.save(new ObJourneyTemplateDependency(
+                    savedDraft.getId(), edge.getDependsOnTemplateId()));
+        }
 
         cloneSteps(active.getId(), savedDraft.getId());
         return savedDraft;
@@ -568,48 +603,169 @@ public class ObJourneyTemplateService {
     }
 
     /**
-     * C-123 · the Module Service catalogue's own "Service depends on" picker,
-     * settable at any time — unlike a step's fields, {@code
-     * dependsOnTemplateId} is catalogue metadata, not journey content an
-     * in-flight instantiation has pinned, so {@link #requireEditable}'s
-     * publish guard does not apply to it. Works on a draft or the active row
-     * alike, on the same reasoning {@link #reorderCatalogue} states for
-     * {@code sequence}.
+     * C-123 · the Module Service catalogue's own "Depends on" picker,
+     * settable at any time — unlike a step's fields, the dependency set is
+     * catalogue metadata, not journey content an in-flight instantiation has
+     * pinned, so {@link #requireEditable}'s publish guard does not apply to
+     * it. Works on a draft or the active row alike, on the same reasoning
+     * {@link #reorderCatalogue} states for {@code sequence}.
      *
-     * @throws TemplateDependencyCycleException the named template already
-     *                                           depends, directly or
+     * <h2>A set, and a full replace</h2>
+     *
+     * <p>This took a single {@code Long} until the picker became multi-select:
+     * a service waits behind several others, and the plan's own example — a
+     * biometric rollout after the ERP service — is a set of one only because
+     * the example is small. {@code dependsOnTemplateIds} is the caller's whole
+     * desired set, not a delta, on {@link #reorderCatalogue}'s convention for
+     * the same screen: an empty list clears every dependency and the service
+     * runs unheld. Duplicates within the list are collapsed rather than
+     * refused — asking for the same edge twice is a request for one edge, and
+     * the primary key would otherwise answer it as a duplicate-key error the
+     * caller cannot act on.
+     *
+     * @throws TemplateDependencyCycleException one of the named templates
+     *                                           already depends, directly or
      *                                           transitively, on this one
      */
     @Transactional
-    public ObJourneyTemplate updateDependsOn(long templateId, Long dependsOnTemplateId) {
+    public ObJourneyTemplate updateDependsOn(long templateId, List<Long> dependsOnTemplateIds) {
         ObJourneyTemplate template = templates.findById(templateId)
                 .orElseThrow(() -> new TemplateNotFoundException(templateId));
+        replaceEdges(templateId, dependsOnTemplateIds);
+        return template;
+    }
 
-        if (dependsOnTemplateId != null) {
-            if (dependsOnTemplateId == templateId) {
-                throw new TemplateDependencyCycleException(templateId, dependsOnTemplateId);
-            }
-            ObJourneyTemplate dependency = templates.findById(dependsOnTemplateId)
-                    .orElseThrow(() -> new TemplateNotFoundException(dependsOnTemplateId));
-
-            // Walk the candidate's own chain forward. Reaching `templateId`
-            // means the candidate already depends on this template, directly
-            // or transitively — pointing this one back at it would close the
-            // cycle plan §5 item 5 says the picker must exclude.
-            Set<Long> visited = new LinkedHashSet<>();
-            ObJourneyTemplate cursor = dependency;
-            while (cursor.getDependsOnTemplateId() != null) {
-                long nextId = cursor.getDependsOnTemplateId();
-                if (nextId == templateId || !visited.add(nextId)) {
-                    throw new TemplateDependencyCycleException(templateId, dependsOnTemplateId);
+    /**
+     * Validates a template's whole desired dependency set and writes it,
+     * replacing whatever it had.
+     *
+     * <p>Every candidate is checked before anything is written. The
+     * alternative — delete, then insert one at a time, refusing on the third —
+     * leaves a transaction to roll back and, more to the point, makes the
+     * failure a caller sees depend on the order the picker happened to send
+     * the ids in.
+     */
+    private void replaceEdges(long templateId, List<Long> dependsOnTemplateIds) {
+        Set<Long> requested = new LinkedHashSet<>();
+        if (dependsOnTemplateIds != null) {
+            for (Long id : dependsOnTemplateIds) {
+                if (id != null) {
+                    requested.add(id);
                 }
-                cursor = templates.findById(nextId)
-                        .orElseThrow(() -> new TemplateNotFoundException(nextId));
             }
         }
 
-        template.setDependsOnTemplateId(dependsOnTemplateId);
-        return templates.save(template);
+        for (Long candidate : requested) {
+            if (candidate == templateId) {
+                // `ck_ob_jt_dependencies_not_self` would refuse this too, but
+                // as a constraint-violation stack trace rather than as the
+                // 409 the picker knows how to show.
+                throw new TemplateDependencyCycleException(templateId, candidate);
+            }
+            if (!templates.existsById(candidate)) {
+                throw new TemplateNotFoundException(candidate);
+            }
+            requireNoCycle(templateId, candidate);
+        }
+
+        dependencies.deleteByIdTemplateIdIn(List.of(templateId));
+        /*
+          Flushed between the delete and the inserts. Without it Hibernate is
+          free to order the inserts first, and re-declaring an edge the
+          template already has — which is most saves, since the picker sends
+          its whole set every time — collides with the row about to be removed
+          on the (template_id, depends_on_template_id) primary key.
+        */
+        dependencies.flush();
+        for (Long candidate : requested) {
+            dependencies.save(new ObJourneyTemplateDependency(templateId, candidate));
+        }
+        dependencies.flush();
+    }
+
+    /**
+     * Refuses {@code templateId -> candidate} if the candidate can already
+     * reach {@code templateId}.
+     *
+     * <h2>Why this is a search and not a walk</h2>
+     *
+     * <p>The single-dependency version followed a <em>chain</em>: one cursor,
+     * one {@code dependsOnTemplateId} at a time, until it ran out. With a set
+     * per node the structure is a directed graph, so this is a breadth-first
+     * search over every outgoing edge. A candidate three hops away down the
+     * second branch of a fork is exactly the cycle a chain walk misses — and
+     * having missed it, reports success.
+     *
+     * <p>{@code visited} is what makes this terminate on data that is already
+     * cyclic. It should not be: that is the invariant this method exists to
+     * keep. But a walk that assumes its own invariant holds hangs the request
+     * instead of reporting the problem, which is the worse of the two.
+     *
+     * <p>Edges out of {@code templateId} itself are never followed. They are
+     * about to be replaced wholesale, so following them would test the graph
+     * as it stands rather than the graph the caller is asking for, and would
+     * refuse a legal edit purely because the set being discarded reached the
+     * candidate.
+     */
+    private void requireNoCycle(long templateId, long candidate) {
+        Set<Long> visited = new LinkedHashSet<>();
+        Deque<Long> frontier = new ArrayDeque<>();
+        frontier.add(candidate);
+        visited.add(candidate);
+
+        while (!frontier.isEmpty()) {
+            long current = frontier.removeFirst();
+            for (ObJourneyTemplateDependency edge
+                    : dependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(current)) {
+                long next = edge.getDependsOnTemplateId();
+                if (next == templateId) {
+                    throw new TemplateDependencyCycleException(templateId, candidate);
+                }
+                if (visited.add(next)) {
+                    frontier.addLast(next);
+                }
+            }
+        }
+    }
+
+    /**
+     * What one template version waits behind — the picker's current selection,
+     * and what every DTO carrying the set reads.
+     */
+    @Transactional(readOnly = true)
+    public List<Long> dependsOnTemplateIds(long templateId) {
+        return dependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(templateId).stream()
+                .map(ObJourneyTemplateDependency::getDependsOnTemplateId)
+                .toList();
+    }
+
+    /**
+     * The same for a whole page of templates in one statement — what the
+     * catalogue list read enriches every row with, rather than a query per
+     * card.
+     *
+     * <p>A template with no dependencies is absent from the map rather than
+     * present with an empty list, {@code countJourneysByTemplate}'s own shape;
+     * callers read it with {@code getOrDefault(id, List.of())}.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, List<Long>> dependsOnByTemplate(Collection<Long> templateIds) {
+        Map<Long, List<Long>> byTemplate = new LinkedHashMap<>();
+        if (templateIds.isEmpty()) {
+            return byTemplate;
+        }
+        for (ObJourneyTemplateDependency edge : dependencies.findByIdTemplateIdIn(templateIds)) {
+            byTemplate.computeIfAbsent(edge.getTemplateId(), key -> new ArrayList<>())
+                    .add(edge.getDependsOnTemplateId());
+        }
+        /*
+          Sorted for the same reason the single-template read has an ORDER BY:
+          the batch query has none, and a set read two ways has to come back
+          the same way both times or the detail ETag moves without the
+          template having changed.
+        */
+        byTemplate.values().forEach(Collections::sort);
+        return byTemplate;
     }
 
     /**
@@ -730,22 +886,51 @@ public class ObJourneyTemplateService {
      * a service nobody created. So the write spans the chain, and the row id in
      * the path only says <em>which</em> chain.
      *
-     * <p><b>Refused outright once a client is on it</b> —
-     * {@link ModuleServiceInUseException} carries the argument, which is not
-     * only about deletion: {@code ob_journeys.service_name} is denormalised at
-     * instantiation and a service-level dependency is resolved by
-     * {@code (product, service name)} rather than by template id, so a rename
-     * underneath a live journey breaks a lookup that has no other key to fall
-     * back on.
+     * <h3>Never refused for being in use — neither field, at any number of
+     * clients</h3>
+     *
+     * <p>Both used to be, and {@link ModuleServiceInUseException} carries the
+     * argument that was made for it. It rested on {@code ob_journeys}
+     * denormalising both facts at instantiation: {@code service_name}, which
+     * {@code uq_ob_journeys_client_service} and the dependency hold resolve a
+     * service by, and {@code product_id}, which is half of
+     * {@code fk_ob_journeys_application}. Neither was ever an argument for
+     * freezing a catalogue entry — a typo, or a service filed under the wrong
+     * product, is most worth correcting precisely when clients are already on
+     * it. What each needs is an answer for the copy the journeys hold, and the
+     * two answers are different:
+     *
+     * <ul>
+     *   <li><b>The name travels.</b> {@code renameServiceOnJourneys} re-stamps
+     *       every journey of the chain in this same transaction, so the
+     *       template and the journeys are never observed disagreeing and both
+     *       lookups keep matching.</li>
+     *   <li><b>The product stays.</b> A journey's {@code product_id} is the key
+     *       to that client's purchase, not a copy of where the catalogue files
+     *       the service; re-stamping it would claim a sale that never happened,
+     *       and the foreign key would refuse it. So the templates move and the
+     *       journeys keep recording what was actually bought.</li>
+     * </ul>
+     *
+     * <p><b>What a move therefore costs, stated plainly.</b> Journeys boarded
+     * before it keep the old product, so the dependency hold — keyed on the
+     * chain's <em>current</em> {@code (product, name)} — stops recognising
+     * them. Holds already stamped are unaffected: {@code release} finds waiting
+     * journeys by {@code held_by_journey_id}, which is an id. The narrow case
+     * that changes is {@code outstandingHolder}, the "is another dependency
+     * still running?" re-check, which can now answer no for a journey under the
+     * old product and release a dependent early. Resolving the hold by the
+     * dependency's template-chain ids instead of its name would close that, and
+     * is the right follow-up; it is not done here because it is a change to the
+     * instantiation and release path rather than to this one.
      *
      * <p>This is deliberately <em>not</em> {@link #requireEditable}. That guard
      * asks whether a version has been published, because publishing freezes the
      * journey content a running instance renders from. A name and a product are
      * catalogue metadata rather than journey content — the same distinction
      * {@link #updateDependsOn} draws to justify working on a published row — so
-     * what gates this is whether anybody was ever boarded on it, not whether it
-     * was ever published. A published service nobody bought is renameable; an
-     * unpublished draft cannot have been bought at all.
+     * publishing has never had a say here either. What is left of the usage
+     * check belongs to {@link #deleteModuleService} alone.
      */
     @Transactional
     public ObJourneyTemplate updateModuleService(long templateId, String name, Long productId) {
@@ -753,13 +938,15 @@ public class ObJourneyTemplateService {
                 .orElseThrow(() -> new TemplateNotFoundException(templateId));
 
         List<ObJourneyTemplate> chain = serviceChain(head);
-        requireUnused(head.getName(), chain);
-
+        String oldName = head.getName();
+        long oldProductId = head.getProductId();
         String newName = name.trim();
-        long newProductId = productId == null ? head.getProductId() : productId;
-        if (newName.equals(head.getName()) && newProductId == head.getProductId()) {
+        long newProductId = productId == null ? oldProductId : productId;
+        if (newName.equals(oldName) && newProductId == oldProductId) {
             return head;
         }
+
+        List<Long> chainIds = chain.stream().map(ObJourneyTemplate::getId).toList();
 
         /*
           Checked before the loop rather than left to the unique index. The
@@ -778,6 +965,28 @@ public class ObJourneyTemplateService {
             templates.save(version);
         }
         templates.flush();
+
+        /*
+          The journeys follow the name, in this transaction. Left behind, they
+          would keep the old string and two lookups keyed on it would stop
+          matching: the dependency hold (ObJourneyDependencyRelease joins
+          h2.service_name = dep.name) and uq_ob_journeys_client_service, which
+          is what stops one client being boarded twice onto one service.
+
+          It cannot collide with a journey of another service. A journey's
+          service_name only ever comes from a template of the same product, the
+          duplicate check above has just established that no other chain in that
+          product holds this name, and the index already forbids one client two
+          live journeys on one chain. So the rows being re-stamped are the only
+          rows in their (client, product) that can hold the new name.
+
+          Unconditional on the journey count, unlike the guard it replaced:
+          asking how many there are first would be a second query to decide
+          whether to run an UPDATE whose WHERE clause answers the same question.
+        */
+        if (!newName.equals(oldName)) {
+            templates.renameServiceOnJourneys(newName, chainIds);
+        }
         return templates.findById(templateId).orElseThrow(() -> new TemplateNotFoundException(templateId));
     }
 
@@ -817,10 +1026,13 @@ public class ObJourneyTemplateService {
      * <p>Items and docs need no such care: their own foreign keys are
      * {@code ON DELETE CASCADE} onto the step.
      *
-     * <p>The chain's own {@code dependsOnTemplateId} values are cleared first.
-     * A dependency normally names another service, but nothing stops one
-     * version of a chain naming another, and the self-FK would refuse the
-     * delete over a reference that is about to be deleted too.
+     * <p>The chain's own dependency edges are cleared first. A dependency
+     * normally names another service, but nothing stops one version of a
+     * chain naming another, and {@code fk_ob_jt_dependencies_depends_on}
+     * would refuse the delete over a reference that is about to be deleted
+     * too. Edges are rows in {@code ob_journey_template_dependencies} since
+     * {@code V20260911_1100}, so clearing them is a delete of association
+     * rows rather than a null-out of a column — the same act, one table over.
      */
     @Transactional
     public void deleteModuleService(long templateId) {
@@ -831,22 +1043,30 @@ public class ObJourneyTemplateService {
         requireUnused(head.getName(), chain);
 
         Set<Long> chainIds = new LinkedHashSet<>(chain.stream().map(ObJourneyTemplate::getId).toList());
-        List<String> dependents = templates.findByDependsOnTemplateIdIn(chainIds).stream()
-                .filter(other -> !chainIds.contains(other.getId()))
-                .map(ObJourneyTemplate::getName)
-                .distinct()
-                .toList();
-        if (!dependents.isEmpty()) {
+        /*
+          Which other services hold an edge onto any version of this chain.
+          The chain's own versions are filtered out before the ids are
+          resolved to names: a version of this service depending on another
+          version of itself is about to be deleted along with the edge, and
+          reporting the service as its own dependent would refuse a delete
+          that is perfectly safe.
+        */
+        Set<Long> dependentIds = new LinkedHashSet<>();
+        for (ObJourneyTemplateDependency edge : dependencies.findByIdDependsOnTemplateIdIn(chainIds)) {
+            if (!chainIds.contains(edge.getTemplateId())) {
+                dependentIds.add(edge.getTemplateId());
+            }
+        }
+        if (!dependentIds.isEmpty()) {
+            List<String> dependents = templates.findByIdIn(dependentIds).stream()
+                    .map(ObJourneyTemplate::getName)
+                    .distinct()
+                    .toList();
             throw new ModuleServiceHasDependentsException(head.getName(), dependents);
         }
 
-        for (ObJourneyTemplate version : chain) {
-            if (version.getDependsOnTemplateId() != null) {
-                version.setDependsOnTemplateId(null);
-                templates.save(version);
-            }
-        }
-        templates.flush();
+        dependencies.deleteByIdTemplateIdIn(chainIds);
+        dependencies.flush();
 
         for (ObJourneyTemplate version : chain) {
             deleteStepsOf(version.getId());
@@ -896,7 +1116,16 @@ public class ObJourneyTemplateService {
         return templates.findByProductIdAndNameOrderByVersionAsc(head.getProductId(), head.getName());
     }
 
-    /** @throws ModuleServiceInUseException if any client was ever boarded on any version of the chain. */
+    /**
+     * The delete's own usage check.
+     *
+     * <p>Only the delete's: editing is not gated on usage in either field —
+     * a rename carries its journeys with it, and a product move leaves them
+     * recording the purchase they were bought under. See
+     * {@link #updateModuleService}.
+     *
+     * @throws ModuleServiceInUseException if any client was ever boarded on any version of the chain
+     */
     private void requireUnused(String serviceName, List<ObJourneyTemplate> chain) {
         List<Long> ids = chain.stream().map(ObJourneyTemplate::getId).toList();
         long journeys = ids.isEmpty() ? 0L : templates.countJourneysForTemplates(ids);

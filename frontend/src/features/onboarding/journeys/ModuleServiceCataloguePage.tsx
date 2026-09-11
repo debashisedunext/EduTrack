@@ -4,52 +4,65 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
 import type { ObProduct } from '@/api/generated/model/obProduct'
 import type { ObJourneyTemplateSummary } from '@/api/generated/model/obJourneyTemplateSummary'
+import type { UserRef } from '@/api/generated/model/userRef'
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
 import { useListObJourneyTemplates } from '@/api/generated/onboarding-journeys/onboarding-journeys'
+import { useListUsers } from '@/api/generated/users/users'
 
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { toast } from '@/components/ui/use-toast'
 
+import { DependsOnMultiSelect } from './DependsOnMultiSelect'
 import { useCreateJourneyTemplate, useJourneyTemplate } from './journeyTemplateQueries'
-import { cycleFreeCandidates, moveTemplate } from './moduleServiceCatalogue'
-import {
-  useReorderModuleServiceCatalogue,
-  useUpdateModuleServiceDependsOn,
-} from './moduleServiceCatalogueQueries'
+import { checklistCount, cycleFreeCandidates, defaultImplementor } from './moduleServiceCatalogue'
+import { useUpdateModuleServiceDependsOn } from './moduleServiceCatalogueQueries'
 
 /**
- * C-123 · OB-07's other half — the Module Service catalogue itself, one card
- * per **service**, laid out to `docs/prototype/onboarding.html`'s `vTemplates()`:
- * page head with the versioning caption, a create card, a product filter
- * card, then a responsive card grid. `JourneyTemplateDesignerPage` is where a
- * single service is read and edited; clicking a card opens it.
+ * C-123 · OB-07's other half — the Module Service catalogue itself, one **row**
+ * per service: page head with the versioning caption, a create card, a product
+ * filter card, then the table. `JourneyTemplateDesignerPage` is where a single
+ * service is read and edited; clicking a row opens it.
  *
- * <h2>A card is a summary, and the whole card is the link</h2>
+ * <h2>A table, not a card grid</h2>
  *
- * A card says what a service *is* — its position, product, step count, total
- * TAT and state — and nothing about how it is built. It used to print every
- * step as a line of text, which made a grid of five services a wall of forty
- * lines nobody scanned; the count is the fact a catalogue is read for, and the
- * steps themselves are one click away on the service's own page.
+ * This screen was a responsive grid of tiles, each carrying the name, five to
+ * seven chips and its own controls. Nothing lined up: step counts and TATs
+ * could not be compared down a column, and the sequence — which is the fact
+ * this screen exists to show — was readable only by counting tiles left to
+ * right as they wrapped. Seven columns say the same things in a shape a reader
+ * can scan.
  *
- * Rename, move to another product and delete moved onto that page with it, in
- * `ModuleServiceAdmin.tsx`. Two controls stayed, and both for the same reason
- * — they are about a service's place *among the others*, which is a fact only
- * this screen has: the ↑/↓ that sets `sequence`, and "Service depends on".
- * Both sit above the card's link overlay on `relative z-10`, so they take
- * their own clicks instead of opening the service.
+ * <h2>What the columns are, and what left with the cards</h2>
  *
- * <h2>The reorder is catalogue-wide, not filter-wide</h2>
+ * Position, name (with its product beneath), default implementor, step count,
+ * checklist-item count, the cross-service dependency, and TAT. **Product,
+ * version, state, the in-use count and the ↑/↓ reorder pair were dropped** —
+ * the first four are on the service's own page, and re-sequencing lives in
+ * `ModuleServiceAdmin`'s form beside the rename, which is where a service's
+ * own facts are edited. One consequence is deliberate and worth knowing: with
+ * neither version nor state on the row, a draft reads like a live service
+ * apart from having no position — `#` says "Not in order".
  *
- * `sequence` is one number shared by every active template, so the ↑/↓
- * buttons act on the *whole* catalogue's ordering, not the filtered view —
- * exactly the mockup's `msMove`, which reorders `TEMPLATES` regardless of
- * the filter. A card's disabled ↑ or ↓ therefore reflects its place in the
- * unfiltered order, which is the order clients are actually boarded in.
+ * <h2>Two columns are derived from the detail read</h2>
+ *
+ * Neither the checklist count nor the implementor is on
+ * `ObJourneyTemplateSummary` — items and owners nest inside the steps of the
+ * detail read, which this page already fetches per active row for the
+ * depends-on picker's ETag. Totalling them here costs one request per draft
+ * row and a moment's "…" in two cells; the long-run answer is a
+ * `checklistItemCount` on the list row, which is a contract change.
  *
  * <h2>Create wires to the data layer's own `useCreateJourneyTemplate`</h2>
  *
@@ -72,8 +85,10 @@ export function ModuleServiceCataloguePage() {
   const query = useListObProducts()
   const templates = useListObJourneyTemplates()
   const [filterId, setFilterId] = React.useState<'ALL' | number>('ALL')
-  const reorder = useReorderModuleServiceCatalogue()
   const create = useCreateJourneyTemplate()
+  /* Names the step owners the implementor column reads — the designer's own
+     source for exactly the same lookup. */
+  const users = useListUsers({ isActive: true, limit: 200 })
 
   const [newName, setNewName] = React.useState('')
   const [newProductId, setNewProductId] = React.useState<number | ''>('')
@@ -115,15 +130,15 @@ export function ModuleServiceCataloguePage() {
 
   /*
     `sequence` orders the *active* services, which is what instantiation and
-    the client's journey list follow — so the ↑/↓ control acts on those and a
-    draft-only service has no position to move.
+    the client's journey list follow — so a draft-only service has no position
+    in it, and its row says so rather than printing a misleading number.
   */
   const activeOrder = services.filter((s) => s.isActive).map((s) => s.id)
   const catalogueEntries = services
     .filter((s) => s.isActive)
     .map((s) => ({
       activeTemplateId: s.id,
-      dependsOnTemplateId: s.dependsOnTemplateId ?? null,
+      dependsOnTemplateIds: s.dependsOnTemplateIds ?? [],
       name: s.name,
     }))
 
@@ -134,22 +149,6 @@ export function ModuleServiceCataloguePage() {
   const withoutService = products.filter(
     (p) => p.isActive && !services.some((s) => s.productId === p.id),
   )
-
-  const move = async (templateId: number, direction: -1 | 1) => {
-    const from = activeOrder.indexOf(templateId)
-    if (from < 0) return
-    const next = moveTemplate(activeOrder, from, from + direction)
-    if (next === activeOrder) return
-    try {
-      await reorder.mutateAsync({ templateIds: next })
-    } catch (error) {
-      toast({
-        title: 'Could not reorder the catalogue',
-        description: problemDetail(error),
-        variant: 'danger',
-      })
-    }
-  }
 
   const doCreate = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -257,9 +256,9 @@ export function ModuleServiceCataloguePage() {
           ))}
         </select>
         <span className="text-caption text-content-muted">
-          Card order below is the service sequence — it drives the order journeys are instantiated
-          and shown for every new client. Use ↑ ↓ to re-sequence. Open a card to see and edit its
-          steps.
+          Row order below is the service sequence — it drives the order journeys are instantiated
+          and shown for every new client. Open a row to see and edit its steps, or to re-sequence
+          it.
         </span>
       </div>
 
@@ -269,20 +268,41 @@ export function ModuleServiceCataloguePage() {
           description="Create one above, or choose another product in the filter."
         />
       ) : (
-        <ul role="list" className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
-          {visible.map((service) => (
-            <ModuleServiceCard
-              key={service.id}
-              service={service}
-              product={productById.get(service.productId)}
-              catalogueEntries={catalogueEntries}
-              index={activeOrder.indexOf(service.id)}
-              total={activeOrder.length}
-              reordering={reorder.isPending}
-              onMove={move}
-            />
-          ))}
-        </ul>
+        <TableContainer>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16" title="Position in the catalogue sequence">
+                  #
+                </TableHead>
+                <TableHead>Module/Service</TableHead>
+                <TableHead title="Who this service lands on when a client is boarded">
+                  Default Implementor
+                </TableHead>
+                <TableHead className="w-24">Steps</TableHead>
+                <TableHead className="w-28" title="Checklist items across every step">
+                  Checklists
+                </TableHead>
+                <TableHead className="w-[17rem]">Depends on</TableHead>
+                <TableHead className="w-24 text-right" title="Sum of this service's step TATs">
+                  TAT
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((service) => (
+                <ModuleServiceRow
+                  key={service.id}
+                  service={service}
+                  product={productById.get(service.productId)}
+                  catalogueEntries={catalogueEntries}
+                  index={activeOrder.indexOf(service.id)}
+                  users={users.data?.data ?? []}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
       {/*
@@ -303,170 +323,158 @@ export function ModuleServiceCataloguePage() {
 }
 
 /**
- * One service, as a summary tile. The whole tile is the link to the service's
- * own page — the heading carries a stretched `::after`, which is the one way
- * to make a card clickable without wrapping the *card* in an `<a>` and burying
- * its chips and buttons inside a link a screen reader then has to read as one
- * label. The reorder buttons sit above that overlay on `z-10`.
+ * One service, as a table row. The name is the link to its own page and the
+ * whole row navigates too — a reader aiming at a row rather than at nine
+ * characters of link text is the common case, and the anchor keeps
+ * middle-click and "copy link" working. The depends-on select stops its own
+ * clicks from reaching the row.
+ *
+ * Two cells wait on the service's detail read: the implementor and the
+ * checklist total. They say "…" while it is in flight rather than "0", which
+ * would be a claim rather than a gap.
  */
-function ModuleServiceCard({
+function ModuleServiceRow({
   service,
   product,
   catalogueEntries,
   index,
-  total,
-  reordering,
-  onMove,
+  users,
 }: {
   service: ObJourneyTemplateSummary
   /** Undefined only if the catalogue and the product list disagree — drawn as the id. */
   product: ObProduct | undefined
   /** Every active service, for the depends-on picker's cycle-free candidates. */
-  catalogueEntries: { activeTemplateId: number; dependsOnTemplateId: number | null; name: string }[]
+  catalogueEntries: { activeTemplateId: number; dependsOnTemplateIds: number[]; name: string }[]
   /** Position in the whole (unfiltered) active order, or -1 for a service that is not active. */
   index: number
-  total: number
-  reordering: boolean
-  onMove: (templateId: number, direction: -1 | 1) => void
+  users: readonly UserRef[]
 }) {
-  const hasActive = service.isActive
-  const dependsOnEntry = catalogueEntries.find(
-    (c) => c.activeTemplateId === (service.dependsOnTemplateId ?? null),
-  )
+  const navigate = useNavigate()
+  const detail = useJourneyTemplate(service.id)
+  const steps = detail.data?.detail.steps ?? []
+  const implementor = defaultImplementor(steps, users)
+  const checklists = checklistCount(steps)
+  /*
+    A draft's dependencies, named. Read off the summary row rather than the
+    detail, because a draft draws no picker and so never fetches one — and
+    resolved through `catalogueEntries` so a dependency on a service that has
+    since been retired is counted but not named, rather than printed as a
+    bare id.
+  */
+  const draftDependsOn = (service.dependsOnTemplateIds ?? [])
+    .map((id) => catalogueEntries.find((c) => c.activeTemplateId === id)?.name)
+    .filter((name): name is string => name != null)
+  const open = () => navigate(`/onboarding/journey-templates/${service.id}`)
 
   return (
-    <li className="relative flex flex-col gap-2 rounded-card border border-border bg-surface p-4 shadow-rest transition-colors hover:border-primary focus-within:border-primary">
-      <div className="flex flex-wrap items-center gap-2">
-        {index >= 0 && (
-          <Chip variant="neutral" className="tabular-nums" title="Service sequence">
-            #{index + 1}
-          </Chip>
-        )}
-        {/* The service is the card's subject; the product is context on it. */}
-        <h3 className="m-0 text-h3 text-content">
-          <Link
-            to={`/onboarding/journey-templates/${service.id}`}
-            /*
-              `after:absolute inset-0` stretches this link over the whole card,
-              so a click anywhere on the tile opens the service while the
-              accessible name stays just the service name.
-            */
-            className="rounded-control after:absolute after:inset-0 after:rounded-card hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            {service.name}
-          </Link>
-        </h3>
-        <Chip variant="info">v{service.version}</Chip>
-        {hasActive && (
-          /* Above the card's link overlay — these edit the catalogue's order,
-             they do not open the service. */
-          <span className="relative z-10 ml-auto inline-flex gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={reordering || index <= 0}
-              aria-label={`Move ${service.name} up`}
-              onClick={() => onMove(service.id, -1)}
-            >
-              ↑
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={reordering || index < 0 || index >= total - 1}
-              aria-label={`Move ${service.name} down`}
-              onClick={() => onMove(service.id, 1)}
-            >
-              ↓
-            </Button>
+    <TableRow
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) open()
+      }}
+      className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+    >
+      <TableCell className="tabular-nums text-content-muted">
+        {index >= 0 ? (
+          index + 1
+        ) : (
+          /* A draft or retired service has no place in the active order.
+             Words rather than a dash: the cell is not missing a number, there
+             is no number for it to hold. */
+          <span title="Only an active service holds a position in the catalogue sequence.">
+            Not in order
           </span>
         )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip variant="neutral" title="The product this service belongs to">
+      </TableCell>
+      <TableCell>
+        <Link
+          to={`/onboarding/journey-templates/${service.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="font-medium text-content hover:text-primary hover:underline"
+        >
+          {service.name}
+        </Link>
+        {/* The product is context on the service, not a column of its own —
+            without it the "All products" view cannot say whose service a row
+            is. */}
+        <span className="mt-0.5 block text-caption text-content-muted">
           {product?.name ?? `Product ${service.productId}`}
-        </Chip>
-        {product && !product.isActive && <Chip variant="neutral">Product retired</Chip>}
-        {/*
-          The count, not the list. A catalogue answers "how big is this
-          service"; the steps themselves are on the page this card opens.
-        */}
-        <Chip variant="neutral" title="Services in this journey — open the card to see them">
-          ☰ {service.stepCount} step{service.stepCount === 1 ? '' : 's'}
-        </Chip>
-        <Chip variant="info" title="Sum of this service's step TATs">
-          ⏱ {service.totalTatDays}d total TAT
-        </Chip>
-        {hasActive ? (
+          {product && !product.isActive && ' · retired'}
+        </span>
+      </TableCell>
+      <TableCell title={implementor.hint}>
+        {detail.isPending ? (
+          <span className="text-content-muted">…</span>
+        ) : (
           <>
-            {/* Active for this *service*. A product publishes several at
-                once since V20260910_0030, so "active for product" would now
-                read as though the others had been switched off. */}
-            <Chip variant="success">Active version</Chip>
-            {dependsOnEntry ? (
-              <Chip variant="warning">⛓ after {dependsOnEntry.name}</Chip>
-            ) : (
-              <Chip variant="neutral">∥ parallel</Chip>
+            <span className={implementor.named ? 'text-content' : 'text-content-muted'}>
+              {implementor.label}
+            </span>
+            {implementor.extra !== '' && (
+              <span className="ml-1.5 text-caption text-content-muted">{implementor.extra}</span>
             )}
           </>
+        )}
+      </TableCell>
+      <TableCell
+        className="tabular-nums text-content-muted"
+        title="Services in this journey — open the row to see them"
+      >
+        ☰ {service.stepCount}
+      </TableCell>
+      <TableCell
+        className="tabular-nums text-content-muted"
+        title="Checklist items across every step of this service"
+      >
+        {detail.isPending ? '…' : `☑ ${checklists}`}
+      </TableCell>
+      <TableCell>
+        {service.isActive ? (
+          <DependsOnPicker
+            templateId={service.id}
+            serviceName={service.name}
+            catalogueEntries={catalogueEntries}
+          />
         ) : (
-          /*
-            Draft and retired are different states and the card says which:
-            `publishedAt == null` has never been live, anything else was and
-            has since been superseded — the distinction `ObJourneyTemplate`'s
-            own contract note draws.
-          */
-          <Chip variant="neutral">
-            {service.publishedAt == null ? 'Draft — not published' : 'Retired version'}
-          </Chip>
+          /* A draft holds no live dependency — the picker is an active
+             service's control, and the row says which of the two states this
+             is rather than showing a control that would refuse. */
+          <span
+            className="text-caption text-content-muted"
+            title="Drafts hold no position and no live dependency."
+          >
+            {draftDependsOn.length > 0 ? `⛓ after ${draftDependsOn.join(', ')}` : '∥ parallel'}
+          </span>
         )}
-        {product && (
-          <Chip variant="neutral">
-            {product.journeyCount} journey{product.journeyCount === 1 ? '' : 's'}
-          </Chip>
-        )}
-      </div>
-
-      {hasActive && (
-        <DependsOnPicker
-          templateId={service.id}
-          serviceName={service.name}
-          catalogueEntries={catalogueEntries}
-        />
-      )}
-
-      {/*
-        Named rather than left to be discovered by clicking: a tile whose only
-        controls belong to the catalogue has to say that the rest of it is a
-        way in.
-      */}
-      <p className="m-0 text-caption text-content-muted">
-        {service.isActive
-          ? 'Open to read its steps, task lists and TATs — editing there publishes a new version.'
-          : 'Open to finish this draft and publish it.'}
-      </p>
-    </li>
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-right tabular-nums text-content-muted">
+        ⏱ {service.totalTatDays}d
+      </TableCell>
+    </TableRow>
   )
 }
 
 /**
- * "Service depends on" — the cross-service dependency (plan §5.5), one field
- * on one template, editable from any card.
+ * "Depends on" — the cross-service dependency (plan §5.5), **a set** of other
+ * services, editable from any row.
  *
  * <p>It stays on the catalogue rather than moving to the service's own page
  * with the rename and the delete, because the choice it offers is *the other
  * services*: setting it is a comparison, and this is the only screen where
- * everything being compared is already on the page.
+ * everything being compared is already on the page. That argument gets
+ * stronger with a set rather than weaker — picking three of nine services is
+ * more of a comparison than picking one.
  *
- * <p>`relative z-10` lifts it above the card's stretched link, so the select
- * takes its own clicks instead of opening the service underneath it.
+ * <p>The row it sits in is itself clickable, so the control stops its own
+ * clicks rather than opening the service underneath it.
  *
- * <p>Loads its own template detail purely for the `ETag` `PUT .../depends-on`
- * requires — `useJourneyTemplate`'s own cache, shared with the designer page
- * if the same template is opened there in the same session.
+ * <p>Loads its own template detail for two things now: the `ETag` that
+ * `PUT .../depends-on` requires, and the current set. The set is read from
+ * the detail rather than from the summary row this component's parent already
+ * holds, so the value sent back is the one that matches the tag sent with it
+ * — reading the selection from one response and the precondition from another
+ * is how a picker sends a set the server has already superseded.
  */
 function DependsOnPicker({
   templateId,
@@ -475,20 +483,32 @@ function DependsOnPicker({
 }: {
   templateId: number
   serviceName: string
-  catalogueEntries: { activeTemplateId: number; dependsOnTemplateId: number | null; name: string }[]
+  catalogueEntries: { activeTemplateId: number; dependsOnTemplateIds: number[]; name: string }[]
 }) {
   const detail = useJourneyTemplate(templateId)
   const update = useUpdateModuleServiceDependsOn()
 
   const candidates = cycleFreeCandidates(templateId, catalogueEntries)
-  const currentDependsOn = detail.data?.detail.dependsOnTemplateId ?? null
+  const current = detail.data?.detail.dependsOnTemplateIds ?? []
 
-  const onChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const raw = event.target.value
-    const dependsOnTemplateId = raw === '' ? null : Number(raw)
+  const onToggle = async (dependsOnId: number, next: boolean) => {
+    /*
+      The whole set on every call — the route replaces rather than patches.
+      Built from `current` at the moment of the tick, which is the set the
+      `ETag` beside it describes: a stale pair here would be answered `412`
+      rather than silently writing the wrong thing.
+    */
+    const dependsOnTemplateIds = next
+      ? [...current, dependsOnId]
+      : current.filter((id) => id !== dependsOnId)
     try {
-      await update.mutateAsync({ templateId, dependsOnTemplateId, etag: detail.data?.etag ?? null })
-      toast({ title: `${serviceName}'s dependency updated` })
+      await update.mutateAsync({ templateId, dependsOnTemplateIds, etag: detail.data?.etag ?? null })
+      toast({
+        title:
+          dependsOnTemplateIds.length === 0
+            ? `${serviceName} now runs in parallel`
+            : `${serviceName}'s dependencies updated`,
+      })
     } catch (error) {
       toast({
         title: 'Could not update that dependency',
@@ -498,44 +518,19 @@ function DependsOnPicker({
     }
   }
 
-  // `min-w-0` here for the select's reason, one level up: this row is itself a
-  // child of the card's flex column, and a shrinkable child inside an
-  // unshrinkable parent still overflows.
+  // `min-w-0` here for the control's own reason, one level up: a shrinkable
+  // child inside an unshrinkable parent still overflows.
   return (
-    <div className="relative z-10 flex min-w-0 items-center gap-2 text-sm">
-      <label
-        htmlFor={`depends-on-${templateId}`}
-        className="whitespace-nowrap font-medium text-content"
-      >
-        Service depends on
-      </label>
-      <select
+    <div className="flex min-w-0 items-center gap-2 text-sm" onClick={(e) => e.stopPropagation()}>
+      <DependsOnMultiSelect
         id={`depends-on-${templateId}`}
-        /*
-          `min-w-0` is load-bearing, not tidying. A flex item defaults to
-          `min-width: auto`, which for a <select> is the width of its widest
-          <option> — and the options here are service names of arbitrary
-          length. Without it `flex-1` cannot shrink the control below that
-          intrinsic width, so one long service name pushes the select straight
-          out of the card and over whatever is beside it.
-
-          `truncate` handles the closed state: the browser ellipsises the
-          selected label rather than letting it decide the width. The open
-          list is the browser's own popup and is unconstrained either way,
-          so a long name is still readable when choosing it.
-        */
-        className="h-9 min-w-0 flex-1 truncate rounded-control border border-border bg-surface px-2 text-sm text-content"
-        value={currentDependsOn ?? ''}
-        disabled={detail.isPending || update.isPending}
-        onChange={onChange}
-      >
-        <option value="">∥ No dependency — runs parallel</option>
-        {candidates.map((c) => (
-          <option key={c.activeTemplateId} value={c.activeTemplateId}>
-            ⛓ {c.name}
-          </option>
-        ))}
-      </select>
+        label={`Services ${serviceName} depends on`}
+        options={candidates}
+        selectedIds={current}
+        disabled={detail.isPending}
+        busy={update.isPending}
+        onToggle={(id, next) => void onToggle(id, next)}
+      />
     </div>
   )
 }

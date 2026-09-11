@@ -47,11 +47,22 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 
-/**
- * C-123 · the active template's `dependsOnTemplateId` — the other
-Module Service this one is held behind (plan §5 item 5), or null
-for one that runs unheld. Also null when there is no active
-template to have declared one.
+export interface ObImplementationStageWriteRequest {
+  /** @maxLength 120 */
+  name: string;
+  /**
+   * The position this stage should end up at, 1-based — **not** a
+column value to store as sent. The server moves the row there and
+renumbers the rest, so typing `2` into the fifth row does what it
+looks like rather than producing two rows sharing a 2. Out-of-range
+values are clamped: a large number means last.
 
- */
-export type ObProductDependsOnTemplateId = number | null;
+Omit it to say nothing about order — appends on a create, leaves
+the position alone on a `PATCH`. That is a different thing from any
+number this field could carry.
+
+   * @minimum 1
+   */
+  sequence?: number;
+  isActive?: boolean;
+}

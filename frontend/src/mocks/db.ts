@@ -598,6 +598,18 @@ export interface TimesheetApproval {
 // the `ob_` tables, so the two modules stay separable by grep here too.
 
 /** `ob_products` — the catalogue journey templates bind to. */
+/**
+ * OB-15 · `ob_implementation_stages` — the implementation vocabulary.
+ *
+ * `sequence` is 1-based and contiguous across the whole list, retired rows
+ * included, and the handlers renumber it on every write exactly as
+ * `ObImplementationStageService` does. A fixture with gaps in it would let a
+ * screen be built against an ordering the server cannot produce.
+ */
+export interface ObImplementationStage {
+  id: number; name: string; sequence: number; isActive: boolean;
+}
+
 export interface ObProduct {
   id: number; code: string; name: string; isActive: boolean;
   /** Whether an active journey template exists. The OB-04 picker requires it. */
@@ -858,7 +870,12 @@ export interface ObClient {
  */
 export interface ObJourneyTemplateRow {
   id: number; productId: number; name: string; version: number; isActive: boolean;
-  sequence: number; dependsOnTemplateId: number | null;
+  /**
+   * Every service this one waits behind (plan §5.5) — a set, not one id,
+   * mirroring `ob_journey_template_dependencies` rather than the column that
+   * table replaced in `V20260911_1100`. Ascending, empty when unheld.
+   */
+  sequence: number; dependsOnTemplateIds: number[];
   publishedBy: number | null; publishedAt: string | null;
 }
 
@@ -957,6 +974,8 @@ export interface Db {
    * not correspond and nothing here should ever join them — the mock is the
    * first place that separation is either kept or quietly lost.
    */
+  /** OB-15 · the implementation stage master. See {@link ObImplementationStage}. */
+  obImplementationStages: ObImplementationStage[];
   obProducts: ObProduct[];
   obClients: ObClient[];
   /** C-102 · OB-07's designer. See {@link ObJourneyTemplateRow}'s own note on why this is here. */
@@ -1933,6 +1952,25 @@ const TEMPLATE_MAPPINGS: TemplateMappingRow[] = [
  * to refuse — a purchase with nothing to instantiate would board a client into
  * nothing. A fixture where every product is bookable never exercises that.
  */
+/**
+ * OB-15 · the six values `V20260911_1030__ob_implementation_stages.sql` seeds,
+ * in the order it seeds them.
+ *
+ * Deliberately identical to the migration rather than "varied for the screen":
+ * this is the state a fresh deployment is in, and the one an admin first opens
+ * OB-15 to. The interesting states — a retired stage, a seventh value, a
+ * reordered list — are all reachable from here by using the screen, which is
+ * the point of the master.
+ */
+const OB_IMPLEMENTATION_STAGES: ObImplementationStage[] = [
+  { id: 1, name: 'Configuration', sequence: 1, isActive: true },
+  { id: 2, name: 'Data Migration', sequence: 2, isActive: true },
+  { id: 3, name: 'Reports', sequence: 3, isActive: true },
+  { id: 4, name: 'Training', sequence: 4, isActive: true },
+  { id: 5, name: 'Communication', sequence: 5, isActive: true },
+  { id: 6, name: 'Third Party Integration', sequence: 6, isActive: true },
+];
+
 const OB_PRODUCTS: ObProduct[] = [
   // The catalogue's TAT still sums the *active template* (24d, template 1);
   // the seeded journeys were instantiated from an earlier 8-step revision
@@ -2486,7 +2524,7 @@ const OB_NOTIFICATIONS: ObNotificationRow[] = [
 const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   {
     id: 1, productId: 1, name: 'ERP Suite onboarding', version: 1, isActive: true,
-    sequence: 1, dependsOnTemplateId: null,
+    sequence: 1, dependsOnTemplateIds: [],
     publishedBy: 1, publishedAt: iso('2026-06-20T09:00:00'),
   },
   // A second *live* service on the SAME product. EduTrack ERP sells a
@@ -2496,12 +2534,12 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   // product" would keep passing every test.
   {
     id: 4, productId: 1, name: 'Enterprise (data migration)', version: 1, isActive: true,
-    sequence: 2, dependsOnTemplateId: 1,
+    sequence: 2, dependsOnTemplateIds: [1],
     publishedBy: 1, publishedAt: iso('2026-06-22T09:00:00'),
   },
   {
     id: 2, productId: 2, name: 'Biometric Attendance onboarding', version: 1, isActive: false,
-    sequence: 1, dependsOnTemplateId: null,
+    sequence: 1, dependsOnTemplateIds: [],
     publishedBy: null, publishedAt: null,
   },
   // C-123 · LMS (OB_PRODUCTS[2]) is a *retired* product with a real,
@@ -2509,11 +2547,18 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   // already had, and the Module Service catalogue's own second active row
   // (`sequence: 2`) is what makes the ↑/↓ control and the depends-on picker
   // reachable at all against this fixture. No steps: the catalogue page
-  // reads sequence/dependsOnTemplateId/totalTatDays only, none of which
+  // reads sequence/dependsOnTemplateIds/totalTatDays only, none of which
   // needs one.
+  //
+  // One dependency, deliberately, even though the picker is multi-select:
+  // with LMS also waiting for template 4 there is no service left in this
+  // fixture holding a dependency *and* an untaken candidate — everything
+  // else either reaches it or is it — and "tick a second one" becomes
+  // untestable. A test that wants the two-dependency case sets it up itself,
+  // which is a line in that test rather than a constraint on every other one.
   {
     id: 3, productId: 3, name: 'LMS onboarding', version: 1, isActive: true,
-    sequence: 3, dependsOnTemplateId: 1,
+    sequence: 3, dependsOnTemplateIds: [1],
     publishedBy: 1, publishedAt: iso('2026-07-01T09:00:00'),
   },
 ];
@@ -2594,6 +2639,8 @@ export function createDb(): Db {
     // most users meet first, so it is what the mock starts in.
     reportSchedules: [],
     // A-118 · the onboarding module. See OB_PRODUCTS / OB_CLIENTS.
+    // OB-15 · the implementation vocabulary. See OB_IMPLEMENTATION_STAGES.
+    obImplementationStages: structuredClone(OB_IMPLEMENTATION_STAGES),
     obProducts: structuredClone(OB_PRODUCTS),
     obClients: structuredClone(OB_CLIENTS),
     // C-102 · see OB_JOURNEY_TEMPLATES's own note.

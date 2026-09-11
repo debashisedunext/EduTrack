@@ -4,8 +4,10 @@ import { format, parseISO } from 'date-fns'
 import { ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { useListObClients } from '@/api/generated/onboarding/onboarding'
-import type { ObClient } from '@/api/generated/model/obClient'
+import {
+  useListObClients,
+  useListObDelayedProjects,
+} from '@/api/generated/onboarding/onboarding'
 
 import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
@@ -22,12 +24,31 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-import { healthChip, journeyProgress } from './obClientRow'
+import type { DelayReadState, ObClientProductRow } from './obClientRow'
+import type { ObDelayedProject } from '@/api/generated/model/obDelayedProject'
+import {
+  delayCells,
+  delayKey,
+  healthChip,
+  indexDelayedProjects,
+  journeyProgress,
+  missingDateReason,
+  toProductRows,
+} from './obClientRow'
 import { isContradictory, toQueryParams, useObClientFilters } from './useObClientFilters'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
-const COLUMN_COUNT = 8
+const COLUMN_COUNT = 11
+
+/**
+ * The delay read's page. The route's own maximum, and the set is bounded by
+ * construction — only journeys with an overdue service are on it, ordered
+ * worst first. `meta.hasMore` is surfaced under the grid rather than ignored:
+ * past this many, a row that is genuinely a day or two late would render as
+ * on time, and a reader is owed that caveat rather than left to find it.
+ */
+const DELAY_PAGE_LIMIT = 200
 
 /**
  * The mockup's two selects, verbatim (`vClients()` in
@@ -83,6 +104,23 @@ const HEALTH_OPTIONS = [
  * `gateStatus`, `ownerId`, `salesPersonId` and `productId` remain in
  * `useObClientFilters` and keep working from the URL (OB-02's cards deep-link
  * into them), but the filter card shows the mockup's three controls only.
+ *
+ * ## Delayed and Responsible person come from a second read
+ *
+ * `listObClients` carries neither a step owner nor a delay count, and the
+ * working-day figure cannot be subtracted client-side anyway — it goes through
+ * the working calendar. `GET /onboarding/dashboard/delayed-projects` has both,
+ * one row per delayed journey, and this page joins it on (client, product).
+ * It covers delayed journeys only, so an on-time row says so and its
+ * Responsible cell reads "Unknown" — see `delayCells` for why that is a
+ * contract gap rather than a missing join.
+ *
+ * ## No cell is left blank
+ *
+ * Every column says something, including the ones with nothing to show: a
+ * gate-locked client reads "Not started" where it used to render an em-dash,
+ * and a finished one reads "Complete". A dash says only that something is
+ * missing, never which of the several reasons it is missing for.
  *
  * ## Products Bought, Start Date and Expected Completion are not in the mockup
  *
@@ -159,6 +197,26 @@ export function ObClientListPage() {
 
   const clients = React.useMemo(() => data?.data ?? [], [data])
   const meta = data?.meta
+
+  /**
+   * The delay columns' own read. Unfiltered by the grid's filters on purpose —
+   * it is a lookup table joined per row, not a second list, and narrowing it
+   * would only make rows the filters *do* show fall out of it.
+   */
+  const delayedProjects = useListObDelayedProjects({ limit: DELAY_PAGE_LIMIT })
+  const delayIndex = React.useMemo(
+    () => indexDelayedProjects(delayedProjects.data?.data ?? []),
+    [delayedProjects.data],
+  )
+  const delayState: DelayReadState = delayedProjects.isPending
+    ? 'loading'
+    : delayedProjects.isError
+      ? 'error'
+      : 'ready'
+  const delayTruncated = delayedProjects.data?.meta?.hasMore ?? false
+
+  /** One row per (client, product) — a school that bought ERP and CRM is two rows. */
+  const rows = React.useMemo(() => toProductRows(clients), [clients])
 
   const pageStart = clients.length === 0 ? 0 : cursorStack.length * PAGE_SIZE + 1
   const pageEnd = pageStart === 0 ? 0 : pageStart + clients.length - 1
@@ -266,12 +324,29 @@ export function ObClientListPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              {/* Numbers the rows *on this page*. Cursor pagination has no
+                  absolute offset to count from, and a client occupies as many
+                  rows as it bought products, so page 2's first row is not
+                  knowably row 26 — saying "1" and meaning it beats saying "26"
+                  and being wrong. */}
+              <TableHead className="w-24" title="Row number on this page">
+                Serial Number
+              </TableHead>
               <TableHead>Client</TableHead>
+              <TableHead>Products Bought</TableHead>
               <TableHead>Health</TableHead>
               <TableHead>Current step</TableHead>
-              <TableHead>Products Bought</TableHead>
               <TableHead>Start Date</TableHead>
               <TableHead>Expected Completion</TableHead>
+              {/* B-128's read, joined per row — see the page note. The chip
+                  carries the working-day count itself, so there is no separate
+                  "Delayed by" column repeating "On schedule" down the page. */}
+              <TableHead title="Whether this journey is past its expected completion, and by how many working days">
+                Delayed
+              </TableHead>
+              <TableHead title="Who holds the service that made this journey late">
+                Responsible person
+              </TableHead>
               <TableHead>Sales</TableHead>
               <TableHead>Boarded</TableHead>
             </TableRow>
@@ -344,12 +419,19 @@ export function ObClientListPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              clients.map((client) => (
-                <ObClientRow
-                  key={client.id}
-                  client={client}
+              rows.map((row, i) => (
+                <ObClientProductTableRow
+                  key={row.key}
+                  row={row}
+                  serial={i + 1}
                   isFetching={isFetching}
-                  onOpen={() => navigate(`/onboarding/clients/${client.id}`)}
+                  delayed={
+                    row.product
+                      ? delayIndex.get(delayKey(row.client.id, row.product.id))
+                      : undefined
+                  }
+                  delayState={delayState}
+                  onOpen={() => navigate(`/onboarding/clients/${row.client.id}`)}
                 />
               ))
             )}
@@ -357,9 +439,21 @@ export function ObClientListPage() {
         </Table>
       </TableContainer>
 
+      {delayTruncated && (
+        <p className="text-caption text-content-muted">
+          The delay columns cover the {DELAY_PAGE_LIMIT} most delayed journeys. A journey behind
+          that cut-off — the mildest delays — reads as on time here; the Delayed projects grid on
+          the dashboard pages through the rest.
+        </p>
+      )}
+
       {/* ── pagination ─────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between text-caption text-content-muted">
-        <p role="status">{clients.length === 0 ? '0 clients' : `Rows ${pageStart}–${pageEnd}`}</p>
+        <p role="status">
+          {clients.length === 0
+            ? '0 clients'
+            : `Clients ${pageStart}–${pageEnd} · ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
+        </p>
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
@@ -387,18 +481,41 @@ export function ObClientListPage() {
   )
 }
 
-function ObClientRow({
-  client,
+/**
+ * One row of the Projects grid: a client **and one of its products**.
+ *
+ * Named for what it renders — `toProductRows` has already flattened the page,
+ * so this is handed an `ObClientProductRow`, not a client. The client-level
+ * columns (health, current step, the two dates, sales, boarded) repeat down a
+ * client's rows, as does the client name itself — every row names its client,
+ * so a row says whose product it is without the reader having to scan upwards.
+ * `row.isClientHead` still marks the first row of each client for a caller
+ * that would rather render the client-level columns once. See
+ * `ObClientProductRow` for why that repetition is the lesser evil while the
+ * cross-client journeys collection is unimplemented.
+ */
+function ObClientProductTableRow({
+  row,
+  serial,
   isFetching,
+  delayed,
+  delayState,
   onOpen,
 }: {
-  client: ObClient
+  row: ObClientProductRow
+  serial: number
   isFetching: boolean
+  /** This (client, product)'s delayed-projects row, where it has one. */
+  delayed: ObDelayedProject | undefined
+  delayState: DelayReadState
   onOpen: () => void
 }) {
+  const { client, product } = row
   const health = healthChip(client)
   const journeys = journeyProgress(client)
   const journeyCount = client.journeyCount ?? 0
+  const delay = delayCells(row, delayed, delayState)
+  const noDate = missingDateReason(client)
 
   return (
     <TableRow
@@ -413,16 +530,47 @@ function ObClientRow({
       }}
       className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
+      <TableCell className="text-content-muted tabular-nums">{serial}</TableCell>
       <TableCell>
+        {/* Named on *every* row, continuation rows included — a client that
+            bought ERP and CRM reads "ABC School · ERP" then "ABC School · CRM".
+            The blank continuation cell this replaces saved a repeated link at
+            the cost of the thing the column exists for: a reader scanning the
+            grid, or sorting it, or looking at row 2 of a three-product client,
+            could not tell whose product it was. The repeat is the point.
+
+            `aria-label` carries the product so the duplicate links are
+            distinguishable to a screen reader reading them out of context —
+            they share an href, which is correct: both open the client. */}
         <Link
           to={`/onboarding/clients/${client.id}`}
           onClick={(e) => e.stopPropagation()}
+          aria-label={product ? `${client.name} — ${product.code ?? product.name}` : client.name}
           className="font-medium text-content hover:text-primary hover:underline"
         >
           {client.name}
         </Link>
         {/* Mockup caption is "city · PAN masked" — neither is on the list row
             (identity data belongs to the detail read). Contract gap, reported. */}
+      </TableCell>
+      {/* Straight to this product's own ribbon — OB-05's card chooser is a
+          detour when the reader already knows which product they want.
+          stopPropagation so this wins over the row's own click, which would
+          otherwise still open the client page. */}
+      <TableCell className="text-content-muted">
+        {product ? (
+          <Link
+            to={`/onboarding/clients/${client.id}/products/${product.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="hover:text-primary hover:underline"
+          >
+            {product.code ?? product.name}
+          </Link>
+        ) : (
+          <span title="This client has bought nothing yet, so there is no journey to run.">
+            None bought
+          </span>
+        )}
       </TableCell>
       <TableCell>
         <Chip variant={health.variant} title={health.hint}>
@@ -447,35 +595,13 @@ function ObClientRow({
           </span>
         )}
       </TableCell>
-      <TableCell className="text-content-muted">
-        {client.products && client.products.length > 0 ? (
-          <span className="flex flex-wrap items-center gap-x-1">
-            {client.products.map((p, i) => (
-              <React.Fragment key={p.id}>
-                {i > 0 && <span aria-hidden>,</span>}
-                {/* Straight to this product's own ribbon — OB-05's card chooser
-                    is a detour when the reader already knows which product
-                    they want. stopPropagation so this wins over the row's own
-                    click, which would otherwise still open the client page. */}
-                <Link
-                  to={`/onboarding/clients/${client.id}/products/${p.id}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-primary hover:underline"
-                >
-                  {p.code ?? p.name}
-                </Link>
-              </React.Fragment>
-            ))}
-          </span>
-        ) : (
-          '—'
-        )}
-      </TableCell>
       <TableCell className="text-content-muted tabular-nums">
         {client.startedAt ? (
           <time dateTime={client.startedAt}>{format(parseISO(client.startedAt), 'd MMM yyyy')}</time>
         ) : (
-          '—'
+          /* Words rather than an em-dash: `startedAt` is null only while
+             nothing has ever activated, and that has a name. */
+          <span title={noDate.hint}>{noDate.label}</span>
         )}
       </TableCell>
       <TableCell className="text-content-muted tabular-nums">
@@ -484,10 +610,26 @@ function ObClientRow({
             {format(parseISO(client.currentStep.dueAt), 'd MMM yyyy')}
           </time>
         ) : (
-          '—'
+          <span title={noDate.hint}>{noDate.label}</span>
         )}
       </TableCell>
-      <TableCell className="text-content-muted">{client.salesPerson?.displayName ?? '—'}</TableCell>
+      <TableCell className="whitespace-nowrap">
+        <Chip variant={delay.delayed.variant} title={delay.delayed.hint}>
+          <span aria-hidden>{delay.delayed.glyph}</span>
+          <span>{delay.delayed.label}</span>
+        </Chip>
+      </TableCell>
+      <TableCell
+        title={delay.responsible.hint}
+        className={delay.responsible.named ? 'text-content' : 'text-content-muted'}
+      >
+        {delay.responsible.label}
+      </TableCell>
+      <TableCell className="text-content-muted">
+        {client.salesPerson?.displayName ?? (
+          <span title="Nobody is recorded as the sales owner of this client.">Unassigned</span>
+        )}
+      </TableCell>
       <TableCell className="text-content-muted tabular-nums">{client.onboardingDate}</TableCell>
     </TableRow>
   )

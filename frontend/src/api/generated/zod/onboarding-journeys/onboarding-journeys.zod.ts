@@ -81,11 +81,11 @@ export const listObJourneyTemplatesResponse = zod.object({
   "version": zod.number().describe('Counts the edits to \*\*this service\*\*, not to the product. Two\nservices under one product each have their own chain, so both can\nsit at v1 — `uq_ob_journey_templates_version` is keyed on\n`(product_id, name, version)`.\n'),
   "isActive": zod.boolean().describe('True for at most one service per product, across all of them.'),
   "sequence": zod.number(),
-  "dependsOnTemplateId": zod.number().nullish(),
+  "dependsOnTemplateIds": zod.array(zod.number()).optional(),
   "publishedAt": zod.string().datetime({}).nullish(),
   "stepCount": zod.number().describe('How many services this journey has — the card\'s step list length.'),
   "totalTatDays": zod.number().describe('Σ of the step TATs in working days — what a journey for this\nservice costs. On the row because the card shows it and it is not\nderivable from the other fields; the alternative is the page\nfetching every service\'s full detail to render one chip.\n'),
-  "serviceJourneyCount": zod.number().describe('C-124 · client journeys instantiated from \*\*any version of this\nservice\*\*, archived ones included — the number `PATCH` and `DELETE`\non this resource both refuse above zero.\n\nChain-wide, not this version\'s own: every row of one service\ncarries the same total. The catalogue card is the \*head\* of a\nversion chain, so a service whose v1 carries three clients and\nwhose v3 carries none is in use, and a per-row count would have\nreported `0` on the very card that draws the Edit and Delete\nbuttons.\n\nOn the row for `totalTatDays`\'s reason — the page disables both\ncontrols by it, and without it the only way to find out is to let\nan admin click and answer `409`.\n')
+  "serviceJourneyCount": zod.number().describe('C-124 · client journeys instantiated from \*\*any version of this\nservice\*\*, archived ones included — the number `DELETE` refuses\nabove zero. \*\*`PATCH` does not consult it at all\*\*, so a page that\ndisables its edit form by this number is disabling something the\nserver would have accepted: it speaks for Delete, and for warning\nthat a product move leaves these journeys where they were bought.\n\nChain-wide, not this version\'s own: every row of one service\ncarries the same total. The catalogue card is the \*head\* of a\nversion chain, so a service whose v1 carries three clients and\nwhose v3 carries none is in use, and a per-row count would have\nreported `0` on the very card that draws the Delete button.\n\nOn the row for `totalTatDays`\'s reason — the page disables Delete\nby it, and without it the only way to find out is to let an admin\nclick and answer `409`.\n')
 }).describe('One Module Service as the OB-07 catalogue lists it.'))
 })
 
@@ -119,7 +119,7 @@ export const createObJourneyTemplateBody = zod.object({
   "productId": zod.number(),
   "name": zod.string().max(createObJourneyTemplateBodyNameMax),
   "sequence": zod.number(),
-  "dependsOnTemplateId": zod.number().nullish()
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('Omitted is the same as empty: a service that runs unheld.')
 })
 
 /**
@@ -163,7 +163,7 @@ export const getObJourneyTemplateResponse = zod.object({
   "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
   "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
   "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
-  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('Cross-product service dependencies (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service \*and\* the network survey.\nAscending, empty for a service that runs unheld.\n\nRows of `ob_journey_template_dependencies` since\n`V20260911_1100`, not a column on the template. Cycle-freedom is\nenforced by C-123: the table\'s `CHECK` refuses only the one-hop\ncase, and no constraint can perform the transitive walk.\n'),
   "publishedBy": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
 }).describe('`ob_journey_templates` — a Module Service, and one version of it.').and(zod.object({
@@ -210,23 +210,33 @@ service.
 `productId` is optional; omitting it leaves the service where it is,
 so renaming does not require knowing a product id.
 
-**`409` once any client is on it** — any journey instantiated from any
-version, archived or not. `ob_journeys.service_name` is denormalised at
-instantiation and a service-level dependency is resolved by
-`(product, service name)` rather than by template id (deliberately, so
-a hold survives its dependency publishing a new version), so a rename
-underneath a live journey breaks a lookup with no other key to fall
-back on. The problem document carries `journeyCount`;
-`ObJourneyTemplateSummary.serviceJourneyCount` is how a page knows
-before the admin clicks. `409` also if the target product already has a
-service by that name.
+**Never refused for being in use**, in either field and at any number of
+clients. Correcting a service clients are already on is the case this
+route exists for. What each field does about the copy `ob_journeys`
+denormalises at instantiation differs, and the difference is worth
+knowing:
+
+- **The name travels.** `service_name` is what
+  `uq_ob_journeys_client_service` and the service-level dependency hold
+  resolve a service by — keyed on `(product, service name)` rather than
+  template id, deliberately, so a hold survives its dependency
+  publishing a new version. So a rename re-stamps every journey of the
+  chain inside the same transaction and both lookups keep matching.
+- **The product stays.** A journey's `productId` is half of
+  `fk_ob_journeys_application`, the key to that client's purchase; it
+  records what was bought, not where the catalogue files the service.
+  The templates are re-filed and journeys already running keep their
+  product. A consequence worth stating: those journeys stop being
+  recognised by the dependency hold, which is keyed on the chain's
+  *current* `(product, name)`. Holds already placed are unaffected —
+  they are released by journey id.
+
+`409` only if the target product already has a service by that name.
 
 Note this is **not** gated on `publishedAt`, unlike the step routes. A
 name and a product are catalogue metadata rather than journey content —
 the same distinction `PUT .../depends-on` draws to justify working on a
-published row — so what gates it is whether anybody was ever boarded on
-it. A published service nobody bought is renameable; an unpublished
-draft cannot have been bought at all.
+published row.
 
 `If-Match` is required, not optional — `428` without one, `412` if it
 does not match. Read the tag from
@@ -263,7 +273,7 @@ export const updateObJourneyModuleServiceResponse = zod.object({
   "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
   "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
   "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
-  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('Cross-product service dependencies (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service \*and\* the network survey.\nAscending, empty for a service that runs unheld.\n\nRows of `ob_journey_template_dependencies` since\n`V20260911_1100`, not a column on the template. Cycle-freedom is\nenforced by C-123: the table\'s `CHECK` refuses only the one-hop\ncase, and no constraint can perform the transitive walk.\n'),
   "publishedBy": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
 }).describe('`ob_journey_templates` — a Module Service, and one version of it.')
@@ -348,7 +358,7 @@ export const publishObJourneyTemplateResponse = zod.object({
   "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
   "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
   "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
-  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('Cross-product service dependencies (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service \*and\* the network survey.\nAscending, empty for a service that runs unheld.\n\nRows of `ob_journey_template_dependencies` since\n`V20260911_1100`, not a column on the template. Cycle-freedom is\nenforced by C-123: the table\'s `CHECK` refuses only the one-hop\ncase, and no constraint can perform the transitive walk.\n'),
   "publishedBy": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
 }).describe('`ob_journey_templates` — a Module Service, and one version of it.')
@@ -411,18 +421,23 @@ export const reorderObJourneyTemplateCatalogueBody = zod.object({
 })
 
 /**
- * `dependsOnTemplateId: null` clears the dependency — the service runs
-unheld from journey start. Cross-product is allowed; a cycle is
-not — `409` if the chosen dependency already depends, directly or
-transitively, on this template. Works on a draft or the active
-version alike: unlike a step's fields, this is catalogue metadata,
-not journey content an in-flight instantiation has pinned.
+ * `dependsOnTemplateIds` is the caller's whole desired set, not a
+delta: every service this one waits behind, each named once. An
+empty list clears every dependency and the service runs unheld from
+journey start.
+
+Cross-product is allowed; a cycle is not — `409` naming the
+offending template if any chosen dependency already depends,
+directly or transitively, on this one, and `404` if one of them does
+not exist. Works on a draft or the active version alike: unlike a
+step's fields, this is catalogue metadata, not journey content an
+in-flight instantiation has pinned.
 
 `If-Match` is required, not optional — `428` without one, `412` if
 it does not match the template's current tag. Read the tag from
 `GET /onboarding/journey-templates/{templateId}`.
 
- * @summary The catalogue's "Service depends on" picker (C-123)
+ * @summary The catalogue's "Depends on" multi-select picker (C-123)
  */
 export const updateObJourneyTemplateDependsOnParams = zod.object({
   "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
@@ -433,7 +448,7 @@ export const updateObJourneyTemplateDependsOnHeader = zod.object({
 })
 
 export const updateObJourneyTemplateDependsOnBody = zod.object({
-  "dependsOnTemplateId": zod.number().nullable().describe('Null clears the dependency: the service runs unheld from journey start.')
+  "dependsOnTemplateIds": zod.array(zod.number()).describe('The whole desired set, not a delta — every service this one waits\nbehind, each named once. An empty list clears every dependency\nand the service runs unheld from journey start.\n\nRequired but not `minItems: 1`: \"nothing\" is a legal answer here,\nwhere an absent body would be a caller who forgot one.\n')
 })
 
 export const updateObJourneyTemplateDependsOnResponseDataNameMax = 160;
@@ -448,7 +463,7 @@ export const updateObJourneyTemplateDependsOnResponse = zod.object({
   "version": zod.number().describe('One row is one \*\*version\*\* of the product\'s template, not one\nproduct. `beginRevision` clones the currently active version\ninto `version + 1`; the source row is never edited in place.\n'),
   "isActive": zod.boolean().describe('True for at most one version per product. A version can also be\nneither active nor a draft — \*\*retired\*\*, superseded by a later\npublish — which this flag alone does not distinguish from\n\"never published\"; read `publishedAt` alongside it: `publishedAt\n== null` is draft, `publishedAt != null && !isActive` is retired.\n'),
   "sequence": zod.number().describe('Service order on the OB-07 catalogue — the `↑\/↓` control one level up, over products rather than steps.'),
-  "dependsOnTemplateId": zod.number().nullish().describe('Cross-product service dependency (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service. Cycle-freedom here is\nenforced by C-123, not by this table\'s foreign key alone.\n'),
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('Cross-product service dependencies (plan §5.5) — e.g. Biometric\nDevice Rollout after the ERP service \*and\* the network survey.\nAscending, empty for a service that runs unheld.\n\nRows of `ob_journey_template_dependencies` since\n`V20260911_1100`, not a column on the template. Cycle-freedom is\nenforced by C-123: the table\'s `CHECK` refuses only the one-hop\ncase, and no constraint can perform the transitive walk.\n'),
   "publishedBy": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
 }).describe('`ob_journey_templates` — a Module Service, and one version of it.')

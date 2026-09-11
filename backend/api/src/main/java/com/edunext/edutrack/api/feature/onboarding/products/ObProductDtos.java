@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.products;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -85,12 +86,17 @@ final class ObProductDtos {
                             + "template.")
             Integer templateSequence,
 
-            @Schema(nullable = true,
-                    description = "C-123 · the active template's `dependsOnTemplateId` — the other "
-                            + "Module Service this one is held behind (plan §5 item 5), or null for "
-                            + "one that runs unheld. Null (rather than a sentinel) also when there "
-                            + "is no active template to have declared one.")
-            Long dependsOnTemplateId
+            @ArraySchema(schema = @Schema(format = "int64"),
+                    arraySchema = @Schema(
+                            description = "C-123 · the active template's `dependsOnTemplateIds` — the "
+                                    + "other Module Services this one is held behind (plan §5 item 5). "
+                                    + "Empty for a service that runs unheld, and empty (rather than "
+                                    + "absent) when there is no active template to have declared "
+                                    + "anything: a caller reading this to decide whether to draw a "
+                                    + "chain icon wants one branch, not two. It was a single nullable "
+                                    + "`dependsOnTemplateId` until V20260911_1100 made the dependency "
+                                    + "a set."))
+            List<Long> dependsOnTemplateIds
     ) {
     }
 

@@ -121,8 +121,9 @@ class OnboardingFixtureCorpusIT {
     @DisplayName("the Biometric service declares its cross-product dependency on the ERP one")
     void theServiceDependencyLands() {
         Integer dependent = count("""
-                SELECT COUNT(*) FROM ob_journey_templates t
-                  JOIN ob_journey_templates d ON d.id = t.depends_on_template_id
+                SELECT COUNT(*) FROM ob_journey_template_dependencies e
+                  JOIN ob_journey_templates t ON t.id = e.template_id
+                  JOIN ob_journey_templates d ON d.id = e.depends_on_template_id
                  WHERE t.name = 'Biometric Device Rollout' AND d.name = 'Standard SaaS Onboarding'
                 """);
         assertThat(dependent).isEqualTo(1);

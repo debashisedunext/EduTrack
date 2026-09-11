@@ -31,15 +31,38 @@ import {
   useReorderJourneyTemplateSteps,
 } from './journeyTemplateQueries'
 import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTemplateTat'
+import { buildStepTree, scheduleBar, scheduleLabel, type StepNode } from './journeyTemplateTree'
 import { ModuleServiceAdmin } from './ModuleServiceAdmin'
 
 /**
- * C-102 · OB-07's journey template designer, laid out to
- * `docs/prototype/onboarding.html`'s `vTplEdit()`: back link, name + product
- * chip header with the versioning caption, publish button, then the step
- * table — #, Service name, TAT (days), Default responsible, Service depends
- * on, Sign-off, Order — with the Task List chip editor under each row and
- * "+ Add step" at the bottom.
+ * C-102 · OB-07's journey template designer: back link, name + product chip
+ * header with the versioning caption, publish button, then the step tree —
+ * Service, Schedule, TAT (days), Default responsible, Sign-off (and Order
+ * while the version is editable) — with each step's task list and required
+ * documents drawn as its own child rows, and "+ Add step" at the bottom.
+ *
+ * <h2>The table is a tree, and the dependency is the shape of it</h2>
+ *
+ * <p>It was a flat list with a "Service depends on" cell reading
+ * {@code ↳ 3. Cleansing & field mapping}. That says what one step waits for
+ * and never what the journey *is*: reading a chain of five meant holding five
+ * row numbers in your head and walking them backwards. Now a step is nested
+ * under the step it waits for, and the column is gone because the indentation
+ * has replaced it. {@code journeyTemplateTree.ts} builds the tree and, from
+ * the same walk, the **Schedule** column's day ranges — the earliest a step
+ * could begin if nothing slips, in working days relative to journey start,
+ * never dates, because a template has no client and therefore no calendar.
+ *
+ * <p>The one thing indentation cannot say is "waits for nothing", so the root
+ * rows say it in words. That is not decoration: {@code dependsOnStepId} being
+ * null means the step runs in **parallel** from journey start, not that it is
+ * first, and a step at the left margin is otherwise indistinguishable from the
+ * head of a chain.
+ *
+ * <p>Reordering still moves a step in the **flat sequence**, which is what
+ * {@code PUT .../steps/order} replaces — so ↑/↓ visibly reorders siblings and
+ * does nothing visible to a parent and its child, which the tree draws in
+ * dependency order regardless.
  *
  * <h2>The one rule that shapes everything on this page</h2>
  *
@@ -62,6 +85,12 @@ import { ModuleServiceAdmin } from './ModuleServiceAdmin'
  * whose input would be silently dropped. Correcting a step is remove + add,
  * which the Order column and "+ Add step" cover. The mockup's editable
  * template-name input is out for the same reason: there is no rename route.
+ *
+ * <p>The tick boxes on the task rows are the same kind of statement. This
+ * screen defines the list; the client's own journey page is where a task is
+ * ticked off. They are drawn because the shape is what an admin is authoring,
+ * and they are inert and {@code aria-hidden} because the control they look
+ * like does not exist here.
  *
  * <h2>A step's owner is picked from the Role Master, not typed</h2>
  *
@@ -175,6 +204,24 @@ function Designer({
   const catalogue = useListObJourneyTemplates()
   const serviceRow = catalogue.data?.data.find((row) => row.id === templateId)
 
+  /*
+    C-124 · ModuleServiceAdmin's Position and "Service depends on" fields need
+    the same two shapes the OB-07 catalogue page itself builds from this
+    exact list: every active template's id in sequence order (the reorder
+    route's own shape), and the active rows as cycle-free candidates. Built
+    here rather than threading the catalogue page's own values in, since this
+    page reads the list independently for `serviceRow` already.
+  */
+  const activeRows = (catalogue.data?.data ?? [])
+    .filter((row) => row.isActive)
+    .sort((a, b) => a.sequence - b.sequence)
+  const activeOrder = activeRows.map((row) => row.id)
+  const catalogueEntries = activeRows.map((row) => ({
+    activeTemplateId: row.id,
+    dependsOnTemplateIds: row.dependsOnTemplateIds ?? [],
+    name: row.name,
+  }))
+
   const [ordered, setOrdered] = React.useState<ObJourneyTemplateStep[] | null>(null)
   const [announcement, setAnnouncement] = React.useState('')
   const [addingStep, setAddingStep] = React.useState(false)
@@ -194,6 +241,34 @@ function Designer({
   // template carries, read the same way `totalTatDays` reads a journey.
   const totalTatDays = templateTotalTatDays(steps)
   const product = products.data?.data.find((p) => p.id === detail.productId)
+
+  /*
+    The table is a tree of `dependsOnStepId`, and the Schedule column falls out
+    of the same walk — see `journeyTemplateTree.ts` for why the dependency
+    stopped being a column and became the shape of the rows.
+  */
+  const tree = React.useMemo(() => buildStepTree(steps), [steps])
+  /*
+    Collapsed rather than expanded is the stored set, so a step added or
+    revealed by a reorder arrives open — the default is "show me everything",
+    and only a deliberate collapse is remembered. Keyed by step id, so it
+    survives a reorder; a removed step leaves a stale id behind, which costs
+    nothing and cannot resurrect as anything but that same step.
+  */
+  const [collapsed, setCollapsed] = React.useState<ReadonlySet<number>>(() => new Set())
+  const toggle = (node: StepNode<ObJourneyTemplateStep>) => {
+    setCollapsed((held) => {
+      const next = new Set(held)
+      if (next.has(node.step.id)) next.delete(node.step.id)
+      else next.add(node.step.id)
+      return next
+    })
+    setAnnouncement(
+      `${node.step.name} ${collapsed.has(node.step.id) ? 'expanded' : 'collapsed'}.`,
+    )
+  }
+  // A collapsed step takes its whole subtree with it, not only its task list.
+  const visibleNodes = flattenVisible(tree.roots, collapsed)
 
   const move = (from: number, to: number) => {
     const next = moveItem(steps, from, to)
@@ -298,6 +373,14 @@ function Designer({
             {' · '}
             <b title={formatTemplateTotalTatDays(totalTatDays)}>Total TAT: {totalTatDays}d</b>
             {' '}across {steps.length} service{steps.length === 1 ? '' : 's'}
+            {/* Σ TAT is the work; the span is the elapsed plan, and with the
+                tree they are different numbers the moment anything runs in
+                parallel. Both, rather than one standing in for the other. */}
+            {tree.spanDays > 0 && (
+              <> · <b title="Earliest finish if every step starts the day after the one it waits for">
+                Plan runs to day {tree.spanDays}
+              </b></>
+            )}
           </p>
         </div>
 
@@ -338,37 +421,66 @@ function Designer({
           description="Add the first service this journey walks a client through."
         />
       ) : (
-        <div className="overflow-x-auto rounded-card border border-border bg-surface shadow-rest">
-          <table className="w-full border-collapse text-sm" aria-label="Services">
-            <thead>
-              <tr className="border-b border-border text-left">
-                <th scope="col" className="w-9 px-3 py-2 text-caption font-semibold text-content-muted">#</th>
-                <th scope="col" className="px-3 py-2 text-caption font-semibold text-content-muted">Service name</th>
-                <th scope="col" className="w-24 px-3 py-2 text-caption font-semibold text-content-muted">TAT (days)</th>
-                <th scope="col" className="w-44 px-3 py-2 text-caption font-semibold text-content-muted">Default responsible</th>
-                <th scope="col" className="w-48 px-3 py-2 text-caption font-semibold text-content-muted">Service depends on</th>
-                <th scope="col" className="w-20 px-3 py-2 text-center text-caption font-semibold text-content-muted">Sign-off</th>
-                {editable && (
-                  <th scope="col" className="w-32 px-3 py-2 text-caption font-semibold text-content-muted">Order</th>
-                )}
-              </tr>
-            </thead>
-            {steps.map((step, index) => (
-              <StepRows
-                key={step.id}
-                templateId={templateId}
-                step={step}
-                index={index}
-                total={steps.length}
-                editable={editable}
-                allSteps={steps}
-                users={userList}
-                roles={roleList}
-                onMove={move}
-                onRemove={() => doRemoveStep(step)}
-              />
-            ))}
-          </table>
+        <div className="flex flex-col gap-2">
+          {/*
+            Said once, above the table, rather than under every step. With the
+            tasks now drawn inline as the step's own children there is one
+            pattern on the screen to explain, not one per row.
+          */}
+          <p className="m-0 text-caption text-content-muted">
+            Services nest under the one they wait for. A task list is shown when its service is
+            clicked on the client page, and a step can't complete until its mandatory tasks are
+            ticked; required documents (📎) gate it the same way.
+          </p>
+          <div className="overflow-x-auto rounded-card border border-border bg-surface shadow-rest">
+            <table className="w-full border-collapse text-sm" aria-label="Services">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th scope="col" className="px-3 py-2 text-caption font-semibold text-content-muted">Service</th>
+                  <th scope="col" className="w-48 px-3 py-2 text-caption font-semibold text-content-muted">
+                    Schedule
+                  </th>
+                  <th scope="col" className="w-20 px-3 py-2 text-right text-caption font-semibold text-content-muted">
+                    TAT
+                    <span className="block font-normal">(days)</span>
+                  </th>
+                  <th scope="col" className="w-48 px-3 py-2 text-caption font-semibold text-content-muted">Default responsible</th>
+                  <th scope="col" className="w-20 px-3 py-2 text-center text-caption font-semibold text-content-muted">Sign-off</th>
+                  {editable && (
+                    <th scope="col" className="w-32 px-3 py-2 text-caption font-semibold text-content-muted">Order</th>
+                  )}
+                </tr>
+              </thead>
+              {visibleNodes.map((node) => (
+                <StepTreeRows
+                  key={node.step.id}
+                  templateId={templateId}
+                  node={node}
+                  spanDays={tree.spanDays}
+                  /* The reorder route replaces the whole flat sequence, so the
+                     ↑/↓ pair moves a step in `steps` — not in the tree. */
+                  index={steps.indexOf(node.step)}
+                  total={steps.length}
+                  /* Indentation is what says "waits for that one" to the eye,
+                     and says nothing at all to a screen reader — so the name
+                     the removed column used to print goes back in, visually
+                     hidden, for the readers the tree shape does not reach. */
+                  parentName={
+                    node.depth > 0
+                      ? steps.find((s) => s.id === node.step.dependsOnStepId)?.name ?? null
+                      : null
+                  }
+                  editable={editable}
+                  collapsed={collapsed.has(node.step.id)}
+                  users={userList}
+                  roles={roleList}
+                  onToggle={() => toggle(node)}
+                  onMove={move}
+                  onRemove={() => doRemoveStep(node.step)}
+                />
+              ))}
+            </table>
+          </div>
         </div>
       )}
 
@@ -418,6 +530,10 @@ function Designer({
           version={detail.version}
           serviceJourneyCount={serviceRow.serviceJourneyCount}
           products={products.data?.data ?? []}
+          isActive={detail.isActive}
+          dependsOnTemplateIds={detail.dependsOnTemplateIds ?? []}
+          activeOrder={activeOrder}
+          catalogueEntries={catalogueEntries}
         />
       )}
     </div>
@@ -425,39 +541,49 @@ function Designer({
 }
 
 /**
- * One service — two `<tr>`s inside their own `<tbody>`: the field row, then
- * the mockup's full-width Task List chip-editor row under it.
+ * One service, as a branch of the tree: its own `<tbody>` holding the field
+ * row, then a row per task and per required document, then — while the step
+ * is editable — the two add forms. Its children are separate `<tbody>`s that
+ * follow, drawn by the same component one depth deeper.
+ *
+ * <p>The rowgroup is what keeps a step's controls scoped to that step even
+ * though the tree is flattened into one table: "remove this task" is always
+ * inside the same group as the service it belongs to, never a sibling's.
  */
-function StepRows({
+function StepTreeRows({
   templateId,
-  step,
+  node,
+  spanDays,
   index,
   total,
+  parentName,
   editable,
-  allSteps,
+  collapsed,
   users,
   roles,
+  onToggle,
   onMove,
   onRemove,
 }: {
   templateId: number
-  step: ObJourneyTemplateStep
+  node: StepNode<ObJourneyTemplateStep>
+  /** The template's last day — what the schedule bar is drawn against. */
+  spanDays: number
+  /** Position in the flat sequence, which is what the reorder route replaces. */
   index: number
   total: number
+  /** The step this one waits for, for readers the indentation does not reach. */
+  parentName: string | null
   editable: boolean
-  allSteps: ObJourneyTemplateStep[]
+  collapsed: boolean
   users: readonly UserRef[]
   /** Every role, active or not — a retired one still has to render its name. */
   roles: readonly Role[]
+  onToggle: () => void
   onMove: (from: number, to: number) => void
   onRemove: () => void
 }) {
-  const depIndex = step.dependsOnStepId != null
-    ? allSteps.findIndex((s) => s.id === step.dependsOnStepId)
-    : -1
-  const dependsOn = depIndex >= 0
-    ? `↳ ${depIndex + 1}. ${allSteps[depIndex].name}`
-    : '∥ none — runs parallel'
+  const { step, depth } = node
   /*
     A role code is what the column stores; a role *name* is what an admin
     typed into the master and expects to read back. Falling through to the
@@ -468,42 +594,120 @@ function StepRows({
     ? users.find((u) => u.id === step.ownerUserId)?.displayName ?? `user #${step.ownerUserId}`
     : step.ownerRole
       ? roles.find((r) => r.code === step.ownerRole)?.name ?? step.ownerRole
-      : '—'
-  const colSpan = editable ? 6 : 5
+      : null
+  const columns = editable ? 6 : 5
+  const bar = scheduleBar(node, spanDays)
+  /*
+    An editable step always has something to hide — the two add forms — so the
+    chevron is offered whether or not it has children yet. A published one
+    with nothing under it has nothing to toggle, and gets a spacer so its name
+    still lines up with its siblings'.
+  */
+  const collapsible =
+    editable || node.children.length > 0 || step.items.length > 0 || step.docs.length > 0
 
   return (
     <tbody className="border-b border-border last:border-b-0">
       <tr>
-        <td className="px-3 pb-1 pt-2.5 align-top text-caption tabular-nums text-content-muted">{index + 1}</td>
-        <td className="px-3 pb-1 pt-2 align-top">
-          <span className="font-medium text-content">{step.name}</span>
-          {step.description && (
-            <span className="block text-caption text-content-muted">{step.description}</span>
+        <td className="px-3 py-2 align-top">
+          <div className="flex items-start">
+            <TreeGuides depth={depth} />
+            {collapsible ? (
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={!collapsed}
+                aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${step.name}`}
+                className="mr-1 mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-content-muted hover:bg-subtle hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
+              </button>
+            ) : (
+              <span aria-hidden className="mr-1 h-5 w-5 shrink-0" />
+            )}
+            {/* Depth-first, so the badge counts down the tree rather than
+                along the flat sequence — which is the order a reader's eye
+                takes the chain in. */}
+            <span
+              aria-hidden
+              className="mr-2 mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-caption font-semibold tabular-nums text-primary"
+            >
+              {node.number}
+            </span>
+            <span className="min-w-0">
+              <span className="font-medium text-content">{step.name}</span>
+              {step.description && (
+                <span className="block text-caption text-content-muted">{step.description}</span>
+              )}
+              {/*
+                Said on the root rows only. Indentation already says "waits for
+                the row above"; nothing says "waits for nothing", and a step at
+                the left margin is otherwise indistinguishable from the first
+                step of a chain — which is precisely the misreading the
+                contract warns about: null means parallel, not first.
+              */}
+              {depth === 0 ? (
+                <span className="block text-caption text-content-muted">
+                  No dependency, runs in parallel
+                </span>
+              ) : (
+                parentName && <span className="sr-only">Waits for {parentName}</span>
+              )}
+            </span>
+          </div>
+        </td>
+        <td className="px-3 py-2 align-top">
+          <span className="block whitespace-nowrap text-caption text-content-muted">
+            {scheduleLabel(node)}
+          </span>
+          {/* Decorative — the range above it is the accessible form of the
+              same fact, so a screen reader hears it once. */}
+          <span
+            aria-hidden
+            className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-subtle"
+          >
+            <span
+              className="block h-full rounded-full bg-primary"
+              style={{ marginLeft: bar.left, width: bar.width }}
+            />
+          </span>
+        </td>
+        <td className="px-3 py-2 text-right align-top tabular-nums text-content">{step.tatDays}</td>
+        <td className="px-3 py-2 align-top">
+          {responsible == null ? (
+            <span className="text-content-muted">—</span>
+          ) : (
+            <span className="flex items-start gap-2">
+              <span
+                aria-hidden
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary"
+              >
+                {initials(responsible)}
+              </span>
+              <span className="min-w-0 break-words text-content">{responsible}</span>
+            </span>
           )}
         </td>
-        <td className="px-3 pb-1 pt-2 align-top tabular-nums text-content">{step.tatDays}</td>
-        <td className="px-3 pb-1 pt-2 align-top text-content">{responsible}</td>
-        <td className="px-3 pb-1 pt-2 align-top text-content-muted">{dependsOn}</td>
-        <td className="px-3 pb-1 pt-2 text-center align-top">
+        <td className="px-3 py-2 text-center align-top">
           {/* Set when the step is added — the backend has no step-edit route,
               so the box states the fact rather than offering a dead control. */}
           <input
             type="checkbox"
             checked={step.requiresSignoff}
             disabled
-            aria-label={`Step ${index + 1} requires client sign-off`}
+            aria-label={`${step.name} requires client sign-off`}
             title="Set when the step is added — remove and re-add the step to change it"
-            className="h-4 w-4 rounded border-border"
+            className="mt-1 h-4 w-4 rounded border-border"
           />
         </td>
         {editable && (
-          <td className="px-3 pb-1 pt-1.5 align-top">
+          <td className="px-3 py-1.5 align-top">
             <span className="inline-flex gap-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={index === 0}
+                disabled={index <= 0}
                 aria-label={`Move ${step.name} up`}
                 onClick={() => onMove(index, index - 1)}
               >
@@ -513,7 +717,7 @@ function StepRows({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={index === total - 1}
+                disabled={index < 0 || index === total - 1}
                 aria-label={`Move ${step.name} down`}
                 onClick={() => onMove(index, index + 1)}
               >
@@ -532,36 +736,97 @@ function StepRows({
           </td>
         )}
       </tr>
-      <tr>
-        <td className="pb-3" />
-        <td colSpan={colSpan} className="px-3 pb-3">
-          <StepItemChips templateId={templateId} step={step} editable={editable} />
-          <StepDocChips templateId={templateId} step={step} editable={editable} />
-        </td>
-      </tr>
+      {!collapsed && (
+        <>
+          <StepItemRows
+            templateId={templateId}
+            step={step}
+            depth={depth}
+            editable={editable}
+            restSpan={columns - 1}
+          />
+          <StepDocRows
+            templateId={templateId}
+            step={step}
+            depth={depth}
+            editable={editable}
+            restSpan={columns - 1}
+          />
+        </>
+      )}
     </tbody>
   )
 }
 
 /**
- * The Task List editor — one task per line with a ✕, an "Add a task…" input
- * (Enter submits) and a "+ Add" button. Items are always added mandatory,
- * matching the mockup, which has no optional flag on a task.
- *
- * <p>A vertical list rather than a wrapping chip row. Tasks are sentences
- * ("Cut-over window agreed with the client"), not tags, so a row of them wraps
- * at arbitrary points and two tasks read as one; stacked, each is a line the
- * eye can count, and the input beneath spans the cell rather than sitting in
- * whatever gap the last chip left.
+ * The rails that make the indentation read as a tree rather than as padding.
+ * One per ancestor level, so a task three deep sits behind three of them and
+ * the eye can follow any of them back up to the service it belongs to.
  */
-function StepItemChips({
+function TreeGuides({ depth }: { depth: number }) {
+  if (depth <= 0) return null
+  return (
+    <span aria-hidden className="flex shrink-0 self-stretch">
+      {Array.from({ length: depth }, (_, level) => (
+        <span key={level} className="w-5 border-l border-border" />
+      ))}
+    </span>
+  )
+}
+
+/**
+ * A task or a document, as a child row of its service. One `<td>` under the
+ * Service column and one empty cell spanning the rest — the schedule, TAT,
+ * owner and sign-off are the *step's* facts, and repeating them against every
+ * task would claim a task has a TAT of its own.
+ */
+function LeafRow({
+  depth,
+  restSpan,
+  children,
+}: {
+  /** The owning step's depth; the row draws itself one level in from it. */
+  depth: number
+  restSpan: number
+  children: React.ReactNode
+}) {
+  return (
+    <tr>
+      <td className="px-3 py-1 align-top">
+        <div className="flex items-start">
+          <TreeGuides depth={depth + 1} />
+          {children}
+        </div>
+      </td>
+      <td colSpan={restSpan} />
+    </tr>
+  )
+}
+
+/**
+ * The Task List — one row per task under its service, each with the tick box
+ * the client page will offer, plus an "Add a task…" row while the step is
+ * editable. Items are always added mandatory, matching the mockup, which has
+ * no optional flag on a task.
+ *
+ * <p>The boxes are drawn but inert, and deliberately so: this screen defines
+ * the list, the client's own journey is where it is ticked off. They are
+ * `aria-hidden` for the same reason — the task's text is the row's meaning,
+ * and a screen reader announcing "checkbox, not checked" on a template would
+ * be describing a control that does not exist.
+ */
+function StepItemRows({
   templateId,
   step,
+  depth,
   editable,
+  restSpan,
 }: {
   templateId: number
   step: ObJourneyTemplateStep
+  depth: number
   editable: boolean
+  restSpan: number
 }) {
   const addItem = useAddJourneyTemplateStepItem()
   const removeItem = useRemoveJourneyTemplateStepItem()
@@ -600,84 +865,82 @@ function StepItemChips({
     }
   }
 
-  if (!editable && step.items.length === 0) return null
-
   return (
-    <div>
-      <p className="m-0 mb-1.5 text-caption text-content-muted">
-        Task list — shown when this service is clicked on the client page; each task is ticked off
-        there, and the step cannot complete until the mandatory ones are ticked.
-      </p>
-      {step.items.length > 0 && (
-        // `items-start` is what keeps each row the width of its own task
-        // rather than the width of the cell: a column flex container stretches
-        // its children by default, and a one-line task in a full-bleed band
-        // reads as an empty field waiting to be filled.
-        <ul className="m-0 flex list-none flex-col items-start gap-1 p-0">
-          {step.items.map((item) => (
-            <li
-              key={item.id}
-              className="flex max-w-full items-start gap-2 rounded-control border border-border bg-subtle px-2.5 py-1.5 text-sm text-content"
-            >
-              <span className="min-w-0 flex-1 break-words">
-                {item.label}
-                {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
-              </span>
-              {editable && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${item.label}`}
-                  className="rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  onClick={() => doRemove(item.id, item.label)}
-                >
-                  ✕
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+    <>
+      {step.items.map((item) => (
+        <LeafRow key={item.id} depth={depth} restSpan={restSpan}>
+          <span className="flex min-w-0 flex-1 items-start gap-2">
+            <input
+              type="checkbox"
+              checked={false}
+              readOnly
+              aria-hidden
+              tabIndex={-1}
+              title="Ticked on the client page, not here"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-border"
+            />
+            <span className="min-w-0 break-words text-content">
+              {item.label}
+              {!item.mandatory && <span className="text-content-muted"> (optional)</span>}
+            </span>
+            {editable && (
+              <button
+                type="button"
+                aria-label={`Remove ${item.label}`}
+                className="ml-auto shrink-0 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => doRemove(item.id, item.label)}
+              >
+                ✕
+              </button>
+            )}
+          </span>
+        </LeafRow>
+      ))}
       {editable && (
-        // `w-full` on the form and `flex-1 min-w-0` on the input: the cell is
-        // as wide as the table, and a fixed `w-56` box in it was the one thing
-        // on the row that did not use the width it was given.
-        <form onSubmit={submit} className="mt-1.5 flex w-full items-center gap-2">
-          <Input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Add a task…"
-            aria-label={`New task list item for ${step.name}`}
-            className="h-8 min-w-0 flex-1 text-caption"
-          />
-          <Button
-            type="submit"
-            size="sm"
-            variant="secondary"
-            className="shrink-0"
-            disabled={addItem.isPending || !label.trim()}
-          >
-            + Add
-          </Button>
-        </form>
+        <LeafRow depth={depth} restSpan={restSpan}>
+          <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-2">
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Add a task…"
+              aria-label={`New task list item for ${step.name}`}
+              className="h-8 min-w-0 flex-1 text-caption"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="secondary"
+              className="shrink-0"
+              disabled={addItem.isPending || !label.trim()}
+            >
+              + Add
+            </Button>
+          </form>
+        </LeafRow>
       )}
-    </div>
+    </>
   )
 }
 
 /**
  * The required-document checklist, kept from the backend's own contract even
  * though the mockup's template editor omits it — the client page's document
- * gate has to be authored somewhere, and this is its only write surface.
- * Same chip-editor shape as the Task List so the two read as one pattern.
+ * gate has to be authored somewhere, and this is its only write surface. Same
+ * child-row shape as the Task List, marked 📎 so the two are distinguishable
+ * at a glance without a heading between them.
  */
-function StepDocChips({
+function StepDocRows({
   templateId,
   step,
+  depth,
   editable,
+  restSpan,
 }: {
   templateId: number
   step: ObJourneyTemplateStep
+  depth: number
   editable: boolean
+  restSpan: number
 }) {
   const addDoc = useAddJourneyTemplateStepDoc()
   const removeDoc = useRemoveJourneyTemplateStepDoc()
@@ -716,59 +979,54 @@ function StepDocChips({
     }
   }
 
-  if (!editable && step.docs.length === 0) return null
-
   return (
-    <div className="mt-2">
-      <p className="m-0 mb-1.5 text-caption text-content-muted">
-        Required documents — the step's document gate on the client page
-      </p>
-      {step.docs.length > 0 && (
-        <ul className="m-0 flex list-none flex-col items-start gap-1 p-0">
-          {step.docs.map((doc) => (
-            <li
-              key={doc.id}
-              className="flex max-w-full items-start gap-2 rounded-control border border-border bg-subtle px-2.5 py-1.5 text-sm text-content"
-            >
-              <span className="min-w-0 flex-1 break-words">
-                📎 {doc.label}
-                {!doc.required && <span className="text-content-muted"> (optional)</span>}
-              </span>
-              {editable && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${doc.label}`}
-                  className="rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  onClick={() => doRemove(doc.id, doc.label)}
-                >
-                  ✕
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+    <>
+      {step.docs.map((doc) => (
+        <LeafRow key={doc.id} depth={depth} restSpan={restSpan}>
+          <span className="flex min-w-0 flex-1 items-start gap-2">
+            <span aria-hidden className="mt-0.5 w-4 shrink-0 text-center leading-none">
+              📎
+            </span>
+            <span className="min-w-0 break-words text-content">
+              {doc.label}
+              {!doc.required && <span className="text-content-muted"> (optional)</span>}
+            </span>
+            {editable && (
+              <button
+                type="button"
+                aria-label={`Remove ${doc.label}`}
+                className="ml-auto shrink-0 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => doRemove(doc.id, doc.label)}
+              >
+                ✕
+              </button>
+            )}
+          </span>
+        </LeafRow>
+      ))}
       {editable && (
-        <form onSubmit={submit} className="mt-1.5 flex w-full items-center gap-2">
-          <Input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Add a document…"
-            aria-label={`New required document for ${step.name}`}
-            className="h-8 min-w-0 flex-1 text-caption"
-          />
-          <Button
-            type="submit"
-            size="sm"
-            variant="secondary"
-            className="shrink-0"
-            disabled={addDoc.isPending || !label.trim()}
-          >
-            + Add
-          </Button>
-        </form>
+        <LeafRow depth={depth} restSpan={restSpan}>
+          <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-2">
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Add a document…"
+              aria-label={`New required document for ${step.name}`}
+              className="h-8 min-w-0 flex-1 text-caption"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="secondary"
+              className="shrink-0"
+              disabled={addDoc.isPending || !label.trim()}
+            >
+              + Add
+            </Button>
+          </form>
+        </LeafRow>
       )}
-    </div>
+    </>
   )
 }
 
@@ -1042,6 +1300,32 @@ function ParallelGroupsPanel({
 }
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Depth-first, skipping anything a collapsed ancestor hides. The tree is a
+ * tree; the table is a list of rows — this is the only place the two meet.
+ */
+function flattenVisible(
+  roots: readonly StepNode<ObJourneyTemplateStep>[],
+  collapsed: ReadonlySet<number>,
+): StepNode<ObJourneyTemplateStep>[] {
+  const rows: StepNode<ObJourneyTemplateStep>[] = []
+  const walk = (nodes: readonly StepNode<ObJourneyTemplateStep>[]) => {
+    for (const node of nodes) {
+      rows.push(node)
+      if (!collapsed.has(node.step.id)) walk(node.children)
+    }
+  }
+  walk(roots)
+  return rows
+}
+
+/** Up to two initials for the responsible avatar — `avatar-stack`'s own rule. */
+function initials(name: string): string {
+  const parts = name.split(' ').filter(Boolean).slice(0, 2)
+  const letters = parts.map((part) => part[0]?.toUpperCase() ?? '').join('')
+  return letters || '?'
+}
 
 function moveItem<T>(items: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) {

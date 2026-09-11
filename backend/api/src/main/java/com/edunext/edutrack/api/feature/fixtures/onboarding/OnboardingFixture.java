@@ -498,17 +498,32 @@ public class OnboardingFixture {
         Instant publishedAt = Instant.now();
 
         for (TemplateSpec spec : OnboardingFixtureData.TEMPLATES) {
-            Long dependsOn = spec.dependsOnTemplateKey() == null
-                    ? null
-                    : byKey.get(spec.dependsOnTemplateKey()).templateId();
             long templateId = insert("""
                     INSERT INTO ob_journey_templates (product_id, name, version, is_active, sequence,
-                                                      depends_on_template_id, published_by, published_at,
-                                                      created_by)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                      published_by, published_at, created_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     productIds.get(spec.productKey()), spec.name(), spec.version(), spec.active() ? 1 : 0,
-                    spec.sequence(), dependsOn, admin, Timestamp.from(publishedAt), admin);
+                    spec.sequence(), admin, Timestamp.from(publishedAt), admin);
+
+            /*
+              The dependency set, one row each, after the template exists —
+              V20260911_1100 moved it off the template row. Every key must
+              already have been seeded: TEMPLATES is in dependency order, and
+              a forward reference here would be a null id rather than a
+              helpful error, so it is asserted rather than tolerated.
+            */
+            for (String dependsOnKey : spec.dependsOnTemplateKeys()) {
+                TemplateRefs dependency = byKey.get(dependsOnKey);
+                if (dependency == null) {
+                    throw new IllegalStateException("Fixture template " + spec.key()
+                            + " depends on " + dependsOnKey + ", which is seeded after it");
+                }
+                insert("""
+                        INSERT INTO ob_journey_template_dependencies (template_id, depends_on_template_id)
+                             VALUES (?, ?)
+                        """, templateId, dependency.templateId());
+            }
 
             List<Long> stepIds = new ArrayList<>();
             for (int i = 0; i < spec.steps().size(); i++) {

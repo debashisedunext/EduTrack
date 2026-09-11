@@ -7326,6 +7326,147 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
 
+  /onboarding/implementation-stages:
+    get:
+      tags: [onboarding-masters]
+      operationId: listObImplementationStages
+      summary: The implementation stage master (OB-15)
+      description: |
+        `ob_implementation_stages` — the vocabulary an implementation is
+        described in. Seeded with Configuration, Data Migration, Reports,
+        Training, Communication and Third Party Integration, and extended from
+        the screen rather than by a release: **these are values, not an enum**,
+        which is why the field on every schema below is a plain string and not
+        a closed list.
+
+        Ordered by `sequence`, 1-based and contiguous across the whole master.
+        The server owns that numbering — see the `PATCH`.
+
+        **Not paginated**, on the `/masters/task-types` argument that
+        `/onboarding/products` already reuses: a handful of rows, and the screen
+        draws the whole list because a position is only meaningful beside its
+        neighbours. The exemption is recorded in `check-conventions.py`.
+
+        `isActive: false` stages are returned and marked rather than filtered.
+        Retiring is the only way a stage goes away, and a retired one keeps its
+        slot so that bringing it back puts it where it was.
+      parameters:
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+          description: |
+            Omit for the whole master, which is what OB-15 asks for. `true` is
+            what a picker elsewhere would ask for — only live stages are
+            choosable.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObImplementationStageListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding-masters]
+      operationId: createObImplementationStage
+      summary: Add an implementation stage (OB-15) — OB Admin
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        OB Admin only. `name` is unique case-insensitively, and the service
+        refuses a duplicate with a field-keyed `409` rather than letting the
+        index refuse it with a message naming a MySQL constraint.
+
+        **Omit `sequence` to append**, which is what the "New stage" button
+        does. Supplying one inserts at that position and renumbers everything
+        after it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObImplementationStageWriteRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Send back as `If-Match` on the `PATCH`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObImplementationStageResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /onboarding/implementation-stages/{stageId}:
+    parameters: [{ $ref: '#/components/parameters/ObImplementationStageId' }]
+    get:
+      tags: [onboarding-masters]
+      operationId: getObImplementationStage
+      summary: One implementation stage (OB-15)
+      description: |
+        **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+        per CONVENTIONS.md §5 — the gap `GET /masters/task-types/{taskTypeId}`
+        closed for its own master.
+
+        The tag is taken over the content, `sequence` included. Somebody else
+        moving this stage while an edit form is open changes the position that
+        form is showing, so the position it is about to send means something
+        different from what its author intended — which is exactly the save
+        worth refusing.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObImplementationStageResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding-masters]
+      operationId: updateObImplementationStage
+      summary: Rename, reorder or retire an implementation stage (OB-15) — OB Admin
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        OB Admin only. Renaming to this stage's own name is fine — the
+        duplicate check ignores the row being edited, so the round trip of
+        opening the form, changing the position and saving does not fail on a
+        name nobody touched.
+
+        **`sequence` is a position the caller wants, not a column value to
+        store.** The server moves this row there and renumbers the master 1..N,
+        so the number that comes back is not necessarily the one that went in,
+        and **rows this response does not describe have moved** — everything
+        between the old position and the new one shifts by one. Refetch the
+        list rather than patching a cache from this body. Out-of-range
+        positions are clamped rather than refused: `400` means last, which is
+        what somebody typing it into a position box intends.
+
+        Setting `isActive: false` **retires the stage from the pickers and
+        changes nothing else**. It keeps its slot in the list, and anything
+        already recorded against it keeps rendering. There is no delete route:
+        a value that has been used somewhere has to stay resolvable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObImplementationStageWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObImplementationStageResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
   # ═══════════════════════════════════════════════ onboarding · journeys ══════
   #
   # C-102 · OB-07's template designer. Granularity follows the service layer
@@ -7468,23 +7609,33 @@ paths:
         `productId` is optional; omitting it leaves the service where it is,
         so renaming does not require knowing a product id.
 
-        **`409` once any client is on it** — any journey instantiated from any
-        version, archived or not. `ob_journeys.service_name` is denormalised at
-        instantiation and a service-level dependency is resolved by
-        `(product, service name)` rather than by template id (deliberately, so
-        a hold survives its dependency publishing a new version), so a rename
-        underneath a live journey breaks a lookup with no other key to fall
-        back on. The problem document carries `journeyCount`;
-        `ObJourneyTemplateSummary.serviceJourneyCount` is how a page knows
-        before the admin clicks. `409` also if the target product already has a
-        service by that name.
+        **Never refused for being in use**, in either field and at any number of
+        clients. Correcting a service clients are already on is the case this
+        route exists for. What each field does about the copy `ob_journeys`
+        denormalises at instantiation differs, and the difference is worth
+        knowing:
+
+        - **The name travels.** `service_name` is what
+          `uq_ob_journeys_client_service` and the service-level dependency hold
+          resolve a service by — keyed on `(product, service name)` rather than
+          template id, deliberately, so a hold survives its dependency
+          publishing a new version. So a rename re-stamps every journey of the
+          chain inside the same transaction and both lookups keep matching.
+        - **The product stays.** A journey's `productId` is half of
+          `fk_ob_journeys_application`, the key to that client's purchase; it
+          records what was bought, not where the catalogue files the service.
+          The templates are re-filed and journeys already running keep their
+          product. A consequence worth stating: those journeys stop being
+          recognised by the dependency hold, which is keyed on the chain's
+          *current* `(product, name)`. Holds already placed are unaffected —
+          they are released by journey id.
+
+        `409` only if the target product already has a service by that name.
 
         Note this is **not** gated on `publishedAt`, unlike the step routes. A
         name and a product are catalogue metadata rather than journey content —
         the same distinction `PUT .../depends-on` draws to justify working on a
-        published row — so what gates it is whether anybody was ever boarded on
-        it. A published service nobody bought is renameable; an unpublished
-        draft cannot have been bought at all.
+        published row.
 
         `If-Match` is required, not optional — `428` without one, `412` if it
         does not match. Read the tag from
@@ -7504,8 +7655,8 @@ paths:
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '409':
           description: |
-            A client is already on this service, or the target product already
-            has one by that name.
+            The target product already has a Module Service by that name. Never
+            for being in use — that gates `DELETE` alone.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -7686,15 +7837,20 @@ paths:
     put:
       tags: [onboarding-journeys]
       operationId: updateObJourneyTemplateDependsOn
-      summary: The catalogue's "Service depends on" picker (C-123)
+      summary: The catalogue's "Depends on" multi-select picker (C-123)
       parameters: [{ $ref: '#/components/parameters/IfMatch' }]
       description: |
-        `dependsOnTemplateId: null` clears the dependency — the service runs
-        unheld from journey start. Cross-product is allowed; a cycle is
-        not — `409` if the chosen dependency already depends, directly or
-        transitively, on this template. Works on a draft or the active
-        version alike: unlike a step's fields, this is catalogue metadata,
-        not journey content an in-flight instantiation has pinned.
+        `dependsOnTemplateIds` is the caller's whole desired set, not a
+        delta: every service this one waits behind, each named once. An
+        empty list clears every dependency and the service runs unheld from
+        journey start.
+
+        Cross-product is allowed; a cycle is not — `409` naming the
+        offending template if any chosen dependency already depends,
+        directly or transitively, on this one, and `404` if one of them does
+        not exist. Works on a draft or the active version alike: unlike a
+        step's fields, this is catalogue metadata, not journey content an
+        in-flight instantiation has pinned.
 
         `If-Match` is required, not optional — `428` without one, `412` if
         it does not match the template's current tag. Read the tag from
@@ -12456,6 +12612,17 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    ObImplementationStageId:
+      name: stageId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        The stage's own id, never its `sequence`. The two are both small
+        integers and a position is the one a person reads off the screen, so
+        this is worth saying: `sequence` is renumbered by every reorder, and a
+        route keyed on it would address a different row after somebody else's
+        save.
     ObJourneyTemplateId:
       name: templateId
       in: path
@@ -18268,14 +18435,18 @@ components:
             `/journey-templates/order` writes, driving instantiation and
             display order (plan §5 item 5). Null when there is no active
             template.
-        dependsOnTemplateId:
-          type: [integer, 'null']
-          format: int64
+        dependsOnTemplateIds:
+          type: array
+          items: { type: integer, format: int64 }
           description: |
-            C-123 · the active template's `dependsOnTemplateId` — the other
-            Module Service this one is held behind (plan §5 item 5), or null
-            for one that runs unheld. Also null when there is no active
-            template to have declared one.
+            C-123 · the active template's `dependsOnTemplateIds` — the other
+            Module Services this one is held behind (plan §5 item 5). Empty
+            for a service that runs unheld, and empty rather than absent when
+            there is no active template to have declared anything: a caller
+            deciding whether to draw a chain icon wants one branch, not two.
+
+            A single nullable `dependsOnTemplateId` until `V20260911_1100`
+            made the dependency a set.
       description: '`ob_products` — the catalogue journey templates bind to.'
     ObProductRef:
       type: object
@@ -18293,6 +18464,49 @@ components:
       properties:
         code: { type: string, maxLength: 32, pattern: '^[A-Z0-9_-]+$' }
         name: { type: string, maxLength: 160 }
+        isActive: { type: boolean, default: true }
+
+    # ── OB-15 · the implementation stage master ─────────────────────────────
+    ObImplementationStage:
+      type: object
+      required: [id, name, sequence, isActive]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, maxLength: 120 }
+        sequence:
+          type: integer
+          minimum: 1
+          description: |
+            1-based display position, contiguous across the whole master,
+            retired rows included.
+
+            **The server owns this.** It is renumbered on every write, so the
+            value read back after a save is not necessarily the one that was
+            sent. It is also not an identifier: address a stage by `id`.
+        isActive:
+          type: boolean
+          description: |
+            Retired stages stay in the list, in their own slot, and drop out of
+            the pickers. There is no delete — a value that has been used
+            somewhere has to stay resolvable.
+    ObImplementationStageWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 120 }
+        sequence:
+          type: integer
+          minimum: 1
+          description: |
+            The position this stage should end up at, 1-based — **not** a
+            column value to store as sent. The server moves the row there and
+            renumbers the rest, so typing `2` into the fifth row does what it
+            looks like rather than producing two rows sharing a 2. Out-of-range
+            values are clamped: a large number means last.
+
+            Omit it to say nothing about order — appends on a create, leaves
+            the position alone on a `PATCH`. That is a different thing from any
+            number this field could carry.
         isActive: { type: boolean, default: true }
 
     # ── C-102 · OB-07 journey template designer ─────────────────────────────
@@ -18320,13 +18534,18 @@ components:
         sequence:
           type: integer
           description: Service order on the OB-07 catalogue — the `↑/↓` control one level up, over products rather than steps.
-        dependsOnTemplateId:
-          type: [integer, 'null']
-          format: int64
+        dependsOnTemplateIds:
+          type: array
+          items: { type: integer, format: int64 }
           description: |
-            Cross-product service dependency (plan §5.5) — e.g. Biometric
-            Device Rollout after the ERP service. Cycle-freedom here is
-            enforced by C-123, not by this table's foreign key alone.
+            Cross-product service dependencies (plan §5.5) — e.g. Biometric
+            Device Rollout after the ERP service *and* the network survey.
+            Ascending, empty for a service that runs unheld.
+
+            Rows of `ob_journey_template_dependencies` since
+            `V20260911_1100`, not a column on the template. Cycle-freedom is
+            enforced by C-123: the table's `CHECK` refuses only the one-hop
+            case, and no constraint can perform the transitive walk.
         publishedBy: { type: [integer, 'null'], format: int64 }
         publishedAt:
           type: [string, 'null']
@@ -18340,7 +18559,10 @@ components:
         productId: { type: integer, format: int64 }
         name: { type: string, maxLength: 160 }
         sequence: { type: integer }
-        dependsOnTemplateId: { type: [integer, 'null'], format: int64 }
+        dependsOnTemplateIds:
+          type: array
+          items: { type: integer, format: int64 }
+          description: 'Omitted is the same as empty: a service that runs unheld.'
     ObJourneyTemplateResponse:
       type: object
       required: [data]
@@ -18363,7 +18585,9 @@ components:
           type: boolean
           description: True for at most one service per product, across all of them.
         sequence: { type: integer }
-        dependsOnTemplateId: { type: [integer, 'null'], format: int64 }
+        dependsOnTemplateIds:
+          type: array
+          items: { type: integer, format: int64 }
         publishedAt: { type: [string, 'null'], format: date-time }
         stepCount:
           type: integer
@@ -18380,19 +18604,21 @@ components:
           format: int64
           description: |
             C-124 · client journeys instantiated from **any version of this
-            service**, archived ones included — the number `PATCH` and `DELETE`
-            on this resource both refuse above zero.
+            service**, archived ones included — the number `DELETE` refuses
+            above zero. **`PATCH` does not consult it at all**, so a page that
+            disables its edit form by this number is disabling something the
+            server would have accepted: it speaks for Delete, and for warning
+            that a product move leaves these journeys where they were bought.
 
             Chain-wide, not this version's own: every row of one service
             carries the same total. The catalogue card is the *head* of a
             version chain, so a service whose v1 carries three clients and
             whose v3 carries none is in use, and a per-row count would have
-            reported `0` on the very card that draws the Edit and Delete
-            buttons.
+            reported `0` on the very card that draws the Delete button.
 
-            On the row for `totalTatDays`'s reason — the page disables both
-            controls by it, and without it the only way to find out is to let
-            an admin click and answer `409`.
+            On the row for `totalTatDays`'s reason — the page disables Delete
+            by it, and without it the only way to find out is to let an admin
+            click and answer `409`.
       description: One Module Service as the OB-07 catalogue lists it.
     ObJourneyTemplateListResponse:
       type: object
@@ -18540,12 +18766,18 @@ components:
 
     ObJourneyTemplateDependsOnRequest:
       type: object
-      required: [dependsOnTemplateId]
+      required: [dependsOnTemplateIds]
       properties:
-        dependsOnTemplateId:
-          type: [integer, 'null']
-          format: int64
-          description: 'Null clears the dependency: the service runs unheld from journey start.'
+        dependsOnTemplateIds:
+          type: array
+          items: { type: integer, format: int64 }
+          description: |
+            The whole desired set, not a delta — every service this one waits
+            behind, each named once. An empty list clears every dependency
+            and the service runs unheld from journey start.
+
+            Required but not `minItems: 1`: "nothing" is a legal answer here,
+            where an absent body would be a caller who forgot one.
 
     ObJourneyTemplateDetail:
       allOf:
@@ -19518,6 +19750,15 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/ObProduct' } }
+    ObImplementationStageResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObImplementationStage' } }
+    ObImplementationStageListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObImplementationStage' } }
     ObClientDetailResponse:
       type: object
       required: [data]

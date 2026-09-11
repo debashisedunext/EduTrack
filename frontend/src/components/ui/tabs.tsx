@@ -15,6 +15,16 @@ export interface TabsProps {
   /** Accessible name for the tablist — every screen's strip needs its own. */
   ariaLabel: string
   className?: string
+  /**
+   * How the strip is drawn. `underline` is the original and stays the default,
+   * so the two screens that already mount this control are untouched.
+   *
+   * `segmented` draws each tab as its own bordered cell, divided from its
+   * neighbours — asked for on OB-02, where the strip is the page's only
+   * navigation now that the board's heading and its action button are gone
+   * and a row of four flat labels had nothing to read as a control.
+   */
+  variant?: 'underline' | 'segmented'
 }
 
 /**
@@ -27,7 +37,15 @@ export interface TabsProps {
  * focus, which only suits a caller whose panels are all already loaded — a
  * caller that fetches per-tab should not assume that holds without checking.
  */
-export function Tabs({ tabs, activeId, onSelect, ariaLabel, className }: TabsProps) {
+export function Tabs({
+  tabs,
+  activeId,
+  onSelect,
+  ariaLabel,
+  className,
+  variant = 'underline',
+}: TabsProps) {
+  const segmented = variant === 'segmented'
   const instanceId = React.useId()
   const refs = React.useRef<Record<string, HTMLButtonElement | null>>({})
   const activeIndex = Math.max(
@@ -68,7 +86,10 @@ export function Tabs({ tabs, activeId, onSelect, ariaLabel, className }: TabsPro
         role="tablist"
         aria-label={ariaLabel}
         onKeyDown={onKeyDown}
-        className="flex gap-1 overflow-x-auto border-b border-border px-2"
+        className={cn(
+          'flex overflow-x-auto border-b border-border',
+          segmented ? 'gap-0' : 'gap-1 px-2',
+        )}
       >
         {tabs.map((tab) => {
           const selected = tab.id === active.id
@@ -86,10 +107,16 @@ export function Tabs({ tabs, activeId, onSelect, ariaLabel, className }: TabsPro
               tabIndex={selected ? 0 : -1}
               onClick={() => onSelect(tab.id)}
               className={cn(
-                '-mb-px whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                '-mb-px whitespace-nowrap border-b-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                segmented
+                  ? 'flex-1 border-r border-r-border px-4 py-3 last:border-r-0'
+                  : 'px-3 py-2.5',
                 selected
-                  ? 'border-b-primary text-primary'
-                  : 'border-b-transparent text-content-muted hover:text-content',
+                  ? cn('border-b-primary text-primary', segmented && 'bg-primary-soft')
+                  : cn(
+                      'border-b-transparent text-content-muted hover:text-content',
+                      segmented && 'hover:bg-subtle',
+                    ),
               )}
             >
               {tab.label}

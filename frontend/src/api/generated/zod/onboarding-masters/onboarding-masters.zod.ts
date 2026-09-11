@@ -88,7 +88,7 @@ export const listObProductsResponse = zod.object({
   "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
   "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
   "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
-  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('C-123 · the active template\'s `dependsOnTemplateIds` — the other\nModule Services this one is held behind (plan §5 item 5). Empty\nfor a service that runs unheld, and empty rather than absent when\nthere is no active template to have declared anything: a caller\ndeciding whether to draw a chain icon wants one branch, not two.\n\nA single nullable `dependsOnTemplateId` until `V20260911_1100`\nmade the dependency a set.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.'))
 })
 
@@ -158,7 +158,7 @@ export const getObProductResponse = zod.object({
   "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
   "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
   "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
-  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('C-123 · the active template\'s `dependsOnTemplateIds` — the other\nModule Services this one is held behind (plan §5 item 5). Empty\nfor a service that runs unheld, and empty rather than absent when\nthere is no active template to have declared anything: a caller\ndeciding whether to draw a chain icon wants one branch, not two.\n\nA single nullable `dependsOnTemplateId` until `V20260911_1100`\nmade the dependency a set.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.')
 })
 
@@ -216,8 +216,160 @@ export const updateObProductResponse = zod.object({
   "journeyCount": zod.number().optional().describe('Journeys instantiated from this product, across all clients. Inside\nthe `ETag`, because it is what a retire decision is made against.\n'),
   "activeTemplateId": zod.number().nullish().describe('C-123 · the active template\'s own id, null when there is none —\nthe OB-07 card\'s link into the designer, and the id\n`PUT \/onboarding\/journey-templates\/order` and\n`PUT \/onboarding\/journey-templates\/{templateId}\/depends-on` take.\nThe product id itself is never the argument to either.\n'),
   "templateSequence": zod.number().nullish().describe('C-123 · the active template\'s own `sequence` — what\n`\/journey-templates\/order` writes, driving instantiation and\ndisplay order (plan §5 item 5). Null when there is no active\ntemplate.\n'),
-  "dependsOnTemplateId": zod.number().nullish().describe('C-123 · the active template\'s `dependsOnTemplateId` — the other\nModule Service this one is held behind (plan §5 item 5), or null\nfor one that runs unheld. Also null when there is no active\ntemplate to have declared one.\n')
+  "dependsOnTemplateIds": zod.array(zod.number()).optional().describe('C-123 · the active template\'s `dependsOnTemplateIds` — the other\nModule Services this one is held behind (plan §5 item 5). Empty\nfor a service that runs unheld, and empty rather than absent when\nthere is no active template to have declared anything: a caller\ndeciding whether to draw a chain icon wants one branch, not two.\n\nA single nullable `dependsOnTemplateId` until `V20260911_1100`\nmade the dependency a set.\n')
 }).describe('`ob_products` — the catalogue journey templates bind to.')
+})
+
+/**
+ * `ob_implementation_stages` — the vocabulary an implementation is
+described in. Seeded with Configuration, Data Migration, Reports,
+Training, Communication and Third Party Integration, and extended from
+the screen rather than by a release: **these are values, not an enum**,
+which is why the field on every schema below is a plain string and not
+a closed list.
+
+Ordered by `sequence`, 1-based and contiguous across the whole master.
+The server owns that numbering — see the `PATCH`.
+
+**Not paginated**, on the `/masters/task-types` argument that
+`/onboarding/products` already reuses: a handful of rows, and the screen
+draws the whole list because a position is only meaningful beside its
+neighbours. The exemption is recorded in `check-conventions.py`.
+
+`isActive: false` stages are returned and marked rather than filtered.
+Retiring is the only way a stage goes away, and a retired one keeps its
+slot so that bringing it back puts it where it was.
+
+ * @summary The implementation stage master (OB-15)
+ */
+export const listObImplementationStagesQueryParams = zod.object({
+  "isActive": zod.boolean().optional().describe('Omit for the whole master, which is what OB-15 asks for. `true` is\nwhat a picker elsewhere would ask for — only live stages are\nchoosable.\n')
+})
+
+export const listObImplementationStagesResponseDataItemNameMax = 120;
+
+
+
+
+export const listObImplementationStagesResponse = zod.object({
+  "data": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObImplementationStagesResponseDataItemNameMax),
+  "sequence": zod.number().min(1).describe('1-based display position, contiguous across the whole master,\nretired rows included.\n\n\*\*The server owns this.\*\* It is renumbered on every write, so the\nvalue read back after a save is not necessarily the one that was\nsent. It is also not an identifier: address a stage by `id`.\n'),
+  "isActive": zod.boolean().describe('Retired stages stay in the list, in their own slot, and drop out of\nthe pickers. There is no delete — a value that has been used\nsomewhere has to stay resolvable.\n')
+}))
+})
+
+/**
+ * OB Admin only. `name` is unique case-insensitively, and the service
+refuses a duplicate with a field-keyed `409` rather than letting the
+index refuse it with a message naming a MySQL constraint.
+
+**Omit `sequence` to append**, which is what the "New stage" button
+does. Supplying one inserts at that position and renumbers everything
+after it.
+
+ * @summary Add an implementation stage (OB-15) — OB Admin
+ */
+export const createObImplementationStageHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const createObImplementationStageBodyNameMax = 120;
+
+
+export const createObImplementationStageBodyIsActiveDefault = true;
+
+export const createObImplementationStageBody = zod.object({
+  "name": zod.string().max(createObImplementationStageBodyNameMax),
+  "sequence": zod.number().min(1).optional().describe('The position this stage should end up at, 1-based — \*\*not\*\* a\ncolumn value to store as sent. The server moves the row there and\nrenumbers the rest, so typing `2` into the fifth row does what it\nlooks like rather than producing two rows sharing a 2. Out-of-range\nvalues are clamped: a large number means last.\n\nOmit it to say nothing about order — appends on a create, leaves\nthe position alone on a `PATCH`. That is a different thing from any\nnumber this field could carry.\n'),
+  "isActive": zod.boolean().default(createObImplementationStageBodyIsActiveDefault)
+})
+
+/**
+ * **This exists to carry the `ETag` the `PATCH` requires as `If-Match`**,
+per CONVENTIONS.md §5 — the gap `GET /masters/task-types/{taskTypeId}`
+closed for its own master.
+
+The tag is taken over the content, `sequence` included. Somebody else
+moving this stage while an edit form is open changes the position that
+form is showing, so the position it is about to send means something
+different from what its author intended — which is exactly the save
+worth refusing.
+
+ * @summary One implementation stage (OB-15)
+ */
+export const getObImplementationStageParams = zod.object({
+  "stageId": zod.number().describe('The stage\'s own id, never its `sequence`. The two are both small\nintegers and a position is the one a person reads off the screen, so\nthis is worth saying: `sequence` is renumbered by every reorder, and a\nroute keyed on it would address a different row after somebody else\'s\nsave.\n')
+})
+
+export const getObImplementationStageResponseDataNameMax = 120;
+
+
+
+
+export const getObImplementationStageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getObImplementationStageResponseDataNameMax),
+  "sequence": zod.number().min(1).describe('1-based display position, contiguous across the whole master,\nretired rows included.\n\n\*\*The server owns this.\*\* It is renumbered on every write, so the\nvalue read back after a save is not necessarily the one that was\nsent. It is also not an identifier: address a stage by `id`.\n'),
+  "isActive": zod.boolean().describe('Retired stages stay in the list, in their own slot, and drop out of\nthe pickers. There is no delete — a value that has been used\nsomewhere has to stay resolvable.\n')
+})
+})
+
+/**
+ * OB Admin only. Renaming to this stage's own name is fine — the
+duplicate check ignores the row being edited, so the round trip of
+opening the form, changing the position and saving does not fail on a
+name nobody touched.
+
+**`sequence` is a position the caller wants, not a column value to
+store.** The server moves this row there and renumbers the master 1..N,
+so the number that comes back is not necessarily the one that went in,
+and **rows this response does not describe have moved** — everything
+between the old position and the new one shifts by one. Refetch the
+list rather than patching a cache from this body. Out-of-range
+positions are clamped rather than refused: `400` means last, which is
+what somebody typing it into a position box intends.
+
+Setting `isActive: false` **retires the stage from the pickers and
+changes nothing else**. It keeps its slot in the list, and anything
+already recorded against it keeps rendering. There is no delete route:
+a value that has been used somewhere has to stay resolvable.
+
+ * @summary Rename, reorder or retire an implementation stage (OB-15) — OB Admin
+ */
+export const updateObImplementationStageParams = zod.object({
+  "stageId": zod.number().describe('The stage\'s own id, never its `sequence`. The two are both small\nintegers and a position is the one a person reads off the screen, so\nthis is worth saying: `sequence` is renumbered by every reorder, and a\nroute keyed on it would address a different row after somebody else\'s\nsave.\n')
+})
+
+export const updateObImplementationStageHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObImplementationStageBodyNameMax = 120;
+
+
+export const updateObImplementationStageBodyIsActiveDefault = true;
+
+export const updateObImplementationStageBody = zod.object({
+  "name": zod.string().max(updateObImplementationStageBodyNameMax),
+  "sequence": zod.number().min(1).optional().describe('The position this stage should end up at, 1-based — \*\*not\*\* a\ncolumn value to store as sent. The server moves the row there and\nrenumbers the rest, so typing `2` into the fifth row does what it\nlooks like rather than producing two rows sharing a 2. Out-of-range\nvalues are clamped: a large number means last.\n\nOmit it to say nothing about order — appends on a create, leaves\nthe position alone on a `PATCH`. That is a different thing from any\nnumber this field could carry.\n'),
+  "isActive": zod.boolean().default(updateObImplementationStageBodyIsActiveDefault)
+})
+
+export const updateObImplementationStageResponseDataNameMax = 120;
+
+
+
+
+export const updateObImplementationStageResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(updateObImplementationStageResponseDataNameMax),
+  "sequence": zod.number().min(1).describe('1-based display position, contiguous across the whole master,\nretired rows included.\n\n\*\*The server owns this.\*\* It is renumbered on every write, so the\nvalue read back after a save is not necessarily the one that was\nsent. It is also not an identifier: address a stage by `id`.\n'),
+  "isActive": zod.boolean().describe('Retired stages stay in the list, in their own slot, and drop out of\nthe pickers. There is no delete — a value that has been used\nsomewhere has to stay resolvable.\n')
+})
 })
 
 /**

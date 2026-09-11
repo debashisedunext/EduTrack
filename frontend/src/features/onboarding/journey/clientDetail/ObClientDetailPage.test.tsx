@@ -11,7 +11,7 @@ import { ObClientDetailPage } from './ObClientDetailPage'
  *
  * The journeys, ribbons, step panels and §8 sign-offs moved to
  * `ObClientProductPage` and are tested in its own file. What is asserted here
- * is the client page as it stands: the gate, the product cards, the escalation
+ * is the client page as it stands: the gate, the escalation
  * banner, the LIVE banner and §9's closing pair.
  *
  * The seeded clients are the fixture, deliberately, because they are the ones
@@ -222,106 +222,41 @@ describe('ObClientDetailPage', () => {
   })
 
   /**
-   * §9's middle row, as one card per purchased product.
+   * §9's middle row is **not on this page**.
    *
    * The journey accordions, the ribbons, the step panels and §8's sign-off
-   * panel moved to `ObClientProductPage` and are tested there — the reasons
-   * are in `ObClientDetailPage`'s own docstring. What this page owes a reader
-   * now is the choice: which products, how each is doing, and a link that
-   * opens one.
+   * panel live on `ObClientProductPage` and are tested there. The product
+   * chooser that used to stand in for them here is gone too: OB-03's Products
+   * Bought column links straight into a product's ribbons, so a second grid of
+   * the same links was restating what the header already counts.
    */
-  describe('the product cards', () => {
-    it('draws one card per purchased product, each linking to that product', async () => {
+  describe('no product section', () => {
+    it('draws no Products region and no product links', async () => {
       renderClient(1)
       await screen.findByText('GreenValley International School', undefined, SLOW)
+      await screen.findByRole('heading', { name: 'Client info' }, SLOW)
 
-      const products = within(
-        screen.getByRole('region', { name: 'Products' }),
-      ).getAllByRole('link')
-      expect(products).toHaveLength(2)
-      expect(products[0]).toHaveAttribute('href', '/onboarding/clients/1/products/1')
-      expect(products[1]).toHaveAttribute('href', '/onboarding/clients/1/products/2')
+      expect(screen.queryByRole('region', { name: 'Products' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /Open EduTrack ERP/ })).not.toBeInTheDocument()
     })
 
-    /**
-     * A card is a link and its whole state has to be in its name: the figures
-     * inside it are colour and glyphs, and a reader tabbing the page hears
-     * only the accessible name.
-     */
-    it('says how each product is doing in its own name', async () => {
+    /** The header still says what was bought — the count is a fact about the
+     * client, and it is the one thing the removed grid carried that a reader
+     * cannot get from the gate or the info card. */
+    it('still counts the purchased products in the header', async () => {
       renderClient(1)
-      await screen.findByText('GreenValley International School', undefined, SLOW)
-
-      expect(
-        screen.getByRole('link', { name: 'Open EduTrack ERP — 100% complete, all services settled' }),
-      ).toBeInTheDocument()
-    })
-
-    /**
-     * A meter in services rather than a bar in percent — `PrereqAccordion`'s
-     * argument, for the same reason: this is a measurement of a known set, and
-     * "8 of 8" can be checked against what the reader can see while "100%"
-     * cannot.
-     */
-    it('measures progress in services, not only as a bar', async () => {
-      renderClient(1)
-      const meter = await screen.findByRole('meter', { name: 'EduTrack ERP services complete' }, SLOW)
-      expect(meter).toHaveAttribute('aria-valuetext', '8 of 8 services complete')
-      expect(meter).toHaveAttribute('aria-valuemax', '8')
-    })
-
-    /** The licence is what the client is paying for, and a reader choosing
-     * between two products is choosing between two purchases. */
-    it('carries the licence the product was bought on', async () => {
-      renderClient(1)
-      const card = await screen.findByRole('link', { name: /Open EduTrack ERP/ }, SLOW)
-      expect(within(card).getByText(/Enterprise · 120 units/)).toBeInTheDocument()
-    })
-
-    /**
-     * A locked gate and a sibling hold are different facts and OB-03's list
-     * already refuses to merge them. The card refuses too: a reader told the
-     * wrong one goes and clears prerequisites that were already cleared.
-     */
-    it('tells a locked gate apart from a sibling hold', async () => {
-      renderClient(3)
-      await screen.findByText('Horizon Academy', undefined, SLOW)
-
-      const products = screen.getByRole('region', { name: 'Products' })
-      expect(within(products).getByText('Held for another service')).toBeInTheDocument()
-      expect(within(products).queryByText('Prerequisites pending')).not.toBeInTheDocument()
-    })
-
-    it('shows a locked product as prerequisites pending rather than as held', async () => {
-      renderClient(7)
-      await screen.findByText('Little Scholars Preschool', undefined, SLOW)
-
-      const products = screen.getByRole('region', { name: 'Products' })
-      expect(within(products).getByText('Prerequisites pending')).toBeInTheDocument()
-      expect(within(products).queryByText('Held for another service')).not.toBeInTheDocument()
-    })
-
-    /**
-     * C-126 · the product carrying an open escalation is the one to open
-     * first, and that is not derivable from RAG — Sunrise's migration is both
-     * breached and escalated, and plenty of breached services are neither.
-     */
-    it('flags the product carrying an open escalation', async () => {
-      renderClient(2)
-      const card = await screen.findByRole('link', { name: /Open EduTrack ERP/ }, SLOW)
-      expect(await within(card).findByText('1 open escalation', undefined, SLOW)).toBeInTheDocument()
+      expect(await screen.findByText('2 products', undefined, SLOW)).toBeInTheDocument()
     })
 
     /**
      * The contract splits the strip from the ribbon so that "a client with six
      * journeys does not pay for six ribbons on first paint". With the ribbons
-     * a click away this page pays for **none** — the strongest form of that
-     * rule, and the one that regresses the moment somebody puts a ribbon back
-     * on a card to preview it.
+     * on their own page this one pays for **none** — the strongest form of
+     * that rule, and the one that regresses the moment somebody puts a ribbon
+     * back on this page to preview it.
      */
-    it('fetches no journey ribbon at all — the cards are the whole page', async () => {
+    it('fetches no journey ribbon at all', async () => {
       renderClient(1)
-      await screen.findByRole('region', { name: 'Products' }, SLOW)
       await screen.findByRole('heading', { name: 'Client info' }, SLOW)
 
       expect(screen.queryByRole('list', { name: 'Journey steps' })).not.toBeInTheDocument()

@@ -420,23 +420,33 @@ service.
 `productId` is optional; omitting it leaves the service where it is,
 so renaming does not require knowing a product id.
 
-**`409` once any client is on it** — any journey instantiated from any
-version, archived or not. `ob_journeys.service_name` is denormalised at
-instantiation and a service-level dependency is resolved by
-`(product, service name)` rather than by template id (deliberately, so
-a hold survives its dependency publishing a new version), so a rename
-underneath a live journey breaks a lookup with no other key to fall
-back on. The problem document carries `journeyCount`;
-`ObJourneyTemplateSummary.serviceJourneyCount` is how a page knows
-before the admin clicks. `409` also if the target product already has a
-service by that name.
+**Never refused for being in use**, in either field and at any number of
+clients. Correcting a service clients are already on is the case this
+route exists for. What each field does about the copy `ob_journeys`
+denormalises at instantiation differs, and the difference is worth
+knowing:
+
+- **The name travels.** `service_name` is what
+  `uq_ob_journeys_client_service` and the service-level dependency hold
+  resolve a service by — keyed on `(product, service name)` rather than
+  template id, deliberately, so a hold survives its dependency
+  publishing a new version. So a rename re-stamps every journey of the
+  chain inside the same transaction and both lookups keep matching.
+- **The product stays.** A journey's `productId` is half of
+  `fk_ob_journeys_application`, the key to that client's purchase; it
+  records what was bought, not where the catalogue files the service.
+  The templates are re-filed and journeys already running keep their
+  product. A consequence worth stating: those journeys stop being
+  recognised by the dependency hold, which is keyed on the chain's
+  *current* `(product, name)`. Holds already placed are unaffected —
+  they are released by journey id.
+
+`409` only if the target product already has a service by that name.
 
 Note this is **not** gated on `publishedAt`, unlike the step routes. A
 name and a product are catalogue metadata rather than journey content —
 the same distinction `PUT .../depends-on` draws to justify working on a
-published row — so what gates it is whether anybody was ever boarded on
-it. A published service nobody bought is renameable; an unpublished
-draft cannot have been bought at all.
+published row.
 
 `If-Match` is required, not optional — `428` without one, `412` if it
 does not match. Read the tag from
@@ -874,18 +884,23 @@ export const useReorderObJourneyTemplateCatalogue = <TError = Problem | ObModule
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * `dependsOnTemplateId: null` clears the dependency — the service runs
-unheld from journey start. Cross-product is allowed; a cycle is
-not — `409` if the chosen dependency already depends, directly or
-transitively, on this template. Works on a draft or the active
-version alike: unlike a step's fields, this is catalogue metadata,
-not journey content an in-flight instantiation has pinned.
+ * `dependsOnTemplateIds` is the caller's whole desired set, not a
+delta: every service this one waits behind, each named once. An
+empty list clears every dependency and the service runs unheld from
+journey start.
+
+Cross-product is allowed; a cycle is not — `409` naming the
+offending template if any chosen dependency already depends,
+directly or transitively, on this one, and `404` if one of them does
+not exist. Works on a draft or the active version alike: unlike a
+step's fields, this is catalogue metadata, not journey content an
+in-flight instantiation has pinned.
 
 `If-Match` is required, not optional — `428` without one, `412` if
 it does not match the template's current tag. Read the tag from
 `GET /onboarding/journey-templates/{templateId}`.
 
- * @summary The catalogue's "Service depends on" picker (C-123)
+ * @summary The catalogue's "Depends on" multi-select picker (C-123)
  */
 export const updateObJourneyTemplateDependsOn = (
     templateId: number,
@@ -933,7 +948,7 @@ const {mutation: mutationOptions} = options ?
     export type UpdateObJourneyTemplateDependsOnMutationError = ObModuleGatedResponse | Problem | PreconditionFailedResponse
 
     /**
- * @summary The catalogue's "Service depends on" picker (C-123)
+ * @summary The catalogue's "Depends on" multi-select picker (C-123)
  */
 export const useUpdateObJourneyTemplateDependsOn = <TError = ObModuleGatedResponse | Problem | PreconditionFailedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateDependsOn>>, TError,{templateId: number;data: ObJourneyTemplateDependsOnRequest}, TContext>, }

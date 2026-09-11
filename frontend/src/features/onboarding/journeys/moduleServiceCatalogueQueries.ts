@@ -28,7 +28,7 @@ const TEMPLATES_KEY = ['/onboarding/journey-templates'] as const
 
 function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: TEMPLATES_KEY })
-  // `sequence`, `activeTemplateId` and `dependsOnTemplateId` are on the
+  // `sequence`, `activeTemplateId` and `dependsOnTemplateIds` are on the
   // product read too (ObProductDtos.Product), so OB-07's cards and the OB-04
   // picker would otherwise disagree about the order until one of them refetched.
   void queryClient.invalidateQueries({ queryKey: PRODUCTS_KEY })
@@ -55,10 +55,15 @@ export function useReorderModuleServiceCatalogue() {
 }
 
 /**
- * The "Service depends on" picker. `If-Match` is required by the route —
- * `journeyTemplateQueries.ts`'s `useReorderJourneyTemplateSteps` makes the
- * identical call for the identical reason, never defaulted to `*` on a null
- * tag: the route itself refuses a missing precondition with `428`.
+ * The "Depends on" picker, which is multi-select. `If-Match` is required by
+ * the route — `journeyTemplateQueries.ts`'s `useReorderJourneyTemplateSteps`
+ * makes the identical call for the identical reason, never defaulted to `*`
+ * on a null tag: the route itself refuses a missing precondition with `428`.
+ *
+ * `dependsOnTemplateIds` is the whole desired set on every call, not a delta
+ * — the route's own contract, and the reason two ticks in a row cannot
+ * interleave into a set neither of them asked for. An empty array clears
+ * every dependency.
  */
 export function useUpdateModuleServiceDependsOn() {
   const queryClient = useQueryClient()
@@ -66,14 +71,14 @@ export function useUpdateModuleServiceDependsOn() {
   return useMutation<
     ObJourneyTemplate,
     ApiError,
-    { templateId: number; dependsOnTemplateId: number | null; etag: string | null }
+    { templateId: number; dependsOnTemplateIds: number[]; etag: string | null }
   >({
-    mutationFn: async ({ templateId, dependsOnTemplateId, etag }) => {
+    mutationFn: async ({ templateId, dependsOnTemplateIds, etag }) => {
       const body = await http<{ data: ObJourneyTemplate }>({
         url: `/onboarding/journey-templates/${templateId}/depends-on`,
         method: 'PUT',
         headers: { 'If-Match': etag ?? '*' },
-        data: { dependsOnTemplateId },
+        data: { dependsOnTemplateIds },
       })
       return body.data
     },

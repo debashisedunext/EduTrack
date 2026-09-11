@@ -221,11 +221,14 @@ final class OnboardingFixtureData {
      * @param sequence             the service order (A-103, plan §5.5). Not in
      *                             the prototype, which renders templates in array
      *                             order; that order is what is transcribed
-     * @param dependsOnTemplateKey the prototype's template-level {@code dep} —
-     *                             the cross-product service dependency
+     * @param dependsOnTemplateKeys the prototype's template-level {@code dep} —
+     *                              the cross-product service dependencies. A
+     *                              list since {@code V20260911_1100}: a
+     *                              service waits behind a set. Empty for one
+     *                              that runs unheld
      */
     record TemplateSpec(String key, String name, int version, String productKey, boolean active,
-                        int sequence, String dependsOnTemplateKey, List<StepSpec> steps) {
+                        int sequence, List<String> dependsOnTemplateKeys, List<StepSpec> steps) {
     }
 
     /**
@@ -322,11 +325,11 @@ final class OnboardingFixtureData {
      * {@code t1} to exist before {@code t3} names it.
      */
     static final List<TemplateSpec> TEMPLATES = List.of(
-            new TemplateSpec("t1", "Standard SaaS Onboarding", 3, "p1", true, 1, null,
+            new TemplateSpec("t1", "Standard SaaS Onboarding", 3, "p1", true, 1, List.of(),
                     STANDARD_SAAS_STEPS),
-            new TemplateSpec("t2", "Enterprise (with data migration audit)", 1, "p1", true, 2, null,
+            new TemplateSpec("t2", "Enterprise (with data migration audit)", 1, "p1", true, 2, List.of(),
                     STANDARD_SAAS_STEPS),
-            new TemplateSpec("t3", "Biometric Device Rollout", 2, "p2", true, 3, "t1",
+            new TemplateSpec("t3", "Biometric Device Rollout", 2, "p2", true, 3, List.of("t1"),
                     BIOMETRIC_STEPS));
 
     // ══════════════════════════════════════════════════════════════════════

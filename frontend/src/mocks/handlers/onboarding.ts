@@ -229,7 +229,7 @@ function productDto(p: ObProduct, db: Db) {
     ),
     activeTemplateId: active?.id ?? null,
     templateSequence: active?.sequence ?? null,
-    dependsOnTemplateId: active?.dependsOnTemplateId ?? null,
+    dependsOnTemplateIds: [...(active?.dependsOnTemplateIds ?? [])].sort((a, b) => a - b),
   };
 }
 
