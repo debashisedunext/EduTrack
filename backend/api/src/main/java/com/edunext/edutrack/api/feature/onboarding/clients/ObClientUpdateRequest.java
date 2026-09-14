@@ -56,6 +56,12 @@ class ObClientUpdateRequest {
     private String address;
     private boolean addressSet;
 
+    private String city;
+    private boolean citySet;
+
+    private String clientCode;
+    private boolean clientCodeSet;
+
     private Long salesPersonId;
     private boolean salesPersonIdSet;
 
@@ -105,6 +111,42 @@ class ObClientUpdateRequest {
 
     boolean hasAddress() {
         return addressSet;
+    }
+
+    String getCity() {
+        return city;
+    }
+
+    public void setCity(String city) {
+        this.city = city;
+        this.citySet = true;
+    }
+
+    boolean hasCity() {
+        return citySet;
+    }
+
+    /**
+     * The code is editable, unlike the PAN it replaced.
+     *
+     * <p>{@code sealPan} refuses a second call because a PAN is an identity fact
+     * and the duplicate guard's key; a client code is neither. It is a filing
+     * label somebody chooses, it is routinely mistyped on the add dialog, and
+     * nothing resolves a client through it — {@code uq_ob_clients_client_code}
+     * only insists that two clients do not share one. So correcting it is an
+     * ordinary edit, guarded by the same uniqueness check the create makes.
+     */
+    String getClientCode() {
+        return clientCode;
+    }
+
+    public void setClientCode(String clientCode) {
+        this.clientCode = clientCode;
+        this.clientCodeSet = true;
+    }
+
+    boolean hasClientCode() {
+        return clientCodeSet;
     }
 
     Long getSalesPersonId() {

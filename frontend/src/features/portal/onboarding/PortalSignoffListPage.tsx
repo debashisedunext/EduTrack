@@ -7,23 +7,29 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /**
- * CP-05 · the sign-off list — pending and past, deep-linking into the §8 flow
- * (Onboarding-Module-Plan.md §8/§9).
+ * CP-05 · the sign-off list — pending and past (Onboarding-Module-Plan.md
+ * §8/§9).
  *
- * ## Why a "pending" row has no clickable link to `/signoff`
+ * ## A pending row now opens a page that can actually decide it
  *
- * `ob_signoffs.token_hash` is a one-way hash — `ObSignoffTokens`' own reason
- * is "our own database must not be able to yield a working link" — so this
- * screen, or any screen, can never be handed the plaintext a pending row's
- * email carries. The plan's "deep-linking into the same flow" is served two
- * ways instead: a standing link to `/signoff` (OB-09, unchanged — the same
- * page the emailed link opens) so the client can act the moment they have
- * that email open, and `sentToEmail` on each pending row so they know which
- * inbox to search. A live per-row link would need a self-service resend
- * (mint a fresh token, mail it) and that mechanism does not exist anywhere
- * yet — `resendObSignoff` is contract-only, staff side included. Building a
- * portal-only version of a mechanism no one has built for staff was judged
- * out of scope for a list screen; see this task's STREAM-C-TICKETS.md entry.
+ * It used to link nowhere. `ob_signoffs.token_hash` is a one-way hash —
+ * `ObSignoffTokens`' own reason is "our own database must not be able to yield
+ * a working link" — so no screen can ever be handed the plaintext a pending
+ * row's email carries, and a per-row deep link into OB-09 was impossible
+ * without a self-service resend that still does not exist (`resendObSignoff`
+ * is contract-only, staff side included). What this screen could offer was a
+ * standing link to `/signoff` and the inbox to search for the email.
+ *
+ * That constraint was about the *token*, and the token is no longer the only
+ * way in. A row links to `PortalSignoffDetailPage`, on this same authenticated
+ * surface, where the client accepts or objects with no link and no OTP at all —
+ * see `PortalSignoffDecisionService` for why a portal session is a stronger
+ * proof of the same two facts rather than a weaker one.
+ *
+ * `sentToEmail` stays on the row. The email still exists and still works, and a
+ * client part-way through it is owed the inbox it went to; plan §8 keeps that
+ * path as the legal record for the clients — most of them — with no portal
+ * account at all.
  *
  * ## Past rows render their own record inline
  *
@@ -70,12 +76,7 @@ export function PortalSignoffListPage() {
       </div>
 
       <section className="rounded-card border border-border bg-surface p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-h3 text-content">Pending</h2>
-          <Link to="/signoff" className="text-sm text-primary hover:underline">
-            Open the sign-off page →
-          </Link>
-        </div>
+        <h2 className="text-h3 text-content">Pending</h2>
 
         {pending.length === 0 ? (
           <p className="mt-3 text-sm text-content-muted">Nothing waiting on you right now.</p>
@@ -110,30 +111,40 @@ function titleOf(signoff: PortalSignoff): string {
   return signoff.stepTitle ?? 'Service sign-off'
 }
 
+/**
+ * `tokenExpiresAt` is no longer rendered as a deadline, and deliberately not.
+ *
+ * It caps the *emailed link*, and this row no longer sends the client to one —
+ * `PortalSignoffDecisionService` explains why an expired token does not gate
+ * the portal path, since a caller who authenticated never presented it. Drawing
+ * "link expired" beside a button that works regardless would tell the reader
+ * they have missed a deadline they have not missed, which is the one thing this
+ * row must not do.
+ */
 function PendingRow({ signoff }: { signoff: PortalSignoff }) {
-  const expiresAt = signoff.tokenExpiresAt ? new Date(signoff.tokenExpiresAt) : null
-  const expired = expiresAt !== null && expiresAt.getTime() < Date.now()
-
   return (
-    <li className="flex flex-col gap-1 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-col">
-          <span className="text-sm font-medium text-content">{titleOf(signoff)}</span>
-          {signoff.productName ? (
-            <span className="text-caption text-content-muted">{signoff.productName}</span>
-          ) : null}
+    <li className="py-3">
+      <Link
+        to={`/portal/onboarding/signoffs/${signoff.id}`}
+        className="group flex flex-col gap-1 rounded-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-content group-hover:underline">
+              {titleOf(signoff)}
+            </span>
+            {signoff.productName ? (
+              <span className="text-caption text-content-muted">{signoff.productName}</span>
+            ) : null}
+          </div>
+          <Chip variant="warning">Awaiting your decision</Chip>
         </div>
-        <Chip variant={expired ? 'danger' : 'warning'}>{expired ? 'Link expired' : 'Awaiting your action'}</Chip>
-      </div>
-      <p className="text-caption text-content-muted">
-        {signoff.sentToEmail
-          ? `We emailed a secure link to ${signoff.sentToEmail} on ${new Date(signoff.requestedAt).toLocaleDateString()}.`
-          : `Requested ${new Date(signoff.requestedAt).toLocaleDateString()}.`}
-        {expiresAt && !expired
-          ? ` Open it before ${expiresAt.toLocaleDateString()}.`
-          : ''}
-        {expired ? ' Ask your point of contact to send a fresh link.' : ''}
-      </p>
+        <p className="text-caption text-content-muted">
+          Requested {new Date(signoff.requestedAt).toLocaleDateString()}. Open it to review
+          and accept, or raise an objection.
+          {signoff.sentToEmail ? ` We also emailed it to ${signoff.sentToEmail}.` : ''}
+        </p>
+      </Link>
     </li>
   )
 }

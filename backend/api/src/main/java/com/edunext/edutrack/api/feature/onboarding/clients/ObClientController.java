@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -125,17 +126,25 @@ class ObClientController {
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "createObClient", summary = "Board a client (OB-04)")
-    ResponseEntity<ObClientDtos.ObClientDetailResponse> create(
+    ResponseEntity<ObClientDtos.ObClientCreateResponse> create(
             Authentication caller,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ObClientDtos.ObClientCreateRequest request) {
 
-        ObClientDtos.ObClientDetail created =
+        ObClientWriteService.Created created =
                 writes.create(scopeOf(caller), userId(caller), request);
 
+        // `meta` only when there is something to put in it. A `portalLogin`
+        // key present and null on every create would read as "a login was
+        // attempted and produced nothing", which is a different statement from
+        // "no login was asked for".
+        ObClientDtos.ObClientCreateMeta meta = created.login() == null ? null
+                : new ObClientDtos.ObClientCreateMeta(new ObClientDtos.PortalLoginIssued(
+                        created.login().username(), created.login().password()));
+
         return ResponseEntity.status(HttpStatus.CREATED)
-                .eTag(ObClientETag.of(created))
-                .body(new ObClientDtos.ObClientDetailResponse(created));
+                .eTag(ObClientETag.of(created.detail()))
+                .body(new ObClientDtos.ObClientCreateResponse(created.detail(), meta));
     }
 
     /**
@@ -157,6 +166,27 @@ class ObClientController {
 
         requirePrecondition(scopeOf(caller), obClientId, ifMatch);
         return ok(writes.update(scopeOf(caller), obClientId, request));
+    }
+
+    /**
+     * Remove a client that nothing depends on.
+     *
+     * <p><b>No {@code If-Match}.</b> A precondition protects a <em>lost
+     * update</em> — two people editing one record, the second overwriting the
+     * first without seeing it. A delete has no such failure: the guard in
+     * {@code ObClientWriteService} re-asks, inside the transaction, whether
+     * anything now depends on this client, so a project created a second ago
+     * refuses the delete regardless of what tag the caller is holding. Requiring
+     * a tag here would add a round trip and protect nothing.
+     *
+     * <p>204, with no body. There is nothing left to return, and returning the
+     * deleted client would invite a screen to render it.
+     */
+    @DeleteMapping(path = "/{obClientId}")
+    @Operation(operationId = "deleteObClient", summary = "Delete a client nothing depends on")
+    ResponseEntity<Void> delete(Authentication caller, @PathVariable long obClientId) {
+        writes.delete(scopeOf(caller), obClientId);
+        return ResponseEntity.noContent().build();
     }
 
     // ------------------------------------------------------------------

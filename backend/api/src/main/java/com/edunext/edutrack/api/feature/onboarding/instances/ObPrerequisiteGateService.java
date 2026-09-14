@@ -176,10 +176,14 @@ public class ObPrerequisiteGateService implements ObPrereqGate {
         Set<Long> ownerIds = new LinkedHashSet<>();
         for (long journeyId : openedJourneyIds) {
             for (ObJourneyStep step : journeySteps.findByJourneyIdOrderBySequenceAsc(journeyId)) {
-                // Every step here was PENDING until activateEligibleSteps just
-                // ran — the journey was LOCKED, and C-103's own account is
-                // that nothing runs while LOCKED — so IN_PROGRESS here means
-                // this call is what activated it, not a step already running.
+                // IN_PROGRESS is "has work to do now", which is what the
+                // kickoff mail is for. It no longer means "this call started
+                // it": with the gate advisory, an owner may have started a
+                // step on a LOCKED journey themselves. Mailing them too is
+                // the harmless half of that — the message says work is open,
+                // and it is — where narrowing to only the steps this call
+                // activated would mean returning the set from
+                // activateEligibleSteps for a distinction no recipient makes.
                 if (step.getStatus() == ObJourneyStepStatus.IN_PROGRESS && step.getOwnerUserId() != null) {
                     ownerIds.add(step.getOwnerUserId());
                 }

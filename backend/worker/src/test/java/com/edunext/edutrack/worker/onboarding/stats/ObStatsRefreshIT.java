@@ -602,6 +602,86 @@ class ObStatsRefreshIT {
         assertThat(n(implementor(owner), "blocked_hours")).isEqualTo(4);
     }
 
+    // ── ob_client_daily_stats ─────────────────────────────────────
+
+    /**
+     * §9's deadline cards count "all client tasks — services <em>and</em>
+     * prerequisites". This pass is the prerequisite half, and its day and week
+     * boundaries are the organisation's, exactly as the services half's are.
+     */
+    @Test
+    @DisplayName("prerequisite tasks are counted by the calendar's day and week, settled ones excluded")
+    void prerequisiteTasksAreCountedAtTheClientGrain() {
+        long client = client();
+        long checklist = checklist(client);
+
+        // 00:30 IST on the 12th — today, this week, and already past 14:30.
+        prereqTask(checklist, client, "PENDING", Instant.parse("2026-08-11T19:00:00Z"));
+        // Friday the 14th — this week, not today. SUBMITTED is still open: the
+        // client has answered and nobody has verified it yet.
+        prereqTask(checklist, client, "SUBMITTED", Instant.parse("2026-08-14T06:00:00Z"));
+        // Monday the 17th — next week. The week boundary, not just the day one.
+        prereqTask(checklist, client, "PENDING", Instant.parse("2026-08-17T06:00:00Z"));
+        // Verified, and due today. Settled, so on no card at all.
+        prereqTask(checklist, client, "VERIFIED", Instant.parse("2026-08-11T19:30:00Z"));
+
+        worker.refreshOnce();
+
+        Map<String, Object> row = clientStats(client);
+        assertThat(n(row, "prereq_tasks_due_today")).isEqualTo(1);
+        assertThat(n(row, "prereq_tasks_due_this_week")).isEqualTo(2);
+        assertThat(n(row, "prereq_tasks_open")).isEqualTo(3);
+        assertThat(n(row, "prereq_tasks_overdue")).isEqualTo(1);
+    }
+
+    /**
+     * 🔴 The case that forced a second table rather than three more columns on
+     * {@code ob_dashboard_summary}. A client can finish intake and hold an open
+     * checklist before a single journey is instantiated — five of nine clients
+     * were in exactly that state on the deployment that reported the bug. A
+     * product-keyed row cannot carry those tasks under any attribution, so the
+     * board read 0 beside a drill-over listing them.
+     */
+    @Test
+    @DisplayName("🔴 a client with no journey at all still contributes its checklist")
+    void aClientWithNoJourneyIsStillCounted() {
+        long client = client();
+        long checklist = checklist(client);
+        prereqTask(checklist, client, "PENDING", Instant.parse("2026-08-14T06:00:00Z"));
+
+        worker.refreshOnce();
+
+        assertThat(n(clientStats(client), "prereq_tasks_due_this_week")).isEqualTo(1);
+    }
+
+    /**
+     * Deleted and rewritten, like both sibling stock passes. A client earns a
+     * row by having an open task and stops earning one by clearing the
+     * checklist; an upsert cannot retract what it wrote, so the last client to
+     * clear their gate would keep yesterday's count on the board for good.
+     */
+    @Test
+    @DisplayName("a client who clears their checklist loses their row rather than keeping the old count")
+    void clearingTheChecklistRetractsTheRow() {
+        long client = client();
+        long checklist = checklist(client);
+        long task = prereqTask(checklist, client, "PENDING", Instant.parse("2026-08-14T06:00:00Z"));
+        worker.refreshOnce();
+        assertThat(n(clientStats(client), "prereq_tasks_open")).isEqualTo(1);
+
+        jdbc.update("""
+                UPDATE ob_client_prereq_tasks
+                   SET status = 'VERIFIED', verified_at = ?, verified_by = ?
+                 WHERE id = ?
+                """, ts(NOW), staffUser(), task);
+        worker.refreshOnce();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ob_client_daily_stats WHERE stat_date = ? AND ob_client_id = ?",
+                Integer.class, TODAY, client))
+                .isEqualTo(0);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────
 
     private Map<String, Object> summary(long productId) {
@@ -626,6 +706,72 @@ class ObStatsRefreshIT {
     private static int n(Map<String, Object> row, String column) {
         return ((Number) row.get(column)).intValue();
     }
+
+    private Map<String, Object> clientStats(long clientId) {
+        return new HashMap<>(jdbc.queryForMap(
+                "SELECT * FROM ob_client_daily_stats WHERE stat_date = ? AND ob_client_id = ?",
+                TODAY, clientId));
+    }
+
+    /**
+     * A client's prerequisite checklist header, with a template version of its
+     * own.
+     *
+     * <p>One header per client — {@code uq_ob_client_prereqs_client} says so —
+     * and a fresh version per call, because {@code version} is unique across the
+     * table and these tests share a schema with no teardown between them.
+     */
+    private long checklist(long clientId) {
+        int version = SEQ.incrementAndGet();
+        jdbc.update("INSERT INTO ob_prereq_template_versions (version, is_active, published_at) "
+                + "VALUES (?, 0, ?)", version, ts(NOW));
+        long versionId = lastInsertId();
+        jdbc.update("""
+                INSERT INTO ob_client_prereqs (ob_client_id, template_version_id, template_version)
+                VALUES (?, ?, ?)
+                """, clientId, versionId, version);
+        return lastInsertId();
+    }
+
+    /**
+     * One task on a client's checklist.
+     *
+     * <p>Ad hoc, so that {@code ck_ob_client_prereq_tasks_ad_hoc} is satisfied
+     * without a template task behind it — nothing here depends on where the
+     * task came from. The submission and verification columns are filled to
+     * match the status because {@code ck_ob_client_prereq_tasks_submitted} and
+     * {@code _verified} bind them together, and a fixture writing a state the
+     * application cannot is a fixture that proves nothing.
+     */
+    private long prereqTask(long checklistId, long clientId, String status, Instant dueAt) {
+        int sequence = SEQ.incrementAndGet();
+        boolean submitted = "SUBMITTED".equals(status) || "VERIFIED".equals(status);
+        boolean verified = "VERIFIED".equals(status);
+        Long staff = submitted ? staffUser() : null;
+        jdbc.update("""
+                INSERT INTO ob_client_prereq_tasks
+                    (ob_client_prereqs_id, ob_client_id, sequence, title, tat_days, is_ad_hoc,
+                     status, due_at, submitted_at, submitted_via, submitted_by_user,
+                     verified_at, verified_by)
+                VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?)
+                """, checklistId, clientId, sequence, "Prerequisite " + sequence, status, ts(dueAt),
+                submitted ? ts(NOW.minusSeconds(3_600)) : null,
+                submitted ? "STAFF" : null,
+                staff,
+                verified ? ts(NOW.minusSeconds(1_800)) : null,
+                verified ? staff : null);
+        return lastInsertId();
+    }
+
+    /** One user to carry every "who submitted this" column these cases need. */
+    private long staffUser() {
+        if (staffUserId == null) {
+            staffUserId = user();
+        }
+        return staffUserId;
+    }
+
+    private Long staffUserId;
 
     private long product() {
         int i = SEQ.incrementAndGet();

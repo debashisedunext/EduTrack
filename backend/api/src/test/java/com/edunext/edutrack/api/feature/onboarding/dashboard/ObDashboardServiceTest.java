@@ -2,6 +2,7 @@ package com.edunext.edutrack.api.feature.onboarding.dashboard;
 
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardCard;
 import com.edunext.edutrack.api.security.CallerIdentity;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
@@ -16,6 +17,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,7 +44,23 @@ class ObDashboardServiceTest {
     private final ObDashboardSummaryRepository repository = mock(ObDashboardSummaryRepository.class);
     private final ObScopeDashboardSummaryRepository scopedRepository =
             mock(ObScopeDashboardSummaryRepository.class);
-    private final ObDashboardService service = new ObDashboardService(repository, scopedRepository);
+    private final ObClientPrereqStatsRepository prereqRepository =
+            mock(ObClientPrereqStatsRepository.class);
+    private final ObDashboardService service =
+            new ObDashboardService(repository, scopedRepository, prereqRepository);
+
+    /**
+     * No prerequisite task anywhere, unless a case says otherwise.
+     *
+     * <p>A default rather than a stub in every case: five of the seven cards
+     * have no prerequisite arm at all, so most cases here are about something
+     * else entirely and would only be lengthened by saying so.
+     */
+    @BeforeEach
+    void noPrerequisitesByDefault() {
+        when(prereqRepository.contribution(any(), any(), any()))
+                .thenReturn(ObClientPrereqStatsRepository.none());
+    }
 
     // ── the counts ──────────────────────────────────────────────────────────
 
@@ -356,6 +374,115 @@ class ObDashboardServiceTest {
                 .isEqualTo(ObDashboardService.etagOf(other, null, COMPUTED));
     }
 
+    // ── the prerequisite half of the two deadline cards ───────────────────
+
+    /**
+     * The defect this half exists for. Plan §9's deadline cards count "all
+     * client tasks — services <em>and</em> prerequisites"; B-120 fills
+     * {@code steps_due_this_week} from the journey tables alone, because a
+     * checklist has no product to be keyed by. So a board whose only work due
+     * this week was seventeen prerequisite tasks read <b>0</b> beside a
+     * drill-over listing all seventeen.
+     */
+    @Test
+    @DisplayName("prerequisite tasks are counted on the deadline cards, not only in the drill-over")
+    void deadlineCardsCountPrerequisitesToo() {
+        givenDays(List.of(WEDNESDAY));
+        givenRollup(WEDNESDAY, counts(3, 0, 0, 0, 0, 0, 0));
+        givenPrereqs(WEDNESDAY, 17, 2);
+
+        var cards = service.summary(manager(), null).summary().cards();
+
+        assertThat(card(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES).count()).isEqualTo(17L);
+        assertThat(card(cards, ObDashboardCardKey.TODAYS_DELIVERY).count()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("a service and a prerequisite due the same week are two tasks on one card")
+    void theTwoHalvesAreAdded() {
+        givenDays(List.of(WEDNESDAY));
+        givenRollup(WEDNESDAY, counts(3, 5, 1, 0, 0, 0, 0));
+        givenPrereqs(WEDNESDAY, 17, 2);
+
+        var cards = service.summary(manager(), null).summary().cards();
+
+        assertThat(card(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES).count()).isEqualTo(22L);
+        assertThat(card(cards, ObDashboardCardKey.TODAYS_DELIVERY).count()).isEqualTo(3L);
+    }
+
+    /**
+     * Both days or neither. Reading the prerequisite half for today and not for
+     * the previous day would report the whole of today's checklist as growth on
+     * a week where nothing moved.
+     */
+    @Test
+    @DisplayName("the delta compares both halves, not today's prerequisites against yesterday's services")
+    void theDeltaIncludesPrerequisitesOnBothDays() {
+        givenDays(List.of(WEDNESDAY, MONDAY));
+        givenRollup(WEDNESDAY, counts(0, 4, 0, 0, 0, 0, 0));
+        givenRollup(MONDAY, counts(0, 4, 0, 0, 0, 0, 0));
+        givenPrereqs(WEDNESDAY, 17, 0);
+        givenPrereqs(MONDAY, 15, 0);
+
+        var cards = service.summary(manager(), null).summary().cards();
+
+        assertThat(card(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES).deltaFromYesterday())
+                .isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("the five cards with no prerequisite arm are untouched by it")
+    void theOtherCardsAreUnaffected() {
+        givenDays(List.of(WEDNESDAY));
+        givenRollup(WEDNESDAY, counts(3, 0, 0, 6, 9, 1, 2));
+        givenPrereqs(WEDNESDAY, 17, 2);
+
+        var cards = service.summary(manager(), null).summary().cards();
+
+        assertThat(card(cards, ObDashboardCardKey.ONGOING_PROJECTS).count()).isEqualTo(3L);
+        assertThat(card(cards, ObDashboardCardKey.OVERDUE_CLIENTS).count()).isEqualTo(6L);
+        assertThat(card(cards, ObDashboardCardKey.LIVE).count()).isEqualTo(9L);
+        assertThat(card(cards, ObDashboardCardKey.AT_RISK).count()).isEqualTo(1L);
+        assertThat(card(cards, ObDashboardCardKey.CLIENT_ESCALATIONS).count()).isEqualTo(2L);
+    }
+
+    /**
+     * Neither deadline card is an upper bound, and adding the prerequisite half
+     * does not make one. A task belongs to exactly one client, the client rows
+     * partition the population, and the sum is therefore exact — which is the
+     * whole reason the figure lives at the client grain rather than being
+     * attributed to each product the client bought.
+     */
+    @Test
+    @DisplayName("the deadline cards stay exact on the all-products board")
+    void prerequisitesDoNotMakeACardApproximate() {
+        givenDays(List.of(WEDNESDAY));
+        givenRollup(WEDNESDAY, counts(0, 0, 0, 0, 0, 0, 0));
+        givenPrereqs(WEDNESDAY, 17, 2);
+
+        var cards = service.summary(manager(), null).summary().cards();
+
+        assertThat(card(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES).countIsUpperBound()).isFalse();
+        assertThat(card(cards, ObDashboardCardKey.TODAYS_DELIVERY).countIsUpperBound()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a narrowed caller's prerequisites are read under their own scope")
+    void theScopedBoardCountsPrerequisitesUnderItsScope() {
+        givenScopedDays(List.of(WEDNESDAY));
+        givenScopedRollup(WEDNESDAY, counts(2, 1, 0, 0, 0, 0, 0));
+        givenPrereqs(WEDNESDAY, 4, 0);
+
+        var cards = service.summary(stepOwner(), null).summary().cards();
+
+        // The same scope the drill-over applies to its prerequisite rows: card
+        // and list have to narrow to the same set, or they disagree for exactly
+        // the caller least able to check.
+        assertThat(card(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES).count()).isEqualTo(5L);
+        verify(prereqRepository).contribution(eq(WEDNESDAY), eq(null),
+                argThat(scope -> !scope.unrestricted() && scope.userId() == 42L));
+    }
+
     // ── fixtures ────────────────────────────────────────────────────────────
 
     private void givenDays(List<LocalDate> days) {
@@ -374,6 +501,20 @@ class ObDashboardServiceTest {
     private void givenScopedRollup(LocalDate day, Map<ObDashboardCardKey, Long> counts) {
         when(scopedRepository.rollup(eq(day), eq(42L), any()))
                 .thenReturn(Optional.of(new ObDashboardSummaryRepository.Rollup(day, COMPUTED, counts)));
+    }
+
+    /**
+     * The prerequisite half of one day: tasks due this week, tasks due today.
+     *
+     * <p>Only the two cards that have one — {@code ObClientPrereqStatsRepository}
+     * maps no column to the other five, and a fixture pretending otherwise would
+     * assert a shape the repository cannot produce.
+     */
+    private void givenPrereqs(LocalDate day, long dueThisWeek, long dueToday) {
+        Map<ObDashboardCardKey, Long> contribution = new EnumMap<>(ObDashboardCardKey.class);
+        contribution.put(ObDashboardCardKey.THIS_WEEKS_DEADLINES, dueThisWeek);
+        contribution.put(ObDashboardCardKey.TODAYS_DELIVERY, dueToday);
+        when(prereqRepository.contribution(eq(day), any(), any())).thenReturn(contribution);
     }
 
     /** Seven figures in board order, so a case reads as the board it describes. */

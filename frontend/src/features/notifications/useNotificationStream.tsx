@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   getListNotificationsQueryKey,
@@ -38,15 +38,65 @@ import {
  * <p>This is also why nothing here writes to Divyansh's `NotificationBell`: it
  * already reads `useListNotifications`, so invalidating that key updates his
  * badge with no change to his file.
+ *
+ * **Toasts are silenced on the onboarding module's routes.** Every notification
+ * this hook raises is a ticketing event, so on a client-onboarding screen it is
+ * an interruption the reader cannot act on without leaving the page. The badge
+ * and the bell are untouched — only the pop-over goes — and a silenced
+ * notification is left *unacknowledged* so it still arrives the next time the
+ * reader is on a ticketing screen. See `SILENT_ROUTE_PREFIX` and `raise`'s
+ * return value, which is what keeps that promise.
  */
 
 /** How long a snoozed toast stays away. */
 const SNOOZE_MS = 10 * 60 * 1000
 
+/**
+ * Routes that get no toasts at all.
+ *
+ * <p>The onboarding module asked for a silent screen, and the request is a fair
+ * one: every notification this hook raises is a <em>ticketing</em> event — an
+ * SLA breach, a handoff, a stale assignment — and none of them is actionable
+ * from a client-onboarding screen. Five of them thrown over OB-04 on load is
+ * five things the reader cannot do anything about without leaving the page.
+ *
+ * <p>Deliberately a route prefix rather than a user setting or a module claim:
+ * "which module am I looking at" is a property of where the user currently is,
+ * and the router is the only thing that knows it moment to moment.
+ * {@code Sidebar.tsx} decides the same question the same way, from its own
+ * private {@code ONBOARDING_PREFIX} — the duplication is two lines and the
+ * alternative is this feature importing from the shell it is mounted by.
+ */
+const SILENT_ROUTE_PREFIX = '/onboarding'
+
+/**
+ * Whether the screen on display right now takes toasts.
+ *
+ * <p>Matched on the segment, not the raw string, so a future `/onboardings`
+ * route would not silently inherit the rule.
+ */
+function useToastsSilenced(): boolean {
+  const { pathname } = useLocation()
+  return pathname === SILENT_ROUTE_PREFIX || pathname.startsWith(`${SILENT_ROUTE_PREFIX}/`)
+}
+
 export function useNotificationStream(): void {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const markRead = useMarkNotificationRead()
+
+  /**
+   * Read through a ref for the reason {@link raiseRef} is, one section down:
+   * naming it in the drain effect's dependencies would re-run the drain on
+   * every navigation, which is the precise bug that note exists to describe.
+   * Every reader of this wants "where the user is now", never "where they were
+   * when this callback was built".
+   */
+  const silenced = useToastsSilenced()
+  const silencedRef = useRef(silenced)
+  useEffect(() => {
+    silencedRef.current = silenced
+  }, [silenced])
 
   // Snoozes outlive the toast that created them, so they are cancelled on
   // unmount — without this a re-raise fires into a torn-down tree in tests and
@@ -92,8 +142,18 @@ export function useNotificationStream(): void {
     void queryClient.invalidateQueries({ queryKey: getListChatThreadsQueryKey() })
   }, [queryClient])
 
+  /**
+   * Show one notification, and say whether it was actually shown.
+   *
+   * <p>The return value is what keeps delivery honest. A notification this hook
+   * swallows — a chat frame, or anything at all while an onboarding screen is
+   * open — must **not** be acknowledged: acknowledging is the claim that the
+   * user has seen it, and D-046 reads it to decide what never to pop again. Get
+   * that wrong and silencing onboarding quietly destroys the backlog for
+   * ticketing too, which is the one outcome nobody asked for.
+   */
   const raise = useCallback(
-    (created: NotificationCreated) => {
+    (created: NotificationCreated): boolean => {
       // Chat is read in the header panel, not thrown over the screen — see
       // `isChatNotification`. Guarded here rather than at the call sites
       // because there are three of them: the live frame, D-046's replay, and a
@@ -101,7 +161,16 @@ export function useNotificationStream(): void {
       // one place a fourth caller cannot forget.
       if (isChatNotification(created)) {
         refreshChat()
-        return
+        return false
+      }
+
+      // Onboarding takes no toasts — see SILENT_ROUTE_PREFIX. Guarded here,
+      // beside the chat guard, for that guard's own stated reason: there are
+      // three callers and the top of `raise` is the one place a fourth cannot
+      // forget. The badge still moves, and the notification is left pending so
+      // it surfaces the next time the reader is somewhere it means something.
+      if (silencedRef.current) {
+        return false
       }
 
       const open = () => {
@@ -115,7 +184,11 @@ export function useNotificationStream(): void {
       const snooze = () => {
         const timer = setTimeout(() => {
           snoozes.current.delete(timer)
-          raise(created)
+          // A snooze falling due on a silenced screen waits another interval
+          // rather than being swallowed. The user asked to be reminded later;
+          // dropping it because of where they happened to navigate in the
+          // meantime answers a question they did not ask.
+          if (!raise(created)) snooze()
         }, SNOOZE_MS)
         snoozes.current.add(timer)
       }
@@ -134,6 +207,7 @@ export function useNotificationStream(): void {
           </div>
         ),
       })
+      return true
     },
     [markRead, navigate, refreshChat],
   )
@@ -143,16 +217,24 @@ export function useNotificationStream(): void {
     if (!event) return
 
     if (event.event === 'notification.created') {
-      // Recorded before raising, so a drain triggered by a visibility change
-      // cannot re-toast something the user has already watched arrive. The
-      // acknowledgement below is what stops it recurring across sessions, but
-      // it can fail — deliberately silently — and this session should not
-      // repeat itself while it waits to be retried.
-      toasted.current.add(event.id)
-      raise(event)
       // D-046. A live toast is a delivery like any other. Without this, every
       // notification the user watched arrive would pop again at next login.
-      void acknowledge([event.id])
+      //
+      // Both records are conditional on `raise` having actually shown it, and
+      // both for the same reason: a frame swallowed on a silenced screen was
+      // never seen, so marking it delivered would retire it unread and adding
+      // it to `toasted` would stop this session's own drain from ever showing
+      // it. It stays pending instead, and pops the next time the reader is on
+      // a screen that takes toasts.
+      //
+      // `toasted` is still recorded before the acknowledgement completes — the
+      // point it has always made — so a drain triggered by a visibility change
+      // cannot re-toast something the user has already watched arrive while the
+      // round trip is in flight.
+      if (raise(event)) {
+        toasted.current.add(event.id)
+        void acknowledge([event.id])
+      }
     }
     // Every one of the three moves the badge: a new notification adds to it,
     // and a read in another tab takes from it.
@@ -218,6 +300,16 @@ export function useNotificationStream(): void {
 
     const drain = async () => {
       if (draining.current) return
+      // Nothing is fetched and nothing is acknowledged on a silenced screen.
+      // Returning before the request, rather than filtering the toasts out
+      // after it, is what leaves the backlog intact: a drain that read the
+      // pending list and showed none of it would still acknowledge all of it.
+      //
+      // The effect below does not re-run on navigation — deliberately, see its
+      // own note — so leaving onboarding does not immediately drain. The
+      // backlog surfaces on the next reload or tab focus from a ticketing
+      // screen, which is the same cadence it already had.
+      if (silencedRef.current) return
       draining.current = true
       try {
         const pending = await listPendingNotifications()

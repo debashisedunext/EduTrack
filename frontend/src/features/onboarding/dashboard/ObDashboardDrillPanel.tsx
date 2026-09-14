@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
 import {
   SlideOver,
   SlideOverBody,
@@ -95,7 +97,10 @@ export function ObDashboardDrillPanel({
     // shape one module over. Never read when `open` is false.
     cardKey ?? 'ongoing-projects',
     { productId, ownerUserId, limit: PAGE_LIMIT },
-    { query: { enabled: open } },
+    // `enabled` on top of the board's shared freshness options, not instead
+    // of them: a panel left open while a step is completed elsewhere should
+    // catch up on the same cadence as the tab behind it.
+    { query: { ...OB_DASHBOARD_QUERY, enabled: open } },
   )
 
   const rows = data?.data ?? []

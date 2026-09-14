@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { format, parseISO } from 'date-fns'
 
 import type { ObContact, ObSignoff, ObSignoffKind } from '@/api/generated/model'
@@ -21,6 +21,8 @@ import { Chip } from '@/components/ui/chip'
 import { ReasonDialog } from '@/components/ui/reason-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/use-toast'
+import { invalidateObDashboard } from '@/features/onboarding/dashboard/obDashboardFreshness'
+import { signoffSimulationEnabled, simulateSignoff } from './simulateSignoff'
 
 /**
  * The staff half of §8's sign-off — request, chase, withdraw, and read the
@@ -45,6 +47,15 @@ import { toast } from '@/components/ui/use-toast'
  * "🔗 Open client sign-off link (simulate)" is a prototype affordance that
  * cannot exist against the real contract, and pretending otherwise would put
  * a dead button on the screen.
+ *
+ * **What the mockup was reaching for does exist, by the other route.** Not as
+ * a link to open — that half is still impossible and always will be — but as
+ * a server-side stand-in: `DevSignoffSimulationService` requests a sign-off
+ * and accepts it through the same `accept` the public page calls, so a demo
+ * journey can get past a gate with no client and no mailbox. It is fenced by
+ * `@Profile({"dev-noauth", "fixtures"})` rather than by anything on this
+ * screen. See `simulateSignoff.ts`, and `SimulateAcceptance` at the foot of
+ * this file.
  *
  * ## Why the contact is chosen and never defaulted
  *
@@ -112,6 +123,9 @@ export function SignoffPanel({ kind, journeyId, stepId, obClientId }: SignoffPan
     // A go-live acceptance flips the client to LIVE (`ObClientGoLiveService`),
     // so the header and its banner are stale the moment one settles.
     void queryClient.invalidateQueries({ queryKey: ['/onboarding/clients', obClientId] })
+    // ...and OB-02, where that same flip is the `live` card and moves the
+    // client out of whichever RAG column it was sitting in.
+    invalidateObDashboard(queryClient)
   }, [queryClient, journeyId, stepId, obClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** The server's refusal verbatim — `StepActionBar`'s rule, and its reason. */
@@ -295,6 +309,14 @@ export function SignoffPanel({ kind, journeyId, stepId, obClientId }: SignoffPan
         </div>
       )}
 
+      <SimulateAcceptance
+        kind={kind}
+        journeyId={journeyId}
+        stepId={stepId}
+        disabled={busy}
+        onDone={refresh}
+      />
+
       <ReasonDialog
         open={cancelling}
         onOpenChange={setCancelling}
@@ -323,4 +345,120 @@ function StatusChip({ status }: { status?: string }) {
 function formatMoment(value: string): string {
   const parsed = parseISO(value)
   return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'd MMM yyyy, HH:mm')
+}
+
+/**
+ * The demo stand-in for the client, so a journey can be walked end to end
+ * without one.
+ *
+ * ## It looks like a dev tool because it is one
+ *
+ * Dashed border, muted ground, the word "Demo" first. This writes to
+ * `ob_signoffs`, which is the record of who accepted what — the one control on
+ * this screen that should never be mistaken for part of the product, or
+ * clicked by someone who thought it was.
+ *
+ * ## What it reports back is the gate, not a success message
+ *
+ * The server runs the real completion gate and answers 200 either way: the
+ * acceptance stands, and `gateFailures` says whether our own side could finish.
+ * So a refusal is shown as plainly as a completion — a step that still has an
+ * unanswered mandatory item or a missing document did *not* move, and a toast
+ * saying "accepted" would be the one lie that makes the simulator worse than
+ * useless.
+ */
+function SimulateAcceptance({
+  kind,
+  journeyId,
+  stepId,
+  disabled,
+  onDone,
+}: {
+  kind: ObSignoffKind
+  journeyId: number
+  stepId?: number
+  disabled: boolean
+  onDone: () => void
+}) {
+  const simulate = useMutation({
+    mutationFn: () => simulateSignoff({ journeyId, kind, stepId }),
+    onSuccess: (result) => {
+      onDone()
+      if (result.clientWentLive) {
+        toast({
+          variant: 'success',
+          title: 'Simulated — the client is now Live-Green',
+          description: 'The go-live sign-off was accepted and every journey is complete.',
+        })
+        return
+      }
+      if (kind === 'GO_LIVE' || result.stepCompleted) {
+        toast({
+          variant: 'success',
+          title: 'Simulated a client acceptance',
+          description:
+            kind === 'GO_LIVE'
+              ? 'The go-live sign-off is recorded as accepted.'
+              : 'The service accepted and completed. The ribbon has moved on.',
+        })
+        return
+      }
+      // The interesting outcome, and the reason this is not a success toast:
+      // the signature is recorded but our side is still unfinished, so the
+      // ribbon has *not* moved and saying otherwise would send somebody
+      // looking for a bug in the ribbon.
+      toast({
+        // Not `danger`: nothing failed. The acceptance is recorded and the
+        // gate did its job — this is the outcome, reported as one.
+        variant: 'default',
+        title: 'Accepted, but the service did not complete',
+        description: `Our own gate is still short: ${result.gateFailures
+          .map(gateFailureText)
+          .join('; ')}.`,
+      })
+    },
+    onError: (error: unknown) => {
+      const problem = error instanceof ApiError ? error.problem : null
+      toast({
+        variant: 'danger',
+        title: 'The simulator could not run',
+        description:
+          problem?.detail ??
+          problem?.title ??
+          'The dev route is not mapped. It needs the backend on the dev-noauth or fixtures profile.',
+      })
+    },
+  })
+
+  if (!signoffSimulationEnabled()) return null
+
+  return (
+    <div className="mt-3 rounded-control border border-dashed border-border bg-surface-muted px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="m-0 text-caption text-content-muted">
+          <span className="font-semibold uppercase tracking-wide">Demo</span> · stand in for the
+          client so the journey can be walked without one. Writes a real acceptance, on a demo
+          profile only.
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={disabled || simulate.isPending}
+          onClick={() => simulate.mutate()}
+        >
+          {simulate.isPending ? 'Simulating…' : '🤖 Simulate client acceptance'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** The server's stable gate codes, said in words. Unknown codes pass through — a
+ * code this does not know is still more useful on screen than "something". */
+function gateFailureText(code: string): string {
+  if (code === 'ob-step-items-unanswered') return 'a mandatory checklist item is unanswered'
+  if (code === 'ob-step-docs-missing') return 'a required document is not attached'
+  if (code === 'ob-step-signoff-missing') return 'the sign-off is not recorded as accepted'
+  if (code === 'ob-step-not-in-progress') return 'the service is not in progress'
+  return code
 }

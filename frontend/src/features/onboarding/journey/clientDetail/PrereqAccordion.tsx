@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { cn } from '@/lib/utils'
 import { toast } from '@/components/ui/use-toast'
+import { invalidateObDashboard } from '@/features/onboarding/dashboard/obDashboardFreshness'
 
 import { ObAccordion } from './ObAccordion'
 import { PrereqReasonDialog } from './PrereqReasonDialog'
@@ -95,6 +96,9 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
       void queryClient.invalidateQueries({ queryKey: getGetObClientPrereqsQueryKey(obClientId) })
       if (gateOpened) {
         void queryClient.invalidateQueries({ queryKey: getGetObClientQueryKey(obClientId) })
+        // The same flip moves those journeys out of `journeys_locked` and into
+        // `ongoing-projects`, which is the board's headline figure.
+        invalidateObDashboard(queryClient)
       }
     },
     [obClientId, queryClient],

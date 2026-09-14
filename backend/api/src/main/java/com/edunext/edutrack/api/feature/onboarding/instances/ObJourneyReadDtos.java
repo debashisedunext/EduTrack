@@ -37,9 +37,15 @@ final class ObJourneyReadDtos {
     /**
      * {@code ObStepDot} — the collapsed strip's per-service dot, restated here
      * because {@code currentStep} on the summary is one of them.
+     *
+     * <p>{@code stageKey} and {@code stageName} are carried for the same reason
+     * they exist on {@code ObClientDtos.ObStepDot}: the two records serialise to
+     * one schema, and a field one producer fills and the other leaves null is a
+     * shape a caller cannot rely on. Filling both keeps "which stage is this
+     * client in" answerable from whichever read a screen happened to make.
      */
     record ObStepDot(long id, int sequence, String name, String status, ObRag rag,
-                     Long dependsOnStepId) {
+                     Long dependsOnStepId, long stageKey, String stageName) {
     }
 
     record UserRef(long id, String displayName) {

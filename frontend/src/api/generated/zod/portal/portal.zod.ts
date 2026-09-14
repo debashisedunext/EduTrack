@@ -259,7 +259,7 @@ export const portalLoginBodyUsernameMax = 150;
 
 
 export const portalLoginBody = zod.object({
-  "username": zod.string().min(1).max(portalLoginBodyUsernameMax).describe('The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.'),
+  "username": zod.string().min(1).max(portalLoginBodyUsernameMax).describe('The username from the credential mail. An onboarding client\'s is\ntheir client code (`HRZ-001`); a ticketing client\'s is\n`ACME.ravi`. Matched case-insensitively.\n'),
   "password": zod.string().min(1).describe('Plain password. Verified against an Argon2id hash; never logged or stored.')
 })
 
@@ -529,6 +529,201 @@ export const listPortalSignoffsResponse = zod.object({
   "objectionNote": zod.string().nullish(),
   "hasCertificate": zod.boolean()
 }).describe('C-122 · one row of CP-05\'s list. `stepTitle` and `productName` are\nboth `null` exactly when `kind` is `GO_LIVE` — a go-live sign-off\nnames the journey, not one product\'s step.\n\n\*\*No `token`, `tokenHash`, OTP state, `signedIp` or\n`signedUserAgent`.\*\* `sentToEmail` is the one contact detail served,\nand it is this client\'s own contact, not a colleague\'s — named so a\nclient who has mislaid the email knows which inbox to check.\n\n`hasCertificate` is `false` for every row today: `pdfStorageKey` is\nnever written until the acceptance PDF (plan §8, B-116) is built.\nThat is the accurate answer rather than a placeholder, on\n`ObSignoffAcceptResult.clientWentLive`\'s own precedent for the same\nsituation one field over.\n'))
+})
+
+/**
+ * The portal's own OB-09 — what is being signed, read on the
+authenticated surface.
+
+**No token and no OTP, and that is not a weakening.** OB-09 proves two
+things in two steps because it has no principal: the mailed link
+proves possession of a mailbox, the code proves who is holding it
+(A-121: "a link on its own proves possession of an email; it does not
+prove identity"). A portal caller has already proved both, more
+strongly, by signing in against `client_accounts`; `obClientId` comes
+off their own verified token and the row is checked against it. This
+is the same substitution `submitPortalPrereqTask` already makes.
+
+**Served for any status this client owns**, not `PENDING` only, with
+`canDecide` carrying the difference — a sign-off staff withdrew while
+the page was loading should read as withdrawn rather than 404 on a row
+the client was looking at a moment ago. The decision routes do the
+strict check; a disabled form in one browser is not an authorization
+check.
+
+A sign-off on another client's onboarding answers `404`, never `403`.
+
+ * @summary One sign-off, ready to decide (CP-05)
+ */
+export const getPortalSignoffParams = zod.object({
+  "signoffId": zod.number()
+})
+
+export const getPortalSignoffHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getPortalSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "kind": zod.enum(['STEP', 'GO_LIVE']).describe('A-118 · `ob_signoffs.kind`. A `STEP` sign-off names its step; a\n`GO_LIVE` one does not, and A-107\'s\n`ck_ob_signoffs_step_matches_kind` enforces exactly that pairing in\nthe database.\n'),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "clientName": zod.string().nullish(),
+  "productName": zod.string().nullish(),
+  "stepTitle": zod.string().nullish(),
+  "requestedAt": zod.string().datetime({}),
+  "canDecide": zod.boolean().describe('`true` only while the row is `PENDING`. The accept and object\nroutes check this server-side regardless — this field decides\nwhether the forms render, never whether the server accepts.\n'),
+  "csatOffered": zod.boolean().describe('Whether a go-live survey follows the acceptance. False for every\n`STEP` sign-off and for a client who has already answered one.\n'),
+  "checklist": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean(),
+  "isDone": zod.boolean()
+}).describe('One Task List row on the portal\'s review screen.\n\n`isDone` means \*\*answered\*\*, not answered True — C-111\'s distinction,\nthe same one `ObSignoffChecklistItem` carries on the public page. A\nrenderer that draws it as a tick is saying something the field does\nnot.\n'))
+}).describe('What the client reads before deciding.\n\nNarrower than the public page\'s `ObSignoffSession` in two deliberate\nways: no session token — the portal mints one internally and spends it\nin the same call, so it is never on the wire — and no `sentToContact`\ncard, which would tell a contact their own details back.\n\n`checklist` is empty for a `GO_LIVE` sign-off, which is about the\njourney rather than one service; `stepTitle` and `productName` are\n`null` in exactly that case.\n')
+})
+
+/**
+ * Records the acceptance and puts the step through the completion gate —
+the same gate, reached through the same `ObSignoffAcceptService.accept`
+the public page calls. Nothing on this path writes `SIGNED` itself:
+PHASE-2-BUILD-PLAN §3 #4 ruled that there is *one* completion gate
+after finding the prototype enforcing different rules on two paths, and
+a second accept written for the portal would be that bug reintroduced.
+
+**`stepCompleted: false` is a successful outcome.** The acceptance
+stands and the row is `SIGNED` either way; `gateFailures` names what
+*our* side still owes — an unanswered mandatory item, a required
+document nobody attached. `acceptObSignoff`'s own contract, carried
+across unchanged: "the client did accept, they are not the ones who
+left a document unattached".
+
+**`200`, not `201`, and no `Idempotency-Key`.** This decides a row
+staff already created rather than creating one, and the row's own
+`PENDING` status is the idempotency key — a second accept answers
+`422 portal-signoff-not-pending` rather than signing twice.
+
+`acceptedName` is mandatory and is never defaulted from the contact
+row, on `ObSignoffAcceptRequest`'s own reasoning: "a name the person
+entered themselves is what distinguishes acceptance from a click".
+Being authenticated establishes which account acted, not that a human
+put their name to it.
+
+The acceptance is attributed to `sent_to_contact_id`, unchanged and
+not taken from the caller. IP and user agent are recorded from this
+request.
+
+ * @summary Accept a sign-off from the portal (CP-05)
+ */
+export const acceptPortalSignoffParams = zod.object({
+  "signoffId": zod.number()
+})
+
+export const acceptPortalSignoffBodyAcceptedNameMax = 160;
+
+export const acceptPortalSignoffBodyNoteMax = 2000;
+
+
+
+export const acceptPortalSignoffBody = zod.object({
+  "acceptedName": zod.string().min(1).max(acceptPortalSignoffBodyAcceptedNameMax).describe('Typed by the signatory and never defaulted from the contact row —\n`ObSignoffAcceptRequest`\'s own rule, which authentication does not\nrelax: it establishes which account acted, not that a human put\ntheir name to it.\n'),
+  "note": zod.string().max(acceptPortalSignoffBodyNoteMax).nullish().describe('Optional remark, stored on `acceptance_note`.')
+})
+
+export const acceptPortalSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "signedName": zod.string().nullish(),
+  "acceptanceNote": zod.string().nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "objectionNote": zod.string().nullish(),
+  "stepCompleted": zod.boolean(),
+  "gateFailures": zod.array(zod.string()).describe('Stable reason codes for what the gate refused. Empty when `stepCompleted` is true.'),
+  "clientWentLive": zod.boolean().describe('This acceptance was the last one, every journey is complete, and\nthe client is Live-Green.\n'),
+  "hasCertificate": zod.boolean().describe('Whether `getObSignoffCertificate` will return a PDF for this sign-off.'),
+  "csatOffered": zod.boolean().describe('Whether to draw the go-live survey after this acceptance.')
+}).describe('How the sign-off was decided, and what our own side still owes.\n\n`stepCompleted: false` with a non-empty `gateFailures` is a \*\*normal\noutcome\*\* of a successful acceptance, not an error — see\n`acceptPortalSignoff`. Both are empty on an objection: nothing\ncompletes, and the step reverting is staff\'s business rather than a\ngate the client failed.\n')
+})
+
+/**
+ * The other branch of the same decision, through the same
+`ObSignoffObjectService.object` the public page calls — the step
+reverts, and the owner is notified in the transaction the objection is
+recorded in.
+
+**The note is mandatory** where the acceptance note is optional: "an
+objection with no reason guarantees a second round trip".
+
+**Terminal.** There is no un-object here either — "a client who
+changes their mind is a new sign-off request, which is a staff action
+with its own record". The portal offers no path back, and the server's
+`PENDING` check is what enforces that rather than the screen.
+
+ * @summary Raise an objection instead of accepting (CP-05)
+ */
+export const objectPortalSignoffParams = zod.object({
+  "signoffId": zod.number()
+})
+
+export const objectPortalSignoffBodyNoteMax = 2000;
+
+
+
+export const objectPortalSignoffBody = zod.object({
+  "note": zod.string().min(1).max(objectPortalSignoffBodyNoteMax).describe('Mandatory, where the acceptance note is optional — \"an objection\nwith no reason guarantees a second round trip\".\n')
+})
+
+export const objectPortalSignoffResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "status": zod.enum(['PENDING', 'SIGNED', 'OBJECTED', 'EXPIRED', 'CANCELLED']).describe('A-118 · `ob_signoffs.status`.\n\n`EXPIRED` is reached by the token\'s TTL passing, not by an operation —\nthere is no route that expires a sign-off, because the thing that\nexpires it is time. `CANCELLED` is the deliberate withdrawal, and the\ntwo are kept apart because \"we changed our mind\" and \"they never\nclicked\" are different answers to the same question from a client.\n'),
+  "signedAt": zod.string().datetime({}).nullish(),
+  "signedName": zod.string().nullish(),
+  "acceptanceNote": zod.string().nullish(),
+  "objectedAt": zod.string().datetime({}).nullish(),
+  "objectionNote": zod.string().nullish(),
+  "stepCompleted": zod.boolean(),
+  "gateFailures": zod.array(zod.string()).describe('Stable reason codes for what the gate refused. Empty when `stepCompleted` is true.'),
+  "clientWentLive": zod.boolean().describe('This acceptance was the last one, every journey is complete, and\nthe client is Live-Green.\n'),
+  "hasCertificate": zod.boolean().describe('Whether `getObSignoffCertificate` will return a PDF for this sign-off.'),
+  "csatOffered": zod.boolean().describe('Whether to draw the go-live survey after this acceptance.')
+}).describe('How the sign-off was decided, and what our own side still owes.\n\n`stepCompleted: false` with a non-empty `gateFailures` is a \*\*normal\noutcome\*\* of a successful acceptance, not an error — see\n`acceptPortalSignoff`. Both are empty on an objection: nothing\ncompletes, and the step reverting is staff\'s business rather than a\ngate the client failed.\n')
+})
+
+/**
+ * B-119's one-question survey, answered in the portal instead of on the
+acceptance session.
+
+OB-09 rides the accept session because the alternative there is mailing
+a second link — "a second link emailed afterwards is a second thing to
+ignore". The portal has no such problem: the client is still signed in.
+
+**Additive, never gating.** The acceptance is already final before this
+is offered; skipping the survey is simply never calling this, and a
+client who closes the tab has still gone live.
+
+`204` because there is nothing to hand back. Eligibility — a `GO_LIVE`
+sign-off, actually `SIGNED`, not already answered for this client — is
+`ObSignoffCsatService`'s and answers `422`.
+
+ * @summary Answer the go-live survey (CP-05)
+ */
+export const submitPortalCsatParams = zod.object({
+  "signoffId": zod.number()
+})
+
+export const submitPortalCsatBodyScoreMax = 5;
+
+export const submitPortalCsatBodyCommentMax = 2000;
+
+
+
+export const submitPortalCsatBody = zod.object({
+  "score": zod.number().min(1).max(submitPortalCsatBodyScoreMax).describe('One to five. The whole survey.'),
+  "comment": zod.string().max(submitPortalCsatBodyCommentMax).nullish().describe('Optional — the survey\'s design is that it costs one tap.')
 })
 
 /**

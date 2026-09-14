@@ -16,8 +16,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * B-120 · recomputes one day of {@code ob_dashboard_summary} and
- * {@code ob_implementor_daily_stats} from the journey tables.
+ * B-120 · recomputes one day of {@code ob_dashboard_summary},
+ * {@code ob_client_daily_stats} and {@code ob_implementor_daily_stats} from the
+ * journey and prerequisite tables.
  *
  * <p>A-108 created two tables nothing fills, and CLAUDE.md forbids a live
  * {@code COUNT(*)} behind a dashboard, so OB-02 has no other source: until this
@@ -43,9 +44,10 @@ import java.util.Optional;
  * table rather than to one column. So:
  *
  * <ul>
- *   <li>{@link #refreshSummaryStock} and {@link #refreshImplementorStock} are
- *       only ever called for the <em>current</em> day. They delete and rewrite
- *       it, so a product or an implementor that stops earning a row loses one.</li>
+ *   <li>{@link #refreshSummaryStock}, {@link #refreshClientStock} and
+ *       {@link #refreshImplementorStock} are only ever called for the
+ *       <em>current</em> day. They delete and rewrite it, so a product, a
+ *       client or an implementor that stops earning a row loses one.</li>
  *   <li>{@link #refreshSummaryFlow}, {@link #refreshImplementorFlow} and
  *       {@link #refreshBlockedHours} derive from {@code started_at},
  *       {@code completed_at}, {@code finished_at} and the append-only history —
@@ -109,6 +111,21 @@ public class ObDashboardStatsRepository {
      */
     private static final String OPEN =
             "s.status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT')";
+
+    /**
+     * A prerequisite task that is still somebody's to do — {@link #OPEN}'s
+     * counterpart over {@code ob_client_prereq_tasks}, whose statuses are a
+     * different, shorter vocabulary.
+     *
+     * <p>{@code SUBMITTED} counts as open: the client has answered and staff
+     * have not verified, so the task is on somebody's desk and on the
+     * drill-over, which selects {@code NOT IN ('VERIFIED', 'SKIPPED')} — the
+     * same two rows {@code ObPrereqTaskStatus.isSettled} names. Written as the
+     * whitelist rather than as that exclusion for {@link #OPEN}'s reason: a
+     * status added to the enum should have to be classified here rather than
+     * fall into "open" by default.
+     */
+    private static final String OPEN_PREREQ = "t.status IN ('PENDING', 'SUBMITTED')";
 
     /** See the class note. {@code WAITING_ON_CLIENT} is out; {@code BLOCKED} is in. */
     private static final String OVERDUE = """
@@ -602,6 +619,79 @@ public class ObDashboardStatsRepository {
                 .param("day", day.date())
                 .param("dayStart", day.start())
                 .param("dayEnd", day.end())
+                .param("computedAt", computedAt)
+                .update();
+    }
+
+    // ------------------------------------------------------------------
+    // ob_client_daily_stats
+    // ------------------------------------------------------------------
+
+    /**
+     * The current day's prerequisite checklist, one row per client that has
+     * one.
+     *
+     * <h2>Why this is a second table and not three more columns above</h2>
+     *
+     * <p>§9's two deadline cards count "all client tasks — services
+     * <em>and</em> prerequisites", and A-108's column comment on
+     * {@code steps_due_this_week} says so in as many words. This pass is the
+     * prerequisite half; until it landed the cards counted services alone and
+     * the board read zero beside a drill-over listing seventeen rows.
+     *
+     * <p>It cannot be folded into {@link #refreshSummaryStock}'s statement
+     * because a prerequisite task has no product to be grouped by — it hangs
+     * off the client, gating every journey they bought rather than any one of
+     * them. The migration header works through both attributions that were
+     * available and why each is wrong; the short form is that a client can hold
+     * an open checklist and <em>no journey at all</em>, and a product-keyed row
+     * cannot represent that task under any scheme.
+     *
+     * <p>Deleted and rewritten like its two stock siblings, and for the same
+     * reason: a client earns a row by having an open task and stops earning one
+     * by finishing the checklist. An upsert cannot retract what it wrote, so
+     * the last client to clear their gate would keep yesterday's count on the
+     * board for good.
+     *
+     * <p>Current day only. {@code status} carries no history, so recomputing an
+     * earlier day would overwrite it with today's answer rather than repair it
+     * — the class note above makes the argument in full.
+     *
+     * <p><b>Public for the same reason {@link #refreshSummaryStock} is:</b>
+     * Spring ignores {@code @Transactional} on a non-public method silently,
+     * which would autocommit the DELETE on its own and leave every board
+     * reading in that window with no prerequisites at all.
+     *
+     * @return rows written — clients with at least one open task
+     */
+    @Transactional
+    public int refreshClientStock(ObStatsDay day, Instant now, Instant computedAt) {
+        jdbc.sql("DELETE FROM ob_client_daily_stats WHERE stat_date = :day")
+                .param("day", day.date())
+                .update();
+
+        return jdbc.sql("""
+                INSERT INTO ob_client_daily_stats (
+                    stat_date, ob_client_id,
+                    prereq_tasks_open, prereq_tasks_due_today,
+                    prereq_tasks_due_this_week, prereq_tasks_overdue,
+                    computed_at)
+                SELECT :day, t.ob_client_id,
+                    COUNT(*),
+                    COALESCE(SUM(t.due_at >= :dayStart  AND t.due_at < :dayEnd), 0),
+                    COALESCE(SUM(t.due_at >= :weekStart AND t.due_at < :weekEnd), 0),
+                    COALESCE(SUM(t.due_at < :now), 0),
+                    :computedAt
+                FROM ob_client_prereq_tasks t
+                WHERE %s
+                GROUP BY t.ob_client_id
+                """.formatted(OPEN_PREREQ))
+                .param("day", day.date())
+                .param("dayStart", day.start())
+                .param("dayEnd", day.end())
+                .param("weekStart", day.weekStart())
+                .param("weekEnd", day.weekEnd())
+                .param("now", now)
                 .param("computedAt", computedAt)
                 .update();
     }

@@ -19,6 +19,63 @@ class PortalUsernamesTest {
                 .isEqualTo("ACME.ravi");
     }
 
+    // ── the onboarding shape: the code, and nothing after it ────────────────
+
+    @Test
+    @DisplayName("an onboarding client's username is its code, hyphen and all")
+    void theCodeIsTheWholeUsername() {
+        assertThat(PortalUsernames.fromClientCode("HRZ-001", NOTHING_TAKEN))
+                .isEqualTo("HRZ-001");
+    }
+
+    /**
+     * The case the operator typed, kept. {@code ob_clients.client_code} is free
+     * text, so upper-casing it the way the ticketing path does would make the
+     * username a case-folded version of the code rather than the code — and
+     * the two are meant to read as one string on a support call.
+     */
+    @Test
+    @DisplayName("a lower-case code stays lower-case")
+    void theCodeKeepsItsCase() {
+        assertThat(PortalUsernames.fromClientCode("lfs-001", NOTHING_TAKEN))
+                .isEqualTo("lfs-001");
+        assertThat(PortalUsernames.fromClientCode("  Mixed-Case-01  ", NOTHING_TAKEN))
+                .isEqualTo("Mixed-Case-01");
+    }
+
+    /**
+     * Not redundant with {@code uq_ob_clients_client_code}: {@code
+     * client_accounts} is one table and the ticketing master mints into it from
+     * a code column of its own.
+     */
+    @Test
+    @DisplayName("a code already held in client_accounts gets the counter")
+    void aTakenCodeCounts() {
+        Set<String> existing = Set.of("HRZ-001");
+
+        assertThat(PortalUsernames.fromClientCode("HRZ-001", existing::contains))
+                .isEqualTo("HRZ-0012");
+    }
+
+    @Test
+    @DisplayName("a code that reduces to nothing falls back rather than producing an empty name")
+    void anUnusableCodeFallsBack() {
+        assertThat(PortalUsernames.fromClientCode("→→→", NOTHING_TAKEN)).isEqualTo("CLIENT");
+    }
+
+    /**
+     * A 32-character code is the longest {@code ob_clients.client_code} allows,
+     * and it has to survive whole — truncating it is the same "not the code"
+     * failure as changing its case.
+     */
+    @Test
+    @DisplayName("a full-length code is not truncated")
+    void aLongCodeSurvivesWhole() {
+        String longest = "A".repeat(32);
+
+        assertThat(PortalUsernames.fromClientCode(longest, NOTHING_TAKEN)).isEqualTo(longest);
+    }
+
     @Test
     @DisplayName("the second Ravi at one client is ravi2, not ravi1 beside a bare ravi")
     void aCollisionCounts() {

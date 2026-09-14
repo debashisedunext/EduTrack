@@ -119,6 +119,9 @@ class ObClientService {
         return new ObClientDtos.ObClientDetail(
                 id,
                 row.summary().name(),
+                row.summary().clientCode(),
+                row.summary().city(),
+                row.summary().address(),
                 row.summary().onboardingDate(),
                 row.summary().status(),
                 row.summary().rag(),
@@ -135,7 +138,10 @@ class ObClientService {
                 row.summary().startedAt(),
                 row.summary().hasPortalLogin(),
                 row.description(),
-                row.address(),
+                // `address` is on the summary now, beside `city` and
+                // `clientCode` — the Clients master is a four-field screen and
+                // shows all four on the row. It is passed above rather than
+                // here, and DetailRow no longer carries one.
                 row.licenseType(),
                 // Masked for every role, and masked here rather than at the
                 // controller: A-113's reveal is its own audited operation, and
@@ -187,7 +193,8 @@ class ObClientService {
         for (ObClientReadRepository.StepDotRow dot : reads.stepDotsOf(clientId)) {
             dots.computeIfAbsent(dot.journeyId(), key -> new ArrayList<>())
                     .add(new ObClientDtos.ObStepDot(dot.id(), dot.sequence(), dot.name(),
-                            dot.status(), dot.rag(), dot.dependsOnStepId()));
+                            dot.status(), dot.rag(), dot.dependsOnStepId(),
+                            dot.stageKey(), dot.stageName()));
         }
 
         List<ObClientDtos.ObJourneyStrip> strips = new ArrayList<>(journeyRows.size());
@@ -288,7 +295,8 @@ class ObClientService {
                                                         ObClientDtos.ObContact primary,
                                                         ObClientDtos.ObClientCurrentStep currentStep) {
         return new ObClientDtos.ObClientSummary(
-                row.id(), row.name(), row.onboardingDate(), row.status(), row.rag(), row.gateStatus(),
+                row.id(), row.name(), row.clientCode(), row.city(), row.address(),
+                row.onboardingDate(), row.status(), row.rag(), row.gateStatus(),
                 row.journeyCount(), row.journeysComplete(), currentStep, products,
                 ObClientDtos.UserRef.of(row.salesPersonId(), row.salesPersonName()),
                 primary, row.liveAt(), row.startedAt(), row.hasPortalLogin());

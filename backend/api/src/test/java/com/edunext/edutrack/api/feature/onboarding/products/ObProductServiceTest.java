@@ -4,6 +4,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyReposit
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
 import com.edunext.edutrack.domain.onboarding.ObProduct;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository;
+import com.edunext.edutrack.domain.onboarding.ObProductRepository.ActiveTemplateTask;
 import com.edunext.edutrack.domain.onboarding.ObProductRepository.Tally;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,8 +36,22 @@ class ObProductServiceTest {
         private final List<ObProduct> rows = new ArrayList<>();
         private final AtomicLong ids = new AtomicLong();
         private List<Long> withActiveTemplate = List.of();
-        private final Map<Long, Long> tatDaysByProduct = new java.util.HashMap<>();
+        /**
+         * Product → service → its tasks, as {@code (taskId, tatDays,
+         * dependsOnTaskId)}. A task list rather than a per-product total,
+         * because the figure stopped being a sum: the service walks each
+         * service's dependency chain, so a fake that handed it a number would
+         * test nothing about the walk.
+         */
+        private final Map<Long, Map<Long, List<long[]>>> tasksByProduct = new java.util.LinkedHashMap<>();
         private final Map<Long, Long> journeysByProduct = new java.util.HashMap<>();
+
+        /** One task of one active service. {@code dependsOn} of 0 means none. */
+        void task(long productId, long templateId, long taskId, int tatDays, long dependsOn) {
+            tasksByProduct.computeIfAbsent(productId, id -> new java.util.LinkedHashMap<>())
+                    .computeIfAbsent(templateId, id -> new ArrayList<>())
+                    .add(new long[] {taskId, tatDays, dependsOn});
+        }
 
         @Override
         public ObProduct save(ObProduct product) {
@@ -73,12 +88,21 @@ class ObProductServiceTest {
         }
 
         /**
-         * Absent products produce no row, the way {@code group by} does — which
-         * is the behaviour the null-versus-zero rule rests on.
+         * Absent products produce no row, the way the join does — which is the
+         * behaviour the null-versus-zero rule rests on.
          */
         @Override
-        public List<Tally> sumActiveTemplateTatDays(List<Long> productIds) {
-            return tallies(tatDaysByProduct, productIds);
+        public List<ActiveTemplateTask> activeTemplateTasks(List<Long> productIds) {
+            List<ActiveTemplateTask> out = new ArrayList<>();
+            for (Long productId : productIds) {
+                tasksByProduct.getOrDefault(productId, Map.of()).forEach((templateId, tasks) -> {
+                    for (long[] t : tasks) {
+                        out.add(activeTemplateTask(productId, templateId, t[0], (int) t[1],
+                                t[2] == 0 ? null : t[2]));
+                    }
+                });
+            }
+            return out;
         }
 
         @Override
@@ -91,6 +115,36 @@ class ObProductServiceTest {
                     .filter(source::containsKey)
                     .<Tally>map(id -> tally(id, source.get(id)))
                     .toList();
+        }
+
+        private static ActiveTemplateTask activeTemplateTask(Long productId, Long templateId,
+                Long taskId, int tatDays, Long dependsOnTaskId) {
+            return new ActiveTemplateTask() {
+                @Override
+                public Long getProductId() {
+                    return productId;
+                }
+
+                @Override
+                public Long getTemplateId() {
+                    return templateId;
+                }
+
+                @Override
+                public Long getTaskId() {
+                    return taskId;
+                }
+
+                @Override
+                public int getTatDays() {
+                    return tatDays;
+                }
+
+                @Override
+                public Long getDependsOnTaskId() {
+                    return dependsOnTaskId;
+                }
+            };
         }
 
         private static Tally tally(Long productId, long value) {
@@ -237,9 +291,9 @@ class ObProductServiceTest {
     @Test
     @DisplayName("totalTatDays is 0 for an active template with no steps — a different fact")
     void totalTatDaysIsZeroForAnEmptyTemplate() {
-        // The grouped sum returns no row for this product either, exactly as it
+        // The task read returns no row for this product either, exactly as it
         // does for the case above, so the two are told apart by hasActiveTemplate
-        // and not by the sum. Collapsing them is the bug this asserts against.
+        // and not by the tasks. Collapsing them is the bug this asserts against.
         long id = service.create(write("LMS", "Learning", null), null).id();
         repository.withActiveTemplate = List.of(id);
 
@@ -248,14 +302,36 @@ class ObProductServiceTest {
     }
 
     @Test
-    @DisplayName("totalTatDays sums the active template's step TATs")
-    void totalTatDaysSumsTheActiveTemplate() {
+    @DisplayName("totalTatDays adds a chained task and does not add a parallel one")
+    void totalTatDaysIsTheCriticalPathThroughEachService() {
+        // The whole rule in one service: task 1 takes 2 days, task 2 waits for
+        // it and takes 3 (so 5 days so far), and task 3 waits for nothing and
+        // takes 4 — running alongside them, not after them. A sum would say 9.
         long id = service.create(write("LMS", "Learning", null), null).id();
         repository.withActiveTemplate = List.of(id);
-        repository.tatDaysByProduct.put(id, 12L);
+        repository.task(id, 70L, 1L, 2, 0);
+        repository.task(id, 70L, 2L, 3, 1L);
+        repository.task(id, 70L, 3L, 4, 0);
 
         assertThat(service.list(null)).singleElement()
-                .satisfies(p -> assertThat(p.totalTatDays()).isEqualTo(12));
+                .satisfies(p -> assertThat(p.totalTatDays()).isEqualTo(5));
+    }
+
+    @Test
+    @DisplayName("totalTatDays sums across a product's services, each one critical-pathed on its own")
+    void totalTatDaysSumsTheServices() {
+        // Two services of 2 days each (a parallel pair inside each), boarded one
+        // after the other. Within a service the longer branch wins; across
+        // services they add, because a product's services run in sequence.
+        long id = service.create(write("LMS", "Learning", null), null).id();
+        repository.withActiveTemplate = List.of(id);
+        repository.task(id, 70L, 1L, 2, 0);
+        repository.task(id, 70L, 2L, 1, 0);
+        repository.task(id, 71L, 3L, 2, 0);
+        repository.task(id, 71L, 4L, 1, 0);
+
+        assertThat(service.list(null)).singleElement()
+                .satisfies(p -> assertThat(p.totalTatDays()).isEqualTo(4));
     }
 
     @Test
@@ -294,7 +370,7 @@ class ObProductServiceTest {
             }
 
             @Override
-            public List<Tally> sumActiveTemplateTatDays(List<Long> productIds) {
+            public List<ActiveTemplateTask> activeTemplateTasks(List<Long> productIds) {
                 calls.incrementAndGet();
                 return List.of();
             }

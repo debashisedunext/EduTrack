@@ -312,6 +312,60 @@ function resolveSession(db: Db, token: unknown) {
   return signoff ? { session, signoff } : null;
 }
 
+/**
+ * Recording an acceptance and putting its step through the completion gate.
+ *
+ * Extracted from `/public/onboarding/signoff/accept` rather than left inline,
+ * because it now has a second caller: the demo simulator below. That is the
+ * same reason `ObSignoffAcceptService` calls C-106's gate instead of copying it
+ * — PHASE-2-BUILD-PLAN §3 #4 found the prototype enforcing three gates on
+ * `stComplete` and none on `signoffAccept`, and a second evaluation written
+ * beside this one would be that bug again with a longer fuse.
+ *
+ * The order is the design and is preserved exactly: the acceptance is written
+ * **first and unconditionally**, then the gate is attempted. Reversed, a gate
+ * failure would roll back a signature the client already gave us.
+ */
+function acceptSignoffRow(db: Db, signoff: ObSignoffRow, userAgent: string) {
+  signoff.status = 'SIGNED';
+  signoff.signedByContactId = signoff.sentToContactId;
+  signoff.signedAt = new Date().toISOString();
+  signoff.signedIp = '203.0.113.9';
+  signoff.signedUserAgent = userAgent;
+  signoff.pdfStorageKey = `ob-signoffs/${signoff.id}/certificate.pdf`;
+
+  const client = db.obClients.find((c) => c.id === signoff.obClientId);
+  const journey = client?.journeys.find((j) => j.id === signoff.journeyId);
+  const step = signoff.stepId ? journey?.steps.find((x) => x.id === signoff.stepId) : undefined;
+
+  const gateFailures: string[] = [];
+  if (step) {
+    if (step.items?.some((i) => !i.isDone)) gateFailures.push('ob-step-items-unanswered');
+    if (step.docs?.some((d) => d.isRequired && !d.attachmentId)) gateFailures.push('ob-step-docs-missing');
+    if (gateFailures.length === 0) {
+      step.status = 'DONE';
+      step.finishedAt = new Date().toISOString();
+    }
+  }
+
+  let clientWentLive = false;
+  if (signoff.kind === 'GO_LIVE' && client) {
+    const allDone = client.journeys.every((j) => j.steps.every((s) => s.status === 'DONE' || s.status === 'SKIPPED'));
+    if (allDone && client.status !== 'LIVE') {
+      client.status = 'LIVE';
+      client.liveAt = new Date().toISOString();
+      clientWentLive = true;
+    }
+  }
+
+  return {
+    signoff: signoffDetailDto(signoff, db),
+    stepCompleted: step ? gateFailures.length === 0 : false,
+    gateFailures,
+    clientWentLive,
+  };
+}
+
 // ── escalations ─────────────────────────────────────────────────────────────
 
 const escalationDto = (e: ObEscalationRow, db: Db) => ({
@@ -690,6 +744,94 @@ export const obAdminHandlers = [
     return ok(signoffDto(s, db));
   }),
 
+  /**
+   * The demo sign-off simulator — `DevSignoffSimulationController`'s route,
+   * mirrored so the button works with `VITE_USE_MOCKS` on (which is the default
+   * for `npm run dev`). Without this the one control that exists to unblock a
+   * demo would be the one control that only works against a real backend.
+   *
+   * It requests a sign-off and accepts it in a single call, and it accepts it
+   * through `acceptSignoffRow` — the same function the public accept route
+   * uses. So the completion gate still refuses a step with an unanswered
+   * mandatory item or a missing required document, here exactly as on the
+   * server, and a demo does not quietly behave better than production.
+   *
+   * Not in `contracts/openapi.yaml` on purpose: it is not part of the
+   * application we ship, and the server only maps it under `dev-noauth` or
+   * `fixtures`.
+   */
+  http.post(url('/dev/onboarding/journeys/:journeyId/simulate-signoff'), async ({ params, request }) => {
+    const db = getDb();
+    const journeyId = Number(params.journeyId);
+    const body = (await request.json()) as { kind?: 'STEP' | 'GO_LIVE'; stepId?: number };
+
+    const client = db.obClients.find((c) => c.journeys.some((j) => j.id === journeyId));
+    const journey = client?.journeys.find((j) => j.id === journeyId);
+    if (!client || !journey) return notFound('Journey');
+
+    const kind = body.kind === 'GO_LIVE' ? 'GO_LIVE' : 'STEP';
+
+    // ck_ob_signoffs_step_matches_kind, and the server's own two refusals.
+    let stepId: number | null = null;
+    if (kind === 'STEP') {
+      if (body.stepId == null) {
+        return problem(422, 'ob-signoff-step-required', 'A STEP sign-off names its step.');
+      }
+      const step = journey.steps.find((s) => s.id === body.stepId);
+      // 404 rather than 403 for a step in another journey — no existence leak.
+      if (!step) return notFound('Step');
+      // Explicit `false` only, **not** a plain falsy check. The server refuses
+      // an unflagged step outright, because `ob_journey_steps.requires_signoff`
+      // is NOT NULL there — but in this fixture `requiresSignoff` is optional
+      // and `mkObSteps` never copies it off the template, so every seeded
+      // instance has it `undefined`. A falsy check here would refuse every step
+      // in the corpus and make the button look broken in exactly the mode most
+      // people run. Undefined means "this fixture does not model the flag",
+      // which is not the same answer as "no".
+      if (step.requiresSignoff === false) {
+        return problem(422, 'ob-signoff-step-not-signoffable',
+          'That service is not flagged for client sign-off, so nothing gates on one.');
+      }
+      stepId = step.id;
+    }
+
+    const contact = client.contacts.find((c) => c.isActive && c.isPrimary)
+      ?? client.contacts.find((c) => c.isActive);
+    if (!contact) {
+      return problem(422, 'ob-signoff-no-contact',
+        'This client has no active contact to record a sign-off against. Add a SPOC first.');
+    }
+
+    const row: ObSignoffRow = {
+      id: nextId(db, 'obSignoff') + 10,
+      obClientId: client.id,
+      journeyId,
+      stepId,
+      kind,
+      status: 'PENDING',
+      token: `ob-signoff-sim-${nextId(db, 'obSignoffToken')}-${Date.now()}`,
+      tokenExpiresAt: new Date(Date.now() + 14 * 24 * 3600_000).toISOString(),
+      otp: null,
+      otpAttempts: 0,
+      // No requester: no staff member asked for this one.
+      requestedById: null,
+      requestedAt: new Date().toISOString(),
+      sentToContactId: contact.id,
+      signedByContactId: null,
+      signedAt: null,
+      signedIp: null,
+      signedUserAgent: null,
+      objectedAt: null,
+      objectionNote: null,
+      pdfStorageKey: null,
+      csatScore: null,
+      csatComment: null,
+    };
+    db.obSignoffs.push(row);
+
+    return ok(acceptSignoffRow(db, row, 'demo-signoff-simulator'));
+  }),
+
   http.get(url('/onboarding/signoffs/:signoffId/certificate'), ({ params }) => {
     const db = getDb();
     const s = db.obSignoffs.find((x) => x.id === Number(params.signoffId));
@@ -842,48 +984,14 @@ export const obAdminHandlers = [
     if (!resolved) return publicDenied();
     const { session, signoff } = resolved;
 
-    // The acceptance is recorded FIRST and unconditionally. The client did
-    // accept; they are not the ones who left a document unattached.
-    signoff.status = 'SIGNED';
-    signoff.signedByContactId = signoff.sentToContactId;
-    signoff.signedAt = new Date().toISOString();
-    signoff.signedIp = '203.0.113.9';
-    signoff.signedUserAgent = request.headers.get('user-agent') ?? 'mock';
-    signoff.pdfStorageKey = `ob-signoffs/${signoff.id}/certificate.pdf`;
-
-    const client = db.obClients.find((c) => c.id === signoff.obClientId);
-    const journey = client?.journeys.find((j) => j.id === signoff.journeyId);
-    const step = signoff.stepId ? journey?.steps.find((x) => x.id === signoff.stepId) : undefined;
-
-    // Then the same completion gate every other route uses — PHASE-2-BUILD-PLAN
-    // §3 #4. Failing it leaves the step IN_PROGRESS and keeps the acceptance.
-    const gateFailures: string[] = [];
-    if (step) {
-      if (step.items?.some((i) => !i.isDone)) gateFailures.push('ob-step-items-unanswered');
-      if (step.docs?.some((d) => d.isRequired && !d.attachmentId)) gateFailures.push('ob-step-docs-missing');
-      if (gateFailures.length === 0) {
-        step.status = 'DONE';
-        step.finishedAt = new Date().toISOString();
-      }
-    }
-
-    let clientWentLive = false;
-    if (signoff.kind === 'GO_LIVE' && client) {
-      const allDone = client.journeys.every((j) => j.steps.every((s) => s.status === 'DONE' || s.status === 'SKIPPED'));
-      if (allDone && client.status !== 'LIVE') {
-        client.status = 'LIVE';
-        client.liveAt = new Date().toISOString();
-        clientWentLive = true;
-      }
-    }
+    // The acceptance is recorded FIRST and unconditionally, then the gate is
+    // attempted. The client did accept; they are not the ones who left a
+    // document unattached. Both halves live in `acceptSignoffRow`, which the
+    // demo simulator shares — see its own note on why it is not inline here.
+    const result = acceptSignoffRow(db, signoff, request.headers.get('user-agent') ?? 'mock');
 
     session.used = true;
-    return ok({
-      signoff: signoffDetailDto(signoff, db),
-      stepCompleted: step ? gateFailures.length === 0 : false,
-      gateFailures,
-      clientWentLive,
-    });
+    return ok(result);
   }),
 
   http.post(url('/public/onboarding/signoff/object'), async ({ request }) => {

@@ -23,9 +23,9 @@ import java.util.Optional;
  * here would give this package a second mapping of Stream C's table.
  *
  * <p>A client with no journeys at all answers {@code LOCKED}. That is the
- * honest reading of "nothing has been released": plan §5.2 makes
- * {@code LOCKED} the state in which no step activates and no clock runs, and
- * a client with nothing to run is in exactly that state. It also means the
+ * honest reading of "nothing has been released": {@link ObGateStatus#LOCKED}
+ * is the state in which nothing activates itself and no clock starts on its
+ * own, and a client with nothing to run is in exactly that state. It also means the
  * strip renders identically before and after the first product is boarded,
  * which is what OB-03's "Prerequisites pending" filter expects.
  */

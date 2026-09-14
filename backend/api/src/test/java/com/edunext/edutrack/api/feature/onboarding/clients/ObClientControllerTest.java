@@ -75,9 +75,10 @@ class ObClientControllerTest {
     @Test
     @DisplayName("the create answers 201 and tags it, so the wizard can edit without a second read")
     void createIsTaggedOnTheWayOut() {
-        when(writes.create(any(), anyLong(), any())).thenReturn(detail("Horizon Academy"));
+        when(writes.create(any(), anyLong(), any())).thenReturn(
+                new ObClientWriteService.Created(detail("Horizon Academy"), null));
 
-        ResponseEntity<ObClientDtos.ObClientDetailResponse> response =
+        ResponseEntity<ObClientDtos.ObClientCreateResponse> response =
                 controller.create(caller(), "an-idempotency-key", createRequest());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -182,9 +183,10 @@ class ObClientControllerTest {
 
     private static ObClientDtos.ObClientDetail detail(String name) {
         return new ObClientDtos.ObClientDetail(
-                CLIENT, name, LocalDate.of(2026, 9, 7), "ONBOARDING", null, "LOCKED", 1, 0,
+                CLIENT, name, "ACM-001", "Pune", null, LocalDate.of(2026, 9, 7),
+                "ONBOARDING", null, "LOCKED", 1, 0,
                 null, List.of(), null, null, null, null, false,
-                null, null, null, null, null,
+                null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), null, null, null);
     }
 
@@ -193,25 +195,23 @@ class ObClientControllerTest {
                 9L, new ObClientDtos.ObProductRef(1L, "ERP", "ERP"), "Standard SaaS Onboarding",
                 "LOCKED", null, 0,
                 null, 5, null,
-                List.of(new ObClientDtos.ObStepDot(3L, 1, "Kickoff", "IN_PROGRESS", "AMBER", null)));
+                List.of(new ObClientDtos.ObStepDot(3L, 1, "Kickoff", "IN_PROGRESS", "AMBER", null,
+                        1L, "Configuration")));
 
         ObClientDtos.ObClientDetail base = detail(name);
         return new ObClientDtos.ObClientDetail(
-                base.id(), base.name(), base.onboardingDate(), base.status(), base.rag(),
+                base.id(), base.name(), base.clientCode(), base.city(), base.address(),
+                base.onboardingDate(), base.status(), base.rag(),
                 base.gateStatus(), base.journeyCount(), base.journeysComplete(), base.currentStep(),
                 base.products(),
                 base.salesPerson(), base.primaryContact(), base.liveAt(), base.startedAt(), base.hasPortalLogin(),
-                base.description(), base.address(), base.licenseType(), base.pan(),
+                base.description(), base.licenseType(), base.pan(),
                 base.statusReason(), base.contacts(), base.applications(), base.requirements(),
                 List.of(strip), base.createdBy(), base.createdAt(), base.csatScore());
     }
 
     private static ObClientDtos.ObClientCreateRequest createRequest() {
         return new ObClientDtos.ObClientCreateRequest(
-                "Horizon Academy", null, LocalDate.of(2026, 9, 7), null, null, null, null,
-                List.of(new ObClientDtos.ObContactWriteRequest(
-                        "SPOC", null, "spoc@example.com", null, false, null, true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, false, false);
+                "Horizon Academy", "HRZ-001", "12 Ridge Road", "Pune", false);
     }
 }

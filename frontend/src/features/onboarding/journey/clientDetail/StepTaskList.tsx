@@ -73,7 +73,18 @@ export function StepTaskList({ stepId, items, docs, canEdit }: StepTaskListProps
                     checked={item.isDone}
                     disabled={!canEdit || busy}
                     onChange={(event) =>
-                      update.mutate({ itemId: item.id, data: { isDone: event.target.checked } })
+                      /*
+                        `answer`, not `isDone` — the request became three-state so
+                        the project page could record "False, and here is why".
+                        A checkbox has two states, so it writes True or clears
+                        back to unanswered, which is exactly what it meant
+                        before; recording a False from here would need a remark
+                        field this list does not have.
+                      */
+                      update.mutate({
+                        itemId: item.id,
+                        data: { answer: event.target.checked ? true : null },
+                      })
                     }
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   />

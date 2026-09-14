@@ -47,7 +47,6 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObClientDetailAllOfDescription } from './obClientDetailAllOfDescription';
-import type { ObClientDetailAllOfAddress } from './obClientDetailAllOfAddress';
 import type { ObClientDetailAllOfLicenseType } from './obClientDetailAllOfLicenseType';
 import type { ObClientDetailAllOfPan } from './obClientDetailAllOfPan';
 import type { ObClientDetailAllOfStatusReason } from './obClientDetailAllOfStatusReason';
@@ -60,7 +59,6 @@ import type { ObClientDetailAllOfCsatScore } from './obClientDetailAllOfCsatScor
 
 export type ObClientDetailAllOf = {
   description?: ObClientDetailAllOfDescription;
-  address?: ObClientDetailAllOfAddress;
   /** @maxLength 64 */
   licenseType?: ObClientDetailAllOfLicenseType;
   /** **Masked for every role except OB Admin and Onboarding

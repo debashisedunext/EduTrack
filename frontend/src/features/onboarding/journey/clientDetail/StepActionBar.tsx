@@ -14,6 +14,7 @@ import {
 import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/use-toast'
+import { invalidateObDashboard } from '@/features/onboarding/dashboard/obDashboardFreshness'
 
 import type { JourneyHold } from './journeyStrip'
 import { BlockStepDialog } from './BlockStepDialog'
@@ -21,6 +22,7 @@ import {
   ACTION_LABELS,
   actionRefusal,
   allowedActions,
+  startCaution,
   type CompletionGate,
   type StepAction,
 } from './stepActions'
@@ -69,6 +71,10 @@ export function StepActionBar({ step, hold, gate, canAct }: StepActionBarProps) 
   const refresh = React.useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: getGetObJourneyStepQueryKey(step.id) })
     void queryClient.invalidateQueries({ queryKey: getGetObJourneyQueryKey(step.journeyId) })
+    // Starting, completing or blocking a step is the single biggest mover of
+    // OB-02: it changes `steps_completed`, `steps_overdue`, the journey's RAG
+    // colour and which column of the board its client sits in.
+    invalidateObDashboard(queryClient)
   }, [queryClient, step.id, step.journeyId])
 
   /**
@@ -121,6 +127,7 @@ export function StepActionBar({ step, hold, gate, canAct }: StepActionBarProps) 
     start.isPending || complete.isPending || waiting.isPending || resume.isPending || block.isPending
 
   const actions = allowedActions(step.status)
+  const caution = startCaution(hold)
 
   // Someone else's step, or a terminal one. Nothing to offer, and nothing
   // greyed out pretending otherwise.
@@ -168,6 +175,19 @@ export function StepActionBar({ step, hold, gate, canAct }: StepActionBarProps) 
             </p>
           ) : null
         })}
+
+        {/*
+          The same slot, for the thing that is worth knowing but does not
+          refuse: the client's prerequisites are still open and Start works
+          anyway. Suppressed once the step is running — `allowedActions` has
+          dropped `start` by then, and a caution about starting is noise
+          beside a Complete button.
+        */}
+        {actions.includes('start') && caution && (
+          <p role="status" className="w-full text-caption text-content-muted">
+            {caution}
+          </p>
+        )}
       </div>
 
       <BlockStepDialog

@@ -46,6 +46,8 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObJourneyStepItemAnswer } from './obJourneyStepItemAnswer';
+import type { ObJourneyStepItemRemark } from './obJourneyStepItemRemark';
 import type { ObJourneyStepItemDoneAt } from './obJourneyStepItemDoneAt';
 import type { ObJourneyStepItemDoneBy } from './obJourneyStepItemDoneBy';
 
@@ -56,7 +58,30 @@ export interface ObJourneyStepItem {
   label: string;
   /** A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`. */
   isMandatory: boolean;
+  /** **Answered, not answered yes.** True whenever `answer` is set
+either way — an item answered *False, and here is why* satisfies
+the completion gate exactly as a True does. The server computes it
+as `answer IS NOT NULL`; anything that "fixes" it to mean "answered
+True" makes the screen refuse completions the server allows.
+ */
   isDone: boolean;
+  /** The three states `ob_journey_step_items.answer` actually has: `true`,
+`false`, and `null` for not yet answered.
+
+`isDone` cannot express the middle one, which is why this field
+exists. A task list entry is a question — *was the source data
+received?* — and "no, because the client has not sent it" is an
+answer, not an absence of one.
+ */
+  answer?: ObJourneyStepItemAnswer;
+  /**
+   * Why. **Required when `answer` is false** and optional otherwise:
+an exception nobody explained is an exception the next reader has
+to go and ask about.
+
+   * @maxLength 500
+   */
+  remark?: ObJourneyStepItemRemark;
   doneAt?: ObJourneyStepItemDoneAt;
   doneBy?: ObJourneyStepItemDoneBy;
 }

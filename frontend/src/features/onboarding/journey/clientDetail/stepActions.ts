@@ -31,7 +31,8 @@ export type StepAction = 'start' | 'complete' | 'block' | 'waiting' | 'resume'
  *
  * `PENDING` covers both "gate still locked" and "dependency not met"
  * (`ObJourneyStepStatus`'s own note), so `start` appearing here is necessary
- * but not sufficient — `startRefusal` below is the rest of that answer.
+ * but not sufficient — `startRefusal` and `startCaution` below are the rest of
+ * that answer.
  *
  * `DONE` and `SKIPPED` are terminal and deliberately have no entry: there is
  * no reopen transition in the module, and offering one that 422s would be
@@ -78,22 +79,40 @@ export function mayActOnStep(
 /**
  * Why `start` would be refused even though the status permits it.
  *
- * A journey instantiates `LOCKED` — every step visible, owners resolved, TATs
- * shown, and the clocks dead (plan §5.2) — and a journey past the gate can
- * still be held behind a sibling (§5.5). The server answers both with
- * `journey-not-open`, one problem code covering two quite different things a
- * reader would act on differently: clearing prerequisites is work somebody can
- * do today, waiting for a sibling journey is not.
+ * Only one thing refuses it now: a journey held behind a sibling (plan §5.5),
+ * which waits on work nobody on this journey can do. The server's
+ * `journey-not-open` says exactly that and nothing else.
  *
- * So the screen separates them here, from the hold the accordion already
- * computed, rather than parsing the refusal text after the fact.
+ * **A locked prerequisite gate is no longer a refusal.** It used to be — a
+ * journey instantiates `LOCKED` with every step visible and the clocks dead
+ * (plan §5.2), and `start` answered `journey-not-open` for that too, so one
+ * unverified document stopped every implementation task for the client. The
+ * checklist is advisory now: `startCaution` below says so beside an enabled
+ * button, and `ObJourneyStepLifecycleService#start` no longer checks the gate
+ * at all. Which is why the two cases are still separated here rather than
+ * merged — they were never the same answer, and now they are not even the
+ * same kind of answer.
  */
 export function startRefusal(hold: JourneyHold): string | null {
-  if (hold === 'GATE_LOCKED') {
-    return 'This journey is still behind the client’s prerequisites. Clear the gate above to start work.'
-  }
   if (hold === 'HELD_BY_SIBLING') {
     return 'This journey is held until another of the client’s services finishes.'
+  }
+  return null
+}
+
+/**
+ * What to say beside an enabled Start, or null when there is nothing to note.
+ *
+ * A caution, not a refusal, and the distinction is the whole point: the gate
+ * is still real work that somebody owes, and starting ahead of it is a choice
+ * the owner should make knowingly rather than one the screen makes silently
+ * for them. It renders in the same place a refusal would, so a reader who
+ * remembers the old behaviour finds the sentence where they expect it and
+ * finds the button live.
+ */
+export function startCaution(hold: JourneyHold): string | null {
+  if (hold === 'GATE_LOCKED') {
+    return 'The client’s prerequisites have not cleared. You can start anyway — the checklist no longer holds this service — but the TAT clock runs from the moment you do.'
   }
   return null
 }

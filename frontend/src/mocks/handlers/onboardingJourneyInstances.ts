@@ -18,10 +18,12 @@ import { currentUser, notFound, ok, problem, url, validationFailed } from './uti
  * 1. **Row-scope, not a role check.** Only `step.ownerUserId` or
  *    `step.backupOwnerUserId` may act — `mayAct` below is
  *    `ObStepOwnership.mayAct` — everyone else gets a 422, never a 403.
- * 2. **`start` alone checks the journey's gate/hold**, `422` if `gateStatus`
- *    is not `OPEN` or `heldByJourneyId` is set. No dependency-graph check —
- *    that refusal, "naming the blocker", is C-119's, on both sides of the
- *    contract.
+ * 2. **`start` alone checks the journey's hold**, `422` if `heldByJourneyId`
+ *    is set. **`gateStatus` is not checked** — the client's prerequisite
+ *    checklist is advisory, so a `LOCKED` journey starts like any other and
+ *    `JourneyNotOpenException` now has one cause rather than two. No
+ *    dependency-graph check either — that refusal, "naming the blocker", is
+ *    C-119's, on both sides of the contract.
  * 3. **`complete` still completes unconditionally here — one place the mock
  *    and the server now differ, on `CommentThread.tsx`'s own precedent for
  *    naming a gap rather than leaving it to be found.** C-106 made
@@ -98,11 +100,11 @@ export const onboardingJourneyInstanceHandlers = [
 
     if (!mayAct(step, db)) return notStepOwnerProblem(step);
     if (step.status !== 'PENDING') return invalidTransitionProblem(step, 'start');
-    if (journey.gateStatus !== 'OPEN' || journey.heldByJourneyId != null) {
+    // The gate is deliberately not consulted — see rule 2 in the file header.
+    if (journey.heldByJourneyId != null) {
       return problem(422, 'journey-not-open', 'This journey is not open for step activity yet', {
         detail: `journey ${journey.id} is not open for step activity`
-          + (journey.gateStatus !== 'OPEN' ? ' (gate LOCKED)' : '')
-          + (journey.heldByJourneyId != null ? ` (held by journey ${journey.heldByJourneyId})` : ''),
+          + ` (held by journey ${journey.heldByJourneyId})`,
       });
     }
 

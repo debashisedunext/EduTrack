@@ -160,6 +160,9 @@ class ObClientReadRepository {
     private static final String LIST_COLUMNS = """
             SELECT c.id                AS id,
                    c.name              AS name,
+                   c.client_code       AS clientCode,
+                   c.city              AS city,
+                   c.address           AS address,
                    c.onboarding_date   AS onboardingDate,
                    c.overall_status    AS status,
                    c.live_at           AS liveAt,
@@ -197,7 +200,7 @@ class ObClientReadRepository {
      */
     private static final String LIST_FILTERS = """
              WHERE %s
-               AND (:q IS NULL OR c.name LIKE :q)
+               AND (:q IS NULL OR c.name LIKE :q OR c.client_code LIKE :q)
                AND (:status IS NULL OR c.overall_status = :status)
                AND (:salesPersonId IS NULL OR c.sales_person_id = :salesPersonId)
                AND (:productId IS NULL OR EXISTS (
@@ -256,13 +259,15 @@ class ObClientReadRepository {
     private static final String DETAIL = """
             SELECT c.id                AS id,
                    c.name              AS name,
+                   c.client_code       AS clientCode,
+                   c.city              AS city,
+                   c.address           AS address,
                    c.onboarding_date   AS onboardingDate,
                    c.overall_status    AS status,
                    c.live_at           AS liveAt,
                    c.sales_person_id   AS salesPersonId,
                    sp.full_name        AS salesPersonName,
                    c.description       AS description,
-                   c.address           AS address,
                    c.license_type      AS licenseType,
                    c.status_reason     AS statusReason,
                    c.pan_ciphertext    AS panCiphertext,
@@ -678,7 +683,33 @@ class ObClientReadRepository {
                 .param("id", clientId).query(JOURNEY_MAPPER).list();
     }
 
-    /** Every dot of every live journey of one client, in template order. */
+    /**
+     * Every dot of every live journey of one client, in template order.
+     *
+     * <h2>The stage is resolved, not stored</h2>
+     *
+     * <p>{@code ob_journey_steps} carries no stage of its own, so the two left
+     * joins walk back to the template the task was instantiated from and read
+     * the stage group there. <b>Left</b> joins, because a template step can be
+     * deleted after a journey is running: the task keeps working and lands in
+     * the {@code 0} bucket rather than dropping out of the ribbon entirely.
+     *
+     * <p>{@code stageKey} is deliberately the <em>same expression</em> as
+     * {@code ObProjectReadRepository.STAGE_ROLLUP}'s, character for character —
+     * {@code COALESCE(g.implementation_stage_id, -g.id, 0)}. The project
+     * header's ribbon is built from that roll-up and this is what files a task
+     * under the stop somebody clicked, so the two folding differently would be
+     * a silently empty stage rather than a visible error. Copying the
+     * expression is worse than sharing it and better than paraphrasing it; if
+     * a third caller appears it should move somewhere both can import.
+     *
+     * <p><b>Not denormalised onto the row.</b> Snapshotting the key at
+     * instantiation was the obvious alternative and is the wrong one here: the
+     * roll-up resolves against live template rows, so a snapshot would drift
+     * out of agreement with it the first time a template was edited, and the
+     * symptom would be a ribbon whose counts no longer matched the tasks under
+     * it. One source, joined twice, cannot disagree with itself.
+     */
     List<StepDotRow> stepDotsOf(long clientId) {
         return jdbc.sql("""
                 SELECT s.id                 AS id,
@@ -687,9 +718,13 @@ class ObClientReadRepository {
                        s.name               AS name,
                        s.status             AS status,
                        s.depends_on_step_id AS dependsOnStepId,
+                       COALESCE(g.implementation_stage_id, -g.id, 0) AS stageKey,
+                       COALESCE(g.name, 'Ungrouped')                 AS stageName,
                        %s                   AS rag
                   FROM ob_journey_steps s
                   JOIN ob_journeys j ON j.id = s.journey_id
+             LEFT JOIN ob_journey_template_steps  ts ON ts.id = s.template_step_id
+             LEFT JOIN ob_journey_template_stages g  ON g.id = ts.template_stage_id
                  WHERE j.ob_client_id = :id
                    AND j.archived_at IS NULL
                  ORDER BY s.journey_id, s.sequence, s.id
@@ -749,12 +784,13 @@ class ObClientReadRepository {
     // Rows and mappers
     // ------------------------------------------------------------------
 
-    record ListRow(long id, String name, LocalDate onboardingDate, String status, Instant liveAt,
+    record ListRow(long id, String name, String clientCode, String city, String address,
+                   LocalDate onboardingDate, String status, Instant liveAt,
                    Long salesPersonId, String salesPersonName, String rag, String gateStatus,
                    int journeyCount, int journeysComplete, boolean hasPortalLogin, Instant startedAt) {
     }
 
-    record DetailRow(ListRow summary, String description, String address, String licenseType,
+    record DetailRow(ListRow summary, String description, String licenseType,
                      String statusReason, byte[] panCiphertext, Long createdBy, String createdByName,
                      Instant createdAt, Integer csatScore) {
     }
@@ -816,7 +852,7 @@ class ObClientReadRepository {
     }
 
     record StepDotRow(long id, long journeyId, int sequence, String name, String status,
-                      Long dependsOnStepId, String rag) {
+                      Long dependsOnStepId, long stageKey, String stageName, String rag) {
     }
 
     record NameRow(long id, String name, Long createdBy) {
@@ -902,7 +938,6 @@ class ObClientReadRepository {
     private static final RowMapper<DetailRow> DETAIL_MAPPER = (rs, n) -> new DetailRow(
             listRow(rs),
             rs.getString("description"),
-            rs.getString("address"),
             rs.getString("licenseType"),
             rs.getString("statusReason"),
             rs.getBytes("panCiphertext"),
@@ -948,7 +983,8 @@ class ObClientReadRepository {
 
     private static final RowMapper<StepDotRow> STEP_DOT_MAPPER = (rs, n) -> new StepDotRow(
             rs.getLong("id"), rs.getLong("journeyId"), rs.getInt("sequence"), rs.getString("name"),
-            rs.getString("status"), nullableLong(rs, "dependsOnStepId"), rs.getString("rag"));
+            rs.getString("status"), nullableLong(rs, "dependsOnStepId"),
+            rs.getLong("stageKey"), rs.getString("stageName"), rs.getString("rag"));
 
     private static final RowMapper<NameRow> NAME_MAPPER = (rs, n) -> new NameRow(
             rs.getLong("id"), rs.getString("name"), nullableLong(rs, "createdBy"));
@@ -957,6 +993,9 @@ class ObClientReadRepository {
         return new ListRow(
                 rs.getLong("id"),
                 rs.getString("name"),
+                rs.getString("clientCode"),
+                rs.getString("city"),
+                rs.getString("address"),
                 localDate(rs, "onboardingDate"),
                 rs.getString("status"),
                 instant(rs, "liveAt"),

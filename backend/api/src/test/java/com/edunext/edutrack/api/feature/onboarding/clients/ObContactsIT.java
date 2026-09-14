@@ -123,21 +123,27 @@ class ObContactsIT {
         long product = insertProduct("ITSPOC_" + run, "IT SPOC Product " + run);
         insertTemplate(product, "IT SPOC Onboarding " + run);
 
-        ObClientDtos.ObClientDetail client = clientWrites.create(admin, ayush,
+        /*
+          Two calls where there used to be one, and the fixture is more faithful
+          for it. The create is the Clients master's four fields — a company —
+          and the founding SPOC arrives through the panel that owns contacts,
+          which since the wizard retired is the only way one is ever added. Every
+          assertion below is now about a contact that got here exactly as a real
+          one does.
+
+          `acknowledgeSimilarNames`, because the fixtures below are "IT SPOC
+          Client 1", "2", "3" … and the fuzzy name guard is quite right to think
+          those are the same company. It is that guard's test's subject, not this
+          one's.
+        */
+        ObClientDtos.ObClientDetail created = clientWrites.create(admin, ayush,
                 new ObClientDtos.ObClientCreateRequest(
-                        "IT SPOC Client " + run, null, BOARDED, null, null, null, null,
-                        List.of(new ObClientDtos.ObContactWriteRequest(
-                                "Founding SPOC", "Principal", "founder" + run + "@example.com",
-                                "+911111111111", true, "VERBAL", true)),
-                        List.of(new ObClientDtos.ObApplicationWriteRequest(
-                                product, "ANNUAL", 10, BOARDED, BOARDED.plusYears(1))),
-                        List.of(),
-                        // acknowledgeSimilarNames, because the fixtures below are
-                        // "IT SPOC Client 1", "2", "3" … and B-102's fuzzy name
-                        // guard is quite right to think those are the same
-                        // company. It is that guard's test's subject, not this
-                        // one's.
-                        false, true));
+                        "IT SPOC Client " + run, "ITSPOC-" + run, null, null, true)).detail();
+
+        ObClientDtos.ObClientDetail client = contacts.add(admin, ayush, created.id(),
+                new ObContactDtos.ObContactUpsertRequest(
+                        "Founding SPOC", "Principal", "founder" + run + "@example.com",
+                        "+911111111111", true, "VERBAL", true, true));
 
         clientId = client.id();
         primaryId = client.contacts().getFirst().id();

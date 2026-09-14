@@ -10,6 +10,7 @@ import { ApiError } from '@/api/http'
 import { Button } from '@/components/ui/button'
 import { ReasonDialog } from '@/components/ui/reason-dialog'
 import { toast } from '@/components/ui/use-toast'
+import { invalidateObDashboard } from '@/features/onboarding/dashboard/obDashboardFreshness'
 
 /**
  * The staff banner plan §4/§9 asks for: every open escalation this client
@@ -46,6 +47,9 @@ export function EscalationBanner({
       await queryClient.invalidateQueries({
         queryKey: getListObClientEscalationsQueryKey({ obClientId, state: 'OPEN' }),
       })
+      // `client-escalations` is a card of its own, and this is the only action
+      // in the module that decrements it.
+      invalidateObDashboard(queryClient)
       setResolving(null)
     } catch (error) {
       toast({

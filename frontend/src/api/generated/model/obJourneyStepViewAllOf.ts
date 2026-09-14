@@ -52,6 +52,9 @@ import type { ObJourneyStepViewAllOfRag } from './obJourneyStepViewAllOfRag';
 import type { ObJourneyStepViewAllOfDependsOnStepId } from './obJourneyStepViewAllOfDependsOnStepId';
 import type { ObJourneyStepViewAllOfSkipReason } from './obJourneyStepViewAllOfSkipReason';
 import type { ObJourneyStepViewAllOfSkippedByUserId } from './obJourneyStepViewAllOfSkippedByUserId';
+import type { ObJourneyStepViewAllOfTatUsedPercent } from './obJourneyStepViewAllOfTatUsedPercent';
+import type { ObJourneyStepItem } from './obJourneyStepItem';
+import type { ObJourneyStepDoc } from './obJourneyStepDoc';
 
 export type ObJourneyStepViewAllOf = {
   description?: ObJourneyStepViewAllOfDescription;
@@ -62,4 +65,64 @@ export type ObJourneyStepViewAllOf = {
   dependsOnStepId?: ObJourneyStepViewAllOfDependsOnStepId;
   skipReason?: ObJourneyStepViewAllOfSkipReason;
   skippedByUserId?: ObJourneyStepViewAllOfSkippedByUserId;
+  /** The implementation stage this task sits in, folded exactly as
+`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the
+stage's `implementation_stage_id`, else the negated template
+stage-group id, else `0` where the template row has gone.
+
+Three schemas now carry this key and all three must fold the
+same way, because the project page files a task under the
+ribbon stop a reader clicked by matching them. Divergence would
+show as a stage that looks populated and opens empty, which is
+a bug nobody would read as a key mismatch.
+ */
+  stageKey?: number;
+  /**
+   * The stage's name as the template published it. A snapshot, like
+`ObStepDot.stageName` — renaming a stage on OB-15 must not
+re-label a journey that is already running.
+
+   * @maxLength 120
+   */
+  stageName?: string;
+  /** Working hours consumed over this task's budget, as a percentage
+— the figure OB-06 prints as **TAT used**, and the one that goes
+over 100 on a breach.
+
+Computed server-side from `ObJourneyStepRagService.hoursConsumed`
+against `ObStepTatBudget`, so numerator and denominator agree
+about how long a working day is and client waits are excluded
+from both. A browser deriving it from `dueAt` would be counting
+weekends, holidays and resource leave as working time.
+
+Null where nothing has been consumed to measure — a task that
+has never started, or one whose budget is zero.
+ */
+  tatUsedPercent?: ObJourneyStepViewAllOfTatUsedPercent;
+  /** This task's sub-tasks — the third and fourth levels of Module
+Service → Stage → Task → **Task list**.
+
+**Filled by the journey read**, which fetches every task's
+checklist for the whole journey in one query, because the
+project page's stage body draws each task with its sub-tasks
+open underneath and per-task fetching would be a request per
+row on first paint.
+
+Optional here and **required** on `ObJourneyStepDetail`, which
+is the difference between the two shapes: a caller holding a
+detail always has the checklist, a caller holding a view should
+check.
+ */
+  items?: ObJourneyStepItem[];
+  /** Required documents. **Empty on the journey read** — deciding
+satisfaction counts clean attachments per task and walks the
+template's document list, two further reads per row, and the
+stage body shows no documents.
+
+So an empty array here means "not loaded on this read", not
+"this task requires nothing". The place that answers that
+honestly is `GET /onboarding/journey-steps/{stepId}`, where
+`ObJourneyStepDetail` requires the field.
+ */
+  docs?: ObJourneyStepDoc[];
 };

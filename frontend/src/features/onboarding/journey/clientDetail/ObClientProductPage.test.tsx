@@ -187,14 +187,23 @@ describe('ObClientProductPage', () => {
 
   /**
    * The gate belongs to the client and is administered on the client page, so
-   * this page states what is holding its ribbons and points at where to clear
-   * it — rather than repeating a checklist that would then exist twice with
-   * one copy always slightly behind.
+   * this page states what is outstanding and points at where to clear it —
+   * rather than repeating a checklist that would then exist twice with one
+   * copy always slightly behind.
    */
   describe('a locked gate', () => {
-    it('says nothing here starts, and links to the checklist', async () => {
+    /**
+     * It reports; it does not warn anybody off. The gate stopped refusing a
+     * start, so the old wording — "nothing here starts until this client's
+     * prerequisites clear" — would now be contradicted by the live Start
+     * button on the panel below it.
+     */
+    it('says what is outstanding without claiming it blocks, and links to the checklist', async () => {
       renderProduct(7, 1)
-      expect(await screen.findByText(/Nothing here starts until/, undefined, SLOW)).toBeInTheDocument()
+      expect(
+        await screen.findByText(/prerequisites have not cleared/i, undefined, SLOW),
+      ).toBeInTheDocument()
+      expect(screen.getByText(/may start their own service ahead of the checklist/i)).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Open the checklist' })).toHaveAttribute(
         'href',
         '/onboarding/clients/7',

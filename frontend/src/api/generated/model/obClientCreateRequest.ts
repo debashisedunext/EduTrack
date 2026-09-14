@@ -46,71 +46,101 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObClientCreateRequestDescription } from './obClientCreateRequestDescription';
-import type { ObClientCreateRequestPan } from './obClientCreateRequestPan';
 import type { ObClientCreateRequestAddress } from './obClientCreateRequestAddress';
-import type { ObClientCreateRequestSalesPersonId } from './obClientCreateRequestSalesPersonId';
-import type { ObClientCreateRequestLicenseType } from './obClientCreateRequestLicenseType';
-import type { ObContactWriteRequest } from './obContactWriteRequest';
-import type { ObApplicationWriteRequest } from './obApplicationWriteRequest';
-import type { ObRequirementWriteRequest } from './obRequirementWriteRequest';
+import type { ObClientCreateRequestCity } from './obClientCreateRequestCity';
+import type { ObClientCreateRequestContactName } from './obClientCreateRequestContactName';
+import type { ObClientCreateRequestContactEmail } from './obClientCreateRequestContactEmail';
 
+/**
+ * The Clients master's add dialog — a company, and nothing else.
+
+**This used to commit a four-step wizard**: PAN, SPOC contacts,
+commercials, requirements and an optional portal login, in one request.
+Every one of those describes an *engagement* rather than a company, and
+engagements are `ob_projects` now — created from the New Project form,
+which is where the product, the start date, the implementor and the
+module services are chosen.
+
+**Nothing was removed from the system, only from this request.**
+`ob_client_contacts`, `ob_client_requirements`,
+`ob_client_applications` and the portal account all still exist with
+their own operations.
+
+A client added without `createPortalLogin` has **no primary SPOC**, so
+the kickoff mail, every prerequisite reminder and every sign-off
+request have no addressee until one is added through
+`addObClientContact` — and for the same reason no portal login can be
+issued until then either.
+
+`createPortalLogin` is the one exception, and it brings `contactName`
+and `contactEmail` back with it because a login is not issuable on a
+company alone: the account row stores the contact's name and email and
+the credential mail is addressed at them. The two fields are required
+exactly when the flag is true, and the SPOC is created primary and
+active before the account is. All three rows land in one transaction —
+a login that cannot be issued takes the client with it, rather than
+leaving a company whose operator was told credentials were coming.
+
+There is no `onboardingDate`. The column is still `NOT NULL` and the
+server stamps the current date — a company is boarded the day somebody
+records it, and asking separately invited a value that disagreed with
+`createdAt` by a month.
+
+ */
 export interface ObClientCreateRequest {
   /** @maxLength 200 */
   name: string;
-  description?: ObClientCreateRequestDescription;
-  onboardingDate: string;
   /**
-   * Unique across `ob_clients`. Retained as **identity**, never as a
-financial field — the duplicate guard's key and nothing else.
+   * Unique across `ob_clients`; `409` on a duplicate, keyed to this
+field. The client already holding it is **not named back** — unlike
+the PAN guard this replaces, which could name its match: the code
+is a value the caller just typed, so confirming it is taken
+discloses nothing, while naming the holder would disclose a row
+outside their scope.
 
-   * @pattern ^[A-Z]{5}[0-9]{4}[A-Z]$
+   * @maxLength 32
    */
-  pan?: ObClientCreateRequestPan;
+  clientCode: string;
+  /** @maxLength 2000 */
   address?: ObClientCreateRequestAddress;
-  salesPersonId?: ObClientCreateRequestSalesPersonId;
-  /** @maxLength 64 */
-  licenseType?: ObClientCreateRequestLicenseType;
-  /**
-   * At least one, and **exactly one `isPrimary`**. The primary SPOC is
-where the kickoff mail, the portal password and every sign-off
-request go; a client without one cannot be onboarded, only stored.
+  /** @maxLength 120 */
+  city?: ObClientCreateRequestCity;
+  /** Set after a `409 ob-client-name-similar` to proceed anyway.
 
-   * @minItems 1
-   */
-  contacts: ObContactWriteRequest[];
-  /**
-   * The wizard's product multi-select. **Each one instantiates a locked
-journey** from that product's active template, so an empty list
-would board a client with nothing to onboard them through.
-
-   * @minItems 1
-   */
-  applications: ObApplicationWriteRequest[];
-  /** B-106 · the wizard's requirements step, now rich text rather than
-bare strings. Each entry is sanitised against PLAN.md §3.9's
-allow-list before it is stored, exactly as one added later through
-`addObClientRequirement` is — one write path and one sanitiser, so a
-requirement typed at boarding and one typed in month three are the
-same row.
-
-Optional and may be empty: a client with nothing recorded yet is
-ordinary, unlike one with no SPOC or no purchase.
- */
-  requirements?: ObRequirementWriteRequest[];
-  /** The wizard's "Create client portal login now" checkbox. Creates a
-`client_accounts` row with a generated username and a one-time
-password emailed to the primary SPOC.
-
-**Defaults to false and is never implied.** Every other field here
-describes a client; this one hands somebody outside the
-organisation a credential, and the plan is explicit that it happens
-only when staff ask for it (§2.3). It is also not a one-way door —
-the OB-05 portal access panel creates one later just as well.
- */
-  createPortalLogin?: boolean;
-  /** Set after a `409 ob-client-name-similar` to proceed anyway. Only
-the name check is forceable; a duplicate PAN never is.
+The guard survived the wizard deliberately. A four-field add dialog
+is precisely the screen on which somebody boards "Horizon Schools
+Trust" for the second time, and `clientCode` catches only the
+duplicates that also reuse the code.
  */
   acknowledgeSimilarNames?: boolean;
+  /** Issue the client's portal login as part of this request.
+
+Requires `contactName` and `contactEmail`; both are refused as
+`400 ob-client-invalid` when absent, keyed to their own fields. The
+username is the client's own `clientCode` — see
+`ObClientAccount.username`.
+
+Absent is false, which is the behaviour every existing caller has:
+the Excel import and the fixtures create companies and no accounts.
+ */
+  createPortalLogin?: boolean;
+  /**
+   * The client's main contact, created as their primary, active SPOC.
+Required when `createPortalLogin` is true and ignored otherwise.
+
+WhatsApp consent is not asked for here and is recorded as withheld
+— the recoverable direction, and the same default a contact added
+from the SPOC panel gets. Consent is a question for the panel,
+where there is somewhere to record who was asked and when.
+
+   * @maxLength 160
+   */
+  contactName?: ObClientCreateRequestContactName;
+  /**
+   * Where the login's one-time credential link is sent. Required when
+`createPortalLogin` is true and ignored otherwise.
+
+   * @maxLength 200
+   */
+  contactEmail?: ObClientCreateRequestContactEmail;
 }

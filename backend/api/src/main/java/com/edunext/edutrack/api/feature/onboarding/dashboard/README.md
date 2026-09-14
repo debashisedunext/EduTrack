@@ -21,6 +21,59 @@ than in packages of their own — that is why `ObDashboardCardKey` and
 B-127/B-128) three SQL predicates on them rather than private constants
 inside one service.
 
+## 🔴 The two deadline cards are added up from two tables
+
+The bug this section exists to stop coming back: the board read **0** on This
+Week's Deadlines while the drill-over behind that same card listed **17** rows.
+
+§9's wording is "all client tasks — services **and** prerequisites — due
+Mon–Sun". `ObDashboardCardItemsRepository` has always obeyed it, unioning
+`ob_journey_steps` with `ob_client_prereq_tasks`. The *card* read
+`ob_dashboard_summary.steps_due_this_week`, which B-120 fills from the journey
+tables alone — so on a week whose only work due was prerequisite tasks, the
+card and its own list disagreed completely.
+
+**The missing half could not be a column on `ob_dashboard_summary`.** That
+table is keyed `(stat_date, product_id)` and a prerequisite checklist belongs
+to the *client*: one per client, snapshotted at intake, gating every journey
+they bought rather than any one of them. And a client can hold an open
+checklist and **no journey at all** — five of nine clients were in exactly that
+state on the deployment that reported this, which was 13 of the 17 rows. No
+product-keyed row can carry those under any attribution.
+
+So `ob_client_daily_stats` (`V20260914_2245__ob_client_daily_stats.sql`) holds
+them at the client grain, `ObDashboardStatsRepository.refreshClientStock` fills
+it in the same pass as the other two stock tables, and
+`ObClientPrereqStatsRepository` adds its figure to
+`THIS_WEEKS_DEADLINES`/`TODAYS_DELIVERY` in `ObDashboardService`, on read.
+
+Three consequences worth knowing:
+
+- **Neither card is an upper bound.** A task belongs to exactly one client, so
+  the client rows partition the population and the sum is exact — unlike the
+  three client-counted cards in the section below. Attributing a checklist to
+  each product the client bought would have spread that same over-count onto
+  two more cards, which is why the grain is the client.
+- **A product filter reaches prerequisites through an `EXISTS` over the
+  client's journeys** — the identical predicate the drill-over applies to its
+  PREREQUISITE branch, so card and list agree filtered as well as unfiltered. A
+  two-product client's checklist is counted once org-wide and shown under both
+  products, which is what a gate blocking both of them means.
+- **The scope predicate is applied to it too**, so a narrowed caller's card and
+  drill-over narrow to the same clients. It is a filter over `ob_clients`, not
+  a count; every figure still comes from the pre-aggregate.
+
+One edge this does not cover: the board's availability is still decided by
+`ob_dashboard_summary`, so an organisation with clients, checklists and not one
+journey yet reads "No summary has been computed yet" rather than its
+prerequisite counts. Left as it is because the state is a deployment's first
+hour rather than a steady one, and because saying "nothing computed" while the
+refresh genuinely has nothing to compute is at least true.
+
+`prereq_tasks_overdue` is written and read by nothing: Overdue Clients counts
+clients with an overdue *service* and its drill-over excludes prerequisites, so
+those two already agree and adding an arm to one alone would break that.
+
 ## 🔴 Three of the seven cards overstate on the all-products board
 
 The one thing to know before reading a number off this screen, and the thing

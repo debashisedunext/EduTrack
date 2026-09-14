@@ -170,9 +170,13 @@ describe('ObPrereqMasterPage · against the mock server', () => {
     )
 
     expect(await screen.findByRole('button', { name: 'Publish version 1' }, SLOW)).toBeInTheDocument()
-    expect(screen.getByLabelText('Title *')).toBeEnabled()
-    expect(screen.getByText(/Add the first task below/i)).toBeInTheDocument()
+    expect(screen.getByText(/No tasks on this version/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // The form is a dialog now, so an empty draft offers the way into it
+    // rather than standing the fields open underneath.
+    await userEvent.click(screen.getAllByRole('button', { name: '+ Add a task' })[0])
+    expect(await screen.findByLabelText('Title *')).toBeEnabled()
   })
 
   /**
@@ -215,6 +219,82 @@ describe('ObPrereqMasterPage · against the mock server', () => {
 
     expect(await screen.findByRole('alert', undefined, SLOW)).toHaveTextContent(/OB Admin only/i)
     expect(screen.queryByRole('button', { name: 'Author the first checklist' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * Two OB Admins editing the master at once is the normal case, not a race —
+   * `ObPrereqTemplateService` says so in its own javadoc, and "one draft at a
+   * time" is a uniqueness constraint on storage rather than a lock on a
+   * person. So when `POST /revisions` answers the 409 the second admin gets,
+   * this screen joins the open draft and the click they made lands on it.
+   *
+   * <p>Through the real handlers, so the ids are the ones that matter: the
+   * delete must reach the draft's clone (91), never the published row the
+   * table was drawn from (81), and the two are matched by `sequence`.
+   */
+  it('applies an edit to a draft another admin already had open', async () => {
+    const task = (id: number) => ({
+      id,
+      sequence: 1,
+      title: 'Signed service agreement',
+      description: null,
+      tatDays: 3,
+      isMandatory: true,
+      isActive: true,
+      docs: [],
+    })
+    const activeV8 = {
+      version: 8,
+      isDraft: false,
+      isActive: true,
+      publishedAt: '2026-07-01T09:00:00.000Z',
+      publishedBy: { id: 1, displayName: 'Priya Nair' },
+      mandatoryCount: 1,
+      tasks: [task(81)],
+    }
+    const theirDraft = {
+      ...activeV8,
+      version: 9,
+      isDraft: true,
+      isActive: false,
+      publishedAt: null,
+      tasks: [task(91)],
+    }
+    const deleted: string[] = []
+    server.use(
+      http.get(TEMPLATE, ({ request }) => {
+        const asked = new URL(request.url).searchParams.get('version')
+        if (asked === '9') return HttpResponse.json({ data: theirDraft })
+        if (asked === null || asked === '8') return HttpResponse.json({ data: activeV8 })
+        return failure(404, `version ${asked} of the prerequisites master does not exist`)
+      }),
+      // The conflict as `ObPrereqTemplateExceptionHandler` really types it —
+      // the generic `errors/conflict`, not a draft-specific problem type.
+      http.post(`${TEMPLATE}/revisions`, () =>
+        HttpResponse.json(
+          {
+            type: 'https://edutrack/errors/conflict',
+            title: 'Conflict',
+            status: 409,
+            detail: 'A draft already exists — publish or discard it first.',
+          },
+          { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+      http.delete(`${BASE}/onboarding/prereq-template-tasks/:id`, ({ params }) => {
+        deleted.push(String(params.id))
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderPage()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete Signed service agreement' }, SLOW),
+    )
+
+    await waitFor(() => expect(deleted).toEqual(['91']), SLOW)
+    expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   /**

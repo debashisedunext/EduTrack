@@ -138,12 +138,14 @@ class ObClientServiceTest {
 
     private static ObClientReadRepository.ListRow listRow(long id) {
         return new ObClientReadRepository.ListRow(
-                id, "Acme", LocalDate.of(2026, 9, 7), "ONBOARDING", null,
+                id, "Acme", "ACM-001", "Pune", "12 Ridge Road",
+                LocalDate.of(2026, 9, 7), "ONBOARDING", null,
                 null, null, null, "OPEN", 2, 0, false, STARTED_AT);
     }
 
+    /** `address` moved onto the list row, so the detail carries one field fewer. */
     private static ObClientReadRepository.DetailRow detailRow(long id) {
         return new ObClientReadRepository.DetailRow(
-                listRow(id), null, null, null, null, null, null, null, null, null);
+                listRow(id), null, null, null, null, null, null, null, null);
     }
 }

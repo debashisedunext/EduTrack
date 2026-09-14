@@ -719,19 +719,37 @@ final class PermissionMatrix {
     private static final String CREATE_JOURNEY_TEMPLATE = """
             {"productId":1,"name":"Matrix Fixture Template","sequence":1}""";
 
-    /** C-102 · {@code AddStepRequest}: {@code name} is {@code @NotBlank}, {@code tatDays} is {@code @Min(1)}. */
-    private static final String ADD_JOURNEY_TEMPLATE_STEP = """
-            {"name":"Matrix Fixture Step","tatDays":1,"requiresSignoff":false}""";
+    /**
+     * {@code AddTaskRequest}: {@code name} is {@code @NotBlank} and
+     * {@code tatDays} is {@code @Min(1)}. The {@code name} is back — a task is
+     * written by a person, where the step it replaces <em>was</em> an OB-15
+     * stage and took the stage's name. The stage group is in the path, and
+     * names nothing real: this file's standing rule is that a fixture need not
+     * succeed past authorisation.
+     */
+    private static final String ADD_JOURNEY_TEMPLATE_TASK = """
+            {"name":"Matrix Fixture Task","tatDays":1,"requiresSignoff":false}""";
 
     /**
-     * C-102 · {@code ReorderStepsRequest}: {@code stepIds} is {@code @NotEmpty}.
-     * The id names no real step — this route's own guard is {@code If-Match},
-     * checked in the controller before the service runs, and an allowed role
-     * is entitled to reach that check and be refused by it, on this file's
-     * standing rule that a fixture need not succeed past authorisation.
+     * {@code UpdateStepRequest}: every field optional, so the smallest honest
+     * body is the one field this route most exists to set. The step id in the
+     * path names nothing real, which is fine on this file's standing rule —
+     * the controller's own {@code If-Match} guard runs before the service, and
+     * an allowed role is entitled to reach that check and be refused by it.
      */
-    private static final String REORDER_JOURNEY_TEMPLATE_STEPS = """
-            {"stepIds":[1]}""";
+    private static final String UPDATE_JOURNEY_TEMPLATE_STEP = """
+            {"tatDays":3}""";
+
+    /**
+     * C-102 · {@code ReorderTasksRequest}: {@code taskIds} is {@code @NotEmpty}
+     * and is one stage's tasks, not the template's. The id names no real task —
+     * this route's own guard is {@code If-Match}, checked in the controller
+     * before the service runs, and an allowed role is entitled to reach that
+     * check and be refused by it, on this file's standing rule that a fixture
+     * need not succeed past authorisation.
+     */
+    private static final String REORDER_JOURNEY_TEMPLATE_TASKS = """
+            {"taskIds":[1]}""";
 
     /**
      * A-121 · {@code ObSignoffTokenRequest}: {@code token} is {@code @NotBlank}.
@@ -855,7 +873,7 @@ final class PermissionMatrix {
     /**
      * C-104 · {@code ObJourneyStepLifecycleDtos.BlockStepRequest}: {@code reasonCode}
      * is {@code @NotBlank}. The step id names no real row — the same standing
-     * rule {@code REORDER_JOURNEY_TEMPLATE_STEPS} documents: an allowed role is
+     * rule {@code REORDER_JOURNEY_TEMPLATE_TASKS} documents: an allowed role is
      * entitled to reach the service and be refused there, not by this fixture.
      */
     private static final String BLOCK_JOURNEY_STEP = """
@@ -908,9 +926,25 @@ final class PermissionMatrix {
      * allowed role is entitled to reach the service and be refused there.
      */
     private static final String CREATE_OB_CLIENT = """
-            {"name":"Matrix Fixture Client","onboardingDate":"2026-09-07",\
-            "contacts":[{"name":"Matrix Fixture SPOC","email":"matrix@example.com","isPrimary":true}],\
-            "applications":[{"productId":1}]}""";
+            {"name":"Matrix Fixture Client","clientCode":"MTX-001",\
+            "address":"1 Matrix Road","city":"Pune"}""";
+
+    /**
+     * The New Project form's body, with every field the binding layer requires
+     * so the request reaches authorisation rather than stopping at a 400.
+     *
+     * <p>{@code moduleServiceIds} is non-empty for that reason and no other: a
+     * project with no module service is refused by {@code @NotEmpty} during
+     * argument resolution, which is before method-security advice runs — the
+     * hole this file's own javadoc documents at length.
+     */
+    private static final String CREATE_OB_PROJECT = """
+            {"name":"Matrix Fixture Project","clientId":1,"productId":1,\
+            "startDate":"2026-09-14","moduleServiceIds":[1]}""";
+
+    /** {@code ObProjectUpdateRequest} — name and startDate are required; the rest is optional. */
+    private static final String UPDATE_OB_PROJECT = """
+            {"name":"Matrix Fixture Project","startDate":"2026-09-14"}""";
 
     /**
      * B-102 · {@code ObClientUpdateRequest} — every field optional, so an empty
@@ -2315,9 +2349,12 @@ final class PermissionMatrix {
             everyRole("POST", "/api/v1/onboarding/journey-templates", CREATE_JOURNEY_TEMPLATE),
             everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions"),
             everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/publish"),
-            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/steps", ADD_JOURNEY_TEMPLATE_STEP),
-            everyRole("PUT", "/api/v1/onboarding/journey-templates/{templateId}/steps/order",
-                    REORDER_JOURNEY_TEMPLATE_STEPS),
+            everyRole("POST", "/api/v1/onboarding/journey-template-stages/{stageId}/tasks",
+                    ADD_JOURNEY_TEMPLATE_TASK),
+            everyRole("PUT", "/api/v1/onboarding/journey-template-stages/{stageId}/tasks/order",
+                    REORDER_JOURNEY_TEMPLATE_TASKS),
+            everyRole("PATCH", "/api/v1/onboarding/journey-template-steps/{stepId}",
+                    UPDATE_JOURNEY_TEMPLATE_STEP),
             everyRole("DELETE", "/api/v1/onboarding/journey-template-steps/{stepId}"),
             everyRole("POST", "/api/v1/onboarding/journey-template-steps/{stepId}/items",
                     ADD_JOURNEY_TEMPLATE_STEP_ITEM),
@@ -2458,6 +2495,33 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/clients/{obClientId}"),
             everyRole("POST", "/api/v1/onboarding/clients", CREATE_OB_CLIENT),
             everyRole("PATCH", "/api/v1/onboarding/clients/{obClientId}", UPDATE_OB_CLIENT),
+            /*
+              DELETE — 404 for all six, on this block's own reasoning. The
+              scoped read runs first in ObClientWriteService and finds nothing,
+              so none of these fixtures ever reaches the deletion guard, let
+              alone the 409 it produces. That 409 needs a real onboarding role
+              and a real client, which is ObClientsIT's case.
+            */
+            everyRole("DELETE", "/api/v1/onboarding/clients/{obClientId}"),
+
+            // ── The Projects grid ─────────────────────────────────────────────
+            //
+            // Every role, and for the same reason as the client block above: a
+            // project is scoped by its client, so a caller with no onboarding
+            // grant gets an empty list and a 404 by id rather than a 403. The
+            // create answers 404 too — NotAnOnboardingProjectWriterException,
+            // which exists precisely so the write endpoint is not an oracle for
+            // a module the caller has no part in.
+            everyRole("GET", "/api/v1/onboarding/projects"),
+            everyRole("GET", "/api/v1/onboarding/projects/{obProjectId}"),
+            everyRole("POST", "/api/v1/onboarding/projects", CREATE_OB_PROJECT),
+            everyRole("PATCH", "/api/v1/onboarding/projects/{obProjectId}", UPDATE_OB_PROJECT),
+            /*
+              DELETE — 404 for all six, on this block's own reasoning: the
+              scoped read runs first and finds nothing, so none of these
+              fixtures reaches the deletion guard or the 409 it produces.
+            */
+            everyRole("DELETE", "/api/v1/onboarding/projects/{obProjectId}"),
 
             // ── B-103 · OB-05's SPOC panel ────────────────────────────────────
             //

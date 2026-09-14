@@ -79,13 +79,25 @@ class ObJourneyInstantiationServiceTest {
     private final ObJourneyStepLifecycleService stepLifecycle = mock(ObJourneyStepLifecycleService.class);
     private final ObDemoStepDocumentSeeder demoStepDocumentSeeder = mock(ObDemoStepDocumentSeeder.class);
 
+    /**
+     * A journey belongs to a project since `V20260911_1800`, and this service
+     * resolves one rather than inventing one — see
+     * {@code ProjectNotFoundForPairException}. The stub below answers with a
+     * project for every pair, so these tests stay about instantiation.
+     */
+    private final com.edunext.edutrack.domain.onboarding.ObProjectRepository projects =
+            mock(com.edunext.edutrack.domain.onboarding.ObProjectRepository.class);
+
     private final ObJourneyInstantiationService service = new ObJourneyInstantiationService(
             journeys, journeySteps, journeyStepItems, templates, templateDependencies, templateSteps,
-            templateStepItems, purchasedProducts, stepLifecycle, demoStepDocumentSeeder);
+            templateStepItems, purchasedProducts, stepLifecycle, demoStepDocumentSeeder, projects);
 
     @BeforeEach
     void wireFakes() {
         lenient().when(purchasedProducts.isPurchased(anyLong(), anyLong())).thenReturn(true);
+        lenient().when(projects.findByObClientIdAndProductId(anyLong(), anyLong()))
+                .thenAnswer(inv -> java.util.Optional.of(projectFor(
+                        inv.getArgument(0), inv.getArgument(1))));
 
         lenient().when(journeys.save(any())).thenAnswer(inv -> {
             ObJourney j = inv.getArgument(0);
@@ -172,8 +184,14 @@ class ObJourneyInstantiationServiceTest {
         return created.get(0);
     }
 
+    /**
+     * A template task. {@code ownerUserId} null is the ordinary case and is
+     * what the project-implementor fallback answers — the owning role that
+     * used to be the third parameter here is gone ({@code V20260914_1830}),
+     * because nothing ever resolved it to a person.
+     */
     private ObJourneyTemplateStep templateStep(long id, int sequence, String name, Long ownerUserId,
-                                                String ownerRole, Long dependsOnStepId) {
+                                                Long dependsOnStepId) {
         ObJourneyTemplateStep step = new ObJourneyTemplateStep();
         step.setId(id);
         step.setTemplateId(TEMPLATE);
@@ -181,7 +199,6 @@ class ObJourneyInstantiationServiceTest {
         step.setName(name);
         step.setTatDays(2);
         step.setOwnerUserId(ownerUserId);
-        step.setOwnerRole(ownerRole);
         step.setDependsOnStepId(dependsOnStepId);
         return step;
     }
@@ -194,7 +211,7 @@ class ObJourneyInstantiationServiceTest {
         @DisplayName("LOCKED, pinned to the active template's exact version, when the client's gate has never opened")
         void locksAndPinsTheTemplate() {
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
-                    templateStep(1L, 1, "Kickoff", 42L, null, null)));
+                    templateStep(1L, 1, "Kickoff", 42L, null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
             ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
@@ -337,7 +354,7 @@ class ObJourneyInstantiationServiceTest {
         @DisplayName("a pinned owner carries forward; every step is born PENDING with no due date")
         void pinnedOwnerCarriesForward() {
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
-                    templateStep(1L, 1, "Kickoff", 42L, null, null)));
+                    templateStep(1L, 1, "Kickoff", 42L, null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
             ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
@@ -351,11 +368,74 @@ class ObJourneyInstantiationServiceTest {
             assertThat(step.getTemplateStepId()).isEqualTo(1L);
         }
 
+        /**
+         * The rule that replaced the owning role. A Module Service is authored
+         * once for every client that buys the product, so naming a person on a
+         * task there is the exception — and the task that names nobody used to
+         * instantiate onto nobody, which made the unassigned list where most
+         * of a journey went rather than the edge case it is meant to be.
+         */
         @Test
-        @DisplayName("a role-only step is unresolved, not a guess — lands on the Manager's unassigned list")
-        void ownerRoleOnlyStepIsUnresolved() {
+        @DisplayName("a task with nobody named on it lands on the project's implementor")
+        void unownedTaskFallsBackToTheProjectImplementor() {
+            whenProjectIs(project(88L, 5L));
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
-                    templateStep(1L, 1, "Legal review", null, "OB_MANAGER", null)));
+                    templateStep(1L, 1, "Legal review", null, null)));
+            when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
+            ObJourneyStep step = stepsFor(journey.getId()).get(0);
+
+            assertThat(step.getOwnerUserId()).isEqualTo(88L);
+            assertThat(service.unassignedSteps()).isEmpty();
+        }
+
+        /**
+         * A fallback for null, never an override: a task pinned to one person
+         * is pinned deliberately, and a project implementor quietly replacing
+         * them would make the designer's own field advisory.
+         */
+        @Test
+        @DisplayName("a task that names somebody keeps them, project implementor or not")
+        void aNamedOwnerBeatsTheProjectImplementor() {
+            whenProjectIs(project(88L, 5L));
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
+                    templateStep(1L, 1, "Kickoff", 42L, null)));
+            when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
+
+            assertThat(stepsFor(journey.getId()).get(0).getOwnerUserId()).isEqualTo(42L);
+        }
+
+        /**
+         * Second fallback, not a co-equal one: whoever set the project up is a
+         * real person who can see it and pass the work on, which beats nobody.
+         */
+        @Test
+        @DisplayName("with no implementor assigned, the person who created the project answers")
+        void fallsBackToTheProjectCreator() {
+            whenProjectIs(project(null, 5L));
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
+                    templateStep(1L, 1, "Legal review", null, null)));
+            when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+
+            ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
+
+            assertThat(stepsFor(journey.getId()).get(0).getOwnerUserId()).isEqualTo(5L);
+        }
+
+        /**
+         * The unassigned list did not go away — it stopped being where every
+         * task goes. Both columns are nullable, and a project with neither
+         * leaves the task unowned exactly as before.
+         */
+        @Test
+        @DisplayName("a project with no implementor and no creator still leaves the task unassigned")
+        void aProjectWithNobodyOnItLeavesTheTaskUnassigned() {
+            whenProjectIs(project(null, null));
+            when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
+                    templateStep(1L, 1, "Legal review", null, null)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
             ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
@@ -373,8 +453,8 @@ class ObJourneyInstantiationServiceTest {
             // produce, so a clone that leaked the template's raw id instead
             // of re-pointing to its own clone cannot pass by coincidence.
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
-                    templateStep(101L, 1, "Kickoff", 42L, null, null),
-                    templateStep(102L, 2, "Data migration", 42L, null, 101L)));
+                    templateStep(101L, 1, "Kickoff", 42L, null),
+                    templateStep(102L, 2, "Data migration", 42L, 101L)));
             when(templateStepItems.findByStepIdOrderBySequenceAsc(any())).thenReturn(List.of());
 
             ObJourney journey = only(service.instantiate(CLIENT, PRODUCT));
@@ -390,7 +470,7 @@ class ObJourneyInstantiationServiceTest {
         @DisplayName("task list items are snapshotted with their template item id as provenance")
         void taskListItemsAreSnapshotted() {
             when(templateSteps.findByTemplateIdOrderBySequenceAsc(TEMPLATE)).thenReturn(List.of(
-                    templateStep(1L, 1, "Kickoff", 42L, null, null)));
+                    templateStep(1L, 1, "Kickoff", 42L, null)));
             ObJourneyTemplateStepItem templateItem = new ObJourneyTemplateStepItem();
             templateItem.setId(11L);
             templateItem.setStepId(1L);
@@ -570,4 +650,47 @@ class ObJourneyInstantiationServiceTest {
             assertThat(dependentJourney.getHeldByJourneyId()).isEqualTo(dependencyJourney.getId());
         }
     }
+
+    /**
+     * A project for a pair, built through the constructor so the stub cannot
+     * drift from the entity. Its id is derived from the pair, which is enough
+     * for these tests: nothing here asserts on the value, only that every
+     * journey carries one.
+     */
+    private static com.edunext.edutrack.domain.onboarding.ObProject projectFor(
+            long obClientId, long productId) {
+        return projectFor(obClientId, productId, null, null);
+    }
+
+    private static com.edunext.edutrack.domain.onboarding.ObProject projectFor(
+            long obClientId, long productId, Long implementorUserId, Long createdBy) {
+        var project = new com.edunext.edutrack.domain.onboarding.ObProject(
+                obClientId, productId, "Fixture project",
+                java.time.LocalDate.of(2026, 9, 14), null, implementorUserId, createdBy);
+        try {
+            var field = com.edunext.edutrack.domain.onboarding.ObProject.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, obClientId * 1000 + productId);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+        return project;
+    }
+
+    /** The project under test, for the owner-fallback cases. */
+    private static com.edunext.edutrack.domain.onboarding.ObProject project(
+            Long implementorUserId, Long createdBy) {
+        return projectFor(CLIENT, PRODUCT, implementorUserId, createdBy);
+    }
+
+    /**
+     * Replaces the {@code @BeforeEach} stub, which hands back a project with
+     * nobody on it — the right default for every test that is not about the
+     * fallback, and useless for the ones that are.
+     */
+    private void whenProjectIs(com.edunext.edutrack.domain.onboarding.ObProject project) {
+        lenient().when(projects.findByObClientIdAndProductId(anyLong(), anyLong()))
+                .thenReturn(java.util.Optional.of(project));
+    }
+
 }

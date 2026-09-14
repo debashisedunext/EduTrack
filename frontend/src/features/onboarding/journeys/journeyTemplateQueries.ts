@@ -6,9 +6,10 @@ import type { ObJourneyTemplateDetail } from '@/api/generated/model/obJourneyTem
 import type { ObJourneyTemplateStep } from '@/api/generated/model/obJourneyTemplateStep'
 import type { ObJourneyTemplateStepDoc } from '@/api/generated/model/obJourneyTemplateStepDoc'
 import type { ObJourneyTemplateStepDocWriteRequest } from '@/api/generated/model/obJourneyTemplateStepDocWriteRequest'
-import type { ObJourneyTemplateStepItem } from '@/api/generated/model/obJourneyTemplateStepItem'
+import type { ObJourneyTemplateStepItemResponse } from '@/api/generated/model/obJourneyTemplateStepItemResponse'
 import type { ObJourneyTemplateStepItemWriteRequest } from '@/api/generated/model/obJourneyTemplateStepItemWriteRequest'
-import type { ObJourneyTemplateStepWriteRequest } from '@/api/generated/model/obJourneyTemplateStepWriteRequest'
+import type { ObJourneyTemplateStepUpdateRequest } from '@/api/generated/model/obJourneyTemplateStepUpdateRequest'
+import type { ObJourneyTemplateTaskWriteRequest } from '@/api/generated/model/obJourneyTemplateTaskWriteRequest'
 
 /**
  * C-102 · OB-07 template designer's data layer.
@@ -137,24 +138,70 @@ export function usePublishJourneyTemplate() {
 }
 
 /**
- * Add a service to a draft template. Writes immediately, on this designer's
- * own architectural rule — see `JourneyTemplateDesignerPage.tsx`'s header:
- * only the ordering is staged locally, because it is the one route that
- * replaces the whole set under a single precondition.
+ * Add a task to a stage of a draft template. Writes immediately, on this
+ * designer's own architectural rule — see `JourneyTemplateDesignerPage.tsx`'s
+ * header: only the ordering is staged locally, because it is the one route
+ * that replaces the whole set under a single precondition.
+ *
+ * `templateId` is carried alongside the stage id purely to invalidate the
+ * right detail query — the route itself needs only the stage, since a task is
+ * created inside one.
  */
-export function useAddJourneyTemplateStep() {
+export function useAddJourneyTemplateTask() {
   const queryClient = useQueryClient()
 
   return useMutation<
     ObJourneyTemplateStep,
     ApiError,
-    { templateId: number; data: ObJourneyTemplateStepWriteRequest }
+    { templateId: number; stageId: number; data: ObJourneyTemplateTaskWriteRequest }
   >({
-    mutationFn: async ({ templateId, data }) => {
+    mutationFn: async ({ stageId, data }) => {
       const body = await http<{ data: ObJourneyTemplateStep }>({
-        url: `/onboarding/journey-templates/${templateId}/steps`,
+        url: `/onboarding/journey-template-stages/${stageId}/tasks`,
         method: 'POST',
         headers: { 'Idempotency-Key': newIdempotencyKey() },
+        data,
+      })
+      return body.data
+    },
+    onSuccess: (_task, { templateId }) => invalidate(queryClient, templateId),
+  })
+}
+
+/**
+ * Edit a step of a draft — TAT, owner, sign-off, description, dependency.
+ *
+ * Hand-written for this file's standing reason, and one more specific to this
+ * route: `If-Match` is **required** rather than merely accepted, and the tag
+ * is the *template's*. A step has no read of its own to draw one from, and the
+ * template's tag covers every step on it — which is the tag that notices what
+ * this edit can silently destroy, somebody else's dependency change. Never
+ * defaulted to `*` on a null tag, for the same reason the reorder is not: the
+ * route answers `428` for a missing precondition, and `*` would turn that
+ * clear signal into a confusing one.
+ *
+ * `clearDependsOn` exists because null and omitted are the same thing over
+ * JSON, so "this step waits for nothing" has to be something a caller can say
+ * rather than something they fail to say.
+ */
+export function useUpdateJourneyTemplateStep() {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    ObJourneyTemplateStep,
+    ApiError,
+    {
+      templateId: number
+      stepId: number
+      data: ObJourneyTemplateStepUpdateRequest
+      etag: string | null
+    }
+  >({
+    mutationFn: async ({ stepId, data, etag }) => {
+      const body = await http<{ data: ObJourneyTemplateStep }>({
+        url: `/onboarding/journey-template-steps/${stepId}`,
+        method: 'PATCH',
+        headers: { 'If-Match': etag ?? '*' },
         data,
       })
       return body.data
@@ -164,7 +211,8 @@ export function useAddJourneyTemplateStep() {
 }
 
 /**
- * The OB-07 ↑/↓ control, applied in one call. `If-Match` from
+ * The OB-07 ↑/↓ control, applied to one stage's tasks in one call. Tasks in
+ * every other stage keep the positions they had. `If-Match` from
  * `useJourneyTemplate` — the write this whole tag exists for. Two Admins
  * each reordering the same draft would otherwise both save their own screen
  * state, and the second would silently put the first's order back.
@@ -174,20 +222,20 @@ export function useAddJourneyTemplateStep() {
  * route itself refuses a request with none (`428`), so sending `*` on a
  * null `etag` would only turn a clear signal into a confusing one.
  */
-export function useReorderJourneyTemplateSteps() {
+export function useReorderJourneyTemplateTasks() {
   const queryClient = useQueryClient()
 
   return useMutation<
     void,
     ApiError,
-    { templateId: number; stepIds: number[]; etag: string | null }
+    { templateId: number; stageId: number; taskIds: number[]; etag: string | null }
   >({
-    mutationFn: async ({ templateId, stepIds, etag }) => {
+    mutationFn: async ({ stageId, taskIds, etag }) => {
       await http<void>({
-        url: `/onboarding/journey-templates/${templateId}/steps/order`,
+        url: `/onboarding/journey-template-stages/${stageId}/tasks/order`,
         method: 'PUT',
         headers: { 'If-Match': etag ?? '*' },
-        data: { stepIds },
+        data: { taskIds },
       })
     },
     onSuccess: (_void, { templateId }) => invalidate(queryClient, templateId),
@@ -214,24 +262,39 @@ export function useRemoveJourneyTemplateStep() {
   })
 }
 
+/**
+ * B-131 · resolves to the whole envelope, not just `data`.
+ *
+ * `backfilledJourneyCount` is the half the caller cannot work out for itself:
+ * adding an item to a service that is live also puts it on the journeys
+ * already running from it, and the count is the only evidence of that reaching
+ * the screen. Every other mutation here unwraps to `data` — this one is the
+ * exception, and it is the response shape that makes it one.
+ */
 export function useAddJourneyTemplateStepItem() {
   const queryClient = useQueryClient()
 
   return useMutation<
-    ObJourneyTemplateStepItem,
+    ObJourneyTemplateStepItemResponse,
     ApiError,
     { templateId: number; stepId: number; data: ObJourneyTemplateStepItemWriteRequest }
   >({
-    mutationFn: async ({ stepId, data }) => {
-      const body = await http<{ data: ObJourneyTemplateStepItem }>({
+    mutationFn: async ({ stepId, data }) =>
+      http<ObJourneyTemplateStepItemResponse>({
         url: `/onboarding/journey-template-steps/${stepId}/items`,
         method: 'POST',
         headers: { 'Idempotency-Key': newIdempotencyKey() },
         data,
-      })
-      return body.data
-    },
-    onSuccess: (_item, { templateId }) => invalidate(queryClient, templateId),
+      }),
+    /*
+      Invalidates the template, as its siblings do. It deliberately does NOT
+      reach into the journey caches the back-fill also wrote to: this screen is
+      the catalogue, a project's own board refetches on its own mount, and an
+      admin adding an item here is not looking at a client's journey in the
+      same breath. Widening the invalidation to every journey query would
+      refetch a page nobody has open.
+    */
+    onSuccess: (_response, { templateId }) => invalidate(queryClient, templateId),
   })
 }
 

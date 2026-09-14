@@ -62,6 +62,11 @@ interface RequirementRow {
 }
 
 interface ClientDetail extends ClientRow {
+  clientCode: string | null
+  city: string | null
+  address: string | null
+  onboardingDate: string
+  hasPortalLogin: boolean
   pan: string | null
   contacts: ContactRow[]
   applications: ApplicationRow[]
@@ -91,12 +96,20 @@ const patchClient = (id: number, body: unknown) =>
     body: JSON.stringify(body),
   })
 
-/** A create body that passes validation, so each test varies only its own field. */
+/**
+ * A create body that passes validation, so each test varies only its own field.
+ *
+ * Four fields, because that is what the Clients master asks for. The wizard's
+ * contacts, purchases, PAN and portal-login checkbox left this request when
+ * engagements became projects — `POST /onboarding/projects` is where a product
+ * is bought and a journey instantiated now, and `onboardingProjects.test.ts`
+ * is where that is asserted.
+ */
 const validBody = (over: Record<string, unknown> = {}) => ({
   name: 'Fabrikam Industries',
-  onboardingDate: '2026-09-03',
-  contacts: [{ name: 'A Person', email: 'a@fabrikam.example', isPrimary: true }],
-  applications: [{ productId: 1 }],
+  clientCode: 'FAB-900',
+  address: '11 Industrial Estate',
+  city: 'Surat',
   ...over,
 })
 
@@ -274,12 +287,12 @@ describe('A-118 · PAN is masked on the way out', () => {
 })
 
 describe('A-118 · a product with no template cannot be bought', () => {
-  it('refuses a purchase of a product with no active template', async () => {
-    const res = await createClient(validBody({ applications: [{ productId: 2 }] }))
-    expect(res.status).toBe(409)
-    expect((await json<{ type: string }>(res)).type).toContain('ob-product-no-template')
-  })
-
+  /*
+    The refusal itself now lives on `POST /onboarding/projects`, because that is
+    where a product is bought — `onboardingProjects.test.ts` asserts it. What is
+    still this file's is the fact the refusal reads: a product with no published
+    module service reports `hasActiveTemplate: false` the moment it is created.
+  */
   it('creates a product that is not yet bookable', async () => {
     const res = await fetch('/api/v1/onboarding/products', {
       method: 'POST',
@@ -292,13 +305,26 @@ describe('A-118 · a product with no template cannot be bought', () => {
   })
 })
 
-describe('A-118 · the duplicate guard is split on purpose', () => {
-  it('refuses a duplicate PAN and offers no way past it', async () => {
+describe('the duplicate guard is split on purpose', () => {
+  /*
+    One exact half and one advisory half, and which is which changed with the
+    capture: the PAN used to be the exact one and is no longer asked for, so
+    `clientCode` is. The split itself is the point — plan §1.1 item 6 wants one
+    row per legal entity, an exact key is what makes that decidable, and a name
+    is only ever evidence.
+  */
+  it('refuses a duplicate client code and offers no way past it', async () => {
+    // GVI-001 is GreenValley's, in the fixtures.
     const res = await createClient(
-      validBody({ pan: 'AAGCG1204F', acknowledgeSimilarNames: true }),
+      validBody({ name: 'Some Other School', clientCode: 'GVI-001', acknowledgeSimilarNames: true }),
     )
-    expect(res.status).toBe(409)
-    expect((await json<{ type: string }>(res)).type).toContain('ob-client-pan-duplicate')
+    expect(res.status).toBe(400)
+    const body = await json<{ errors: Record<string, string[]> }>(res)
+    // Field-keyed, so it lands on the code input rather than in a banner. And
+    // the client already wearing the code is deliberately not named: it may be
+    // one this caller has no business knowing exists.
+    expect(body.errors.clientCode?.[0]).toContain('GVI-001')
+    expect(body.errors.clientCode?.[0]).not.toContain('GreenValley')
   })
 
   it('warns on a similar name and lets it be acknowledged', async () => {
@@ -316,77 +342,84 @@ describe('A-118 · the duplicate guard is split on purpose', () => {
   })
 })
 
-describe('A-118 · what one call to createObClient creates', () => {
-  it('instantiates one LOCKED journey per purchased product', async () => {
+describe('what one call to createObClient creates', () => {
+  /*
+    A company, and nothing else. This block used to assert the opposite — a
+    journey per purchased product, a prerequisite checklist, optionally a portal
+    login — and every one of those is now `POST /onboarding/projects`'s. The
+    assertions below are the same list read the other way round, which is the
+    point: they fail if any of it comes back here by accident.
+  */
+  it('creates the company and nothing underneath it', async () => {
     const res = await createClient(validBody({ name: 'Fabrikam Industries' }))
     expect(res.status).toBe(201)
     const { data } = await json<{ data: ClientDetail }>(res)
 
-    expect(data.journeys).toHaveLength(1)
-    expect(data.journeys[0].gateStatus).toBe('LOCKED')
-    // Visible plan, dead clock: every step present, nothing consumed, no colour.
-    expect(data.journeys[0].steps.length).toBeGreaterThan(0)
-    expect(data.journeys[0].utilizedHours).toBe(0)
-    expect(data.journeys[0].rag).toBeNull()
+    expect(data.name).toBe('Fabrikam Industries')
+    expect(data.clientCode).toBe('FAB-900')
+    expect(data.city).toBe('Surat')
+    expect(data.address).toBe('11 Industrial Estate')
+
+    // No engagement. A client is not onboarding anything until it has a project.
+    expect(data.journeys).toHaveLength(0)
+    expect(data.applications).toHaveLength(0)
+    expect(data.contacts).toHaveLength(0)
+    expect(data.hasPortalLogin).toBe(false)
     expect(data.rag).toBeNull()
-  })
 
-  it('does not create a portal login unless asked', async () => {
-    const quiet = await json<{ data: { hasPortalLogin: boolean } }>(
-      await createClient(validBody({ name: 'Tailwind Traders' })),
-    )
-    expect(quiet.data.hasPortalLogin).toBe(false)
-
-    const asked = await json<{ data: { hasPortalLogin: boolean } }>(
-      await createClient(validBody({ name: 'Wide World Importers', createPortalLogin: true })),
-    )
-    expect(asked.data.hasPortalLogin).toBe(true)
-  })
-
-  /**
-   * B-109 · the third thing `createObClient` documents itself as creating,
-   * alongside the journeys above — `ObClientPrereqService.instantiate`'s mock
-   * mirror. Read back through the OB-14 fixture's own shape (5 tasks, 3
-   * mandatory) rather than asserted as a bare count, so a handler that
-   * snapshotted the wrong version's tasks would still fail this.
-   */
-  it('snapshots the active prerequisites master onto the new client', async () => {
-    const res = await createClient(validBody({ name: 'Contoso Onboarding' }))
-    const { data } = await json<{ data: ClientDetail }>(res)
-
+    // And no prerequisite checklist: the gate is per client, but it is created
+    // with the client's first project, so a company on the books with nothing
+    // bought has nothing to clear.
     const db = getDb()
-    const header = db.obClientPrereqs.find((h) => h.obClientId === data.id)
-    expect(header).toMatchObject({ templateVersion: 1, status: 'IN_PROGRESS', clearedAt: null })
-
-    const tasks = db.obClientPrereqTasks.filter((t) => t.obClientId === data.id)
-    expect(tasks).toHaveLength(5)
-    expect(tasks.every((t) => t.status === 'PENDING')).toBe(true)
-    expect(tasks.filter((t) => t.isMandatory)).toHaveLength(3)
+    expect(db.obClientPrereqs.some((h) => h.obClientId === data.id)).toBe(false)
   })
 
-  it('boards no client at all when nothing is published on OB-14', async () => {
-    const db = getDb()
-    for (const version of db.obPrereqVersions) version.isActive = false
+  it('stamps the boarding date rather than asking for one', async () => {
+    const { data } = await json<{ data: ClientDetail }>(
+      await createClient(validBody({ name: 'Tailwind Traders', clientCode: 'TAI-901' })),
+    )
+    // The wizard asked for this separately and routinely got a date a month
+    // away from `createdAt`. A company is boarded the day somebody records it.
+    expect(data.onboardingDate).toBe(new Date().toISOString().slice(0, 10))
+  })
 
-    const res = await createClient(validBody({ name: 'Should Not Exist Academy' }))
+  it('requires a name and a code, and says which is missing', async () => {
+    const noName = await createClient(validBody({ name: '' }))
+    expect(noName.status).toBe(400)
+    expect((await json<{ errors: Record<string, string[]> }>(noName)).errors.name).toBeTruthy()
+
+    const noCode = await createClient(validBody({ clientCode: '' }))
+    expect(noCode.status).toBe(400)
+    expect((await json<{ errors: Record<string, string[]> }>(noCode)).errors.clientCode).toBeTruthy()
+  })
+})
+
+describe('deleting a client', () => {
+  it('deletes one that nothing depends on', async () => {
+    const { data } = await json<{ data: ClientDetail }>(
+      await createClient(validBody({ name: 'Typed In Wrong Academy', clientCode: 'TIW-902' })),
+    )
+
+    const res = await fetch(`/api/v1/onboarding/clients/${data.id}`, { method: 'DELETE' })
+    expect(res.status).toBe(204)
+    expect((await listClients()).some((c) => c.id === data.id)).toBe(false)
+  })
+
+  it('refuses one with projects, and names what is in the way', async () => {
+    // GreenValley, in the fixtures: two purchases, so two projects.
+    const res = await fetch('/api/v1/onboarding/clients/1', { method: 'DELETE' })
     expect(res.status).toBe(409)
-    expect((await json<{ type: string }>(res)).type).toContain('ob-client-no-prereq-master')
-    expect((await listClients()).some((c) => c.name === 'Should Not Exist Academy')).toBe(false)
-  })
 
-  it('requires exactly one primary SPOC', async () => {
-    const none = await createClient(validBody({
-      contacts: [{ name: 'A', email: 'a@x.example', isPrimary: false }],
-    }))
-    expect(none.status).toBe(400)
+    const body = await json<{ type: string; blockers: string[]; detail: string }>(res)
+    expect(body.type).toContain('ob-client-in-use')
+    // The array, not the sentence: which blocker it is decides what the screen
+    // offers instead.
+    expect(body.blockers).toContain('projects')
+    expect(body.detail).toContain('Dropped')
 
-    const two = await createClient(validBody({
-      contacts: [
-        { name: 'A', email: 'a@x.example', isPrimary: true },
-        { name: 'B', email: 'b@x.example', isPrimary: true },
-      ],
-    }))
-    expect(two.status).toBe(400)
+    // And nothing was removed — the refusal has to be total, because the
+    // cascade it prevents reaches two hash-chained tables.
+    expect((await listClients()).some((c) => c.id === 1)).toBe(true)
   })
 })
 

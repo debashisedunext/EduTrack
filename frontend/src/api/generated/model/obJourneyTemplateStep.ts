@@ -48,34 +48,49 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObJourneyTemplateStepDescription } from './obJourneyTemplateStepDescription';
 import type { ObJourneyTemplateStepOwnerUserId } from './obJourneyTemplateStepOwnerUserId';
-import type { ObJourneyTemplateStepOwnerRole } from './obJourneyTemplateStepOwnerRole';
-import type { ObJourneyTemplateStepBackupOwnerUserId } from './obJourneyTemplateStepBackupOwnerUserId';
 import type { ObJourneyTemplateStepDependsOnStepId } from './obJourneyTemplateStepDependsOnStepId';
 import type { ObJourneyTemplateStepItem } from './obJourneyTemplateStepItem';
 import type { ObJourneyTemplateStepDoc } from './obJourneyTemplateStepDoc';
 
 /**
- * `ob_journey_template_steps` — a Service within a Module Service.
+ * `ob_journey_template_steps` — a **task** inside a stage of a Module Service.
  */
 export interface ObJourneyTemplateStep {
   id: number;
   sequence: number;
-  /** @maxLength 200 */
+  /**
+   * The task's name, written by whoever added it.
+   * @maxLength 200
+   */
   name: string;
+  /** `ob_journey_template_stages.id` — the stage group this task sits
+inside, and how the designer groups the four levels. Never null:
+a task outside a stage is not a state this model has.
+ */
+  templateStageId: number;
   description?: ObJourneyTemplateStepDescription;
   /**
    * Working days, not hours — the v1.2 unit change. All duration maths goes through the working calendar.
    * @minimum 1
    */
   tatDays: number;
+  /** The implementor: who this task is put on when a client's journey
+is created from this service.
+
+**Null is the ordinary case and not a gap.** A task nobody is
+named on falls back at instantiation to the project's own
+implementor (`ob_projects.implementor_user_id`, and its creator
+after that), so a service can be authored once and still land on
+the right person for every project boarded from it. Only a task
+that must always go to one particular person names one here.
+
+There is no owning *role* beside it any more, and no backup
+owner. A Module Service is a plan for work, and one column
+answering "who does this" is the whole of what it needs to say;
+leave coverage is a fact about a live journey, so it stayed on
+`ObJourneyStep` where it can be set per client.
+ */
   ownerUserId?: ObJourneyTemplateStepOwnerUserId;
-  /**
-   * The role that owns this step when no specific person is named — the ribbon reads both.
-   * @maxLength 40
-   */
-  ownerRole?: ObJourneyTemplateStepOwnerRole;
-  /** Leave-coverage owner. */
-  backupOwnerUserId?: ObJourneyTemplateStepBackupOwnerUserId;
   /** Client sign-off required before this step may complete. */
   requiresSignoff: boolean;
   /** Null means this step runs in **parallel** from journey start,

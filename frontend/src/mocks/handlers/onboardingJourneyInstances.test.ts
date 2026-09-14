@@ -87,13 +87,14 @@ describe('C-104 · step lifecycle', () => {
     expect(data.detail).toContain('held by journey');
   });
 
-  it('refuses to start while the journey gate is locked', async () => {
-    // Little Scholars' journey 71 is still behind its prerequisite gate.
+  it('starts a step while the journey gate is still locked — the checklist is advisory', async () => {
+    // Little Scholars' journey 71 is still behind its prerequisite gate, and
+    // that no longer refuses its owner's own Start.
     await claim(711);
     const { status, data } = await post('/onboarding/journey-steps/711/start');
-    expect(status).toBe(422);
-    expect(data.type).toBe('https://edutrack/errors/journey-not-open');
-    expect(data.detail).toContain('gate LOCKED');
+    expect(status).toBe(200);
+    expect(data.data.status).toBe('IN_PROGRESS');
+    expect(data.data.startedAt).not.toBeNull();
   });
 
   it('completes a step the caller started', async () => {

@@ -64,11 +64,31 @@ mailbox.
 export interface ObClientAccount {
   id: number;
   /**
-   * Generated, never chosen — `CLIENTCODE.givenname`, with a counter
-when that is taken. A-125's generator makes the namespace ours and
-removes the impersonation question a client-chosen handle would
+   * Generated, never chosen. A-125's generator makes the namespace ours
+and removes the impersonation question a client-chosen handle would
 open. Enumerable by design: guessing the name is expected, getting
 past the password is the part that has to be hard.
+
+**For an onboarding client it is the client's own `clientCode`**,
+unchanged, hyphens and all — `HRZ-001`. A portal login is one per
+client (`uq_client_accounts_ob_client`), so there is never a second
+to tell apart, and the code is the value operations already file
+that client under and already quote on the phone.
+
+A counter is appended on the rare collision (`HRZ-0012`):
+`client_accounts` is one table and the ticketing master mints into
+it from a separate code column of its own, so two organisations
+filed as `ACME` in the two masters are not a contradiction anybody
+has to resolve.
+
+Clients boarded before `client_code` existed (V20260911_1800, where
+the column is nullable) have no code, and fall back to the older
+`NAMEPREFIX.givenname` — refusing them a login over a field nobody
+ever asked them for would be the wrong answer.
+
+The ticketing master's own client logins are unchanged:
+`CLIENTCODE.givenname`, where several people at one client may each
+hold a login and the given name is what tells them apart.
 
    * @maxLength 50
    */

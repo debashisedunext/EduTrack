@@ -194,14 +194,35 @@ and demotes the incumbent in the same transaction.
 | Client attachments | B-107 |
 | OB-03 and OB-04 screens, and the SPOC panel's UI | B-108, B-109 |
 | The prerequisites snapshot the create would otherwise write | B-124, B-125 |
-| The portal login `createPortalLogin` promises | B-126 |
 | `ObJourneyStrip.utilizedHours` | C-120 |
 | A `SELECT, INSERT` grants branch for `ob_contact_consent_events` | Stream A |
 
-`createPortalLogin: true` is **refused** with a 409 rather than ignored — see
-`PortalLoginUnavailableException` for why refusing is the safer of the two — and
 `utilizedHours` is null rather than `0.0`, because a zero on screen reads as data
 and a null renders as an em dash.
+
+**`createPortalLogin` is honoured now**, and is no longer on that list. It was
+refused with a 409 for as long as there was no account behind it — B-102's
+argument that ignoring the flag is worse than refusing it, because "a boarder
+ticks the box, sees a 201, tells the client their credentials are coming, and
+nothing was ever sent". B-126 built the account, and the flag now creates one.
+
+It brings `contactName` and `contactEmail` with it, because a login is not
+issuable on a company alone: the account row stores the contact's name and
+email and the credential mail is addressed at them. Both are required exactly
+when the flag is true. The SPOC is created primary and active through
+`ObContactService.add` — B-103's own path, so the duplicate-email guard and the
+consent default are the ones the panel applies — and then the login is issued
+through `ObClientPortalLoginIssuer`.
+
+That interface is worth a word. `feature.portal` imports from this package and
+never the other way round; having `ObClientWriteService` call
+`ClientAccountAdminService` directly would have made that a cycle. So the
+interface belongs here and `portal` supplies the implementation
+(`ObClientPortalLoginAdapter`), which keeps `ClientAccountAdminService` the only
+thing that knows how an account is built.
+
+All three rows land in one transaction, or none do. A company left behind by a
+login that failed is B-102's failure with extra steps.
 
 The grants row is the one owed outward: `apply-app-grants.sql` sweeps every table
 and hands the consent journal the default `SELECT, INSERT, UPDATE, DELETE`. It

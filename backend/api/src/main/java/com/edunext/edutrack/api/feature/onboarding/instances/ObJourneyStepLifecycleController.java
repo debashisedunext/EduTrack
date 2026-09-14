@@ -269,7 +269,8 @@ class ObJourneyStepLifecycleController {
             ObJourneyStepItem row = entry.row();
             return new ObJourneyStepLifecycleDtos.ObJourneyStepItem(
                     row.getId(), row.getStepId(), row.getSequence(), row.getLabel(),
-                    entry.mandatory(), row.getAnswer() != null, row.getAnsweredAt(),
+                    entry.mandatory(), row.getAnswer() != null,
+                    row.getAnswer(), row.getRemark(), row.getAnsweredAt(),
                     // No display name to resolve without a users read this
                     // controller has never carried; the id is what the schema
                     // asks for elsewhere on this route tree too.

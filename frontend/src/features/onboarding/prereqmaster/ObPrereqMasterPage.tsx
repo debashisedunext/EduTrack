@@ -4,6 +4,7 @@ import { FileText, ListChecks, X } from 'lucide-react'
 
 import {
   getGetObPrereqTemplateQueryKey,
+  getObPrereqTemplate,
   useAddObPrereqTemplateTask,
   useBeginObPrereqTemplateRevision,
   useGetObPrereqTemplate,
@@ -17,6 +18,14 @@ import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import {
+  Modal,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+} from '@/components/ui/modal'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -79,9 +88,24 @@ import { cn } from '@/lib/utils'
  * `beginObPrereqTemplateRevision` returns it directly (its response is where
  * this screen learns the draft's version number). When begin answers 409
  * because a draft already exists — another admin's, or an earlier session's —
- * the screen adopts `active.version + 1`, which is the number the sequential
- * versioning gives the one outstanding draft, rather than dead-ending on an
- * error about state it could join.
+ * the screen reads `active.version + 1`, which is the number the sequential
+ * versioning gives the one outstanding draft, joins it and carries the edit
+ * straight onto it. Any OB Admin may change this master, so an open draft is
+ * shared state to edit rather than somebody's lock to be turned away by.
+ *
+ * <h2>Adding a task is a dialog, not a panel under the table</h2>
+ *
+ * The design draws the add form open beneath the checklist, and at rest that
+ * was five empty fields taking about half the screen below the one thing the
+ * page exists to show — worse the longer the master gets, because the admin
+ * scrolls past every task to reach it. The form is unchanged; it moved behind
+ * an <b>Add a task</b> button in the page header, where a screen's primary
+ * action lives on every other master in this module.
+ *
+ * <p>The dialog closes on a successful write only. A refusal — a 412 from
+ * somebody else's edit, a 422 for the last mandatory task — renders inside the
+ * dialog with what was typed still in the fields, because a dialog that closed
+ * on the error would have thrown the admin's text away along with it.
  *
  * <h2>The reference-document input is disabled, with the reason beside it</h2>
  *
@@ -106,6 +130,22 @@ export function ObPrereqMasterPage() {
   const [tat, setTat] = React.useState('3')
   const [description, setDescription] = React.useState('')
   const [mandatory, setMandatory] = React.useState(true)
+  const [adding, setAdding] = React.useState(false)
+
+  /*
+    Opened empty every time rather than holding whatever was typed and
+    abandoned last time — `ObProductMasterPage`'s create dialog sets the idiom
+    for this module, and a form that reopens with a discarded draft in it is
+    one click away from adding a task nobody meant to.
+  */
+  const openAdd = () => {
+    setTitle('')
+    setTat('3')
+    setDescription('')
+    setMandatory(true)
+    setError(null)
+    setAdding(true)
+  }
 
   const templateQuery = useGetObPrereqTemplate(
     draftVersion === null ? undefined : { version: draftVersion },
@@ -149,8 +189,10 @@ export function ObPrereqMasterPage() {
       try {
         await work()
         await refresh()
+        return true
       } catch (caught) {
         setError(describe(caught))
+        return false
       } finally {
         setBusy(false)
       }
@@ -193,6 +235,13 @@ export function ObPrereqMasterPage() {
    * belongs to the published version and writing to it is refused. `sequence`
    * is carried across the clone deliberately, by both the server and the mock,
    * which makes it the one key that survives the boundary.
+   *
+   * <p>A draft somebody else has open is <b>joined and edited</b>, not refused.
+   * The master is org-wide and singular, every OB Admin may change it, and
+   * "one draft at a time" is a storage rule rather than a lock on a person —
+   * `ObPrereqTemplateService` says so in as many words, calling two admins
+   * editing at once the normal case. So the conflict is the screen's to
+   * resolve, not the admin's to be told about.
    */
   const draftTasksFor = async (): Promise<ObPrereqTemplateTask[]> => {
     if (template?.isDraft) return template.tasks
@@ -201,19 +250,36 @@ export function ObPrereqMasterPage() {
       setDraftVersion(revision.data.version)
       return revision.data.tasks
     } catch (caught) {
-      /*
-        Somebody else already has the org's one draft open. Join it — but stop
-        here rather than applying this edit to it: a 409 carries no tasks, so
-        there is nothing to match `sequence` against, and guessing would write
-        to whichever id happened to be on screen. The screen loads their draft
-        and asks for the edit again, against rows that are really there.
-      */
       if (caught instanceof ApiError && (caught.status === 409 || caught.is('ob-prereq-draft-exists'))) {
-        setDraftVersion((template?.version ?? 0) + 1)
-        throw new DraftJoined()
+        return joinOpenDraft()
       }
       throw caught
     }
+  }
+
+  /**
+   * The one outstanding draft, read back so this edit can be applied to it.
+   *
+   * <p>The 409 carries no tasks, and the ids on screen belong to the published
+   * version the draft was cloned from — writing to those is what the server
+   * refuses. So the draft is fetched: versions are sequential and there is at
+   * most one draft, so it is `active.version + 1`, and the read returns any
+   * version by number including an unpublished one
+   * (`ObPrereqTemplateController#get`). `sequence` then matches the row the
+   * admin clicked to its clone, which is what {@link onDraft} is for.
+   *
+   * <p>If that version came back already published, the draft was published
+   * between the 409 and this read — so open a fresh one, which is now free.
+   */
+  const joinOpenDraft = async (): Promise<ObPrereqTemplateTask[]> => {
+    const joined = (await getObPrereqTemplate({ version: (template?.version ?? 0) + 1 })).data
+    if (joined.isDraft) {
+      setDraftVersion(joined.version)
+      return joined.tasks
+    }
+    const revision = await beginRevision.mutateAsync()
+    setDraftVersion(revision.data.version)
+    return revision.data.tasks
   }
 
   /** The same task, on the draft — matched across the clone by `sequence`. */
@@ -235,21 +301,22 @@ export function ObPrereqMasterPage() {
   const submitAdd = (event: React.FormEvent) => {
     event.preventDefault()
     if (!title.trim()) return
-    void apply(async () => {
-      await draftTasksFor()
-      await addTask.mutateAsync({
-        data: {
-          title: title.trim(),
-          description: description.trim() ? description.trim() : undefined,
-          tatDays: Math.max(1, Number(tat) || 1),
-          isMandatory: mandatory,
-        },
+    void (async () => {
+      const added = await apply(async () => {
+        await draftTasksFor()
+        await addTask.mutateAsync({
+          data: {
+            title: title.trim(),
+            description: description.trim() ? description.trim() : undefined,
+            tatDays: Math.max(1, Number(tat) || 1),
+            isMandatory: mandatory,
+          },
+        })
       })
-      setTitle('')
-      setTat('3')
-      setDescription('')
-      setMandatory(true)
-    })
+      // See the docstring: only a write that went through closes the dialog,
+      // so a refusal leaves the typed task in front of the admin to retry.
+      if (added) setAdding(false)
+    })()
   }
 
   /*
@@ -338,7 +405,13 @@ export function ObPrereqMasterPage() {
 
   return (
     <div className="mx-auto max-w-[900px] p-6">
-      <PageHeading />
+      <PageHeading
+        action={
+          <Button onClick={openAdd} disabled={busy}>
+            + Add a task
+          </Button>
+        }
+      />
 
       {/*
         The one thing on this screen the design does not draw, and the one that
@@ -362,7 +435,9 @@ export function ObPrereqMasterPage() {
         </div>
       )}
 
-      {error && <ErrorNote className="mt-4">{error}</ErrorNote>}
+      {/* While the dialog is open it renders this itself, beside the fields
+          the message is about — two copies of one alert is one too many. */}
+      {!adding && error && <ErrorNote className="mt-4">{error}</ErrorNote>}
 
       <TableContainer className="mt-5 bg-surface shadow-rest">
         <Table>
@@ -433,99 +508,127 @@ export function ObPrereqMasterPage() {
         {tasks.length === 0 && (
           <EmptyState
             title="No tasks on this version"
-            description="Add the first task below."
+            description={
+              'Nothing is being asked of a client boarded against it, and a journey with ' +
+              'no mandatory task to clear opens straight away.'
+            }
+            action={
+              <Button onClick={openAdd} disabled={busy}>
+                + Add a task
+              </Button>
+            }
           />
         )}
       </TableContainer>
 
-      <form
-        onSubmit={submitAdd}
-        aria-labelledby="pm-add-heading"
-        className="mt-5 rounded-card border border-border bg-surface p-5 shadow-rest"
-      >
-        <h2
-          id="pm-add-heading"
-          className="text-caption font-semibold uppercase tracking-wider text-content-muted"
-        >
-          Add a task
-        </h2>
-        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="pm-title" className="block text-sm font-medium text-content">
-              Title *
-            </label>
-            <Input
-              id="pm-title"
-              className="mt-1"
-              value={title}
-              maxLength={200}
-              placeholder="e.g. Share GST certificate"
-              disabled={busy}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label htmlFor="pm-tat" className="block text-sm font-medium text-content">
-              TAT (working days)
-            </label>
-            <Input
-              id="pm-tat"
-              className="mt-1 w-32"
-              type="number"
-              min={1}
-              max={365}
-              value={tat}
-              disabled={busy}
-              onChange={(e) => setTat(e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="pm-desc" className="block text-sm font-medium text-content">
-              Description for the client
-            </label>
-            <Input
-              id="pm-desc"
-              className="mt-1"
-              value={description}
-              maxLength={4000}
-              placeholder="What exactly do they need to do?"
-              disabled={busy}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="pm-doc" className="block text-sm font-medium text-content">
-              Reference document (attached for the client)
-            </label>
-            <Input
-              id="pm-doc"
-              className="mt-1"
-              placeholder="e.g. GST_format_sample.pdf"
-              disabled
-              aria-describedby="pm-doc-note"
-            />
-            {/* See the docstring — the contract has no master-scoped upload yet. */}
-            <p id="pm-doc-note" className="mt-1 text-caption text-content-muted">
-              Needs the module&apos;s attachment upload, which has no master-scoped route yet.
-            </p>
-          </div>
-          <div className="flex items-end justify-between gap-4">
-            <label className="flex items-center gap-2 text-sm text-content">
-              <input
-                type="checkbox"
-                checked={mandatory}
+      {/*
+        The design's add panel, moved behind the header button — see the
+        docstring. The fields themselves are untouched, so the form the admin
+        fills in is the one the mockup draws.
+      */}
+      <Modal open={adding} onOpenChange={setAdding}>
+        <ModalContent className="max-w-2xl">
+          <form onSubmit={submitAdd}>
+            <ModalHeader>
+              <ModalTitle id="pm-add-heading">Add a task</ModalTitle>
+              <ModalDescription>
+                It joins the draft rather than the published master. Existing clients keep the
+                checklist they were boarded with until you publish this version.
+              </ModalDescription>
+            </ModalHeader>
+
+            {error && <ErrorNote className="mb-4">{error}</ErrorNote>}
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="pm-title" className="block text-sm font-medium text-content">
+                  Title *
+                </label>
+                <Input
+                  id="pm-title"
+                  className="mt-1"
+                  value={title}
+                  maxLength={200}
+                  placeholder="e.g. Share GST certificate"
+                  disabled={busy}
+                  onChange={(e) => setTitle(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="pm-tat" className="block text-sm font-medium text-content">
+                  TAT (working days)
+                </label>
+                <Input
+                  id="pm-tat"
+                  className="mt-1 w-32"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={tat}
+                  disabled={busy}
+                  onChange={(e) => setTat(e.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="pm-desc" className="block text-sm font-medium text-content">
+                  Description for the client
+                </label>
+                <Input
+                  id="pm-desc"
+                  className="mt-1"
+                  value={description}
+                  maxLength={4000}
+                  placeholder="What exactly do they need to do?"
+                  disabled={busy}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="pm-doc" className="block text-sm font-medium text-content">
+                  Reference document (attached for the client)
+                </label>
+                <Input
+                  id="pm-doc"
+                  className="mt-1"
+                  placeholder="e.g. GST_format_sample.pdf"
+                  disabled
+                  aria-describedby="pm-doc-note"
+                />
+                {/* See the docstring — the contract has no master-scoped upload yet. */}
+                <p id="pm-doc-note" className="mt-1 text-caption text-content-muted">
+                  Needs the module&apos;s attachment upload, which has no master-scoped route yet.
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="flex items-center gap-2 text-sm text-content">
+                  <input
+                    type="checkbox"
+                    checked={mandatory}
+                    disabled={busy}
+                    onChange={(e) => setMandatory(e.target.checked)}
+                  />
+                  Mandatory (gates the journeys)
+                </label>
+              </div>
+            </div>
+
+            <ModalFooter>
+              <Button
+                type="button"
+                variant="secondary"
                 disabled={busy}
-                onChange={(e) => setMandatory(e.target.checked)}
-              />
-              Mandatory (gates the journeys)
-            </label>
-            <Button type="submit" disabled={busy || !title.trim()}>
-              + Add to master
-            </Button>
-          </div>
-        </div>
-      </form>
+                onClick={() => setAdding(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy || !title.trim()}>
+                + Add to master
+              </Button>
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }
@@ -536,15 +639,18 @@ export function ObPrereqMasterPage() {
  * prerequisites master, and a page that answers with a bare red sentence and
  * no heading is the thing this screen was reported for.
  */
-function PageHeading() {
+function PageHeading({ action }: { action?: React.ReactNode }) {
   return (
-    <div>
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
       <h1 className="text-lg font-semibold text-content">Prerequisites master</h1>
       <p className="mt-1 max-w-2xl text-caption text-content-muted">
         The default client-responsibility checklist — applied to every newly boarded client.
         Mandatory tasks gate every journey; existing clients keep the snapshot they were boarded
         with.
       </p>
+      </div>
+      {action}
     </div>
   )
 }
@@ -574,17 +680,7 @@ function beginFailureMessage(caught: unknown): string {
   return messageFor(caught)
 }
 
-/**
- * Not a failure of the server's — the edit was stopped deliberately because
- * this session joined a draft somebody else had open. See {@link
- * ObPrereqMasterPage}'s `draftTasksFor`.
- */
-class DraftJoined extends Error {}
-
 function messageFor(caught: unknown): string {
-  if (caught instanceof DraftJoined) {
-    return 'Somebody else already had a revision open, so you are now editing theirs. Your change was not applied — make it again.'
-  }
   if (caught instanceof ApiError) {
     if (caught.status === 403) {
       return 'The prerequisites master is OB Admin only.'

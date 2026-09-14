@@ -4,6 +4,8 @@ import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
+
 /** Headcount fits one page on any real deployment; see the class note. */
 const PAGE_LIMIT = 200
 
@@ -56,7 +58,10 @@ export interface ObImplementorWorkloadGridProps {
  * a follow-up if the trend view is wanted.
  */
 export function ObImplementorWorkloadGrid({ onDrill }: ObImplementorWorkloadGridProps) {
-  const { data, isPending, isError } = useListObImplementorWorkload({ limit: PAGE_LIMIT })
+  const { data, isPending, isError } = useListObImplementorWorkload(
+    { limit: PAGE_LIMIT },
+    { query: OB_DASHBOARD_QUERY },
+  )
 
   const rows = data?.data ?? []
   const hasMore = data?.meta?.hasMore ?? false

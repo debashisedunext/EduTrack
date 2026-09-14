@@ -71,6 +71,8 @@ export const listObJourneyTemplatesQueryParams = zod.object({
 
 export const listObJourneyTemplatesResponseDataItemNameMax = 160;
 
+export const listObJourneyTemplatesResponseDataItemStagesItemNameMax = 120;
+
 
 
 export const listObJourneyTemplatesResponse = zod.object({
@@ -84,7 +86,13 @@ export const listObJourneyTemplatesResponse = zod.object({
   "dependsOnTemplateIds": zod.array(zod.number()).optional(),
   "publishedAt": zod.string().datetime({}).nullish(),
   "stepCount": zod.number().describe('How many services this journey has — the card\'s step list length.'),
-  "totalTatDays": zod.number().describe('Σ of the step TATs in working days — what a journey for this\nservice costs. On the row because the card shows it and it is not\nderivable from the other fields; the alternative is the page\nfetching every service\'s full detail to render one chip.\n'),
+  "totalTatDays": zod.number().describe('How long a journey for this service \*\*takes\*\*, in working days —\nthe critical path through its tasks, not the sum of them.\n\nTasks that wait for nothing start together, so two of 1 and 2 days\nside by side is 2 days, while the same two chained by\n`dependsOnStepId` is 3. It was a plain Σ until the two readings\nwere noticed to disagree wherever a service has parallel work,\nwhich is most of them.\n\nOn the row because the card shows it and it is not derivable from\nthe other fields; the alternative is the page fetching every\nservice\'s full detail to render one chip.\n'),
+  "stages": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(listObJourneyTemplatesResponseDataItemStagesItemNameMax).describe('The stage\'s name, copied at creation rather than joined at read\ntime — a stage renamed on OB-15 next year must not re-label a\ntemplate published this year.\n'),
+  "sequence": zod.number().describe('Position within the template, pinned at creation from the master.'),
+  "implementationStageId": zod.number().nullish().describe('`ob_implementation_stages.id`. Null on the \"Ungrouped\" group,\nwhich holds tasks written before `V20260911_1600` and belonging\nto no stage — those were deliberately not backfilled by\nname-matching.\n')
+}).describe('`ob_journey_template_stages` — a \*\*stage group\*\*, the second of\nOB-07\'s four levels (Module Service, stage, task, task list).\n\nIt carries no TAT, owner or sign-off: those are facts about a task,\nand a group that also held them would be a second place to answer\n\"who is on the hook and when is it due\". Its TAT on the designer is\nderived by summing its tasks, never stored.\n')).optional().describe('This service\'s stage groups, in display order — OB-07\'s \"Category\"\ncolumn and the New Project form\'s service picker both print them.\n\nOn the \*\*summary\*\* rather than only on the detail because both of\nthose screens draw every service of a product at once, and reading\nthem per row would be a request per card. The same\n`ObJourneyTemplateStage` the detail nests, not a thinner twin: a\nsummary-only shape would be a second thing to keep in step for the\nsake of omitting one nullable id, and the picker groups by that id.\n'),
   "serviceJourneyCount": zod.number().describe('C-124 · client journeys instantiated from \*\*any version of this\nservice\*\*, archived ones included — the number `DELETE` refuses\nabove zero. \*\*`PATCH` does not consult it at all\*\*, so a page that\ndisables its edit form by this number is disabling something the\nserver would have accepted: it speaks for Delete, and for warning\nthat a product move leaves these journeys where they were bought.\n\nChain-wide, not this version\'s own: every row of one service\ncarries the same total. The catalogue card is the \*head\* of a\nversion chain, so a service whose v1 carries three clients and\nwhose v3 carries none is in use, and a per-row count would have\nreported `0` on the very card that draws the Delete button.\n\nOn the row for `totalTatDays`\'s reason — the page disables Delete\nby it, and without it the only way to find out is to let an admin\nclick and answer `409`.\n')
 }).describe('One Module Service as the OB-07 catalogue lists it.'))
 })
@@ -144,10 +152,10 @@ export const getObJourneyTemplateParams = zod.object({
 
 export const getObJourneyTemplateResponseDataNameMax = 160;
 
+export const getObJourneyTemplateResponseDataStagesItemNameMax = 120;
+
 export const getObJourneyTemplateResponseDataStepsItemNameMax = 200;
 
-
-export const getObJourneyTemplateResponseDataStepsItemOwnerRoleMax = 40;
 
 export const getObJourneyTemplateResponseDataStepsItemItemsItemLabelMax = 300;
 
@@ -167,15 +175,20 @@ export const getObJourneyTemplateResponse = zod.object({
   "publishedBy": zod.number().nullish(),
   "publishedAt": zod.string().datetime({}).nullish().describe('Set exactly once, the moment this version was published, and never touched again — including once a later version supersedes it.')
 }).describe('`ob_journey_templates` — a Module Service, and one version of it.').and(zod.object({
+  "stages": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getObJourneyTemplateResponseDataStagesItemNameMax).describe('The stage\'s name, copied at creation rather than joined at read\ntime — a stage renamed on OB-15 next year must not re-label a\ntemplate published this year.\n'),
+  "sequence": zod.number().describe('Position within the template, pinned at creation from the master.'),
+  "implementationStageId": zod.number().nullish().describe('`ob_implementation_stages.id`. Null on the \"Ungrouped\" group,\nwhich holds tasks written before `V20260911_1600` and belonging\nto no stage — those were deliberately not backfilled by\nname-matching.\n')
+}).describe('`ob_journey_template_stages` — a \*\*stage group\*\*, the second of\nOB-07\'s four levels (Module Service, stage, task, task list).\n\nIt carries no TAT, owner or sign-off: those are facts about a task,\nand a group that also held them would be a second place to answer\n\"who is on the hook and when is it due\". Its TAT on the designer is\nderived by summing its tasks, never stored.\n')).describe('Every stage group, in display order, \*\*including the empty\nones\*\* — which is the usual state of a service somebody has\njust created. A read that dropped them would leave the\ndesigner nowhere to hang \"+ Add a task\".\n'),
   "steps": zod.array(zod.object({
   "id": zod.number(),
   "sequence": zod.number(),
-  "name": zod.string().max(getObJourneyTemplateResponseDataStepsItemNameMax),
+  "name": zod.string().max(getObJourneyTemplateResponseDataStepsItemNameMax).describe('The task\'s name, written by whoever added it.'),
+  "templateStageId": zod.number().describe('`ob_journey_template_stages.id` — the stage group this task sits\ninside, and how the designer groups the four levels. Never null:\na task outside a stage is not a state this model has.\n'),
   "description": zod.string().nullish(),
   "tatDays": zod.number().min(1).describe('Working days, not hours — the v1.2 unit change. All duration maths goes through the working calendar.'),
-  "ownerUserId": zod.number().nullish(),
-  "ownerRole": zod.string().max(getObJourneyTemplateResponseDataStepsItemOwnerRoleMax).nullish().describe('The role that owns this step when no specific person is named — the ribbon reads both.'),
-  "backupOwnerUserId": zod.number().nullish().describe('Leave-coverage owner.'),
+  "ownerUserId": zod.number().nullish().describe('The implementor: who this task is put on when a client\'s journey\nis created from this service.\n\n\*\*Null is the ordinary case and not a gap.\*\* A task nobody is\nnamed on falls back at instantiation to the project\'s own\nimplementor (`ob_projects.implementor_user_id`, and its creator\nafter that), so a service can be authored once and still land on\nthe right person for every project boarded from it. Only a task\nthat must always go to one particular person names one here.\n\nThere is no owning \*role\* beside it any more, and no backup\nowner. A Module Service is a plan for work, and one column\nanswering \"who does this\" is the whole of what it needs to say;\nleave coverage is a fact about a live journey, so it stayed on\n`ObJourneyStep` where it can be set per client.\n'),
   "requiresSignoff": zod.boolean().describe('Client sign-off required before this step may complete.'),
   "dependsOnStepId": zod.number().nullish().describe('Null means this step runs in \*\*parallel\*\* from journey start,\nnot \"first\" (plan §5.6). Constrained to a step in the same\ntemplate by the database; that it names an \*earlier\* step is\nC-119\'s rule, not this one\'s.\n'),
   "items": zod.array(zod.object({
@@ -190,7 +203,7 @@ export const getObJourneyTemplateResponse = zod.object({
   "label": zod.string().max(getObJourneyTemplateResponseDataStepsItemDocsItemLabelMax),
   "required": zod.boolean().describe('Only `required` rows gate step completion; the rest are documents the owner may attach.')
 }).describe('`ob_journey_template_step_docs` — the per-step required-document checklist.'))
-}).describe('`ob_journey_template_steps` — a Service within a Module Service.')),
+}).describe('`ob_journey_template_steps` — a \*\*task\*\* inside a stage of a Module Service.')).describe('Every task, flat and in `sequence` order. Flat rather than\nnested inside `stages` so that `parallelGroups` below stays\na list of ids into one array, and so the designer\'s existing\ntree and TAT arithmetic keep reading one list. Group by\n`templateStageId` to draw the four levels.\n'),
   "parallelGroups": zod.array(zod.array(zod.number())).describe('Computed, not stored — a topological layering of\n`dependsOnStepId`. Layer 0 (`parallelGroups[0]`) is every\nstep with no dependency; layer N is every step whose entire\ndependency chain is N hops deep. Everything inside one inner\narray could be in progress on the same journey at once.\n')
 }))
 })
@@ -365,39 +378,50 @@ export const publishObJourneyTemplateResponse = zod.object({
 })
 
 /**
- * `dependsOnStepId` null means the step runs in parallel from journey
-start, not "first" (plan §5.6). The database enforces only that a
-dependency stays inside the same template; that it names an
-*earlier* step in that template is C-119's job, evaluated by the
-designer on every add, reorder and delete.
+ * A **task** is the third of OB-07's four levels — Module Service,
+stage, task, task list — and the one that carries the TAT, the
+owner and the required documents. The stage it goes in is in the
+path, because a task is created inside a stage and never floats
+with a stage id attached.
 
- * @summary Add a service to a draft template (OB-07)
+**There is deliberately no route that creates a stage.** A Module
+Service is born holding one group per active implementation stage,
+and which stages exist is decided on OB-15 and nowhere else — two
+places to decide one thing is how two services end up described in
+different vocabularies.
+
+`dependsOnStepId` null means the task runs in parallel from journey
+start, not "first" (plan §5.6). A dependency may name a task in
+**another stage** of the same template: Data Migration genuinely
+waits on Configuration, and forbidding that would push people into
+inventing filler tasks to express a real order. The designer nests
+by dependency within a stage and captions a cross-stage one
+instead, since a row cannot be indented under a parent in another
+group.
+
+ * @summary Add a task to a stage of a draft template (OB-07)
  */
-export const addObJourneyTemplateStepParams = zod.object({
-  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+export const addObJourneyTemplateTaskParams = zod.object({
+  "stageId": zod.number().describe('An `ob_journey_template_stages` id — one stage group of one\ntemplate version, not an `ob_implementation_stages` id. The master\'s\nid is reachable as `ObJourneyTemplateStage.implementationStageId`.\n')
 })
 
-export const addObJourneyTemplateStepHeader = zod.object({
+export const addObJourneyTemplateTaskHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const addObJourneyTemplateStepBodyNameMax = 200;
+export const addObJourneyTemplateTaskBodyNameMax = 200;
 
 
-export const addObJourneyTemplateStepBodyOwnerRoleMax = 40;
+export const addObJourneyTemplateTaskBodyRequiresSignoffDefault = false;
 
-export const addObJourneyTemplateStepBodyRequiresSignoffDefault = false;
-
-export const addObJourneyTemplateStepBody = zod.object({
-  "name": zod.string().max(addObJourneyTemplateStepBodyNameMax),
+export const addObJourneyTemplateTaskBody = zod.object({
+  "name": zod.string().min(1).max(addObJourneyTemplateTaskBodyNameMax),
   "description": zod.string().nullish(),
   "tatDays": zod.number().min(1),
-  "ownerUserId": zod.number().nullish(),
-  "ownerRole": zod.string().max(addObJourneyTemplateStepBodyOwnerRoleMax).nullish(),
-  "backupOwnerUserId": zod.number().nullish(),
+  "ownerUserId": zod.number().nullish().describe('The implementor. Null — the default — leaves the task to fall\nback to the project\'s implementor at instantiation.\n'),
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish()
-})
+}).describe('A task is written by a person, so it carries a `name` again — the\nstep it replaces \*was\* an OB-15 stage and took the stage\'s name.\nWhat stays closed is the level above: no route creates a stage,\nbecause which stages exist is decided on OB-15 and nowhere else.\n\nThe stage group is in the path, not here: a task is created inside a\nstage, never floating with a stage id attached.\n')
 
 /**
  * `templateIds` is every currently-active template, in the caller's
@@ -470,32 +494,119 @@ export const updateObJourneyTemplateDependsOnResponse = zod.object({
 })
 
 /**
- * `stepIds` is the caller's full desired ordering, not a delta —
-every step id the template currently has, each named exactly once.
-Persisted as `sequence` 1..N in that order.
+ * `taskIds` is the caller's full desired ordering for the tasks of the
+stage named in the path — not a delta, and not the template's whole
+task set. Tasks in every other stage keep the positions they had, so
+reordering inside Configuration cannot disturb Data Migration.
 
 `If-Match` is required, not optional — a write without one is
 refused with `428`, the `GET /users/{userId}` argument applied
 again: treating a missing precondition as "no conflict" protects
 only the callers that already opted in, which is the set that
-needed it least. Read the current tag from `GET
+needed it least. The tag is the **template's**, since a stage group
+has no mutable state of its own to conflict over. Read it from `GET
 /onboarding/journey-templates/{templateId}`.
 
- * @summary The OB-07 ↑/↓ control, applied in one call (draft only)
+ * @summary The OB-07 ↑/↓ control, within one stage (draft only)
  */
-export const reorderObJourneyTemplateStepsParams = zod.object({
-  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+export const reorderObJourneyTemplateTasksParams = zod.object({
+  "stageId": zod.number().describe('An `ob_journey_template_stages` id — one stage group of one\ntemplate version, not an `ob_implementation_stages` id. The master\'s\nid is reachable as `ObJourneyTemplateStage.implementationStageId`.\n')
 })
 
-export const reorderObJourneyTemplateStepsHeader = zod.object({
+export const reorderObJourneyTemplateTasksHeader = zod.object({
   "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
 })
 
 
 
 
-export const reorderObJourneyTemplateStepsBody = zod.object({
-  "stepIds": zod.array(zod.number()).min(1).describe('The template\'s full step set, in the caller\'s desired order — not a delta.')
+export const reorderObJourneyTemplateTasksBody = zod.object({
+  "taskIds": zod.array(zod.number()).min(1).describe('One stage\'s full task set, in the caller\'s desired order — not a\ndelta, and not the template\'s whole task set. Tasks in every\nother stage keep the positions they had.\n')
+})
+
+/**
+ * TAT, owner, backup owner, sign-off, description and the step
+dependency. **Neither the implementation stage nor the name can be
+changed** — a step *is* its stage, and swapping it is remove plus
+add, which is also what makes it obvious that the step's task list
+and documents go with it.
+
+This route exists because a Module Service is now created holding
+one step per implementation stage, each with a one-day TAT and no
+owner. Configuring a service is therefore editing steps rather than
+adding them, and before this the only edit available was
+remove-and-re-add, which destroys the task list underneath.
+
+Every field is optional; `null` means "say nothing about this".
+`dependsOnStepId` is the exception — null there cannot be told from
+an omitted field, so `clearDependsOn: true` is how a caller asks for
+a step that waits for nothing.
+
+`If-Match` is **required**, and the tag is the *template's*, from
+`getObJourneyTemplate`. A step has no read of its own to draw one
+from, and the template's tag covers every step on it — which is the
+tag that notices the edit this route can silently destroy, somebody
+else's dependency change.
+
+ * @summary Edit a step of a draft template (OB-07)
+ */
+export const updateObJourneyTemplateStepParams = zod.object({
+  "stepId": zod.number().describe('An `ob_journey_template_steps` id.')
+})
+
+export const updateObJourneyTemplateStepHeader = zod.object({
+  "If-Match": zod.string().optional().describe('The `ETag` from the last read. Prevents a lost update; `412` if stale.')
+})
+
+export const updateObJourneyTemplateStepBodyNameMax = 200;
+
+
+export const updateObJourneyTemplateStepBodyClearDependsOnDefault = false;export const updateObJourneyTemplateStepBodyClearOwnerUserIdDefault = false;
+
+export const updateObJourneyTemplateStepBody = zod.object({
+  "name": zod.string().min(1).max(updateObJourneyTemplateStepBodyNameMax).optional(),
+  "description": zod.string().nullish(),
+  "tatDays": zod.number().min(1).optional(),
+  "ownerUserId": zod.number().nullish().describe('The implementor — the named person on the hook for this task, and\nwhat the journey instance carries into the ribbon.\n\nNull is indistinguishable from an omitted field, so use\n`clearOwnerUserId` to take the person off. Cleared, the task falls\nback to the project\'s implementor at instantiation rather than\narriving unassigned.\n'),
+  "requiresSignoff": zod.boolean().nullish(),
+  "dependsOnStepId": zod.number().nullish().describe('A step of this same template. Null is indistinguishable from an\nomitted field, so use `clearDependsOn` to make a step unheld.\n'),
+  "clearDependsOn": zod.boolean().optional().describe('True clears the dependency, making the step run in parallel from\njourney start. Takes precedence over `dependsOnStepId`.\n'),
+  "clearOwnerUserId": zod.boolean().optional().describe('True takes the named person off the task, leaving the project\'s\nown implementor to answer \"who does this\" when a journey is\ncreated. Takes precedence over `ownerUserId`.\n')
+}).describe('Every field optional; omitting one says nothing about it. The\n`name` can be sent; which stage the task is in cannot — see the\noperation\'s own description.\n')
+
+export const updateObJourneyTemplateStepResponseDataNameMax = 200;
+
+
+export const updateObJourneyTemplateStepResponseDataItemsItemLabelMax = 300;
+
+export const updateObJourneyTemplateStepResponseDataDocsItemLabelMax = 300;
+
+
+
+export const updateObJourneyTemplateStepResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(updateObJourneyTemplateStepResponseDataNameMax).describe('The task\'s name, written by whoever added it.'),
+  "templateStageId": zod.number().describe('`ob_journey_template_stages.id` — the stage group this task sits\ninside, and how the designer groups the four levels. Never null:\na task outside a stage is not a state this model has.\n'),
+  "description": zod.string().nullish(),
+  "tatDays": zod.number().min(1).describe('Working days, not hours — the v1.2 unit change. All duration maths goes through the working calendar.'),
+  "ownerUserId": zod.number().nullish().describe('The implementor: who this task is put on when a client\'s journey\nis created from this service.\n\n\*\*Null is the ordinary case and not a gap.\*\* A task nobody is\nnamed on falls back at instantiation to the project\'s own\nimplementor (`ob_projects.implementor_user_id`, and its creator\nafter that), so a service can be authored once and still land on\nthe right person for every project boarded from it. Only a task\nthat must always go to one particular person names one here.\n\nThere is no owning \*role\* beside it any more, and no backup\nowner. A Module Service is a plan for work, and one column\nanswering \"who does this\" is the whole of what it needs to say;\nleave coverage is a fact about a live journey, so it stayed on\n`ObJourneyStep` where it can be set per client.\n'),
+  "requiresSignoff": zod.boolean().describe('Client sign-off required before this step may complete.'),
+  "dependsOnStepId": zod.number().nullish().describe('Null means this step runs in \*\*parallel\*\* from journey start,\nnot \"first\" (plan §5.6). Constrained to a step in the same\ntemplate by the database; that it names an \*earlier\* step is\nC-119\'s rule, not this one\'s.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string().max(updateObJourneyTemplateStepResponseDataItemsItemLabelMax),
+  "mandatory": zod.boolean().describe('C-102. `false` marks the item one the instance-side completion\ngate (C-106) will not require an answer to. Every item predates\nthis field with an implicit `true` (plan §5.8\'s \"a service\ncompletes only when every item is answered\"), which is why the\ncolumn defaults to `true` rather than `false`.\n')
+}).describe('`ob_journey_template_step_items` — the Task List (was \"sub-categories\").')),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string().max(updateObJourneyTemplateStepResponseDataDocsItemLabelMax),
+  "required": zod.boolean().describe('Only `required` rows gate step completion; the rest are documents the owner may attach.')
+}).describe('`ob_journey_template_step_docs` — the per-step required-document checklist.'))
+}).describe('`ob_journey_template_steps` — a \*\*task\*\* inside a stage of a Module Service.')
 })
 
 /**
@@ -518,6 +629,20 @@ step completes. Defaults to `true`, matching every item that
 predates this field: before this task, plan §5.8's "a service
 completes only when every item is answered" applied to all of them
 with no exception.
+
+**B-131 — this is the one write a published version accepts.** Every
+other edit to a journey template is refused once it has been
+published, because it would change what a client already onboarding
+is looking at. Adding a checklist entry takes nothing away and
+contradicts no answer already given, and the clients who need it are
+usually the ones already running — so the **active** version accepts
+one, and the item is back-filled onto every live journey
+instantiated from that version. `backfilledJourneyCount` reports how
+many.
+
+Only that version's journeys: clients boarded on an *earlier*
+version keep the checklist they were boarded on, which is what
+pinning a version means.
 
  * @summary Add a Task List entry to a step (OB-07)
  */
@@ -814,6 +939,8 @@ export const listObJourneysResponseDataItemServiceNameMax = 160;
 export const listObJourneysResponseDataItemPercentCompleteMin = 0;
 export const listObJourneysResponseDataItemPercentCompleteMax = 100;
 
+export const listObJourneysResponseDataItemCurrentStepStageNameMax = 120;
+
 
 
 export const listObJourneysResponse = zod.object({
@@ -836,8 +963,10 @@ export const listObJourneysResponse = zod.object({
   "name": zod.string(),
   "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
-  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
-}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n'),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in — the third level of\nModule Service → \*\*Stage\*\* → Task → Task list.\n\n\*\*The same key `ObProjectStage.stageKey` carries\*\*, folded the\nidentical way: the stage\'s `implementation_stage_id`, else the\nnegated template stage-group id for a group belonging to no stage\n(the \"Ungrouped\" bucket), else `0` where the task\'s template row has\ngone. Matching keys is the point — the project header\'s stage ribbon\nis built from the roll-up, and a task can only be filed under the\nstop a reader clicked if both sides fold the same way. Both come\nfrom the same expression in SQL rather than from two opinions.\n'),
+  "stageName": zod.string().max(listObJourneysResponseDataItemCurrentStepStageNameMax).optional().describe('The stage\'s name as the template published it, not as the master\nreads today — `ob_journey_template_stages.name` is already a\nsnapshot, so a stage renamed on OB-15 leaves running journeys\nreading exactly as they were published.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n\n`stageKey` and `stageName` are added under that same test rather than\ndespite it: which phase of their own rollout a client is in is a fact\nthe portal may legitimately show, and neither field names a person, a\nclock or an internal reason. Anything that did would belong on the\nstaff-only step read instead.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
   "owner": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -879,11 +1008,17 @@ export const getObJourneyResponseDataServiceNameMax = 160;
 export const getObJourneyResponseDataPercentCompleteMin = 0;
 export const getObJourneyResponseDataPercentCompleteMax = 100;
 
+export const getObJourneyResponseDataCurrentStepStageNameMax = 120;
+
 export const getObJourneyResponseDataStepsItemNameMax = 200;
 
 export const getObJourneyResponseDataStepsItemBlockedReasonCodeMax = 40;
 
 export const getObJourneyResponseDataStepsItemBlockedNoteMax = 500;
+
+export const getObJourneyResponseDataStepsItemStageNameMax = 120;
+
+export const getObJourneyResponseDataStepsItemItemsItemRemarkMax = 500;
 
 
 
@@ -907,8 +1042,10 @@ export const getObJourneyResponse = zod.object({
   "name": zod.string(),
   "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
-  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
-}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n'),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in — the third level of\nModule Service → \*\*Stage\*\* → Task → Task list.\n\n\*\*The same key `ObProjectStage.stageKey` carries\*\*, folded the\nidentical way: the stage\'s `implementation_stage_id`, else the\nnegated template stage-group id for a group belonging to no stage\n(the \"Ungrouped\" bucket), else `0` where the task\'s template row has\ngone. Matching keys is the point — the project header\'s stage ribbon\nis built from the roll-up, and a task can only be filed under the\nstop a reader clicked if both sides fold the same way. Both come\nfrom the same expression in SQL rather than from two opinions.\n'),
+  "stageName": zod.string().max(getObJourneyResponseDataCurrentStepStageNameMax).optional().describe('The stage\'s name as the template published it, not as the master\nreads today — `ob_journey_template_stages.name` is already a\nsnapshot, so a stage renamed on OB-15 leaves running journeys\nreading exactly as they were published.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n\n`stageKey` and `stageName` are added under that same test rather than\ndespite it: which phase of their own rollout a client is in is a fact\nthe portal may legitimately show, and neither field names a person, a\nclock or an internal reason. Anything that did would belong on the\nstaff-only step read instead.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
   "owner": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -946,7 +1083,36 @@ export const getObJourneyResponse = zod.object({
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
-  "skippedByUserId": zod.number().nullish()
+  "skippedByUserId": zod.number().nullish(),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
+  "stageName": zod.string().max(getObJourneyResponseDataStepsItemStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
+  "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(getObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})).optional().describe('Required documents. \*\*Empty on the journey read\*\* — deciding\nsatisfaction counts clean attachments per task and walks the\ntemplate\'s document list, two further reads per row, and the\nstage body shows no documents.\n\nSo an empty array here means \"not loaded on this read\", not\n\"this task requires nothing\". The place that answers that\nhonestly is `GET \/onboarding\/journey-steps\/{stepId}`, where\n`ObJourneyStepDetail` requires the field.\n')
 })).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n')).describe('Every service in sequence, unpaginated. See `ObJourneyStrip`\nfor why: the ribbon needs all of them to draw any of them.\n'),
   "parallelGroups": zod.array(zod.array(zod.number())).optional().describe('Layer 0 first, each entry the step ids that could be in\nprogress at once — the same recomputed-on-read layering\n`GET \/onboarding\/journey-templates\/{templateId}` returns,\napplied to the instance\'s own dependency graph.\n')
 })).describe('The expanded OB-05 accordion.')
@@ -986,11 +1152,17 @@ export const archiveObJourneyResponseDataServiceNameMax = 160;
 export const archiveObJourneyResponseDataPercentCompleteMin = 0;
 export const archiveObJourneyResponseDataPercentCompleteMax = 100;
 
+export const archiveObJourneyResponseDataCurrentStepStageNameMax = 120;
+
 export const archiveObJourneyResponseDataStepsItemNameMax = 200;
 
 export const archiveObJourneyResponseDataStepsItemBlockedReasonCodeMax = 40;
 
 export const archiveObJourneyResponseDataStepsItemBlockedNoteMax = 500;
+
+export const archiveObJourneyResponseDataStepsItemStageNameMax = 120;
+
+export const archiveObJourneyResponseDataStepsItemItemsItemRemarkMax = 500;
 
 
 
@@ -1014,8 +1186,10 @@ export const archiveObJourneyResponse = zod.object({
   "name": zod.string(),
   "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('A service\'s lifecycle state. `PENDING` covers both \"gate still locked\"\nand \"dependency not yet met\" — the difference is visible in\n`blockedByStepId`, and a step never needs to distinguish them in its\nown field.\n\nBoth `BLOCKED` and `WAITING_ON_CLIENT` mean work has stopped, and they\nare separate because \*\*only one of them stops the clock\*\*: waiting on\nthe client pauses TAT and attributes the wait to the client, while an\ninternal block does not pause anything (plan §5.7). Merging them would\nmake every TAT report disputable within a month, which is the failure\nthe split exists to prevent.\n'),
   "rag": zod.union([zod.enum(['GREEN', 'AMBER', 'RED']).describe('The health colour, computed identically at step, journey and client\nlevel: worst-wins upward (plan §5.9). `AMBER` at a configurable share\nof TAT — default 75% — so the warning arrives before the breach rather\nthan reporting it.\n\n\*\*This carries health and nothing else.\*\* The prototype\'s client chip\nmerges six states into one label — on track, at risk, breached,\nwaiting, prerequisites pending, live — and that is right for a chip and\nwrong for a field. Three of the six are not health: `LIVE` is\n`ObClientStatus`, \"prerequisites pending\" is `ObGateStatus`, and\n\"waiting on client\" is `ObStepClockState`. Folding them here would give\nthe OB-03 filter an enum where selecting `RED` and selecting `LIVE` are\nthe same kind of question, which they are not.\n\n`null` where there is nothing to colour: a client whose journeys are\nall `LOCKED` has no running clock, so it is neither green nor at risk.\n'),zod.null()]).optional(),
-  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n')
-}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
+  "dependsOnStepId": zod.number().nullish().describe('The one service this one waits for, or null for \*\*parallel\*\* — the\nribbon marks these `↳ N` and `∥` respectively. Constrained to an\nearlier step in the same template, so the graph is cycle-free by\nconstruction rather than by a check that can be forgotten.\n'),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in — the third level of\nModule Service → \*\*Stage\*\* → Task → Task list.\n\n\*\*The same key `ObProjectStage.stageKey` carries\*\*, folded the\nidentical way: the stage\'s `implementation_stage_id`, else the\nnegated template stage-group id for a group belonging to no stage\n(the \"Ungrouped\" bucket), else `0` where the task\'s template row has\ngone. Matching keys is the point — the project header\'s stage ribbon\nis built from the roll-up, and a task can only be filed under the\nstop a reader clicked if both sides fold the same way. Both come\nfrom the same expression in SQL rather than from two opinions.\n'),
+  "stageName": zod.string().max(archiveObJourneyResponseDataCurrentStepStageNameMax).optional().describe('The stage\'s name as the template published it, not as the master\nreads today — `ob_journey_template_stages.name` is already a\nsnapshot, so a stage renamed on OB-15 leaves running journeys\nreading exactly as they were published.\n')
+}).describe('A single dot on the collapsed strip. Owner, comments, block reasons and\nTAT internals are \*\*absent by construction, not hidden client-side\*\* —\nthe client portal renders this same strip, and a field the portal must\nnever show is a field that must not be in the schema it receives.\n\n`stageKey` and `stageName` are added under that same test rather than\ndespite it: which phase of their own rollout a client is in is a fact\nthe portal may legitimately show, and neither field names a person, a\nclock or an internal reason. Anything that did would belong on the\nstaff-only step read instead.\n'),zod.null()]).optional().describe('The service in progress, or null when none is — a journey behind\nits gate, held behind a sibling, or finished. The Delayed Projects\ngrid\'s \"module in progress\" and \"current stage\" columns are this\none field.\n'),
   "owner": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -1053,7 +1227,36 @@ export const archiveObJourneyResponse = zod.object({
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
-  "skippedByUserId": zod.number().nullish()
+  "skippedByUserId": zod.number().nullish(),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
+  "stageName": zod.string().max(archiveObJourneyResponseDataStepsItemStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
+  "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(archiveObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})).optional().describe('Required documents. \*\*Empty on the journey read\*\* — deciding\nsatisfaction counts clean attachments per task and walks the\ntemplate\'s document list, two further reads per row, and the\nstage body shows no documents.\n\nSo an empty array here means \"not loaded on this read\", not\n\"this task requires nothing\". The place that answers that\nhonestly is `GET \/onboarding\/journey-steps\/{stepId}`, where\n`ObJourneyStepDetail` requires the field.\n')
 })).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n')).describe('Every service in sequence, unpaginated. See `ObJourneyStrip`\nfor why: the ribbon needs all of them to draw any of them.\n'),
   "parallelGroups": zod.array(zod.array(zod.number())).optional().describe('Layer 0 first, each entry the step ids that could be in\nprogress at once — the same recomputed-on-read layering\n`GET \/onboarding\/journey-templates\/{templateId}` returns,\napplied to the instance\'s own dependency graph.\n')
 })).describe('The expanded OB-05 accordion.')
@@ -1076,6 +1279,12 @@ export const getObJourneyStepResponseDataNameMax = 200;
 export const getObJourneyStepResponseDataBlockedReasonCodeMax = 40;
 
 export const getObJourneyStepResponseDataBlockedNoteMax = 500;
+
+export const getObJourneyStepResponseDataStageNameMax = 120;
+
+export const getObJourneyStepResponseDataItemsItemRemarkMax = 500;
+
+export const getObJourneyStepResponseDataItemsItemRemarkMaxOne = 500;
 
 
 
@@ -1101,7 +1310,36 @@ export const getObJourneyStepResponse = zod.object({
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
-  "skippedByUserId": zod.number().nullish()
+  "skippedByUserId": zod.number().nullish(),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
+  "stageName": zod.string().max(getObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
+  "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})).optional().describe('Required documents. \*\*Empty on the journey read\*\* — deciding\nsatisfaction counts clean attachments per task and walks the\ntemplate\'s document list, two further reads per row, and the\nstage body shows no documents.\n\nSo an empty array here means \"not loaded on this read\", not\n\"this task requires nothing\". The place that answers that\nhonestly is `GET \/onboarding\/journey-steps\/{stepId}`, where\n`ObJourneyStepDetail` requires the field.\n')
 })).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
   "items": zod.array(zod.object({
   "id": zod.number(),
@@ -1109,7 +1347,9 @@ export const getObJourneyStepResponse = zod.object({
   "sequence": zod.number(),
   "label": zod.string(),
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
-  "isDone": zod.boolean(),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1167,6 +1407,12 @@ export const updateObJourneyStepResponseDataBlockedReasonCodeMax = 40;
 
 export const updateObJourneyStepResponseDataBlockedNoteMax = 500;
 
+export const updateObJourneyStepResponseDataStageNameMax = 120;
+
+export const updateObJourneyStepResponseDataItemsItemRemarkMax = 500;
+
+export const updateObJourneyStepResponseDataItemsItemRemarkMaxOne = 500;
+
 
 
 export const updateObJourneyStepResponse = zod.object({
@@ -1191,7 +1437,36 @@ export const updateObJourneyStepResponse = zod.object({
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
-  "skippedByUserId": zod.number().nullish()
+  "skippedByUserId": zod.number().nullish(),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
+  "stageName": zod.string().max(updateObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
+  "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})).optional().describe('Required documents. \*\*Empty on the journey read\*\* — deciding\nsatisfaction counts clean attachments per task and walks the\ntemplate\'s document list, two further reads per row, and the\nstage body shows no documents.\n\nSo an empty array here means \"not loaded on this read\", not\n\"this task requires nothing\". The place that answers that\nhonestly is `GET \/onboarding\/journey-steps\/{stepId}`, where\n`ObJourneyStepDetail` requires the field.\n')
 })).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
   "items": zod.array(zod.object({
   "id": zod.number(),
@@ -1199,7 +1474,9 @@ export const updateObJourneyStepResponse = zod.object({
   "sequence": zod.number(),
   "label": zod.string(),
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
-  "isDone": zod.boolean(),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1259,6 +1536,12 @@ export const skipObJourneyStepResponseDataBlockedReasonCodeMax = 40;
 
 export const skipObJourneyStepResponseDataBlockedNoteMax = 500;
 
+export const skipObJourneyStepResponseDataStageNameMax = 120;
+
+export const skipObJourneyStepResponseDataItemsItemRemarkMax = 500;
+
+export const skipObJourneyStepResponseDataItemsItemRemarkMaxOne = 500;
+
 
 
 export const skipObJourneyStepResponse = zod.object({
@@ -1283,7 +1566,36 @@ export const skipObJourneyStepResponse = zod.object({
   "requiresSignoff": zod.boolean().optional(),
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
-  "skippedByUserId": zod.number().nullish()
+  "skippedByUserId": zod.number().nullish(),
+  "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
+  "stageName": zod.string().max(skipObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
+  "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional()
+})).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
+  "docs": zod.array(zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "label": zod.string(),
+  "isRequired": zod.boolean().describe('A required document with nothing against it refuses `finish` with `ob-step-docs-missing`.'),
+  "isSatisfied": zod.boolean().describe('Whether an attachment exists for this entry. Computed rather than\nstored, so deleting the attachment reopens the requirement instead\nof leaving a flag saying it was met once.\n'),
+  "attachmentId": zod.number().nullish()
+})).optional().describe('Required documents. \*\*Empty on the journey read\*\* — deciding\nsatisfaction counts clean attachments per task and walks the\ntemplate\'s document list, two further reads per row, and the\nstage body shows no documents.\n\nSo an empty array here means \"not loaded on this read\", not\n\"this task requires nothing\". The place that answers that\nhonestly is `GET \/onboarding\/journey-steps\/{stepId}`, where\n`ObJourneyStepDetail` requires the field.\n')
 })).describe('A-118 · what the ribbon and the OB-06 panel need on top of C-104\'s\nlifecycle shape.\n\n\*\*Built on `ObJourneyStep` rather than beside it.\*\* C-104 defined that\nschema for the five transition routes and its server returns it; a\nsecond, fuller step object would mean two shapes for one row and a\nclient having to know which route gave it which. The fields here are\nadditive — plan, health, and the dependency the ribbon draws — and\nnone of them contradicts the base.\n\n`skippedByUserId` is an id rather than a `UserRef`, matching\n`ownerUserId` on the base for the same reason: one convention applied\nto a whole schema beats a better one applied to half of it.\n').and(zod.object({
   "items": zod.array(zod.object({
   "id": zod.number(),
@@ -1291,7 +1603,9 @@ export const skipObJourneyStepResponse = zod.object({
   "sequence": zod.number(),
   "label": zod.string(),
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
-  "isDone": zod.boolean(),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1328,9 +1642,18 @@ export const updateObJourneyStepItemParams = zod.object({
   "itemId": zod.number().describe('A-118 · an `ob_journey_step_items` id — one checklist entry on a live\nservice, not the `ObJourneyTemplateStepItemId` it was instantiated\nfrom.\n')
 })
 
+export const updateObJourneyStepItemBodyRemarkMax = 500;
+
+
+
 export const updateObJourneyStepItemBody = zod.object({
-  "isDone": zod.boolean()
+  "answer": zod.boolean().nullable().describe('`true`, `false`, or `null` to clear the answer back to unanswered.\n\n\*\*This replaced `isDone: boolean`\*\*, which could say neither\n\"false, and here is why\" nor \"I answered this by mistake\". The\ncolumn has been a nullable `tinyint` beside a `remark` since it was\nwritten; only the request was binary, and `StepTaskList` carried a\nstanding note that False-with-a-remark was unreachable.\n'),
+  "remark": zod.string().max(updateObJourneyStepItemBodyRemarkMax).nullish().describe('Mandatory when `answer` is `false` — the server answers\n`ob-step-item-remark-required` without one. Cleared by sending\n`null`, and ignored on an item being cleared to unanswered, since a\nreason for an answer nobody gave is not a thing.\n')
 })
+
+export const updateObJourneyStepItemResponseDataRemarkMax = 500;
+
+
 
 export const updateObJourneyStepItemResponse = zod.object({
   "data": zod.object({
@@ -1339,7 +1662,9 @@ export const updateObJourneyStepItemResponse = zod.object({
   "sequence": zod.number(),
   "label": zod.string(),
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
-  "isDone": zod.boolean(),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(updateObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),

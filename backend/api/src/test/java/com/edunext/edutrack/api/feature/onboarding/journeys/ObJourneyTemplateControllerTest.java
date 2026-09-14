@@ -131,24 +131,36 @@ class ObJourneyTemplateControllerTest {
         verify(service).publish(1L, 9L);
     }
 
+    /**
+     * The step is now named by an implementation stage id rather than by a
+     * string, so what this asserts is that the id reaches the service — a
+     * controller that dropped it would produce a step belonging to no stage,
+     * which the database accepts (the column is nullable for the legacy rows)
+     * and which nothing downstream could tell from a hand-typed step.
+     */
     @Test
-    @DisplayName("addStep delegates every field and wraps an empty items/docs pair")
-    void addStepDelegatesAllFields() {
+    @DisplayName("addTask passes the stage group and the name through, with an empty items/docs pair")
+    void addTaskDelegatesAllFields() {
         ObJourneyTemplateStep created = step(20L, 1L, 1, null);
-        when(service.addStep(1L, "Kickoff", "desc", 2, 6L, "PM", 8L, true, null)).thenReturn(created);
+        when(service.addTask(4L, "Create tenant", "desc", 2, 6L, true, null))
+                .thenReturn(created);
 
-        ObJourneyTemplateDtos.StepResponse response = controller.addStep(1L,
-                new ObJourneyTemplateDtos.AddStepRequest("Kickoff", "desc", 2, 6L, "PM", 8L, true, null));
+        ObJourneyTemplateDtos.StepResponse response = controller.addTask(4L,
+                new ObJourneyTemplateDtos.AddTaskRequest("Create tenant", "desc", 2, 6L, true, null));
 
         assertThat(response.data().id()).isEqualTo(20L);
         assertThat(response.data().items()).isEmpty();
         assertThat(response.data().docs()).isEmpty();
-        verify(service).addStep(1L, "Kickoff", "desc", 2, 6L, "PM", 8L, true, null);
+        verify(service).addTask(4L, "Create tenant", "desc", 2, 6L, true, null);
     }
 
     private void stubDetailFor(long templateId, ObJourneyTemplate t, List<ObJourneyTemplateStep> steps) {
         when(service.getTemplate(templateId)).thenReturn(t);
         when(service.getSteps(templateId)).thenReturn(steps);
+        // The detail read carries the stage groups now. Empty is enough here:
+        // these tests are about the precondition and the delegation, and a
+        // group list would only add noise to the ETag they compare.
+        when(service.getStages(templateId)).thenReturn(List.of());
         for (ObJourneyTemplateStep step : steps) {
             when(service.getStepItems(step.getId())).thenReturn(List.of());
             when(service.getStepDocs(step.getId())).thenReturn(List.of());
@@ -160,36 +172,40 @@ class ObJourneyTemplateControllerTest {
     @DisplayName("reorder with a wildcard If-Match passes the requested id order straight through")
     void reorderDelegates() {
         stubDetailFor(1L, template(1L, false), List.of(step(10L, 1L, 1, null), step(11L, 1L, 2, null)));
+        // The route takes a stage; the tag it checks is that stage's template's.
+        when(service.templateIdOfStage(7L)).thenReturn(1L);
 
-        controller.reorder(1L, "*", new ObJourneyTemplateDtos.ReorderStepsRequest(List.of(11L, 10L)));
+        controller.reorderTasks(7L, "*", new ObJourneyTemplateDtos.ReorderTasksRequest(List.of(11L, 10L)));
 
-        verify(service).reorderSteps(eq(1L), eq(List.of(11L, 10L)));
+        verify(service).reorderTasks(eq(7L), eq(List.of(11L, 10L)));
     }
 
     @Test
     @DisplayName("reorder without If-Match is refused (428) before the service is called — CONVENTIONS.md §5")
     void reorderWithoutIfMatchRefused() {
         stubDetailFor(1L, template(1L, false), List.of(step(10L, 1L, 1, null)));
+        when(service.templateIdOfStage(7L)).thenReturn(1L);
 
         assertThatThrownBy(() ->
-                controller.reorder(1L, null, new ObJourneyTemplateDtos.ReorderStepsRequest(List.of(10L))))
+                controller.reorderTasks(7L, null, new ObJourneyTemplateDtos.ReorderTasksRequest(List.of(10L))))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode().value()).isEqualTo(428));
 
-        verify(service, never()).reorderSteps(anyLong(), org.mockito.ArgumentMatchers.anyList());
+        verify(service, never()).reorderTasks(anyLong(), org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
     @DisplayName("reorder with a stale If-Match is refused (412) before the service is called")
     void reorderWithStaleIfMatchRefused() {
         stubDetailFor(1L, template(1L, false), List.of(step(10L, 1L, 1, null)));
+        when(service.templateIdOfStage(7L)).thenReturn(1L);
 
-        assertThatThrownBy(() -> controller.reorder(1L, "\"not-the-current-tag\"",
-                new ObJourneyTemplateDtos.ReorderStepsRequest(List.of(10L))))
+        assertThatThrownBy(() -> controller.reorderTasks(7L, "\"not-the-current-tag\"",
+                new ObJourneyTemplateDtos.ReorderTasksRequest(List.of(10L))))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode().value()).isEqualTo(412));
 
-        verify(service, never()).reorderSteps(anyLong(), org.mockito.ArgumentMatchers.anyList());
+        verify(service, never()).reorderTasks(anyLong(), org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test

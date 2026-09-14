@@ -76,11 +76,13 @@ export function TopBar() {
     if (e.key !== 'Enter' || !query.trim()) return
 
     /*
-      Onboarding has no equivalent of a ticket code — a client is named, not
-      coded — so there is no "went straight to the one you named" shortcut to
-      mirror here. `?q=` is `useObClientFilters`' own parameter, so this lands
-      on a list already filtered and with the term still in the field, which is
-      what makes a second search from the results page work.
+      Onboarding has no equivalent of a ticket code to jump straight to. A
+      client does carry one now, but it is a filing label rather than a
+      navigable identifier — nothing resolves a client through it — so the
+      answer is still a filtered list. `?q=` is the Clients master's own URL
+      parameter and matches the name or the code, so this lands on a list
+      already filtered with the term still in the field, which is what makes a
+      second search from the results page work.
     */
     if (inOnboarding) {
       navigate(`/onboarding/clients?q=${encodeURIComponent(query.trim())}`)

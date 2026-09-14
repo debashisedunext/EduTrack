@@ -1,13 +1,11 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
 import com.edunext.edutrack.common.pagination.PageMeta;
-import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -107,8 +105,19 @@ final class ObClientDtos {
                          UserRef createdBy, Instant createdAt, Instant updatedAt) {
     }
 
-    /** {@code ObStepDot} — one dot on OB-05's collapsed strip. */
-    record ObStepDot(long id, int sequence, String name, String status, String rag, Long dependsOnStepId) {
+    /**
+     * {@code ObStepDot} — one dot on OB-05's collapsed strip.
+     *
+     * @param stageKey  the implementation stage this task belongs to, folded
+     *                  exactly as {@code ObProjectStage.stageKey} is so the
+     *                  project page can file a task under the ribbon stop a
+     *                  reader clicked. See
+     *                  {@link ObClientReadRepository#stepDotsOf}.
+     * @param stageName that stage's published name, or {@code Ungrouped} for a
+     *                  task whose template predates the stage master.
+     */
+    record ObStepDot(long id, int sequence, String name, String status, String rag, Long dependsOnStepId,
+                     long stageKey, String stageName) {
     }
 
     /**
@@ -175,7 +184,8 @@ final class ObClientDtos {
      *                    Unlike {@code currentStep}, stays populated once a
      *                    finished journey has no current step left to name
      */
-    record ObClientSummary(long id, String name, LocalDate onboardingDate, String status,
+    record ObClientSummary(long id, String name, String clientCode, String city, String address,
+                           LocalDate onboardingDate, String status,
                            String rag, String gateStatus, int journeyCount, int journeysComplete,
                            ObClientCurrentStep currentStep,
                            List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
@@ -197,12 +207,13 @@ final class ObClientDtos {
      *            live"). Detail only — OB-03's list has no banner and does not
      *            pay for the subquery.
      */
-    record ObClientDetail(long id, String name, LocalDate onboardingDate, String status,
+    record ObClientDetail(long id, String name, String clientCode, String city, String address,
+                          LocalDate onboardingDate, String status,
                           String rag, String gateStatus, int journeyCount, int journeysComplete,
                           ObClientCurrentStep currentStep,
                           List<ObProductRef> products, UserRef salesPerson, ObContact primaryContact,
                           Instant liveAt, Instant startedAt, boolean hasPortalLogin,
-                          String description, String address, String licenseType, String pan,
+                          String description, String licenseType, String pan,
                           String statusReason, List<ObContact> contacts, List<ObApplication> applications,
                           List<ObRequirement> requirements, List<ObJourneyStrip> journeys,
                           UserRef createdBy, Instant createdAt, Integer csatScore) {
@@ -329,33 +340,84 @@ final class ObClientDtos {
     }
 
     /**
-     * {@code ObClientCreateRequest} — the OB-04 wizard, committing all four
-     * steps in one request.
+     * {@code ObClientCreateRequest} — the Clients master's add dialog.
      *
-     * <p>{@code pan}'s pattern is the contract's, applied to the value as typed
-     * rather than to a normalised form, because Bean Validation runs before any
-     * of our code does. {@code PanFormat.normalise} trims and upper-cases
-     * afterwards, so a lower-case PAN is refused here rather than accepted and
-     * silently corrected — which is the safer direction for the one field the
-     * duplicate guard keys on.
+     * <h2>Four fields, where there were fourteen</h2>
+     *
+     * <p>This record used to commit a four-step wizard: PAN, SPOC contacts,
+     * commercials, requirements and an optional portal login, all in one
+     * request. Every one of those describes an <em>engagement</em> rather than a
+     * company, and engagements now have a table of their own
+     * ({@code ob_projects}) — so a client is the company, and nothing else.
+     *
+     * <p><b>Nothing was dropped from the system, only from this request.</b>
+     * {@code ob_client_contacts}, {@code ob_client_requirements},
+     * {@code ob_client_applications} and the portal account all still exist,
+     * with their own routes and their own panels on the client page. Re-adding
+     * any of them to capture is additive.
+     *
+     * <h2>{@code createPortalLogin}, and the two fields it drags back in</h2>
+     *
+     * <p>The consequence this record used to record — "a client created this
+     * way has no primary SPOC, so the kickoff mail, the one-time portal
+     * password and every sign-off request have no addressee, and for the same
+     * reason a portal login cannot be issued until one is added" — is the one
+     * the tick box had to answer. It is still true of a client added without
+     * ticking it.
+     *
+     * <p>A portal login is not issuable on a company alone, and that is not an
+     * incidental limitation to be coded around. The username's second half is
+     * the contact's given name ({@code PortalUsernames}), the account row
+     * stores the contact's name and email, and the credential mail is addressed
+     * at {@code contact_id}. All three want a person. So ticking the box asks
+     * for one, and {@code contactName} and {@code contactEmail} are required
+     * exactly when it is ticked — the SPOC is created as the client's primary,
+     * active, in the same transaction, before the login is.
+     *
+     * <p><b>The alternative was considered and refused:</b> generating a
+     * contactless {@code CODE.admin} account with the mail suppressed. It works
+     * on a demo box, where the dev password makes the mail irrelevant, and it
+     * fails silently everywhere else — an account whose credential has nowhere
+     * to go, discovered by the client not receiving it. B-102's argument
+     * against ignoring this flag is the same argument against half-honouring
+     * it.
+     *
+     * <p>Consent is not asked for here and the SPOC is created with none
+     * recorded, which {@code ObContactService} treats as withheld. That is the
+     * recoverable direction and it is the existing default for a contact added
+     * without the box ticked; WhatsApp consent is a question for the SPOC
+     * panel, where there is somewhere to record who was asked and when.
+     *
+     * <p>There is no {@code onboardingDate} either. The column is still
+     * {@code NOT NULL} and {@code ObClientWriteService} stamps the current
+     * date: a company is boarded the day somebody records it, and asking for
+     * the date separately invited a field that disagreed with
+     * {@code created_at} by a month.
      */
     record ObClientCreateRequest(
             @NotBlank @Size(max = 200) String name,
-            String description,
-            @NotNull LocalDate onboardingDate,
-            @Pattern(regexp = "^[A-Z]{5}[0-9]{4}[A-Z]$",
-                    message = "must be five letters, four digits and a letter, upper case") String pan,
-            String address,
-            Long salesPersonId,
-            @Size(max = 64) String licenseType,
-            @NotEmpty @Valid List<ObContactWriteRequest> contacts,
-            @NotEmpty @Valid List<ObApplicationWriteRequest> applications,
-            @Valid List<ObRequirementWriteRequest> requirements,
+            @NotBlank @Size(max = 32) String clientCode,
+            @Size(max = 2000) String address,
+            @Size(max = 120) String city,
+            Boolean acknowledgeSimilarNames,
             Boolean createPortalLogin,
-            Boolean acknowledgeSimilarNames) {
+            @Size(max = 160) String contactName,
+            @Email @Size(max = 200) String contactEmail) {
 
-        boolean wantsPortalLogin() {
-            return Boolean.TRUE.equals(createPortalLogin);
+        /**
+         * A company, and nothing else — the record's own documented identity,
+         * for the callers that want exactly that.
+         *
+         * <p>Jackson never reaches this one: record deserialisation binds to
+         * the canonical constructor, which is also the only one Bean Validation
+         * reads its annotations from. This is for Java callers — fixtures and
+         * tests, today — and it exists so that adding the portal fields did not
+         * put {@code , null, null, null} on the end of a dozen call sites that
+         * have nothing to say about a portal login.
+         */
+        ObClientCreateRequest(String name, String clientCode, String address, String city,
+                              Boolean acknowledgeSimilarNames) {
+            this(name, clientCode, address, city, acknowledgeSimilarNames, false, null, null);
         }
 
         boolean acknowledgedSimilarNames() {
@@ -363,14 +425,53 @@ final class ObClientDtos {
         }
 
         /**
-         * B-106 · the wizard's requirements step is optional and may be empty.
-         *
-         * <p>Unlike {@code contacts} and {@code applications}, which are
-         * {@code @NotEmpty} because a client without either cannot be onboarded
-         * at all. A client with nothing recorded yet is an ordinary client.
+         * <p>Absent is false. A client added by a caller that has never heard
+         * of this field — the Excel import, an older client, a test fixture —
+         * gets no login, which is the behaviour every one of them already had.
          */
-        List<ObRequirementWriteRequest> requirementsOrEmpty() {
-            return requirements == null ? List.of() : requirements;
+        boolean createsPortalLogin() {
+            return Boolean.TRUE.equals(createPortalLogin);
         }
+    }
+
+    /**
+     * The login the add dialog just issued, for the confirmation it shows.
+     *
+     * <p>Carried in the create's {@code meta} rather than on
+     * {@link ObClientDetail}, and the distinction is the whole reason this
+     * record exists. {@code ObClientDetail} is what every read of a client
+     * returns, forever; a password on it would be a live credential served on
+     * every {@code GET} to everyone in scope, for the life of the account.
+     * {@code meta} is the answer to <em>this request</em> — the one moment the
+     * operator who ticked the box is entitled to read it — and it is never
+     * stored, never re-read, and gone from the response the next time anybody
+     * looks at the client.
+     *
+     * <p>{@code password} is null on any deployment that has not configured a
+     * development password, and {@code ObClientAccountPanel} makes the same
+     * distinction: a null means the client was mailed a one-time link, not that
+     * something went missing.
+     */
+    @Schema(name = "ObPortalLoginIssued")
+    record PortalLoginIssued(
+            String username,
+            @Schema(description = "Development builds only; null in the product, where the client is mailed a link.")
+            String password) {
+    }
+
+    /**
+     * The create's envelope.
+     *
+     * <p>A shape of its own rather than {@link ObClientDetailResponse}, because
+     * a create is the only client response that has anything to put in
+     * {@code meta} — see {@link PortalLoginIssued} for why that is not simply a
+     * field on the detail. {@code meta} is null when no login was asked for,
+     * which is the common case.
+     */
+    record ObClientCreateResponse(ObClientDetail data, ObClientCreateMeta meta) {
+    }
+
+    @Schema(name = "ObClientCreateMeta")
+    record ObClientCreateMeta(PortalLoginIssued portalLogin) {
     }
 }

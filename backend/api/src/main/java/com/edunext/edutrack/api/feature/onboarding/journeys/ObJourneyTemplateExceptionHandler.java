@@ -37,7 +37,8 @@ class ObJourneyTemplateExceptionHandler {
             TemplateNotFoundException.class,
             StepNotFoundException.class,
             StepItemNotFoundException.class,
-            StepDocNotFoundException.class
+            StepDocNotFoundException.class,
+            StageGroupNotFoundException.class
     })
     ResponseEntity<ProblemDetail> handleNotFound(RuntimeException e) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
@@ -65,7 +66,8 @@ class ObJourneyTemplateExceptionHandler {
             TemplateAlreadyPublishedException.class,
             TemplateNotEditableException.class,
             TemplateNotActiveException.class,
-            DuplicateModuleServiceNameException.class
+            DuplicateModuleServiceNameException.class,
+            StepDependencyCycleException.class
     })
     ResponseEntity<ProblemDetail> handleConflict(RuntimeException e) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);

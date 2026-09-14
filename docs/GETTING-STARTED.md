@@ -245,6 +245,60 @@ mvn -q verify              # green
 
 A stack that only runs on one laptop is a stack that will block three people the first time it breaks.
 
+#### The stack is **three** processes, not two
+
+```bash
+make up          # MySQL, Redis, MinIO, Mailpit
+make api         # :8080
+make web         # :5173
+make worker      # no port - and nothing works without it that you will notice later
+```
+
+`make worker` is the one everybody skips, because the app looks fine without
+it: you can sign in, create a client, board a project, complete a step. What
+you cannot do is read a number off any dashboard.
+
+**No dashboard figure is computed when it is asked for.** CLAUDE.md forbids a
+live `COUNT(*)` behind a dashboard, so every counter on OB-02, the implementor
+workload grid and A-050's ticketing widgets read a pre-aggregated table —
+`ob_dashboard_summary`, `ob_implementor_daily_stats`, `client_daily_stats` and
+the rest. **The `api` process writes none of them.** `ObStatsRefreshWorker`
+(B-120) and `StatsRefreshWorker` (A-051) do, and both live in the separate
+`worker` application.
+
+So on a machine that has never run `make worker`, those tables have zero rows
+and the onboarding board renders seven cards that all say *"No summary has been
+computed yet, so there is nothing to show."* That sentence is accurate and it
+reads exactly like a broken screen — it was reported as one on 14 Sep 2026, and
+the tables were empty at the time.
+
+The tell, if you suspect it again:
+
+```bash
+docker exec edutrack-mysql mysql -uedutrack_migrate -pedutrack_migrate -D edutrack -N -B   -e "SELECT COUNT(*), MAX(computed_at) FROM ob_dashboard_summary;"
+```
+
+Zero rows means the worker has never run here. A `computed_at` from days ago
+means it ran once and has been down since — the figures on screen are that old,
+and nothing on the page says so louder than the card's own caveat.
+
+No `make` on your machine (common on Windows)? The target is one command:
+
+```bash
+cd backend && ./mvnw -pl common,domain install -DskipTests -DskipFrontend=true
+cd backend && OB_STATS_REFRESH_INTERVAL=PT30S ./mvnw -pl worker spring-boot:run
+```
+
+The install first for the reason `-pl api` needs it too: `-pl` resolves
+`common` and `domain` from `~/.m2`, not from source, so a branch that added a
+domain class fails to compile against the stale jar.
+
+`make worker` runs the refresh every 30 seconds locally rather than the
+committed five minutes, so creating a project and watching the counter move is
+one short wait. The frontend polls the board every 60 seconds and refetches it
+on every mount and window focus (`obDashboardFreshness.ts`), so you do not have
+to reload the page to see it land.
+
 ### 5.5 Review and sign off the OpenAPI contract · end of week 1
 
 **The one genuinely shared deliverable of Sprint 0.** Stream D authors it; all four review and sign off.

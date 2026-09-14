@@ -23,6 +23,7 @@ const apiError = (status: number, type = 'about:blank', detail?: string) =>
   new ApiError(status, { type, title: `HTTP ${status}`, status, detail } as Problem, undefined as never)
 
 const getTemplate = vi.fn()
+const fetchTemplate = vi.fn()
 const beginMutate = vi.fn()
 const publishMutate = vi.fn()
 const addMutate = vi.fn()
@@ -31,6 +32,7 @@ const removeMutate = vi.fn()
 
 vi.mock('@/api/generated/onboarding-masters/onboarding-masters', () => ({
   useGetObPrereqTemplate: (params?: { version?: number }) => getTemplate(params),
+  getObPrereqTemplate: (params?: { version?: number }) => fetchTemplate(params),
   useBeginObPrereqTemplateRevision: () => ({ mutateAsync: beginMutate }),
   usePublishObPrereqTemplate: () => ({ mutateAsync: publishMutate }),
   useAddObPrereqTemplateTask: () => ({ mutateAsync: addMutate }),
@@ -109,6 +111,7 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks()
   getTemplate.mockReturnValue(result(active()))
+  fetchTemplate.mockResolvedValue({ data: draft() })
   beginMutate.mockResolvedValue({ data: draft() })
   publishMutate.mockResolvedValue({ data: active({ version: 6 }) })
   addMutate.mockResolvedValue({})
@@ -130,10 +133,11 @@ describe('OB-14 · prerequisites master', () => {
     expect(mandatory).toBeEnabled()
 
     expect(screen.getByRole('button', { name: 'Delete Share GST certificate' })).toBeEnabled()
-    expect(screen.getByLabelText('Title *')).toBeEnabled()
-    // Add stays disabled until there is a title — that is the form's own rule,
-    // not the read-only one this screen used to have.
-    expect(screen.getByRole('button', { name: '+ Add to master' })).toBeDisabled()
+
+    // The add form lives in a dialog behind the header button, so at rest the
+    // page is the table and nothing else.
+    expect(screen.queryByLabelText('Title *')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add a task' })).toBeEnabled()
 
     // The resting screen is the mockup's: no version chip, no revision button,
     // and nothing unpublished to announce.
@@ -171,30 +175,59 @@ describe('OB-14 · prerequisites master', () => {
   /**
    * The contract has no "get the draft" read — a draft is whatever `isDraft`
    * is true on. When begin answers 409 because one already exists, the screen
-   * joins it (versions are sequential, so it can only be active + 1) rather
-   * than dead-ending on an error about state it could edit.
+   * joins it (versions are sequential, so it can only be active + 1) and
+   * <b>applies the edit to it</b>. Any OB Admin may change this master, so a
+   * draft another admin left open is shared state, not a lock: turning this
+   * click away with "make it again" made every first edit of a session cost
+   * two clicks and told the admin about machinery they do not own.
+   *
+   * <p>The cloned rows carry new ids, so the assertion that matters is the id
+   * the delete is sent with: 111, the draft's clone, matched to the row on
+   * screen by `sequence` rather than by the published version's id 11.
    */
-  it('joins the draft somebody else had open, and says the edit did not apply', async () => {
+  it('joins the draft somebody else had open and applies the edit to it', async () => {
     beginMutate.mockRejectedValue(apiError(409, 'https://edutrack.example/problems/ob-prereq-draft-exists'))
+    const theirs = draft({ tasks: [{ ...GST, id: 111 }, { ...SPOC, id: 112 }] })
+    fetchTemplate.mockResolvedValue({ data: theirs })
     getTemplate.mockImplementation((params?: { version?: number }) =>
-      params?.version === 6 ? result(draft()) : result(active()),
+      params?.version === 6 ? result(theirs) : result(active()),
     )
     renderPage()
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete Share GST certificate' }))
 
+    await waitFor(() => expect(removeMutate).toHaveBeenCalledWith({ templateTaskId: 111 }))
+    expect(fetchTemplate).toHaveBeenCalledWith({ version: 6 })
     expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
-    // The delete is deliberately not retried against ids the 409 never carried.
-    expect(removeMutate).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent(/make it again/i)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The draft can be published between the 409 and the read that joins it, so
+   * the version this screen went looking for comes back already published.
+   * Opening a revision is free again at that point, and the edit still lands —
+   * the admin never learns either fact.
+   */
+  it('opens a fresh revision when the draft was published under the join', async () => {
+    beginMutate
+      .mockRejectedValueOnce(apiError(409, 'https://edutrack/errors/conflict'))
+      .mockResolvedValue({ data: draft({ version: 7, tasks: [{ ...GST, id: 121 }, SPOC] }) })
+    fetchTemplate.mockResolvedValue({ data: active({ version: 6 }) })
+    renderPage()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Share GST certificate' }))
+
+    await waitFor(() => expect(removeMutate).toHaveBeenCalledWith({ templateTaskId: 121 }))
+    expect(beginMutate).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   /**
    * The same conflict as the server actually sends it.
    * `ObPrereqTemplateExceptionHandler` types all three of its 409s as the
    * generic `errors/conflict`, so a screen matching only on the mock's
-   * `ob-prereq-draft-exists` would adopt the draft in tests and dead-end in
+   * `ob-prereq-draft-exists` would join the draft in tests and dead-end in
    * production. `beginRevision` raises no other 409, so the status is enough.
    */
   it('adopts the existing draft on the conflict type the server really sends', async () => {
@@ -210,23 +243,34 @@ describe('OB-14 · prerequisites master', () => {
 
     expect(await screen.findByText('Unpublished changes')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Publish version 6' })).toBeInTheDocument()
-    expect(removeMutate).not.toHaveBeenCalled()
+    await waitFor(() => expect(removeMutate).toHaveBeenCalled())
   })
 
   it('adds a task to the draft with exactly what was typed', async () => {
     getTemplate.mockReturnValue(result(draft()))
     renderPage()
 
-    const add = screen.getByRole('button', { name: '+ Add to master' })
+    /*
+      `delay: null` rather than the default, which yields to the event loop
+      once per keystroke: the form is a dialog now, and forty-odd characters
+      typed inside a Radix portal took this test past the 5s timeout on a slow
+      machine. Nothing about the assertion changes — every key still dispatches
+      a real event sequence through the field.
+    */
+    const user = userEvent.setup({ delay: null })
+
+    await user.click(screen.getByRole('button', { name: '+ Add a task' }))
+
+    const add = await screen.findByRole('button', { name: '+ Add to master' })
     expect(add).toBeDisabled() // no title yet — the one field the server refuses blank
 
-    await userEvent.type(screen.getByLabelText('Title *'), 'Provide student data extract')
-    await userEvent.type(screen.getByLabelText('Description for the client'), 'CSV per the sample')
+    await user.type(screen.getByLabelText('Title *'), 'Provide student data extract')
+    await user.type(screen.getByLabelText('Description for the client'), 'CSV per the sample')
     const tat = screen.getByLabelText('TAT (working days)')
-    await userEvent.clear(tat)
-    await userEvent.type(tat, '4')
+    await user.clear(tat)
+    await user.type(tat, '4')
 
-    await userEvent.click(add)
+    await user.click(add)
 
     await waitFor(() =>
       expect(addMutate).toHaveBeenCalledWith({
@@ -238,7 +282,16 @@ describe('OB-14 · prerequisites master', () => {
         },
       }),
     )
-  })
+
+    // A write that went through closes the dialog; a refused one would not.
+    await waitFor(() => expect(screen.queryByLabelText('Title *')).not.toBeInTheDocument())
+    /*
+      Headroom over the 5s default, because this is the one test that mounts a
+      dialog, fills three fields and waits for it to close again. With
+      `delay: null` above it runs well inside this; the margin is for a loaded
+      CI runner, not for a hang.
+    */
+  }, 15_000)
 
   /**
    * The one shaped by the contract's own reasoning: OB-14 has a real PATCH

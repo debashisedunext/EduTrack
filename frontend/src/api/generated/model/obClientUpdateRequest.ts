@@ -46,6 +46,7 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObClientUpdateRequestCity } from './obClientUpdateRequestCity';
 import type { ObClientUpdateRequestDescription } from './obClientUpdateRequestDescription';
 import type { ObClientUpdateRequestAddress } from './obClientUpdateRequestAddress';
 import type { ObClientUpdateRequestSalesPersonId } from './obClientUpdateRequestSalesPersonId';
@@ -62,6 +63,20 @@ operations because each has a side effect a field update cannot carry.
 export interface ObClientUpdateRequest {
   /** @maxLength 200 */
   name?: string;
+  /**
+   * Editable, unlike the PAN it replaced, and **not clearable** — a
+`null` or blank is a `400`. A code is a filing label somebody
+chooses and routinely mistypes on the add dialog, not an identity
+fact, so correcting it is ordinary; but a client that has one must
+not be able to lose it by clearing a field. Uniqueness is checked
+against every other client, ignoring this one, so re-saving an
+unchanged form is not a conflict with itself.
+
+   * @maxLength 32
+   */
+  clientCode?: string;
+  /** @maxLength 120 */
+  city?: ObClientUpdateRequestCity;
   description?: ObClientUpdateRequestDescription;
   address?: ObClientUpdateRequestAddress;
   salesPersonId?: ObClientUpdateRequestSalesPersonId;

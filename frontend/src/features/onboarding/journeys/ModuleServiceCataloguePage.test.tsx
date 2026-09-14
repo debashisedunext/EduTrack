@@ -60,8 +60,13 @@ describe('the catalogue lists every service', () => {
     // own — without it the "All products" view cannot say whose service a row
     // is, and with it the table is a column narrower.
     expect(within(row).getByText('EduTrack ERP')).toBeInTheDocument()
-    // Template 1's five steps: 3 + 4 + 8 + 5 + 4.
-    expect(within(row).getByText('⏱ 24d')).toBeInTheDocument()
+    /*
+      The critical path, not Σ of the five step TATs — which would be 24.
+      Template 1 chains Kickoff (3) → Provisioning (4) → Data Migration (8) →
+      Go-live (4), so the chain is 19 days, and User Training's 5 days run
+      alongside it rather than after it.
+    */
+    expect(within(row).getByText('⏱ 19d')).toBeInTheDocument()
     // Version and state left with the cards. A row says what a service *is*,
     // and the designer page says which version you are looking at.
     expect(within(row).queryByText('Active version')).not.toBeInTheDocument()
@@ -73,13 +78,15 @@ describe('the catalogue lists every service', () => {
    * and checklist items nest inside the steps of the *detail* read, which this
    * page already fetches per row for the picker's ETag.
    */
-  it('names the default implementor from the first step, falling back to its role', async () => {
+  it('names the default implementor from the first step, or the project when it pins nobody', async () => {
     await openCatalogue()
 
     const row = serviceRow('ERP Suite onboarding')
-    // Template 1's first step pins no person, only the role that covers it —
-    // so the column says the role rather than inventing a name.
-    expect(await within(row).findByText('Role · PM', undefined, SLOW)).toBeInTheDocument()
+    // Template 1's first step pins nobody, which is the ordinary case — so the
+    // column says who will actually take it rather than "Unassigned".
+    expect(
+      await within(row).findByText('Project implementor', undefined, SLOW),
+    ).toBeInTheDocument()
   })
 
   it('totals the checklist items across a service’s steps', async () => {
