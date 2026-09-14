@@ -43,21 +43,26 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => navigate }
 })
 
-function renderStream() {
+/**
+ * @param path which route the stream is mounted on. Only the onboarding block
+ *   below passes anything — toasts are silenced there and nowhere else, so
+ *   every other test wants a route that is emphatically not it.
+ */
+function renderStream(path = '/tickets') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
 
-  render(
+  const { unmount } = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
         <NotificationStream />
         <Toaster />
       </MemoryRouter>
     </QueryClientProvider>,
   )
-  return { invalidate }
+  return { invalidate, unmount }
 }
 
 /**
@@ -344,6 +349,96 @@ describe('D-046 · what was raised while nobody was watching', () => {
     await waitFor(() =>
       expect(getDb().notifications.find((n) => n.id === 91)?.deliveredAt).toBeTruthy(),
     )
+  })
+})
+
+describe('the onboarding module, which takes no toasts', () => {
+  /** One undelivered row, as `/notifications/pending` would hand it over. */
+  const BACKLOG = {
+    id: 9200,
+    userId: 1,
+    eventKey: 'TICKET_HANDED_OFF',
+    title: 'Queued while you were offline',
+    body: 'while you were away',
+    ticketId: 'CRM-26-00347',
+    isRead: false,
+    deepLink: '/tickets/CRM-26-00347',
+    createdAt: new Date().toISOString(),
+    deliveredAt: null,
+  }
+
+  /**
+   * Wait until this mount has demonstrably finished reacting to a live frame.
+   *
+   * <p>**Every test here asserts an absence, and an absence needs an anchor.**
+   * `waitFor(() => expect(nothingShowing()).toBe(true))` resolves on its first
+   * tick, before the toast it denies has had any chance to appear — which is
+   * how the first version of this block passed with the silencing disabled.
+   * The badge refresh is the anchor: it runs at the end of the same realtime
+   * handler that would have raised the toast, so once it has landed, a toast
+   * that was going to be raised already has been.
+   *
+   * <p>It anchors the *live frame* only. The backlog drain is a round trip this
+   * never waits on, which is why the test below uses a second mount as its
+   * clock instead.
+   */
+  async function settle(invalidate: ReturnType<typeof renderStream>['invalidate']) {
+    push(MENTION)
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['/notifications'] }),
+      ),
+    )
+  }
+
+  it('never asks for the backlog, and so pops none of it', async () => {
+    let pendingRequests = 0
+    server.use(
+      http.get('*/notifications/pending', () => {
+        pendingRequests += 1
+        return HttpResponse.json({ data: [BACKLOG], hasMore: false })
+      }),
+    )
+
+    // Mounted first, so a drain of its own would be dispatched before the
+    // control's.
+    const silenced = renderStream('/onboarding/projects/7')
+
+    // The control is the clock, and that is the whole trick. Waiting on a
+    // duration, or on a tick count, is a race dressed up as a test. Waiting
+    // until a *later* mount has asked and popped makes "still one request" a
+    // fact: a request dispatched before it has certainly been served by then.
+    const control = renderStream('/tickets')
+    expect(await screen.findAllByText(BACKLOG.title)).not.toHaveLength(0)
+
+    expect(pendingRequests).toBe(1)
+
+    control.unmount()
+    silenced.unmount()
+  })
+
+  it('swallows a live frame too, and leaves it undelivered', async () => {
+    const db = getDb()
+    db.notifications.push({ ...BACKLOG, id: 91, title: MENTION.title })
+    const { invalidate } = renderStream('/onboarding/clients')
+
+    await settle(invalidate)
+
+    expect(screen.queryByText(MENTION.title)).toBeNull()
+    // The whole point of silencing rather than draining-and-discarding: an
+    // acknowledged notification is retired for good, on every screen. Left
+    // pending, it still reaches the reader on a ticketing route.
+    expect(getDb().notifications.find((n) => n.id === 91)?.deliveredAt).toBeNull()
+  })
+
+  it('still moves the bell badge — silenced is not unsubscribed', async () => {
+    const { invalidate } = renderStream('/onboarding/dashboard')
+
+    // `settle` is the assertion here rather than the preamble: it waits on
+    // exactly the badge refresh this test is about. Silencing the toast must
+    // not cost the bell its count, or the notification becomes unreachable
+    // rather than merely quiet.
+    await settle(invalidate)
   })
 })
 

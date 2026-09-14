@@ -130,20 +130,27 @@ class ObApplicationsIT {
         // No template at all — the other half of the two refusals an add makes.
         templatelessProduct = insertProduct("ITAPP_T_" + run, "IT App Templateless " + run, true);
 
-        ObClientDtos.ObClientDetail client = clientWrites.create(admin, ayush,
+        /*
+          The company, then the purchase that gives this file something to edit.
+
+          Two calls where the wizard did both at once, and the purchase now goes
+          through the operation that owns it — which is also what creates the
+          project the journey hangs off. That makes the fixture a stricter test
+          of the setup than it was: if `add` ever stopped provisioning a project,
+          every assertion below would fail rather than only the ones that look
+          at journeys.
+
+          `acknowledgeSimilarNames`, for the reason ObContactsIT gives: "IT App
+          Client 1", "2", "3" … are exactly what the fuzzy name guard exists to
+          stop, and that is its own test's subject rather than this one's.
+        */
+        ObClientDtos.ObClientDetail created = clientWrites.create(admin, ayush,
                 new ObClientDtos.ObClientCreateRequest(
-                        "IT App Client " + run, null, BOARDED, null, null, null, null,
-                        List.of(new ObClientDtos.ObContactWriteRequest(
-                                "Founding SPOC", "Principal", "appfounder" + run + "@example.com",
-                                "+911111111111", false, null, true)),
-                        List.of(new ObClientDtos.ObApplicationWriteRequest(
-                                boughtProduct, "ANNUAL", 10, BOARDED, BOARDED.plusYears(1))),
-                        List.of(),
-                        // acknowledgeSimilarNames, for the reason ObContactsIT
-                        // gives: "IT App Client 1", "2", "3" … are exactly what
-                        // B-102's fuzzy name guard exists to stop, and that is
-                        // its own test's subject rather than this one's.
-                        false, true));
+                        "IT App Client " + run, "ITAPP-" + run, null, null, true)).detail();
+
+        ObClientDtos.ObClientDetail client = applications.add(admin, created.id(),
+                new ObClientDtos.ObApplicationWriteRequest(
+                        boughtProduct, "ANNUAL", 10, BOARDED, BOARDED.plusYears(1)));
 
         clientId = client.id();
         boughtApplicationId = client.applications().getFirst().id();

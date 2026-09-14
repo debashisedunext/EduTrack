@@ -77,6 +77,7 @@ import type {
   ListObImplementorWorkloadParams,
   ListObPrereqCommentsParams,
   ListObPrereqHistoryParams,
+  ListObProjectsParams,
   ListObSignoffsParams,
   NotFoundResponse,
   ObApplicationWriteRequest,
@@ -85,6 +86,7 @@ import type {
   ObClientAccountResponse,
   ObClientAccountStatusRequest,
   ObClientCreateRequest,
+  ObClientCreateResponse,
   ObClientDetailResponse,
   ObClientEscalationListResponse,
   ObClientEscalationResponse,
@@ -115,6 +117,10 @@ import type {
   ObPrereqSkipRequest,
   ObPrereqSubmitRequest,
   ObPrereqVerifyRequest,
+  ObProjectCreateRequest,
+  ObProjectListResponse,
+  ObProjectResponse,
+  ObProjectUpdateRequest,
   ObReportCatalogueResponse,
   ObReportResponse,
   ObRequirementUpdateRequest,
@@ -136,7 +142,8 @@ import type {
   TooManyRequestsResponse,
   UnauthorizedResponse,
   UploadObClientAttachmentBody,
-  ValidationFailedResponse
+  ValidationFailedResponse,
+  ValidationProblem
 } from '.././model';
 
 import { http } from '../../http';
@@ -145,6 +152,484 @@ import { http } from '../../http';
 
 
 /**
+ * One row per engagement, with the figures the grid is read for: the
+current stage, stages completed of total, days delayed and the
+tentative completion date.
+
+**Scoped by the project's client, never by the project.** Plan §3's
+rule is about clients — Sales sees the ones they created, a step owner
+sees the ones whose journeys hold a step of theirs — and a project is
+visible exactly when its client is. A caller with no standing in the
+module gets an empty page rather than a `403`.
+
+**`delayedByDays` is null, not zero, when the project is not late**,
+and null for every project whose status is not `RUNNING`. A completed
+project that overran by a fortnight must not keep counting, and a
+dropped one has a clock somebody stopped on purpose. Zero would be a
+claim that the project is on time today; null says the question does
+not apply.
+
+Ordered newest-created first. The keyset cursor is the project id
+alone — `startDate` is what the grid *shows*, and several projects
+starting on one day would make a cursor over it skip rows at the page
+boundary.
+
+ * @summary Running projects, with their analytics
+ */
+export const listObProjects = (
+    params?: ListObProjectsParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObProjectListResponse>(
+      {url: `/onboarding/projects`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObProjectsQueryKey = (params?: ListObProjectsParams,) => {
+    return [
+    `/onboarding/projects`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObProjectsQueryOptions = <TData = Awaited<ReturnType<typeof listObProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(params?: ListObProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObProjectsQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObProjects>>> = ({ signal }) => listObProjects(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObProjectsQueryResult = NonNullable<Awaited<ReturnType<typeof listObProjects>>>
+export type ListObProjectsQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useListObProjects<TData = Awaited<ReturnType<typeof listObProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params: undefined |  ListObProjectsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObProjects>>,
+          TError,
+          Awaited<ReturnType<typeof listObProjects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObProjects<TData = Awaited<ReturnType<typeof listObProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObProjects>>,
+          TError,
+          Awaited<ReturnType<typeof listObProjects>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObProjects<TData = Awaited<ReturnType<typeof listObProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Running projects, with their analytics
+ */
+
+export function useListObProjects<TData = Awaited<ReturnType<typeof listObProjects>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ params?: ListObProjectsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObProjects>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObProjectsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The New Project form, committing four writes in one transaction and in
+this order: the **purchase row** (because journey instantiation refuses
+a product the client has not bought), the **project**, the client's
+**prerequisite checklist** if they have none yet, and one **journey per
+checked module service**.
+
+One transaction, so the states nobody can act on — a project with no
+journeys, journeys with no purchase, a locked gate with no checklist
+behind it — are unreachable rather than merely unlikely.
+
+**The checklist stays per client.** One per client, and clearing it
+opens every project's journeys, so a client's second project finds one
+already there and adds nothing.
+
+`422 ob-client-no-prereq-master` when no prerequisite master is
+published *and* this client has no checklist yet. Journeys instantiate
+`LOCKED` and the only thing that opens the gate is the checklist
+clearing (plan §5.3: there is no "open gate anyway" override), so a
+project created in that state would hold journeys nothing can ever
+start.
+
+ * @summary Create a project
+ */
+export const createObProject = (
+    obProjectCreateRequest: ObProjectCreateRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObProjectResponse>(
+      {url: `/onboarding/projects`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obProjectCreateRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getCreateObProjectMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObProject>>, TError,{data: ObProjectCreateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createObProject>>, TError,{data: ObProjectCreateRequest}, TContext> => {
+
+const mutationKey = ['createObProject'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createObProject>>, {data: ObProjectCreateRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createObProject(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateObProjectMutationResult = NonNullable<Awaited<ReturnType<typeof createObProject>>>
+    export type CreateObProjectMutationBody = ObProjectCreateRequest
+    export type CreateObProjectMutationError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem
+
+    /**
+ * @summary Create a project
+ */
+export const useCreateObProject = <TError = ValidationFailedResponse | UnauthorizedResponse | ObModuleGatedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObProject>>, TError,{data: ObProjectCreateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createObProject>>,
+        TError,
+        {data: ObProjectCreateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getCreateObProjectMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The header the ribbon page prints above its journeys: the same figures
+as the grid row, plus the stage roll-up as rows and the module services
+this project was boarded through.
+
+The journeys themselves are not here — they are `getObJourney`'s, one
+ribbon at a time, exactly as the client product page already reads
+them.
+
+The only source of the `ETag` the `PATCH` requires. It covers the stage
+roll-up too, so a step completed by an owner while somebody had this
+header open costs the editor a reload rather than a lost update.
+
+ * @summary Project header
+ */
+export const getObProject = (
+    obProjectId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObProjectResponse>(
+      {url: `/onboarding/projects/${obProjectId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObProjectQueryKey = (obProjectId?: number,) => {
+    return [
+    `/onboarding/projects/${obProjectId}`
+    ] as const;
+    }
+
+    
+export const getGetObProjectQueryOptions = <TData = Awaited<ReturnType<typeof getObProject>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(obProjectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObProjectQueryKey(obProjectId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObProject>>> = ({ signal }) => getObProject(obProjectId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(obProjectId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObProjectQueryResult = NonNullable<Awaited<ReturnType<typeof getObProject>>>
+export type GetObProjectQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObProject<TData = Awaited<ReturnType<typeof getObProject>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obProjectId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObProject>>,
+          TError,
+          Awaited<ReturnType<typeof getObProject>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObProject<TData = Awaited<ReturnType<typeof getObProject>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obProjectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObProject>>,
+          TError,
+          Awaited<ReturnType<typeof getObProject>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObProject<TData = Awaited<ReturnType<typeof getObProject>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obProjectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Project header
+ */
+
+export function useGetObProject<TData = Awaited<ReturnType<typeof getObProject>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+ obProjectId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProject>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObProjectQueryOptions(obProjectId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Name, start date, the two people, and the status.
+
+**`clientId` and `productId` are absent deliberately.** The pair is the
+project's identity — `uq_ob_projects_client_product` is over it and
+every journey pins a template belonging to that product — so moving a
+project to another one is not an edit, it is a different project.
+
+`COMPLETED` is refused with `422`: it is stamped when the project's
+last journey completes, on the same reasoning that makes a client's
+`LIVE` unsettable. `ON_HOLD` and `DROPPED` each require a
+`statusReason`.
+
+**There is no `DELETE`.** A project owns journeys, and those journeys
+own hash-chained `ob_step_history` rows; removing one is not a tidy-up.
+A project that should not have been created is `DROPPED` with a reason,
+which keeps the record, stops the delay clock and leaves the ribbon
+readable.
+
+ * @summary Edit the project header
+ */
+export const updateObProject = (
+    obProjectId: number,
+    obProjectUpdateRequest: ObProjectUpdateRequest,
+ ) => {
+      
+      
+      return http<ObProjectResponse>(
+      {url: `/onboarding/projects/${obProjectId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obProjectUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObProjectMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObProject>>, TError,{obProjectId: number;data: ObProjectUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObProject>>, TError,{obProjectId: number;data: ObProjectUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObProject'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObProject>>, {obProjectId: number;data: ObProjectUpdateRequest}> = (props) => {
+          const {obProjectId,data} = props ?? {};
+
+          return  updateObProject(obProjectId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObProjectMutationResult = NonNullable<Awaited<ReturnType<typeof updateObProject>>>
+    export type UpdateObProjectMutationBody = ObProjectUpdateRequest
+    export type UpdateObProjectMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse
+
+    /**
+ * @summary Edit the project header
+ */
+export const useUpdateObProject = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObProject>>, TError,{obProjectId: number;data: ObProjectUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObProject>>,
+        TError,
+        {obProjectId: number;data: ObProjectUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObProjectMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **This is for a project created against the wrong client, or on the
+wrong product.** That is noise on a grid people read every morning, and
+`DROPPED` would keep it there forever wearing a reason that says "this
+was a typo".
+
+Everything else is refused. A project owns journeys, journeys own steps,
+and **nine tables hold a foreign key to those steps with no cascade** —
+`ob_step_history`, `ob_step_clock_events`, `ob_step_communications`,
+`ob_signoffs`, `ob_escalations`, `ob_client_escalations`,
+`ob_attachments`, `ob_notifications` and `ob_notification_outbox`. Two
+of them are hash-chained and append-only. All nine are asked before
+anything is removed, and the refusal names what is in the way.
+
+The question is deliberately "does anything point at this?" rather than
+"has it started?" — the first can be answered exactly, and a project
+nothing points at is a project nothing happened to.
+
+`ob_journey_step_items` is not among them: it is the task-list template
+copied at instantiation, it cascades, and a checklist nobody has ticked
+records nothing.
+
+**The client's purchase row is left alone.** It is a commercial fact
+about the client rather than part of the project, and a client who
+bought a product still bought it after somebody deleted a project
+mis-created against it.
+
+**No `If-Match`.** A precondition protects a lost update; a delete has
+no such failure, and the guard re-asks inside the transaction — so a
+sign-off recorded a second ago refuses the delete whatever tag the
+caller holds.
+
+ * @summary Delete a project that never ran
+ */
+export const deleteObProject = (
+    obProjectId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/projects/${obProjectId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteObProjectMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObProject>>, TError,{obProjectId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteObProject>>, TError,{obProjectId: number}, TContext> => {
+
+const mutationKey = ['deleteObProject'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteObProject>>, {obProjectId: number}> = (props) => {
+          const {obProjectId} = props ?? {};
+
+          return  deleteObProject(obProjectId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteObProjectMutationResult = NonNullable<Awaited<ReturnType<typeof deleteObProject>>>
+    
+    export type DeleteObProjectMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Delete a project that never ran
+ */
+export const useDeleteObProject = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObProject>>, TError,{obProjectId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteObProject>>,
+        TError,
+        {obProjectId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteObProjectMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * Ordered by `onboardingDate` descending, then id — a keyset over the
 date alone skips rows wherever two clients were boarded the same day,
 and after a sales push they are.
@@ -254,36 +739,37 @@ export function useListObClients<TData = Awaited<ReturnType<typeof listObClients
 
 
 /**
- * The OB-04 wizard, committing all four steps in **one** request. OB
-Admin, Onboarding Manager and Sales.
+ * The Clients master's add dialog. OB Admin, Onboarding Manager and
+Sales.
 
 ## What one call creates
 
-This is the module's widest side effect and it is deliberately atomic —
-a client boarded with no journeys, or journeys with no prerequisites,
-is a half-state somebody has to notice and repair by hand:
+A company, and nothing else — unless a portal login is asked for.
 
-1. the `ob_clients` row, its SPOCs and its requirements;
-2. **one journey per purchased product**, each instantiated from that
-   product's active template *at its current version*, and each created
-   `gateStatus: LOCKED` — steps visible, owners resolved, TATs shown,
-   **clocks dead and the scanner ignoring them**. Everyone sees the
-   plan from day one and no TAT can breach before the client has been
-   asked for anything (plan §5.2);
-3. the prerequisites instance, snapshotted from the active
-   `ob_prereq_template_tasks` version;
-4. a portal login, **only if `createPortalLogin` is true.** Never
-   silently — plan §2.3. The one-time password goes to the primary
-   SPOC and the account is `mustChangePassword`.
+This once committed a four-step wizard: PAN, SPOC contacts,
+commercials, requirements, a journey per purchased product and the
+prerequisites snapshot. Every one of those describes an *engagement*
+rather than a company, and engagements are `ob_projects` now, created
+from `createObProject`.
 
-Nothing starts running here. Journeys open when the prerequisite gate
-clears, which is its own transition and its own notification.
+1. the `ob_clients` row;
+2. **only if `createPortalLogin` is true**, the primary SPOC from
+   `contactName` and `contactEmail`, and then the portal login itself.
+
+Both, or neither. The login is the module's widest remaining side
+effect and it is deliberately atomic — B-102 refused this flag outright
+rather than ignore it, on the grounds that "a boarder ticks the box,
+sees a 201, tells the client their credentials are coming, and nothing
+was ever sent". A company left behind by a login that failed is that
+same failure, so it rolls back too.
+
+The credentials come back in `meta.portalLogin`, which is the only
+response that ever carries them.
 
 ## The duplicate guard
 
-`pan` is unique. A second client with the same PAN is `409`
-`ob-client-pan-duplicate` and cannot be forced — two rows for one legal
-entity is the state the guard exists to prevent.
+`clientCode` is unique. A second client reusing one is `409`
+`ob-client-code-duplicate` and cannot be forced.
 
 A *similar name* is a different matter and is **a warning, not a
 refusal**: "Acme Pvt Ltd" and "Acme Private Limited" are frequently two
@@ -294,6 +780,10 @@ forceable conflict rather than a silent create keeps the decision with
 the person who can tell the two apart, and keeps it out of a query
 parameter nobody reads twice.
 
+The guard survived the wizard deliberately. A four-field add dialog is
+precisely the screen on which somebody boards the same trust twice, and
+`clientCode` catches only the duplicates that also reuse the code.
+
  * @summary Board a client (OB-04)
  */
 export const createObClient = (
@@ -302,7 +792,7 @@ export const createObClient = (
 ) => {
       
       
-      return http<ObClientDetailResponse>(
+      return http<ObClientCreateResponse>(
       {url: `/onboarding/clients`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: obClientCreateRequest, signal
@@ -312,7 +802,7 @@ export const createObClient = (
   
 
 
-export const getCreateObClientMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
+export const getCreateObClientMutationOptions = <TError = ValidationProblem | ObModuleGatedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObClient>>, TError,{data: ObClientCreateRequest}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof createObClient>>, TError,{data: ObClientCreateRequest}, TContext> => {
 
@@ -339,12 +829,12 @@ const {mutation: mutationOptions} = options ?
 
     export type CreateObClientMutationResult = NonNullable<Awaited<ReturnType<typeof createObClient>>>
     export type CreateObClientMutationBody = ObClientCreateRequest
-    export type CreateObClientMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem
+    export type CreateObClientMutationError = ValidationProblem | ObModuleGatedResponse | Problem
 
     /**
  * @summary Board a client (OB-04)
  */
-export const useCreateObClient = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
+export const useCreateObClient = <TError = ValidationProblem | ObModuleGatedResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObClient>>, TError,{data: ObClientCreateRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createObClient>>,
@@ -546,6 +1036,92 @@ export const useUpdateObClient = <TError = ValidationFailedResponse | Problem | 
       > => {
 
       const mutationOptions = getUpdateObClientMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * **This exists for one case: a row typed in wrong, minutes ago.**
+
+Sixteen tables carry `ob_client_id` and several cascade — two of them,
+`ob_step_history` and `ob_prereq_history`, are hash-chained and
+append-only. A delete that reached those would destroy an audit trail
+the module is built to keep, and would do it silently, because a
+cascade reports nothing. So four questions are asked first: does the
+client have **projects**, a **prerequisite checklist**, **uploaded
+documents** or a **client portal login**. Any one of them is a `409`
+naming what is in the way.
+
+Contacts, requirements and purchase rows are deliberately *not*
+checked. All three cascade, all three are the client's own descriptive
+data with nothing pointing at them, and all three are exactly what a
+row typed in wrong five minutes ago might already have — blocking on
+them would make this unreachable in the only case it is for.
+
+For everything else the answer is `status: DROPPED` with a reason,
+which keeps the record and hides the client from nothing.
+
+**No `If-Match`.** A precondition protects a lost update — two people
+editing one record — and a delete has no such failure: the guard
+re-asks inside the transaction, so a project created a second ago
+refuses the delete whatever tag the caller holds.
+
+ * @summary Delete a client nothing depends on
+ */
+export const deleteObClient = (
+    obClientId: number,
+ ) => {
+      
+      
+      return http<void>(
+      {url: `/onboarding/clients/${obClientId}`, method: 'DELETE'
+    },
+      );
+    }
+  
+
+
+export const getDeleteObClientMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObClient>>, TError,{obClientId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteObClient>>, TError,{obClientId: number}, TContext> => {
+
+const mutationKey = ['deleteObClient'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteObClient>>, {obClientId: number}> = (props) => {
+          const {obClientId} = props ?? {};
+
+          return  deleteObClient(obClientId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteObClientMutationResult = NonNullable<Awaited<ReturnType<typeof deleteObClient>>>
+    
+    export type DeleteObClientMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Delete a client nothing depends on
+ */
+export const useDeleteObClient = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteObClient>>, TError,{obClientId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteObClient>>,
+        TError,
+        {obClientId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getDeleteObClientMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

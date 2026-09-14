@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStage;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
@@ -42,23 +43,72 @@ final class ObJourneyTemplateDtos {
             List<@NotNull Long> dependsOnTemplateIds) {
     }
 
-    record AddStepRequest(
+    /**
+     * Add a task to a stage group — OB-07's third level.
+     *
+     * <p><b>The name is back, and its return is the point.</b> For six hours a
+     * step <em>was</em> a stage and this record had no {@code name}: the
+     * vocabulary was closed and the name was copied from the master. A task is
+     * not a stage — it is the work somebody writes inside one — so it is named
+     * by the person writing it. What stays closed is the level above: there is
+     * still no way to create a stage, which is decided on OB-15 and nowhere
+     * else.
+     *
+     * <p>The stage group is in the path rather than in this body, because the
+     * route is {@code POST /onboarding/journey-template-stages/{stageId}/tasks}
+     * — a task is created inside a stage, never floating with a stage id
+     * attached.
+     */
+    record AddTaskRequest(
             @NotBlank @Size(max = 200) String name,
             String description,
             @Min(1) int tatDays,
             Long ownerUserId,
-            @Size(max = 40) String ownerRole,
-            Long backupOwnerUserId,
             boolean requiresSignoff,
             Long dependsOnStepId) {
     }
 
     /**
-     * @param stepIds every step id currently on the template, in the order
-     *                the caller wants them to hold — not a delta. See
-     *                {@code ObJourneyTemplateService#reorderSteps}.
+     * Edit a step of a draft - see {@code ObJourneyTemplateService#updateStep}
+     * for why this route exists and what it refuses.
+     *
+     * <p>Every field is optional and {@code null} means "say nothing about
+     * this", which is what makes a PATCH a PATCH. The exceptions are the two
+     * id-valued fields: null there is indistinguishable from omitting them, so
+     * {@code clearDependsOn} and {@code clearOwnerUserId} are how a caller
+     * asks for a step that waits for nothing or has nobody named on it.
+     *
+     * <p>A step with nobody named on it is not an unassigned step: it falls
+     * back to the project's own implementor when a journey is created from
+     * this service. That fallback is why the owning role and the backup owner
+     * are no longer here — one field answers "who does this", and leave
+     * coverage is a fact about a live journey rather than about a plan.
+     *
+     * <p><b>The name can be sent; the stage cannot.</b> A task is named by
+     * whoever writes it, so correcting a typo is an ordinary edit. Moving a
+     * task to another stage is not this route — see
+     * {@code ObJourneyTemplateService#updateStep} for why it would need to be
+     * its own.
      */
-    record ReorderStepsRequest(@NotEmpty List<@NotNull Long> stepIds) {
+    record UpdateStepRequest(
+            @Size(max = 200) String name,
+            String description,
+            @Min(1) Integer tatDays,
+            Long ownerUserId,
+            Boolean requiresSignoff,
+            Long dependsOnStepId,
+            boolean clearDependsOn,
+            boolean clearOwnerUserId) {
+    }
+
+    /**
+     * @param taskIds every task id currently in the stage group named in the
+     *                path, in the order the caller wants them to hold — not a
+     *                delta, and not the whole template's tasks. Reordering
+     *                inside Configuration cannot disturb Data Migration; see
+     *                {@code ObJourneyTemplateService#reorderTasks}.
+     */
+    record ReorderTasksRequest(@NotEmpty List<@NotNull Long> taskIds) {
     }
 
     /**
@@ -176,10 +226,18 @@ final class ObJourneyTemplateDtos {
      * buttons sit on is the head of a chain, and a service whose v1 carries
      * three clients is in use however empty its v3 is.
      */
+    /*
+      `stages` was added for two screens at once: OB-07's "Category" column and
+      the New Project form's service picker, both of which draw every service
+      of a product and print the stages each one covers. It is the same
+      StageDetail the full read nests, not a thinner twin — a summary-only
+      stage shape would be a second thing to keep in step for the sake of
+      omitting one nullable id, and the picker wants that id to group by.
+    */
     record TemplateSummary(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
             List<Long> dependsOnTemplateIds, Instant publishedAt, int stepCount, int totalTatDays,
-            long serviceJourneyCount) {
+            long serviceJourneyCount, List<StageDetail> stages) {
     }
 
     /*
@@ -213,14 +271,34 @@ final class ObJourneyTemplateDtos {
         }
     }
 
+    /**
+     * One stage group — the second of OB-07's four levels.
+     *
+     * @param implementationStageId which OB-15 stage this group is. Null on
+     *        the "Ungrouped" group, which holds tasks written before
+     *        {@code V20260911_1600} and belonging to no stage.
+     */
+    record StageDetail(Long id, Long implementationStageId, String name, int sequence) {
+        static StageDetail of(ObJourneyTemplateStage g) {
+            return new StageDetail(g.getId(), g.getImplementationStageId(), g.getName(), g.getSequence());
+        }
+    }
+
+    /**
+     * One task — the third level, and the row that carries the work.
+     *
+     * @param templateStageId the stage group this task sits in. Never null;
+     *        the designer groups by it.
+     */
     record StepDetail(
-            Long id, int sequence, String name, String description, int tatDays,
-            Long ownerUserId, String ownerRole, Long backupOwnerUserId, boolean requiresSignoff,
+            Long id, int sequence, String name, Long templateStageId, String description, int tatDays,
+            Long ownerUserId, boolean requiresSignoff,
             Long dependsOnStepId, List<StepItem> items, List<StepDoc> docs) {
 
         static StepDetail of(ObJourneyTemplateStep s, List<StepItem> items, List<StepDoc> docs) {
-            return new StepDetail(s.getId(), s.getSequence(), s.getName(), s.getDescription(), s.getTatDays(),
-                    s.getOwnerUserId(), s.getOwnerRole(), s.getBackupOwnerUserId(), s.isRequiresSignoff(),
+            return new StepDetail(s.getId(), s.getSequence(), s.getName(), s.getTemplateStageId(),
+                    s.getDescription(), s.getTatDays(),
+                    s.getOwnerUserId(), s.isRequiresSignoff(),
                     s.getDependsOnStepId(), items, docs);
         }
     }
@@ -228,7 +306,17 @@ final class ObJourneyTemplateDtos {
     record StepResponse(StepDetail data) {
     }
 
-    record StepItemResponse(StepItem data) {
+    /**
+     * B-131 · {@code backfilledJourneyCount} is how many running journeys the
+     * new item landed on as well as the catalogue — {@code 0} on a draft, and
+     * on a live service nobody is currently onboarding with.
+     *
+     * <p>Returned rather than left for the caller to work out, because an
+     * admin adding an item to a service in use has no other way to tell
+     * whether the edit reached the clients it was added for. The designer
+     * screen says it back to them.
+     */
+    record StepItemResponse(StepItem data, int backfilledJourneyCount) {
     }
 
     record StepDocResponse(StepDoc data) {
@@ -246,7 +334,7 @@ final class ObJourneyTemplateDtos {
     record TemplateDetail(
             Long id, Long productId, String name, int version, boolean isActive, int sequence,
             List<Long> dependsOnTemplateIds, Long publishedBy, Instant publishedAt,
-            List<StepDetail> steps, List<List<Long>> parallelGroups) {
+            List<StageDetail> stages, List<StepDetail> steps, List<List<Long>> parallelGroups) {
     }
 
     record TemplateDetailResponse(TemplateDetail data) {

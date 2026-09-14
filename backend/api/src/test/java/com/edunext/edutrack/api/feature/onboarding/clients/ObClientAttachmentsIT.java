@@ -135,8 +135,8 @@ class ObClientAttachmentsIT {
         long product = insertProduct("ITATT_A_" + run, "IT Att Product A " + run);
         insertTemplate(product, "IT Att Onboarding A " + run);
 
-        clientId = boardClient("IT Att Client " + run, product, run, "one");
-        otherClientId = boardClient("Another IT Att Client " + run, product, run, "two");
+        clientId = boardClient("IT Att Client " + run, run, "one");
+        otherClientId = boardClient("Another IT Att Client " + run, run, "two");
 
         when(storage.signedDownloadUrl(any(), anyString(), anyString(), any()))
                 .thenReturn(URI.create("https://minio.local/signed"));
@@ -353,26 +353,28 @@ class ObClientAttachmentsIT {
         return jdbc.queryForMap("SELECT * FROM ob_attachments WHERE id = ?", attachmentId);
     }
 
-    private long boardClient(String name, long product, int run, String suffix) {
-        // Created BY the Sales user, deliberately: ObClientScope reduces Sales
-        // to the clients they created, so a fixture boarded by anybody else
-        // would make every Sales assertion below a 404 about visibility rather
-        // than the thing it is trying to say.
+    /**
+     * A company, and nothing under it.
+     *
+     * <p>The fixture used to board a SPOC and a purchase too, because the wizard
+     * took all three in one call. Attachments hang off the <em>client</em> —
+     * `ob_attachments.ob_client_id` — so none of it was ever load-bearing here,
+     * and the product parameter went with it.
+     *
+     * <p>Created BY the Sales user, deliberately: ObClientScope reduces Sales to
+     * the clients they created, so a fixture boarded by anybody else would make
+     * every Sales assertion below a 404 about visibility rather than the thing
+     * it is trying to say.
+     *
+     * <p>`acknowledgeSimilarNames`, on ObApplicationsIT's reason: these fixture
+     * names are exactly what the fuzzy name guard exists to stop, and that is
+     * its own subject.
+     */
+    private long boardClient(String name, int run, String suffix) {
         return clientWrites.create(admin, colleague,
                 new ObClientDtos.ObClientCreateRequest(
-                        name, null, BOARDED, null, null, null, null,
-                        List.of(new ObClientDtos.ObContactWriteRequest(
-                                "Founding SPOC", "Principal",
-                                "attfounder" + suffix + run + "@example.com",
-                                "+911111111111", false, null, true)),
-                        List.of(new ObClientDtos.ObApplicationWriteRequest(
-                                product, "ANNUAL", 10, BOARDED, BOARDED.plusYears(1))),
-                        List.of(),
-                        // acknowledgeSimilarNames, on ObApplicationsIT's reason:
-                        // these fixture names are exactly what B-102's fuzzy name
-                        // guard exists to stop, and that is its own subject.
-                        false, true))
-                .id();
+                        name, "ITATT-" + suffix + run, null, null, true))
+                .detail().id();
     }
 
     private long insertUser(String username) {

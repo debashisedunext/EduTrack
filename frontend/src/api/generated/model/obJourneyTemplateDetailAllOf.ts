@@ -46,9 +46,22 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObJourneyTemplateStage } from './obJourneyTemplateStage';
 import type { ObJourneyTemplateStep } from './obJourneyTemplateStep';
 
 export type ObJourneyTemplateDetailAllOf = {
+  /** Every stage group, in display order, **including the empty
+ones** — which is the usual state of a service somebody has
+just created. A read that dropped them would leave the
+designer nowhere to hang "+ Add a task".
+ */
+  stages: ObJourneyTemplateStage[];
+  /** Every task, flat and in `sequence` order. Flat rather than
+nested inside `stages` so that `parallelGroups` below stays
+a list of ids into one array, and so the designer's existing
+tree and TAT arithmetic keep reading one list. Group by
+`templateStageId` to draw the four levels.
+ */
   steps: ObJourneyTemplateStep[];
   /** Computed, not stored — a topological layering of
 `dependsOnStepId`. Layer 0 (`parallelGroups[0]`) is every

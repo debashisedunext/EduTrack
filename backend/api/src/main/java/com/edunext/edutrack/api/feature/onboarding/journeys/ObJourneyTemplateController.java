@@ -120,6 +120,13 @@ class ObJourneyTemplateController {
         */
         Map<Long, List<Long>> dependsOn = service.dependsOnByTemplate(
                 templates.stream().map(ObJourneyTemplate::getId).toList());
+        /*
+          And the stage groups, on the same reasoning: the catalogue's Category
+          column and the New Project form's service picker both print them, and
+          both draw every service of a product at once.
+        */
+        Map<Long, List<com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStage>> stages =
+                service.stagesByTemplate(templates.stream().map(ObJourneyTemplate::getId).toList());
 
         List<ObJourneyTemplateDtos.TemplateSummary> rows = templates.stream()
                 .map(t -> new ObJourneyTemplateDtos.TemplateSummary(
@@ -127,7 +134,9 @@ class ObJourneyTemplateController {
                         t.getSequence(), dependsOn.getOrDefault(t.getId(), List.of()),
                         t.getPublishedAt(),
                         service.stepCount(t.getId()), service.totalTatDays(t.getId()),
-                        journeyCounts.getOrDefault(t.getId(), 0L)))
+                        journeyCounts.getOrDefault(t.getId(), 0L),
+                        stages.getOrDefault(t.getId(), List.of()).stream()
+                                .map(ObJourneyTemplateDtos.StageDetail::of).toList()))
                 .toList();
         return new ObJourneyTemplateDtos.ObJourneyTemplateListResponse(rows);
     }
@@ -165,10 +174,13 @@ class ObJourneyTemplateController {
                 .map(group -> group.stream().map(ObJourneyTemplateStep::getId).toList())
                 .toList();
 
+        List<ObJourneyTemplateDtos.StageDetail> stageDetails = service.getStages(templateId).stream()
+                .map(ObJourneyTemplateDtos.StageDetail::of).toList();
+
         return new ObJourneyTemplateDtos.TemplateDetail(
                 template.getId(), template.getProductId(), template.getName(), template.getVersion(),
                 template.isActive(), template.getSequence(), service.dependsOnTemplateIds(templateId),
-                template.getPublishedBy(), template.getPublishedAt(), stepDetails, parallelGroups);
+                template.getPublishedBy(), template.getPublishedAt(), stageDetails, stepDetails, parallelGroups);
     }
 
     @PostMapping(value = "/journey-templates",
@@ -219,23 +231,26 @@ class ObJourneyTemplateController {
                 published, service.dependsOnTemplateIds(published.getId()));
     }
 
-    @PostMapping(value = "/journey-templates/{templateId}/steps",
+    @PostMapping(value = "/journey-template-stages/{stageId}/tasks",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(operationId = "addObJourneyTemplateStep",
-            summary = "Add a service to a draft template (OB-07)",
+    @Operation(operationId = "addObJourneyTemplateTask",
+            summary = "Add a task to a stage of a draft template (OB-07)",
             description = """
-                    `dependsOnStepId` null means the step runs in parallel from journey \
-                    start. The database only enforces that a dependency stays inside the \
-                    same template; that it names an *earlier* step is C-119's job. `409` \
-                    if the template has ever been published — only a draft accepts new \
-                    steps.""")
-    ObJourneyTemplateDtos.StepResponse addStep(
-            @PathVariable long templateId,
-            @Valid @RequestBody ObJourneyTemplateDtos.AddStepRequest request) {
-        ObJourneyTemplateStep step = service.addStep(templateId, request.name(), request.description(),
-                request.tatDays(), request.ownerUserId(), request.ownerRole(), request.backupOwnerUserId(),
-                request.requiresSignoff(), request.dependsOnStepId());
-        return new ObJourneyTemplateDtos.StepResponse(ObJourneyTemplateDtos.StepDetail.of(step, List.of(), List.of()));
+                    A task is the third of OB-07's four levels — Module Service, stage, \
+                    task, task list — and the one carrying the TAT, the owner and the \
+                    required documents. It is created inside a stage, which is why the \
+                    stage is in the path rather than the body. `404` if the stage group \
+                    does not exist, `409` if its template has ever been published — only \
+                    a draft accepts new tasks. There is deliberately no route that \
+                    creates a stage: a Module Service is born holding every active one, \
+                    and which stages exist is decided on OB-15.""")
+    ObJourneyTemplateDtos.StepResponse addTask(
+            @PathVariable long stageId,
+            @Valid @RequestBody ObJourneyTemplateDtos.AddTaskRequest request) {
+        ObJourneyTemplateStep task = service.addTask(stageId, request.name(), request.description(),
+                request.tatDays(), request.ownerUserId(), request.requiresSignoff(),
+                request.dependsOnStepId());
+        return new ObJourneyTemplateDtos.StepResponse(ObJourneyTemplateDtos.StepDetail.of(task, List.of(), List.of()));
     }
 
     @PutMapping(value = "/journey-templates/order", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -284,25 +299,30 @@ class ObJourneyTemplateController {
                 updated, service.dependsOnTemplateIds(templateId));
     }
 
-    @PutMapping(value = "/journey-templates/{templateId}/steps/order",
+    @PutMapping(value = "/journey-template-stages/{stageId}/tasks/order",
             consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Operation(operationId = "reorderObJourneyTemplateSteps",
-            summary = "The OB-07 ↑/↓ control, applied in one call (draft only)",
+    @Operation(operationId = "reorderObJourneyTemplateTasks",
+            summary = "The OB-07 ↑/↓ control, within one stage (draft only)",
             description = """
-                    `stepIds` is the caller's full desired ordering, not a delta — every id \
-                    the template currently has, each named exactly once. `400` if the list \
-                    does not match the template's current step set exactly: an id missing, \
-                    an id repeated, or an id belonging to a different template.
+                    `taskIds` is the caller's full desired ordering for the tasks of the \
+                    stage named in the path — not a delta, and not the template's whole \
+                    task set. Tasks in every other stage keep the positions they had, so \
+                    reordering inside Configuration cannot disturb Data Migration. `400` \
+                    if the list does not match that stage's current task set exactly: an \
+                    id missing, an id repeated, or an id belonging to another stage.
 
                     `If-Match` is required, not optional — `428` without one, `412` if it \
                     does not match the template's current tag. Read the tag from \
                     `GET /onboarding/journey-templates/{templateId}`.""")
-    void reorder(@PathVariable long templateId,
-                 @RequestHeader(name = "If-Match", required = false) String ifMatch,
-                 @Valid @RequestBody ObJourneyTemplateDtos.ReorderStepsRequest request) {
-        requirePrecondition(templateId, ifMatch);
-        service.reorderSteps(templateId, request.stepIds());
+    void reorderTasks(@PathVariable long stageId,
+                      @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                      @Valid @RequestBody ObJourneyTemplateDtos.ReorderTasksRequest request) {
+        // The precondition is the *template's* tag, not a tag of the stage: a
+        // stage group has no mutable state of its own to conflict over, and
+        // what two admins race on is the task list they are both reordering.
+        requirePrecondition(service.templateIdOfStage(stageId), ifMatch);
+        service.reorderTasks(stageId, request.taskIds());
     }
 
     /**

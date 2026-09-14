@@ -6,6 +6,8 @@ import type { ObDashboardItem } from '@/api/generated/model'
 import { Chip } from '@/components/ui/chip'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
+
 const ITEMS_LIMIT = 50
 
 const STUCK_STATUSES = new Set(['BLOCKED', 'WAITING_ON_CLIENT'])
@@ -33,8 +35,16 @@ function stuckChip(status: string) {
  * cards' own items, filtered and re-labelled for this section's two tables.
  */
 export function ObDashboardStuckPanel() {
-  const ongoing = useListObDashboardCardItems('ongoing-projects', { limit: ITEMS_LIMIT })
-  const overdue = useListObDashboardCardItems('overdue-clients', { limit: ITEMS_LIMIT })
+  const ongoing = useListObDashboardCardItems(
+    'ongoing-projects',
+    { limit: ITEMS_LIMIT },
+    { query: OB_DASHBOARD_QUERY },
+  )
+  const overdue = useListObDashboardCardItems(
+    'overdue-clients',
+    { limit: ITEMS_LIMIT },
+    { query: OB_DASHBOARD_QUERY },
+  )
 
   const stuck = (ongoing.data?.data ?? []).filter((item) => STUCK_STATUSES.has(item.status))
   const breaches = overdue.data?.data ?? []

@@ -80,6 +80,7 @@ import type {
   PortalCommentListResponse,
   PortalCredentialLinkResponse,
   PortalCredentialRedeemRequest,
+  PortalCsatRequest,
   PortalEscalationRaiseRequest,
   PortalLoginRequest,
   PortalLoginResponse,
@@ -87,7 +88,11 @@ import type {
   PortalPrereqCommentListResponse,
   PortalPrereqCommentResponse,
   PortalPrereqSubmitRequest,
+  PortalSignoffAcceptRequest,
+  PortalSignoffDecisionResponse,
   PortalSignoffListResponse,
+  PortalSignoffObjectRequest,
+  PortalSignoffReviewResponse,
   PortalTicketListResponse,
   PortalTicketResponse,
   Problem,
@@ -1078,6 +1083,371 @@ export function useListPortalSignoffs<TData = Awaited<ReturnType<typeof listPort
 
 
 /**
+ * The portal's own OB-09 — what is being signed, read on the
+authenticated surface.
+
+**No token and no OTP, and that is not a weakening.** OB-09 proves two
+things in two steps because it has no principal: the mailed link
+proves possession of a mailbox, the code proves who is holding it
+(A-121: "a link on its own proves possession of an email; it does not
+prove identity"). A portal caller has already proved both, more
+strongly, by signing in against `client_accounts`; `obClientId` comes
+off their own verified token and the row is checked against it. This
+is the same substitution `submitPortalPrereqTask` already makes.
+
+**Served for any status this client owns**, not `PENDING` only, with
+`canDecide` carrying the difference — a sign-off staff withdrew while
+the page was loading should read as withdrawn rather than 404 on a row
+the client was looking at a moment ago. The decision routes do the
+strict check; a disabled form in one browser is not an authorization
+check.
+
+A sign-off on another client's onboarding answers `404`, never `403`.
+
+ * @summary One sign-off, ready to decide (CP-05)
+ */
+export const getPortalSignoff = (
+    signoffId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalSignoffReviewResponse>(
+      {url: `/portal/onboarding/signoffs/${signoffId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetPortalSignoffQueryKey = (signoffId?: number,) => {
+    return [
+    `/portal/onboarding/signoffs/${signoffId}`
+    ] as const;
+    }
+
+    
+export const getGetPortalSignoffQueryOptions = <TData = Awaited<ReturnType<typeof getPortalSignoff>>, TError = void | UnauthorizedResponse | NotFoundResponse>(signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalSignoffQueryKey(signoffId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalSignoff>>> = ({ signal }) => getPortalSignoff(signoffId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(signoffId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalSignoffQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalSignoff>>>
+export type GetPortalSignoffQueryError = void | UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetPortalSignoff<TData = Awaited<ReturnType<typeof getPortalSignoff>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ signoffId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalSignoff>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalSignoff>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalSignoff<TData = Awaited<ReturnType<typeof getPortalSignoff>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalSignoff>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalSignoff>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalSignoff<TData = Awaited<ReturnType<typeof getPortalSignoff>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One sign-off, ready to decide (CP-05)
+ */
+
+export function useGetPortalSignoff<TData = Awaited<ReturnType<typeof getPortalSignoff>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ signoffId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalSignoff>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalSignoffQueryOptions(signoffId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Records the acceptance and puts the step through the completion gate —
+the same gate, reached through the same `ObSignoffAcceptService.accept`
+the public page calls. Nothing on this path writes `SIGNED` itself:
+PHASE-2-BUILD-PLAN §3 #4 ruled that there is *one* completion gate
+after finding the prototype enforcing different rules on two paths, and
+a second accept written for the portal would be that bug reintroduced.
+
+**`stepCompleted: false` is a successful outcome.** The acceptance
+stands and the row is `SIGNED` either way; `gateFailures` names what
+*our* side still owes — an unanswered mandatory item, a required
+document nobody attached. `acceptObSignoff`'s own contract, carried
+across unchanged: "the client did accept, they are not the ones who
+left a document unattached".
+
+**`200`, not `201`, and no `Idempotency-Key`.** This decides a row
+staff already created rather than creating one, and the row's own
+`PENDING` status is the idempotency key — a second accept answers
+`422 portal-signoff-not-pending` rather than signing twice.
+
+`acceptedName` is mandatory and is never defaulted from the contact
+row, on `ObSignoffAcceptRequest`'s own reasoning: "a name the person
+entered themselves is what distinguishes acceptance from a click".
+Being authenticated establishes which account acted, not that a human
+put their name to it.
+
+The acceptance is attributed to `sent_to_contact_id`, unchanged and
+not taken from the caller. IP and user agent are recorded from this
+request.
+
+ * @summary Accept a sign-off from the portal (CP-05)
+ */
+export const acceptPortalSignoff = (
+    signoffId: number,
+    portalSignoffAcceptRequest: PortalSignoffAcceptRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalSignoffDecisionResponse>(
+      {url: `/portal/onboarding/signoffs/${signoffId}/accept`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalSignoffAcceptRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getAcceptPortalSignoffMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffAcceptRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof acceptPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffAcceptRequest}, TContext> => {
+
+const mutationKey = ['acceptPortalSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptPortalSignoff>>, {signoffId: number;data: PortalSignoffAcceptRequest}> = (props) => {
+          const {signoffId,data} = props ?? {};
+
+          return  acceptPortalSignoff(signoffId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptPortalSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof acceptPortalSignoff>>>
+    export type AcceptPortalSignoffMutationBody = PortalSignoffAcceptRequest
+    export type AcceptPortalSignoffMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Accept a sign-off from the portal (CP-05)
+ */
+export const useAcceptPortalSignoff = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffAcceptRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acceptPortalSignoff>>,
+        TError,
+        {signoffId: number;data: PortalSignoffAcceptRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getAcceptPortalSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The other branch of the same decision, through the same
+`ObSignoffObjectService.object` the public page calls — the step
+reverts, and the owner is notified in the transaction the objection is
+recorded in.
+
+**The note is mandatory** where the acceptance note is optional: "an
+objection with no reason guarantees a second round trip".
+
+**Terminal.** There is no un-object here either — "a client who
+changes their mind is a new sign-off request, which is a staff action
+with its own record". The portal offers no path back, and the server's
+`PENDING` check is what enforces that rather than the screen.
+
+ * @summary Raise an objection instead of accepting (CP-05)
+ */
+export const objectPortalSignoff = (
+    signoffId: number,
+    portalSignoffObjectRequest: PortalSignoffObjectRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<PortalSignoffDecisionResponse>(
+      {url: `/portal/onboarding/signoffs/${signoffId}/object`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalSignoffObjectRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getObjectPortalSignoffMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof objectPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffObjectRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof objectPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffObjectRequest}, TContext> => {
+
+const mutationKey = ['objectPortalSignoff'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof objectPortalSignoff>>, {signoffId: number;data: PortalSignoffObjectRequest}> = (props) => {
+          const {signoffId,data} = props ?? {};
+
+          return  objectPortalSignoff(signoffId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ObjectPortalSignoffMutationResult = NonNullable<Awaited<ReturnType<typeof objectPortalSignoff>>>
+    export type ObjectPortalSignoffMutationBody = PortalSignoffObjectRequest
+    export type ObjectPortalSignoffMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Raise an objection instead of accepting (CP-05)
+ */
+export const useObjectPortalSignoff = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof objectPortalSignoff>>, TError,{signoffId: number;data: PortalSignoffObjectRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof objectPortalSignoff>>,
+        TError,
+        {signoffId: number;data: PortalSignoffObjectRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getObjectPortalSignoffMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * B-119's one-question survey, answered in the portal instead of on the
+acceptance session.
+
+OB-09 rides the accept session because the alternative there is mailing
+a second link — "a second link emailed afterwards is a second thing to
+ignore". The portal has no such problem: the client is still signed in.
+
+**Additive, never gating.** The acceptance is already final before this
+is offered; skipping the survey is simply never calling this, and a
+client who closes the tab has still gone live.
+
+`204` because there is nothing to hand back. Eligibility — a `GO_LIVE`
+sign-off, actually `SIGNED`, not already answered for this client — is
+`ObSignoffCsatService`'s and answers `422`.
+
+ * @summary Answer the go-live survey (CP-05)
+ */
+export const submitPortalCsat = (
+    signoffId: number,
+    portalCsatRequest: PortalCsatRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<void>(
+      {url: `/portal/onboarding/signoffs/${signoffId}/csat`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: portalCsatRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitPortalCsatMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPortalCsat>>, TError,{signoffId: number;data: PortalCsatRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitPortalCsat>>, TError,{signoffId: number;data: PortalCsatRequest}, TContext> => {
+
+const mutationKey = ['submitPortalCsat'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitPortalCsat>>, {signoffId: number;data: PortalCsatRequest}> = (props) => {
+          const {signoffId,data} = props ?? {};
+
+          return  submitPortalCsat(signoffId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitPortalCsatMutationResult = NonNullable<Awaited<ReturnType<typeof submitPortalCsat>>>
+    export type SubmitPortalCsatMutationBody = PortalCsatRequest
+    export type SubmitPortalCsatMutationError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem
+
+    /**
+ * @summary Answer the go-live survey (CP-05)
+ */
+export const useSubmitPortalCsat = <TError = ValidationFailedResponse | UnauthorizedResponse | NotFoundResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPortalCsat>>, TError,{signoffId: number;data: PortalCsatRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitPortalCsat>>,
+        TError,
+        {signoffId: number;data: PortalCsatRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitPortalCsatMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * `ObClientPrereqTaskDetail`, unchanged — "one schema for both
 principals". 404 for a task on another client, the same 404 for one
 that does not exist, and the same 404 again when this account's token

@@ -94,9 +94,10 @@ import type {
   ObJourneyTemplateStepDocWriteRequest,
   ObJourneyTemplateStepItemResponse,
   ObJourneyTemplateStepItemWriteRequest,
-  ObJourneyTemplateStepOrderRequest,
   ObJourneyTemplateStepResponse,
-  ObJourneyTemplateStepWriteRequest,
+  ObJourneyTemplateStepUpdateRequest,
+  ObJourneyTemplateTaskOrderRequest,
+  ObJourneyTemplateTaskWriteRequest,
   ObModuleGatedResponse,
   ObStepCommunicationCreateRequest,
   ObStepCommunicationListResponse,
@@ -739,36 +740,51 @@ export const usePublishObJourneyTemplate = <TError = ObModuleGatedResponse | Pro
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * `dependsOnStepId` null means the step runs in parallel from journey
-start, not "first" (plan §5.6). The database enforces only that a
-dependency stays inside the same template; that it names an
-*earlier* step in that template is C-119's job, evaluated by the
-designer on every add, reorder and delete.
+ * A **task** is the third of OB-07's four levels — Module Service,
+stage, task, task list — and the one that carries the TAT, the
+owner and the required documents. The stage it goes in is in the
+path, because a task is created inside a stage and never floats
+with a stage id attached.
 
- * @summary Add a service to a draft template (OB-07)
+**There is deliberately no route that creates a stage.** A Module
+Service is born holding one group per active implementation stage,
+and which stages exist is decided on OB-15 and nowhere else — two
+places to decide one thing is how two services end up described in
+different vocabularies.
+
+`dependsOnStepId` null means the task runs in parallel from journey
+start, not "first" (plan §5.6). A dependency may name a task in
+**another stage** of the same template: Data Migration genuinely
+waits on Configuration, and forbidding that would push people into
+inventing filler tasks to express a real order. The designer nests
+by dependency within a stage and captions a cross-stage one
+instead, since a row cannot be indented under a parent in another
+group.
+
+ * @summary Add a task to a stage of a draft template (OB-07)
  */
-export const addObJourneyTemplateStep = (
-    templateId: number,
-    obJourneyTemplateStepWriteRequest: ObJourneyTemplateStepWriteRequest,
+export const addObJourneyTemplateTask = (
+    stageId: number,
+    obJourneyTemplateTaskWriteRequest: ObJourneyTemplateTaskWriteRequest,
  signal?: AbortSignal
 ) => {
       
       
       return http<ObJourneyTemplateStepResponse>(
-      {url: `/onboarding/journey-templates/${templateId}/steps`, method: 'POST',
+      {url: `/onboarding/journey-template-stages/${stageId}/tasks`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: obJourneyTemplateStepWriteRequest, signal
+      data: obJourneyTemplateTaskWriteRequest, signal
     },
       );
     }
   
 
 
-export const getAddObJourneyTemplateStepMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateStep>>, TError,{templateId: number;data: ObJourneyTemplateStepWriteRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateStep>>, TError,{templateId: number;data: ObJourneyTemplateStepWriteRequest}, TContext> => {
+export const getAddObJourneyTemplateTaskMutationOptions = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateTask>>, TError,{stageId: number;data: ObJourneyTemplateTaskWriteRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateTask>>, TError,{stageId: number;data: ObJourneyTemplateTaskWriteRequest}, TContext> => {
 
-const mutationKey = ['addObJourneyTemplateStep'];
+const mutationKey = ['addObJourneyTemplateTask'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -778,10 +794,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObJourneyTemplateStep>>, {templateId: number;data: ObJourneyTemplateStepWriteRequest}> = (props) => {
-          const {templateId,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addObJourneyTemplateTask>>, {stageId: number;data: ObJourneyTemplateTaskWriteRequest}> = (props) => {
+          const {stageId,data} = props ?? {};
 
-          return  addObJourneyTemplateStep(templateId,data,)
+          return  addObJourneyTemplateTask(stageId,data,)
         }
 
         
@@ -789,23 +805,23 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type AddObJourneyTemplateStepMutationResult = NonNullable<Awaited<ReturnType<typeof addObJourneyTemplateStep>>>
-    export type AddObJourneyTemplateStepMutationBody = ObJourneyTemplateStepWriteRequest
-    export type AddObJourneyTemplateStepMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem
+    export type AddObJourneyTemplateTaskMutationResult = NonNullable<Awaited<ReturnType<typeof addObJourneyTemplateTask>>>
+    export type AddObJourneyTemplateTaskMutationBody = ObJourneyTemplateTaskWriteRequest
+    export type AddObJourneyTemplateTaskMutationError = ValidationFailedResponse | Problem
 
     /**
- * @summary Add a service to a draft template (OB-07)
+ * @summary Add a task to a stage of a draft template (OB-07)
  */
-export const useAddObJourneyTemplateStep = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateStep>>, TError,{templateId: number;data: ObJourneyTemplateStepWriteRequest}, TContext>, }
+export const useAddObJourneyTemplateTask = <TError = ValidationFailedResponse | Problem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addObJourneyTemplateTask>>, TError,{stageId: number;data: ObJourneyTemplateTaskWriteRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof addObJourneyTemplateStep>>,
+        Awaited<ReturnType<typeof addObJourneyTemplateTask>>,
         TError,
-        {templateId: number;data: ObJourneyTemplateStepWriteRequest},
+        {stageId: number;data: ObJourneyTemplateTaskWriteRequest},
         TContext
       > => {
 
-      const mutationOptions = getAddObJourneyTemplateStepMutationOptions(options);
+      const mutationOptions = getAddObJourneyTemplateTaskMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -964,40 +980,42 @@ export const useUpdateObJourneyTemplateDependsOn = <TError = ObModuleGatedRespon
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * `stepIds` is the caller's full desired ordering, not a delta —
-every step id the template currently has, each named exactly once.
-Persisted as `sequence` 1..N in that order.
+ * `taskIds` is the caller's full desired ordering for the tasks of the
+stage named in the path — not a delta, and not the template's whole
+task set. Tasks in every other stage keep the positions they had, so
+reordering inside Configuration cannot disturb Data Migration.
 
 `If-Match` is required, not optional — a write without one is
 refused with `428`, the `GET /users/{userId}` argument applied
 again: treating a missing precondition as "no conflict" protects
 only the callers that already opted in, which is the set that
-needed it least. Read the current tag from `GET
+needed it least. The tag is the **template's**, since a stage group
+has no mutable state of its own to conflict over. Read it from `GET
 /onboarding/journey-templates/{templateId}`.
 
- * @summary The OB-07 ↑/↓ control, applied in one call (draft only)
+ * @summary The OB-07 ↑/↓ control, within one stage (draft only)
  */
-export const reorderObJourneyTemplateSteps = (
-    templateId: number,
-    obJourneyTemplateStepOrderRequest: ObJourneyTemplateStepOrderRequest,
+export const reorderObJourneyTemplateTasks = (
+    stageId: number,
+    obJourneyTemplateTaskOrderRequest: ObJourneyTemplateTaskOrderRequest,
  ) => {
       
       
       return http<void>(
-      {url: `/onboarding/journey-templates/${templateId}/steps/order`, method: 'PUT',
+      {url: `/onboarding/journey-template-stages/${stageId}/tasks/order`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
-      data: obJourneyTemplateStepOrderRequest
+      data: obJourneyTemplateTaskOrderRequest
     },
       );
     }
   
 
 
-export const getReorderObJourneyTemplateStepsMutationOptions = <TError = Problem | ObModuleGatedResponse | PreconditionFailedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>, TError,{templateId: number;data: ObJourneyTemplateStepOrderRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>, TError,{templateId: number;data: ObJourneyTemplateStepOrderRequest}, TContext> => {
+export const getReorderObJourneyTemplateTasksMutationOptions = <TError = Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>, TError,{stageId: number;data: ObJourneyTemplateTaskOrderRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>, TError,{stageId: number;data: ObJourneyTemplateTaskOrderRequest}, TContext> => {
 
-const mutationKey = ['reorderObJourneyTemplateSteps'];
+const mutationKey = ['reorderObJourneyTemplateTasks'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1007,10 +1025,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>, {templateId: number;data: ObJourneyTemplateStepOrderRequest}> = (props) => {
-          const {templateId,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>, {stageId: number;data: ObJourneyTemplateTaskOrderRequest}> = (props) => {
+          const {stageId,data} = props ?? {};
 
-          return  reorderObJourneyTemplateSteps(templateId,data,)
+          return  reorderObJourneyTemplateTasks(stageId,data,)
         }
 
         
@@ -1018,23 +1036,110 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type ReorderObJourneyTemplateStepsMutationResult = NonNullable<Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>>
-    export type ReorderObJourneyTemplateStepsMutationBody = ObJourneyTemplateStepOrderRequest
-    export type ReorderObJourneyTemplateStepsMutationError = Problem | ObModuleGatedResponse | PreconditionFailedResponse
+    export type ReorderObJourneyTemplateTasksMutationResult = NonNullable<Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>>
+    export type ReorderObJourneyTemplateTasksMutationBody = ObJourneyTemplateTaskOrderRequest
+    export type ReorderObJourneyTemplateTasksMutationError = Problem | ObModuleGatedResponse | PreconditionFailedResponse
 
     /**
- * @summary The OB-07 ↑/↓ control, applied in one call (draft only)
+ * @summary The OB-07 ↑/↓ control, within one stage (draft only)
  */
-export const useReorderObJourneyTemplateSteps = <TError = Problem | ObModuleGatedResponse | PreconditionFailedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>, TError,{templateId: number;data: ObJourneyTemplateStepOrderRequest}, TContext>, }
+export const useReorderObJourneyTemplateTasks = <TError = Problem | ObModuleGatedResponse | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>, TError,{stageId: number;data: ObJourneyTemplateTaskOrderRequest}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof reorderObJourneyTemplateSteps>>,
+        Awaited<ReturnType<typeof reorderObJourneyTemplateTasks>>,
         TError,
-        {templateId: number;data: ObJourneyTemplateStepOrderRequest},
+        {stageId: number;data: ObJourneyTemplateTaskOrderRequest},
         TContext
       > => {
 
-      const mutationOptions = getReorderObJourneyTemplateStepsMutationOptions(options);
+      const mutationOptions = getReorderObJourneyTemplateTasksMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * TAT, owner, backup owner, sign-off, description and the step
+dependency. **Neither the implementation stage nor the name can be
+changed** — a step *is* its stage, and swapping it is remove plus
+add, which is also what makes it obvious that the step's task list
+and documents go with it.
+
+This route exists because a Module Service is now created holding
+one step per implementation stage, each with a one-day TAT and no
+owner. Configuring a service is therefore editing steps rather than
+adding them, and before this the only edit available was
+remove-and-re-add, which destroys the task list underneath.
+
+Every field is optional; `null` means "say nothing about this".
+`dependsOnStepId` is the exception — null there cannot be told from
+an omitted field, so `clearDependsOn: true` is how a caller asks for
+a step that waits for nothing.
+
+`If-Match` is **required**, and the tag is the *template's*, from
+`getObJourneyTemplate`. A step has no read of its own to draw one
+from, and the template's tag covers every step on it — which is the
+tag that notices the edit this route can silently destroy, somebody
+else's dependency change.
+
+ * @summary Edit a step of a draft template (OB-07)
+ */
+export const updateObJourneyTemplateStep = (
+    stepId: number,
+    obJourneyTemplateStepUpdateRequest: ObJourneyTemplateStepUpdateRequest,
+ ) => {
+      
+      
+      return http<ObJourneyTemplateStepResponse>(
+      {url: `/onboarding/journey-template-steps/${stepId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obJourneyTemplateStepUpdateRequest
+    },
+      );
+    }
+  
+
+
+export const getUpdateObJourneyTemplateStepMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateStep>>, TError,{stepId: number;data: ObJourneyTemplateStepUpdateRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateStep>>, TError,{stepId: number;data: ObJourneyTemplateStepUpdateRequest}, TContext> => {
+
+const mutationKey = ['updateObJourneyTemplateStep'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateObJourneyTemplateStep>>, {stepId: number;data: ObJourneyTemplateStepUpdateRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  updateObJourneyTemplateStep(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateObJourneyTemplateStepMutationResult = NonNullable<Awaited<ReturnType<typeof updateObJourneyTemplateStep>>>
+    export type UpdateObJourneyTemplateStepMutationBody = ObJourneyTemplateStepUpdateRequest
+    export type UpdateObJourneyTemplateStepMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse
+
+    /**
+ * @summary Edit a step of a draft template (OB-07)
+ */
+export const useUpdateObJourneyTemplateStep = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | PreconditionFailedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateObJourneyTemplateStep>>, TError,{stepId: number;data: ObJourneyTemplateStepUpdateRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateObJourneyTemplateStep>>,
+        TError,
+        {stepId: number;data: ObJourneyTemplateStepUpdateRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getUpdateObJourneyTemplateStepMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -1112,6 +1217,20 @@ step completes. Defaults to `true`, matching every item that
 predates this field: before this task, plan §5.8's "a service
 completes only when every item is answered" applied to all of them
 with no exception.
+
+**B-131 — this is the one write a published version accepts.** Every
+other edit to a journey template is refused once it has been
+published, because it would change what a client already onboarding
+is looking at. Adding a checklist entry takes nothing away and
+contradicts no answer already given, and the clients who need it are
+usually the ones already running — so the **active** version accepts
+one, and the item is back-filled onto every live journey
+instantiated from that version. `backfilledJourneyCount` reports how
+many.
+
+Only that version's journeys: clients boarded on an *earlier*
+version keep the checklist they were boarded on, which is what
+pinning a version means.
 
  * @summary Add a Task List entry to a step (OB-07)
  */

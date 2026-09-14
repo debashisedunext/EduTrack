@@ -8,7 +8,10 @@ import com.edunext.edutrack.domain.onboarding.ObPrereqSubmittedVia;
 import com.edunext.edutrack.domain.onboarding.ObPrereqTaskStatus;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -241,18 +244,22 @@ public final class PortalOnboardingDtos {
      * {@code ObSignoffAcceptService.wentLive}'s own precedent for the same
      * situation one field over.
      *
-     * <h2>Why there is no deep-link URL on this row</h2>
+     * <h2>Why there is still no deep-link URL on this row</h2>
      *
      * <p>{@code ob_signoffs.token_hash} is a one-way hash — {@code
-     * ObSignoffTokens}'s whole point is that "our own database must not be
-     * able to yield a working link". So no read, here or anywhere, can ever
-     * hand back the plaintext a PENDING row's email carries, and this DTO does
-     * not pretend otherwise with a link that would 401. Plan §8's "deep-linking
-     * into the same flow" is served by routing the client to {@code /signoff}
-     * (OB-09, unchanged) and by naming the inbox to check — see
-     * {@code PortalSignoffListPage}'s own note for the frontend half of this
-     * decision, and this task's STREAM-C-TICKETS.md entry for why a
-     * self-service resend was not built to close the gap instead.
+     * ObSignoffTokens}'s whole point is that "our own database must not be able
+     * to yield a working link". So no read, here or anywhere, can ever hand
+     * back the plaintext a PENDING row's email carries, and this DTO does not
+     * pretend otherwise with a link that would 401.
+     *
+     * <p><b>It no longer needs to.</b> A {@code PENDING} row now links to
+     * {@link PortalSignoffReview} on this same authenticated surface, where the
+     * client accepts or objects without the emailed link or the OTP at all —
+     * see {@code PortalSignoffDecisionService} for why a portal session is a
+     * stronger proof of the same two facts that flow establishes, not a weaker
+     * one. {@code sentToEmail} stays, because the emailed link still exists and
+     * still works, and a client part-way through it is owed the inbox it went
+     * to.
      */
     public record PortalSignoff(
             long id,
@@ -272,5 +279,121 @@ public final class PortalOnboardingDtos {
     }
 
     public record PortalSignoffListResponse(List<PortalSignoff> data) {
+    }
+
+    // ── CP-05 · deciding a sign-off in the portal ───────────────────────────
+
+    /**
+     * One Task List row on the review screen.
+     *
+     * <p>{@code isDone} means <b>answered</b>, not answered True — C-111's
+     * distinction, restated on A-121's own checklist DTO and again here so a
+     * renderer cannot quietly turn it into a tick. The screen shows "recorded"
+     * for the same reason.
+     */
+    public record PortalSignoffChecklistItem(long id, int sequence, String label,
+                                             boolean isMandatory, boolean isDone) {
+    }
+
+    /**
+     * What the client reads before deciding — the portal's own OB-09.
+     *
+     * <p>Served for any status this client owns rather than {@code PENDING}
+     * only, with {@code canDecide} carrying the difference: a sign-off staff
+     * withdrew while the page was loading should read as withdrawn, not 404 on
+     * a row the client was looking at a moment ago.
+     *
+     * <p>Deliberately narrower than the public page's {@code ObSignoffSession}:
+     * no session token (the portal has no session to hand out — see
+     * {@code PortalSignoffDecisionService} on why the minted one never leaves
+     * that class), and no {@code sentToContact} card, which tells a contact
+     * their own details back.
+     */
+    public record PortalSignoffReview(
+            long id,
+            ObSignoffKind kind,
+            ObSignoffStatus status,
+            String clientName,
+            String productName,
+            String stepTitle,
+            Instant requestedAt,
+            boolean canDecide,
+            boolean csatOffered,
+            List<PortalSignoffChecklistItem> checklist) {
+    }
+
+    public record PortalSignoffReviewResponse(PortalSignoffReview data) {
+    }
+
+    /**
+     * Accepting.
+     *
+     * <p>{@code acceptedName} is mandatory and is not defaulted from the
+     * contact row, on {@code PublicSignoffAcceptDtos.AcceptRequest}'s own
+     * reasoning, which applies here word for word: "a name the person entered
+     * themselves is what distinguishes acceptance from a click", and a
+     * defaulted one produces a record that reads as though somebody typed their
+     * name when nobody did. Being authenticated does not change that — it
+     * establishes <em>which account</em> acted, not that a human put their name
+     * to it.
+     */
+    public record PortalSignoffAcceptRequest(
+            @NotBlank @Size(max = 160) String acceptedName,
+            @Size(max = 2000) String note) {
+    }
+
+    /**
+     * Objecting.
+     *
+     * <p>The note is mandatory where the acceptance note is optional — the
+     * contract's own line, kept: "an objection with no reason guarantees a
+     * second round trip".
+     */
+    public record PortalSignoffObjectRequest(
+            @NotBlank @Size(max = 2000) String note) {
+    }
+
+    /**
+     * How it was decided, and what our own side still owes.
+     *
+     * <p>{@code stepCompleted} false is a <b>normal outcome</b>, not an error,
+     * and this shape exists so the portal can render it as one:
+     * {@code PublicSignoffAcceptDtos.AcceptResult}'s contract, carried across
+     * unchanged. The acceptance is recorded and the row is {@code SIGNED}
+     * either way; {@code gateFailures} names what we have not finished, which
+     * is ours to fix and not something to ask the client to click again for.
+     *
+     * <p>Both fields are empty on an objection — nothing completes, and the
+     * step reverting is staff's business, not a gate the client failed.
+     */
+    public record PortalSignoffDecision(
+            long id,
+            ObSignoffStatus status,
+            Instant signedAt,
+            String signedName,
+            String acceptanceNote,
+            Instant objectedAt,
+            String objectionNote,
+            boolean stepCompleted,
+            List<String> gateFailures,
+            boolean clientWentLive,
+            boolean hasCertificate,
+            boolean csatOffered) {
+    }
+
+    public record PortalSignoffDecisionResponse(PortalSignoffDecision data) {
+    }
+
+    /**
+     * B-119's one-question go-live survey, answered in the portal.
+     *
+     * <p>{@code score} is 1–5 and mandatory; the comment is optional, because
+     * the survey's whole design is that it costs one tap. A client who closes
+     * the tab has still gone live — the acceptance is already final before this
+     * is ever offered.
+     */
+    public record PortalCsatRequest(
+            @NotNull @Min(1) @Max(5) Integer score,
+            @Size(max = 2000) String comment) {
     }
 }

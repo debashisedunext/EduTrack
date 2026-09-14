@@ -3,7 +3,10 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -103,6 +106,181 @@ class ObJourneyReadRepository {
         return jdbc.sql("SELECT full_name FROM users WHERE id = :id")
                 .param("id", userId).query(String.class).optional();
     }
+
+    /**
+     * Which implementation stage each task of one journey belongs to, by step
+     * id.
+     *
+     * <h2>One query for the whole journey, not one per step</h2>
+     *
+     * <p>The alternative is resolving the stage inside the per-step mapping,
+     * which is a join per task on a screen that draws every task of a journey
+     * at once — the N+1 this read already avoids everywhere else.
+     *
+     * <h2>The fold is copied deliberately, and must stay copied</h2>
+     *
+     * <p>{@code COALESCE(g.implementation_stage_id, -g.id, 0)} is the same
+     * expression as {@code ObProjectReadRepository.STAGE_ROLLUP} and
+     * {@code ObClientReadRepository#stepDotsOf}. Three readers now fold stage
+     * groups onto implementation stages this way, and the project page matches
+     * a task to a ribbon stop by comparing the results — so a fourth reader
+     * that folded differently would produce a stage that looks populated and
+     * opens empty. That is a bug nobody would read as a key mismatch, which is
+     * why each of the three says so in its own javadoc rather than trusting
+     * the next author to go looking.
+     *
+     * <p><b>Left joins, on purpose.</b> A template step deleted after a journey
+     * started leaves {@code template_step_id} pointing at nothing; the task
+     * keeps running and lands in the {@code 0} bucket rather than dropping out
+     * of the ribbon.
+     */
+    Map<Long, StageRef> stagesOfJourney(long journeyId) {
+        return jdbc.sql("""
+                SELECT s.id AS stepId,
+                       COALESCE(g.implementation_stage_id, -g.id, 0) AS stageKey,
+                       COALESCE(g.name, 'Ungrouped')                 AS stageName
+                  FROM ob_journey_steps s
+             LEFT JOIN ob_journey_template_steps  ts ON ts.id = s.template_step_id
+             LEFT JOIN ob_journey_template_stages g  ON g.id = ts.template_stage_id
+                 WHERE s.journey_id = :journeyId
+                """)
+                .param("journeyId", journeyId)
+                .query((rs, n) -> Map.entry(
+                        rs.getLong("stepId"),
+                        new StageRef(rs.getLong("stageKey"), rs.getString("stageName"))))
+                .list().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    /** One task's stage — the key the ribbon matches on, and the name it prints. */
+    record StageRef(long stageKey, String stageName) {
+    }
+
+    /**
+     * Every sub-task of every task of one journey, keyed by task id.
+     *
+     * <h2>Why the journey read carries these at all</h2>
+     *
+     * <p>It did not used to: the checklist was fetched one task at a time by
+     * {@code GET /onboarding/journey-steps/{stepId}}, because only the selected
+     * task's panel ever showed it. The project page's stage body shows every
+     * task of a stage with its sub-tasks open underneath, so that shape would
+     * be one request per task on first paint.
+     *
+     * <h2>Mandatory is resolved here, not defaulted by the caller</h2>
+     *
+     * <p>{@code ob_journey_step_items} does not store it — it is a fact about
+     * the <em>template</em> item, which is why
+     * {@code ObJourneyStepLifecycleService.checklistFor} joins for it too.
+     * {@code COALESCE(ti.is_mandatory, 1)} keeps this agreeing with that
+     * method's {@code getOrDefault(..., true)}: an item whose template row has
+     * gone is treated as mandatory, so a vanished template can never quietly
+     * drop a task out of the completion gate.
+     *
+     * <h2>`isDone` means answered, not answered yes</h2>
+     *
+     * <p>{@code answer IS NOT NULL}, matching the server's completion gate
+     * exactly — an item answered <b>False</b> satisfies the gate as an item
+     * answered True does. {@code StepTaskList}'s own note spells out why
+     * "fixing" this to mean "answered True" would make the screen refuse
+     * completions the server allows.
+     */
+    Map<Long, List<ItemRow>> itemsOfJourney(long journeyId) {
+        return jdbc.sql("""
+                SELECT i.step_id                     AS stepId,
+                       i.id                          AS id,
+                       i.sequence                    AS sequence,
+                       i.label                       AS label,
+                       i.answer IS NOT NULL          AS isDone,
+                       i.answer                      AS answer,
+                       i.remark                      AS remark,
+                       COALESCE(ti.is_mandatory, 1)  AS isMandatory,
+                       i.answered_at                 AS answeredAt,
+                       i.answered_by                 AS answeredBy
+                  FROM ob_journey_step_items i
+                  JOIN ob_journey_steps s ON s.id = i.step_id
+             LEFT JOIN ob_journey_template_step_items ti ON ti.id = i.template_item_id
+                 WHERE s.journey_id = :journeyId
+                 ORDER BY i.step_id, i.sequence, i.id
+                """)
+                .param("journeyId", journeyId)
+                .query((rs, n) -> new ItemRow(
+                        rs.getLong("stepId"), rs.getLong("id"), rs.getInt("sequence"),
+                        rs.getString("label"), rs.getBoolean("isDone"),
+                        nullableBoolean(rs, "answer"), rs.getString("remark"),
+                        rs.getBoolean("isMandatory"),
+                        // `getObject(.., Instant.class)` is not supported by the
+                        // MySQL driver — the same reason this file already has
+                        // `instant` for every other timestamp it reads.
+                        instant(rs, "answeredAt"),
+                        nullableLong(rs, "answeredBy")))
+                .list().stream()
+                .collect(Collectors.groupingBy(ItemRow::stepId,
+                        java.util.LinkedHashMap::new, Collectors.toList()));
+    }
+
+    /**
+     * Every required-document entry of every task of one journey, keyed by task.
+     *
+     * <h2>One query, not two per task</h2>
+     *
+     * <p>{@code ObJourneyStepLifecycleService.docsFor} answers this for a single
+     * task with two reads — the template's document list, and a count of the
+     * task's clean attachments. On a stage drawing every task at once that is
+     * 2N, so both are folded into one statement here with the count as a
+     * correlated subquery.
+     *
+     * <p><b>Satisfaction is counted, not matched</b>, and that is not a
+     * shortcut: {@code ob_journey_step_docs} does not exist, so nothing links
+     * one attachment to one checklist entry. The gate can only ask whether
+     * enough clean files are attached to cover the required entries. Which
+     * entries are marked satisfied is therefore decided in Java below, in
+     * sequence, exactly as {@code docsFor} does — a stable order at least means
+     * one entry does not read satisfied on one call and outstanding on the next.
+     *
+     * <p>A task whose {@code template_step_id} is null or gone contributes no
+     * rows, which is right: the requirement lived on the template.
+     */
+    Map<Long, List<DocRow>> docsOfJourney(long journeyId) {
+        return jdbc.sql("""
+                SELECT s.id        AS stepId,
+                       d.id        AS id,
+                       d.label     AS label,
+                       d.is_required AS isRequired,
+                       (SELECT COUNT(*) FROM ob_attachments a
+                         WHERE a.step_id = s.id
+                           AND a.scan_status = 'CLEAN'
+                           AND a.deleted_at IS NULL) AS cleanCount
+                  FROM ob_journey_steps s
+                  JOIN ob_journey_template_step_docs d ON d.step_id = s.template_step_id
+                 WHERE s.journey_id = :journeyId
+                 ORDER BY s.id, d.sequence, d.id
+                """)
+                .param("journeyId", journeyId)
+                .query((rs, n) -> new DocRow(
+                        rs.getLong("stepId"), rs.getLong("id"), rs.getString("label"),
+                        rs.getBoolean("isRequired"), rs.getInt("cleanCount")))
+                .list().stream()
+                .collect(Collectors.groupingBy(DocRow::stepId,
+                        java.util.LinkedHashMap::new, Collectors.toList()));
+    }
+
+    /** One required-document entry. {@code cleanCount} is the whole task's. */
+    record DocRow(long stepId, long id, String label, boolean isRequired, int cleanCount) {
+    }
+
+    /** One sub-task, as the stage body draws it. */
+    record ItemRow(long stepId, long id, int sequence, String label,
+                   boolean isDone, Boolean answer, String remark,
+                   boolean isMandatory, Instant answeredAt, Long answeredBy) {
+    }
+
+    /** `getBoolean` reads a SQL NULL as false, which is the middle state here. */
+    private static Boolean nullableBoolean(ResultSet rs, String column) throws SQLException {
+        boolean value = rs.getBoolean(column);
+        return rs.wasNull() ? null : value;
+    }
+
 
     record Row(long id, long obClientId, String clientName, String gateStatus, Long heldByJourneyId,
                Instant startedAt, Instant completedAt, Instant archivedAt,

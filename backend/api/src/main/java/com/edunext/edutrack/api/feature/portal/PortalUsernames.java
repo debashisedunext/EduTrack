@@ -50,6 +50,19 @@ final class PortalUsernames {
     private static final int MAX_LOCAL_PART = 24;
 
     /**
+     * A whole client code, kept whole.
+     *
+     * <p>{@code ob_clients.client_code} is {@code VARCHAR(32)} and the code
+     * path appends nothing but a rare counter, so 32 is what fits without ever
+     * truncating a real code — and it still leaves room inside
+     * {@code client_accounts.username}'s {@code VARCHAR(50)}. Reusing
+     * {@link #MAX_LOCAL_PART} here cut a 32-character code down to 24, which is
+     * precisely the "the username is not the code" failure this path exists to
+     * avoid.
+     */
+    private static final int MAX_CODE = 32;
+
+    /**
      * Where the counter stops. Twenty-five people called Ravi at one client is
      * not a naming problem any more, and a loop with no bound is how a unique
      * constraint turns into a hang.
@@ -80,6 +93,80 @@ final class PortalUsernames {
      *                    point something is wrong with the caller's assumptions
      *                    and inventing {@code ACME.ravi7f3a} would hide it.
      */
+    /**
+     * The client's own code, and nothing after it — the onboarding module's
+     * shape.
+     *
+     * <pre>
+     *   HRZ-001           the client code, as the operator filed it
+     *   HRZ-0012          …and a counter on the rare occasion that is taken
+     * </pre>
+     *
+     * <h2>Why this is the better name where a code exists</h2>
+     *
+     * <p>{@link #generate} appends the contact's given name because the
+     * ticketing master's login is a <em>person at</em> a client and several of
+     * them may exist. An onboarding portal login is not: {@code
+     * uq_client_accounts_ob_client} allows exactly one per client, so there is
+     * never a second one to tell apart, and the given name was disambiguating
+     * nothing. What it did do was make the login name depend on which SPOC
+     * happened to be primary the day it was issued — so the client's own code,
+     * the value operations already file them under and already quote on the
+     * phone, is both more stable and more recognisable.
+     *
+     * <p><b>The counter stays anyway.</b> {@code uq_ob_clients_client_code}
+     * makes the code unique among onboarding clients, but {@code
+     * client_accounts} is one table and the ticketing master mints names into
+     * it from its own separate code column. Two organisations filed as
+     * {@code ACME} in the two masters are not a contradiction anybody has to
+     * resolve — V20260905_1630 is explicit that nothing links them — and
+     * without the counter the second one to ask for a login would fail on a
+     * unique constraint instead of getting {@code ACME2}.
+     *
+     * <p>Reduced to {@code [A-Z0-9._-]} rather than passed through: the code is
+     * free text up to 32 characters and a space or a slash in a login name is a
+     * support call. A code that reduces to nothing falls back to
+     * {@code CLIENT}, on the same reasoning as {@link #localPart}'s
+     * {@code user}.
+     *
+     * @param clientCode the client's code. Required — callers with none use
+     *                   {@link #generate}.
+     * @param taken      true if a candidate is already in use.
+     */
+    static String fromClientCode(String clientCode, Predicate<String> taken) {
+        String base = reduceCode(requireCodeAsTyped(clientCode));
+
+        if (!taken.test(base)) {
+            return base;
+        }
+        for (int suffix = 2; suffix <= MAX_ATTEMPTS; suffix++) {
+            String candidate = base + suffix;
+            if (!taken.test(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException(
+                "no free portal username for " + base + " after " + MAX_ATTEMPTS + " attempts");
+    }
+
+    /**
+     * <p>Hyphens, dots and underscores survive because real codes are written
+     * with them — {@code HRZ-001} is the shape operations actually use, and
+     * stripping it to {@code HRZ001} would mean the login name and the code on
+     * the client page did not match, which is the one property this change
+     * exists to give them.
+     */
+    private static String reduceCode(String clientCode) {
+        // `a-z` included deliberately: the case the operator typed is kept —
+        // see requireCodeAsTyped — so folding it out here would delete the
+        // lower-case half of every code rather than preserve it.
+        String reduced = clientCode.replaceAll("[^A-Za-z0-9._-]", "");
+        if (reduced.isEmpty()) {
+            return "CLIENT";
+        }
+        return reduced.length() > MAX_CODE ? reduced.substring(0, MAX_CODE) : reduced;
+    }
+
     static String generate(String clientCode, String displayName, Predicate<String> taken) {
         String prefix = requireCode(clientCode);
         String local = localPart(displayName);
@@ -107,6 +194,30 @@ final class PortalUsernames {
             throw new IllegalArgumentException("a portal username needs a client code");
         }
         return clientCode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * The code as the operator typed it, trimmed and not case-folded.
+     *
+     * <p>{@link #requireCode} upper-cases because the ticketing master's
+     * {@code ClientCodeFormat} has already done so and the call is a no-op
+     * there. An onboarding {@code client_code} is free text, so the same call
+     * is <em>not</em> a no-op: "IT-fb5f3d24" became "IT-FB5F3D24", and a
+     * username that is a case-folded version of the code is not the code. The
+     * whole point of naming the login after it is that the two read as one
+     * string on a support call.
+     *
+     * <p>Nothing is lost by keeping the case. Uniqueness still holds —
+     * {@code client_accounts} collates {@code utf8mb4_0900_ai_ci}, so
+     * {@code usernameExists} and {@code uq_client_accounts_username} are both
+     * case-insensitive — and {@code PortalAuthService} matches the login
+     * case-insensitively too, so a client who types it in caps still gets in.
+     */
+    private static String requireCodeAsTyped(String clientCode) {
+        if (clientCode == null || clientCode.isBlank()) {
+            throw new IllegalArgumentException("a portal username needs a client code");
+        }
+        return clientCode.trim();
     }
 
     /**

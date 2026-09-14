@@ -40,6 +40,24 @@ public interface ObClientRepository extends JpaRepository<ObClient, Long> {
     boolean existsByPanBlindIndex(byte[] panBlindIndex);
 
     /**
+     * The client wearing this code, for the add dialog's duplicate guard.
+     *
+     * <p>Unscoped, on {@link #existsByPanBlindIndex}'s argument applied to the
+     * key that replaced the PAN: "one code, one client" is a fact about the
+     * organisation, and scoping it would let one salesperson reuse a code
+     * another salesperson's client already holds, because that client is
+     * invisible to them — turning the row-scope guard into a collision on
+     * {@code uq_ob_clients_client_code}.
+     *
+     * <p>Callers must not name the holder back. Unlike the PAN guard, which
+     * decides whether to name the match from {@code ObClientScope.seesClientAuthoredBy},
+     * the code is a value the caller has just typed: confirming it is taken
+     * tells them nothing they did not supply, while naming the client that has
+     * it would disclose a row outside their scope.
+     */
+    Optional<ObClient> findByClientCode(String clientCode);
+
+    /**
      * The existing holder, for a message that can say <em>which</em> client
      * already carries this PAN.
      *

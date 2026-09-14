@@ -84,7 +84,7 @@ class ClientAccountAdminServiceTest {
         when(encoder.encode(anyString())).thenReturn("$argon2id$fake");
         when(clients.find(any(), eq(OB_CLIENT))).thenReturn(Optional.of(
                 new ObPrimaryContactReader.ClientAndPrimary(
-                        "Northwind Technologies Pvt Ltd", CONTACT, "Meena Raghavan",
+                        "Northwind Technologies Pvt Ltd", "NWT-001", CONTACT, "Meena Raghavan",
                         "meena@northwind.example")));
         when(accounts.insert(anyString(), anyString(), anyLong(), anyString(), anyString(), any()))
                 .thenReturn(ACCOUNT);
@@ -108,7 +108,7 @@ class ClientAccountAdminServiceTest {
     class Create {
 
         @Test
-        @DisplayName("mints a username from the client name and the primary SPOC")
+        @DisplayName("the username is the client's own code")
         void mintsUsername() {
             when(accounts.findByObClientId(OB_CLIENT))
                     .thenReturn(Optional.empty(), Optional.of(existingAccount(true)));
@@ -118,11 +118,56 @@ class ClientAccountAdminServiceTest {
             ArgumentCaptor<String> username = ArgumentCaptor.forClass(String.class);
             verify(accounts).insert(username.capture(), anyString(), eq(OB_CLIENT),
                     eq("Meena Raghavan"), eq("meena@northwind.example"), eq(ACTOR));
-            // ob_clients has no code column, so the prefix is derived from the
-            // name — see ClientAccountAdminService#usernamePrefix. "Northwind
-            // Technologies Pvt Ltd" reduces to NORTHWINDTECHNOLOGIESPVTLTD and
-            // is cut at twelve, which is the length that keeps the whole
-            // username inside VARCHAR(50) with a real given name after it.
+            // The code, unchanged — hyphen included. A login is one per client
+            // and the code is what operations file them under, so the two are
+            // deliberately the same string. See PortalUsernames#fromClientCode.
+            assertThat(username.getValue()).isEqualTo("NWT-001");
+        }
+
+        /**
+         * The counter that {@code uq_ob_clients_client_code} does not make
+         * redundant: {@code client_accounts} is one table and the ticketing
+         * master mints into it from a separate code column of its own.
+         */
+        @Test
+        @DisplayName("a code already held in client_accounts gets the counter, not a constraint violation")
+        void disambiguatesACodeAlreadyTaken() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(existingAccount(true)));
+            when(accounts.usernameExists("NWT-001")).thenReturn(true);
+
+            service.create(ADMIN, OB_CLIENT, ACTOR);
+
+            ArgumentCaptor<String> username = ArgumentCaptor.forClass(String.class);
+            verify(accounts).insert(username.capture(), anyString(), eq(OB_CLIENT),
+                    anyString(), anyString(), any());
+            assertThat(username.getValue()).isEqualTo("NWT-0012");
+        }
+
+        /**
+         * {@code client_code} arrived in V20260911_1800 and is nullable, so the
+         * clients boarded before it still have none. Refusing them a login over
+         * a field nobody ever asked them for would be the wrong answer; they
+         * fall back to the name-and-SPOC scheme these accounts were minted with
+         * to begin with.
+         */
+        @Test
+        @DisplayName("a client with no code falls back to the name and the primary SPOC")
+        void fallsBackForAClientWithNoCode() {
+            when(clients.find(any(), eq(OB_CLIENT))).thenReturn(Optional.of(
+                    new ObPrimaryContactReader.ClientAndPrimary(
+                            "Northwind Technologies Pvt Ltd", null, CONTACT, "Meena Raghavan",
+                            "meena@northwind.example")));
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(existingAccount(true)));
+
+            service.create(ADMIN, OB_CLIENT, ACTOR);
+
+            ArgumentCaptor<String> username = ArgumentCaptor.forClass(String.class);
+            verify(accounts).insert(username.capture(), anyString(), eq(OB_CLIENT),
+                    anyString(), anyString(), any());
+            // "Northwind Technologies Pvt Ltd" reduces to
+            // NORTHWINDTECHNOLOGIESPVTLTD and is cut at twelve.
             assertThat(username.getValue()).isEqualTo("NORTHWINDTEC.meena");
         }
 
@@ -165,8 +210,14 @@ class ClientAccountAdminServiceTest {
             ClientAccountAdminDtos.Account account = service.create(ADMIN, OB_CLIENT, ACTOR);
 
             verify(encoder).encode(anyString());
-            // Account is a nine-field record and none of them is a credential.
-            assertThat(ClientAccountAdminDtos.Account.class.getRecordComponents()).hasSize(9);
+            // Account is a ten-field record and the only credential among them
+            // is `devPassword`, which is null unless a development deployment
+            // has deliberately switched it on — see PortalDevCredentialConfig,
+            // which refuses to start with it enabled outside local/dev-noauth/
+            // fixtures. The count is the guard: a new field here fails this
+            // test, so nothing joins the response without somebody deciding it
+            // may. It last read nine, before `devPassword` was added.
+            assertThat(ClientAccountAdminDtos.Account.class.getRecordComponents()).hasSize(10);
             // Read back off the row, so this asserts the response carries the
             // stored username rather than re-deriving it.
             assertThat(account.username()).isEqualTo("NORTHWIND.meena");
@@ -188,7 +239,7 @@ class ClientAccountAdminServiceTest {
         @DisplayName("refuses a client with no active primary SPOC, before writing anything")
         void refusesWithNoPrimary() {
             when(clients.find(any(), eq(OB_CLIENT))).thenReturn(Optional.of(
-                    new ObPrimaryContactReader.ClientAndPrimary("Northwind", null, null, null)));
+                    new ObPrimaryContactReader.ClientAndPrimary("Northwind", "NWT-001", null, null, null)));
 
             assertThatExceptionOfType(NoPrimaryContactException.class)
                     .isThrownBy(() -> service.create(ADMIN, OB_CLIENT, ACTOR));

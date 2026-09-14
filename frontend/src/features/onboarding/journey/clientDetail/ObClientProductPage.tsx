@@ -54,10 +54,37 @@ import { useOpenEscalations } from './useOpenEscalations'
  * shouting about an ERP migration escalation would send a reader to a ribbon
  * that is not on the screen. The client page keeps the unscoped banner.
  */
-export function ObClientProductPage() {
+/**
+ * Both ids, for the one caller that has them without a matching URL.
+ *
+ * `/onboarding/projects/:obProjectId` renders this same surface — a project
+ * *is* a client-and-product pair — but reaches it by project id, so it resolves
+ * the pair itself and passes it in. Optional, so the route this page was built
+ * for is unchanged and still reads its own params.
+ *
+ * <p>Stream B's addition, in Stream C's directory, with C's sign-off: two
+ * props and a default. The alternative was a second copy of this page's
+ * accordion, escalation-scoping and anchoring logic, which is exactly the
+ * duplication `PHASE-2-BUILD-PLAN.md` §7 draws the directory line to prevent.
+ */
+export interface ObClientProductPageProps {
+  obClientId?: number
+  productId?: number
+  /**
+   * The host is already drawing the prerequisites checklist above this, so the
+   * gate banner below would point at something one scroll up.
+   *
+   * `ObProjectDetailPage` sets it. Left false on the standalone route, where
+   * the checklist genuinely is on another page and the banner is the only way
+   * to find it.
+   */
+  checklistShownAbove?: boolean
+}
+
+export function ObClientProductPage(props: ObClientProductPageProps = {}) {
   const params = useParams<{ obClientId: string; productId: string }>()
-  const obClientId = Number(params.obClientId)
-  const productId = Number(params.productId)
+  const obClientId = props.obClientId ?? Number(params.obClientId)
+  const productId = props.productId ?? Number(params.productId)
 
   const client = useGetObClient(obClientId, { query: { enabled: Number.isFinite(obClientId) } })
   const users = useListUsers({ isActive: true, limit: 200 })
@@ -221,20 +248,30 @@ export function ObClientProductPage() {
       </header>
 
       {/*
-        The gate is the client's, and it is administered on the client page —
-        so this says what is holding the ribbons and points at where to go,
-        rather than repeating a checklist that would then exist in two places
-        with one copy always slightly behind.
+        The gate is the client's, and on this route it is administered on the
+        client page — so this says what is outstanding and points at where to
+        go, rather than repeating a checklist that would then exist in two
+        places with one copy always slightly behind.
+
+        It reports; it does not warn anybody off. The gate stopped refusing a
+        start, so the old wording ("nothing here starts until…") would now be
+        contradicted by the live Start button two rows below it.
+
+        `checklistShownAbove` is the host saying it has already mounted the
+        real thing. Then this banner is not a shortcut, it is a second voice
+        saying the same sentence a few pixels below the controls that answer
+        it — so it goes, and the accordion's own chip carries the state.
       */}
-      {group.hold === 'GATE_LOCKED' && (
+      {group.hold === 'GATE_LOCKED' && !props.checklistShownAbove && (
         <div
           className="flex flex-wrap items-center gap-2 rounded-card border border-level-high bg-level-high-soft px-5 py-3 text-sm text-warning-text"
           role="status"
         >
           <span aria-hidden="true">📋</span>
           <span>
-            Nothing here starts until this client&apos;s prerequisites clear — no step activates and
-            no TAT clock runs (plan §5.2).
+            This client&apos;s prerequisites have not cleared. Nothing here starts on its own — no
+            step activates and no TAT clock runs until they do — but an owner may start their own
+            service ahead of the checklist.
           </span>
           <Link
             to={`/onboarding/clients/${obClientId}`}

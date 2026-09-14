@@ -293,6 +293,11 @@ function obClientDto(c: ObClient, db: Db) {
   return {
     id: c.id,
     name: c.name,
+    clientCode: c.clientCode,
+    city: c.city,
+    // On the list row as well as the detail, unlike `pan`: the Clients master
+    // is a four-field screen and this is one of the four.
+    address: c.address,
     onboardingDate: c.onboardingDate,
     status: c.status,
     rag: clientRag(c),
@@ -313,7 +318,6 @@ function obClientDetailDto(c: ObClient, db: Db) {
   return {
     ...obClientDto(c, db),
     description: c.description,
-    address: c.address,
     licenseType: c.licenseType,
     pan: maskPan(c.pan),
     contacts: c.contacts.map(contactDto),
@@ -660,9 +664,14 @@ export const onboardingHandlers = [
     const term = q.searchParams.get('q');
     if (term) {
       const needle = term.toLowerCase();
-      // Name only. Never PAN — it is masked on the way out, so matching on it
-      // here would make the mock an oracle for a value the API will not return.
-      rows = rows.filter((c) => c.name.toLowerCase().includes(needle));
+      // Name or code. Never PAN — it is masked on the way out, so matching on
+      // it here would make the mock an oracle for a value the API will not
+      // return. The code is safe: it is shown on every row.
+      rows = rows.filter(
+        (c) =>
+          c.name.toLowerCase().includes(needle) ||
+          (c.clientCode ?? '').toLowerCase().includes(needle),
+      );
     }
     const status = q.searchParams.get('status');
     if (status) rows = rows.filter((c) => c.status === status);
@@ -699,45 +708,61 @@ export const onboardingHandlers = [
     return ok(page.map((c) => obClientDto(c, db)), meta);
   }),
 
+  /*
+    The Clients master's add dialog — four fields.
+
+    Everything the four-step wizard used to commit from here (PAN, SPOC
+    contacts, purchases, requirements, journeys, the prerequisite checklist, an
+    optional portal login) described an *engagement* rather than a company, and
+    engagements are created by `POST /onboarding/projects` now. The fixtures
+    still carry all of it for the clients that were boarded the old way, which
+    is exactly the mix a real database has.
+  */
   http.post(url('/onboarding/clients'), async ({ request }) => {
     const db = getDb();
     const body = (await request.json()) as {
-      name?: string; description?: string | null; onboardingDate?: string;
-      pan?: string | null; address?: string | null; salesPersonId?: number | null;
-      licenseType?: string | null;
-      contacts?: ContactUpsert[];
-      applications?: { productId: number; licenseType?: string | null; units?: number | null;
-        licenseStart?: string | null; licenseEnd?: string | null }[];
-      requirements?: RequirementWrite[];
-      createPortalLogin?: boolean;
+      name?: string;
+      clientCode?: string;
+      address?: string | null;
+      city?: string | null;
       acknowledgeSimilarNames?: boolean;
+      createPortalLogin?: boolean;
+      contactName?: string | null;
+      contactEmail?: string | null;
     };
 
     const errors: Record<string, string[]> = {};
-    if (!body.name) errors.name = ['Name is required'];
-    if (!body.onboardingDate) errors.onboardingDate = ['Onboarding date is required'];
-    if (!body.contacts?.length) errors.contacts = ['At least one SPOC is required'];
-    else if (body.contacts.filter((c) => c.isPrimary).length !== 1) {
-      errors.contacts = ['Exactly one contact must be primary'];
+    if (!body.name?.trim()) errors.name = ['Name is required'];
+    if (!body.clientCode?.trim()) errors.clientCode = ['A client code is required'];
+    // Conditionally required, as `ObClientWriteService#validateForCreate` has
+    // it: a login is issued to a person, and the account row stores their name
+    // and email. Collected with the rest so one submit reports everything.
+    if (body.createPortalLogin) {
+      if (!body.contactName?.trim()) {
+        errors.contactName = ['A portal login is issued to a person — give the main contact.'];
+      }
+      if (!body.contactEmail?.trim()) {
+        errors.contactEmail = ["The login's one-time link is mailed to this address."];
+      }
     }
-    if (!body.applications?.length) errors.applications = ['At least one product is required'];
     if (Object.keys(errors).length) return validationFailed(errors);
 
-    if (body.pan && db.obClients.some((c) => c.pan === body.pan)) {
-      // Final. Two rows for one legal entity is the state the guard exists to
-      // prevent, so there is no acknowledge flag for this one.
-      return problem(409, 'ob-client-pan-duplicate', 'A client with that PAN already exists', {
-        errors: { pan: ['Already boarded'] },
-      });
+    const code = body.clientCode!.trim();
+    if (db.obClients.some((c) => c.clientCode === code)) {
+      // Field-keyed and never forceable, unlike the name guard below: the code
+      // is the exact half of "one row per legal entity" that the PAN used to be.
+      // The holder is not named — the server does not name it either, because
+      // the client wearing this code may be outside the caller's scope.
+      return validationFailed({ clientCode: [`The code ${code} already belongs to another client.`] });
     }
 
     if (!body.acknowledgeSimilarNames) {
       const needle = normaliseName(body.name!);
       const similar = db.obClients.filter((c) => normaliseName(c.name) === needle);
       if (similar.length) {
-        // B-109 · the real service's shape (`ObClientExceptionHandler.handleSimilarName`):
-        // `candidates` is what the wizard renders and links, `detail` is prose for
-        // whoever is not branching on the structured property.
+        // The real service's shape (`ObClientExceptionHandler.handleSimilarName`):
+        // `candidates` is what the dialog renders, `detail` is prose for whoever
+        // is not branching on the structured property.
         return problem(409, 'ob-client-name-similar',
           'A client with a very similar name already exists', {
             detail: similar.map((c) => c.name).join(', '),
@@ -749,145 +774,116 @@ export const onboardingHandlers = [
       }
     }
 
-    for (const app of body.applications!) {
-      const product = db.obProducts.find((p) => p.id === app.productId);
-      if (!product) return validationFailed({ applications: [`Unknown product ${app.productId}`] });
-      if (!product.hasActiveTemplate) {
-        return problem(409, 'ob-product-no-template',
-          `${product.name} has no active journey template`, {
-            detail: 'A purchase with no template to instantiate would board this client into nothing.',
-          });
-      }
+    const clientId = Math.max(0, ...db.obClients.map((c) => c.id)) + 1;
+    const created: ObClient = {
+      id: clientId,
+      name: body.name!.trim(),
+      clientCode: code,
+      city: body.city?.trim() || null,
+      description: null,
+      // Stamped, not asked for: a company is boarded the day somebody records
+      // it, and the wizard's separate field routinely disagreed with createdAt.
+      onboardingDate: new Date().toISOString().slice(0, 10),
+      pan: null,
+      address: body.address?.trim() || null,
+      licenseType: null,
+      salesPersonId: null,
+      status: 'ONBOARDING',
+      liveAt: null,
+      hasPortalLogin: Boolean(body.createPortalLogin),
+      contacts: [],
+      applications: [],
+      requirements: [],
+      attachments: [],
+      journeys: [],
+      createdById: 1,
+      createdAt: new Date().toISOString(),
+    };
+    db.obClients.push(created);
+
+    if (!body.createPortalLogin) {
+      return ok(obClientDetailDto(created, db), undefined, { status: 201 });
     }
 
-    // B-109 · the wizard's third thing this call creates. Checked here, ahead
-    // of every write below, on `ob-product-no-template`'s own shape: a boarder
-    // finds out nothing is published before the rest of the form is thrown
-    // away, not after.
-    const activePrereqVersion = db.obPrereqVersions.find((v) => v.isActive);
-    if (!activePrereqVersion) {
-      return problem(409, 'ob-client-no-prereq-master',
-        'No prerequisites checklist is published yet', {
-          detail: 'An onboarding admin publishes one on OB-14 before this client can be boarded.',
+    // The SPOC first, then the account — the server's order, and the reason
+    // for it: the username and the credential mail both come off the primary.
+    const contactId = Math.max(0, ...db.obClients.flatMap((c) => c.contacts.map((ct) => ct.id))) + 1;
+    created.contacts.push({
+      id: contactId,
+      name: body.contactName!.trim(),
+      designation: null,
+      email: body.contactEmail!.trim(),
+      phone: null,
+      // Consent withheld, and no timestamp — the add dialog does not ask, and
+      // the recoverable direction is "not yet". Recorded on the SPOC panel.
+      whatsappOptIn: false,
+      whatsappOptInAt: null,
+      whatsappOptInSource: null,
+      isPrimary: true,
+      isActive: true,
+    });
+
+    // The username is the client code, unchanged — see
+    // `PortalUsernames.fromClientCode`. The counter the server appends on a
+    // collision is not modelled: `clientCode` is already refused above as a
+    // duplicate, so the only collision left is with the ticketing master's
+    // separate namespace, which this mock does not carry.
+    const accountId = Math.max(0, ...db.obClientAccounts.map((a) => a.id)) + 1;
+    db.obClientAccounts.push({
+      id: accountId,
+      obClientId: clientId,
+      username: code,
+      displayName: body.contactName!.trim(),
+      email: body.contactEmail!.trim(),
+      isActive: true,
+      mustChangePassword: false,
+      lastLoginAt: null,
+      lockedUntil: null,
+      credentialSentAt: new Date().toISOString(),
+    });
+
+    return ok(
+      obClientDetailDto(created, db),
+      // `Demo-Passw0rd!` is what `edutrack.portal.dev-credentials` is set to
+      // locally, so the mock and the real dev stack agree. A build with the
+      // switch off answers `password: null` and the dialog says a link was
+      // mailed instead.
+      { portalLogin: { username: code, password: 'Demo-Passw0rd!' } },
+      { status: 201 },
+    );
+  }),
+
+  /*
+    Delete, and the four things that refuse it.
+
+    Projects, a prerequisite checklist, uploaded documents, a portal login.
+    Contacts, requirements and purchases are deliberately not checked — all
+    three cascade, all three are the client's own descriptive data, and all
+    three are exactly what a row typed in wrong five minutes ago might have.
+  */
+  http.delete(url('/onboarding/clients/:obClientId'), ({ params }) => {
+    const db = getDb();
+    const id = Number(params.obClientId);
+    const client = db.obClients.find((c) => c.id === id);
+    if (!client) return notFound('client');
+
+    const blockers: string[] = [];
+    if (db.obProjects.some((p) => p.obClientId === id)) blockers.push('projects');
+    if (db.obClientPrereqs.some((p) => p.obClientId === id)) blockers.push('a prerequisite checklist');
+    if (client.attachments.length > 0) blockers.push('uploaded documents');
+    if (db.obClientAccounts.some((a) => a.obClientId === id)) blockers.push('a client portal login');
+
+    if (blockers.length > 0) {
+      return problem(409, 'ob-client-in-use',
+        'The client is in use', {
+          detail: `This client has ${blockers.join(', ')}, so it cannot be deleted. `
+            + 'Set it to Dropped instead — that keeps the record and hides nothing.',
+          blockers,
         });
     }
 
-    const clientId = Math.max(0, ...db.obClients.map((c) => c.id)) + 1;
-    let contactId = Math.max(0, ...db.obClients.flatMap((c) => c.contacts.map((x) => x.id)));
-    let applicationId = Math.max(0, ...db.obClients.flatMap((c) => c.applications.map((x) => x.id)));
-    let requirementId = Math.max(0, ...db.obClients.flatMap((c) => c.requirements.map((r) => r.id)));
-    let journeyId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.map((j) => j.id)));
-    let stepId = Math.max(0, ...db.obClients.flatMap((c) => c.journeys.flatMap((j) => j.steps.map((s) => s.id))));
-
-    const created: ObClient = {
-      id: clientId,
-      name: body.name!,
-      description: body.description ?? null,
-      onboardingDate: body.onboardingDate!,
-      pan: body.pan ?? null,
-      address: body.address ?? null,
-      licenseType: body.licenseType ?? null,
-      salesPersonId: body.salesPersonId ?? null,
-      status: 'ONBOARDING',
-      liveAt: null,
-      hasPortalLogin: body.createPortalLogin ?? false,
-      // B-103 · the wizard's rows carry a consent basis and no stamp; the stamp
-      // is the server's to apply, which is why this maps rather than spreads.
-      contacts: body.contacts!.map((c) => ({
-        id: ++contactId,
-        name: c.name!,
-        designation: c.designation ?? null,
-        email: c.email!,
-        phone: c.phone ?? null,
-        ...consentOf(c, null),
-        isPrimary: Boolean(c.isPrimary),
-        isActive: true,
-      })),
-      applications: body.applications!.map((a) => ({
-        id: ++applicationId,
-        productId: a.productId,
-        licenseType: a.licenseType ?? null,
-        units: a.units ?? null,
-        licenseStart: a.licenseStart ?? null,
-        licenseEnd: a.licenseEnd ?? null,
-      })),
-      // B-107 · a new client has no documents; OB-04 has no upload step.
-      attachments: [],
-      // B-106 · rows, numbered in the order they were entered. Blank bodies
-      // are dropped rather than refused, exactly as the server does: a wizard
-      // textarea produces them by accident.
-      requirements: (body.requirements ?? [])
-        .filter((r) => r.bodyHtml?.trim())
-        .map((r, index) => ({
-          id: ++requirementId,
-          sequence: index,
-          title: r.title?.trim() || null,
-          bodyHtml: r.bodyHtml!,
-          bodyText: plainText(r.bodyHtml!),
-          isMet: Boolean(r.isMet),
-          metAt: r.isMet ? new Date().toISOString() : null,
-          metById: r.isMet ? 1 : null,
-          createdById: 1,
-          createdAt: new Date().toISOString(),
-          updatedAt: null,
-        })),
-      // One journey per purchased product, every one LOCKED. Steps are copied
-      // from an existing journey for that product, which stands in for the
-      // template snapshot the real service takes — the point being that the
-      // plan is fully visible from day one with no clock running.
-      journeys: body.applications!.map((a) => {
-        const specimen = db.obClients
-          .flatMap((c) => c.journeys)
-          .find((j) => j.productId === a.productId);
-        return {
-          id: ++journeyId,
-          productId: a.productId,
-          gateStatus: 'LOCKED' as const,
-          heldByJourneyId: null,
-          steps: (specimen?.steps ?? []).map((s) => ({
-            id: ++stepId,
-            sequence: s.sequence,
-            name: s.name,
-            status: 'PENDING' as const,
-            tatDays: s.tatDays,
-            usedHours: 0,
-            dependsOnStepId: null,
-          })),
-        };
-      }),
-      createdById: db.currentUserId,
-      createdAt: new Date().toISOString(),
-    };
-
-    db.obClients.push(created);
-
-    // B-109 · the checklist behind the gate, snapshotted from the active
-    // master — the mock's own mirror of `ObClientPrereqService.instantiate`.
-    // Every task's clock starts now, on the same plan §5.4 line the real
-    // service reads: prerequisite time is attributed to the client from
-    // boarding, not from gate-open or first login.
-    db.obClientPrereqs.push({
-      obClientId: clientId, templateVersion: activePrereqVersion.version,
-      status: 'IN_PROGRESS', clearedAt: null,
-    });
-    let prereqTaskId = Math.max(0, ...db.obClientPrereqTasks.map((t) => t.id));
-    const boardedAt = new Date().toISOString();
-    for (const source of db.obPrereqTemplateTasks.filter(
-      (t) => t.templateVersion === activePrereqVersion.version && t.isActive,
-    )) {
-      db.obClientPrereqTasks.push({
-        id: ++prereqTaskId, obClientId: clientId, templateTaskId: source.id,
-        sequence: source.sequence, title: source.title, description: source.description,
-        tatDays: source.tatDays, isMandatory: source.isMandatory, isAdHoc: false,
-        status: 'PENDING', dueAt: boardedAt,
-        submittedAt: null, submittedVia: null,
-        verifiedAt: null, verifiedById: null,
-        skippedAt: null, skippedById: null, skipReason: null,
-        referenceDocs: source.docs, submissions: [],
-      });
-    }
-
-    return ok(obClientDetailDto(created, db), undefined, { status: 201 });
+    db.obClients = db.obClients.filter((c) => c.id !== id);
+    return noContent();
   }),
 
   http.get(url('/onboarding/clients/:obClientId'), ({ params }) => {
@@ -910,6 +906,19 @@ export const onboardingHandlers = [
       return validationFailed({ statusReason: ['A reason is required for this status'] });
     }
 
+    if (body.clientCode !== undefined) {
+      const code = (body.clientCode ?? '').trim();
+      if (!code) {
+        // Not clearable. A client that has a code must not be able to lose it
+        // by clearing a field — see the contract's note on the same rule.
+        return validationFailed({ clientCode: ['A client code is required.'] });
+      }
+      if (db.obClients.some((other) => other.id !== c.id && other.clientCode === code)) {
+        return validationFailed({ clientCode: [`The code ${code} already belongs to another client.`] });
+      }
+      c.clientCode = code;
+    }
+    if (body.city !== undefined) c.city = body.city;
     if (body.name != null) c.name = body.name;
     if (body.description !== undefined) c.description = body.description;
     if (body.address !== undefined) c.address = body.address;

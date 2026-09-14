@@ -7,6 +7,7 @@ import { Tabs, type TabItem } from '@/components/ui/tabs'
 
 import { ObDashboardCardRow } from './ObDashboardCardRow'
 import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
 import { ObDashboardRagBoard } from './ObDashboardRagBoard'
 import { ObDashboardStuckPanel } from './ObDashboardStuckPanel'
 import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
@@ -93,7 +94,7 @@ function isTabId(value: string | null): value is TabId {
  * exactly the card that was clicked.
  */
 export function ObDashboardPage() {
-  const { data, isPending, isError } = useGetObDashboardSummary()
+  const { data, isPending, isError } = useGetObDashboardSummary(undefined, { query: OB_DASHBOARD_QUERY })
   const [drill, setDrill] = useState<DrillTarget | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
 

@@ -46,6 +46,9 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObClientClientCode } from './obClientClientCode';
+import type { ObClientCity } from './obClientCity';
+import type { ObClientAddress } from './obClientAddress';
 import type { ObClientStatus } from './obClientStatus';
 import type { ObClientRag } from './obClientRag';
 import type { ObGateStatus } from './obGateStatus';
@@ -66,6 +69,31 @@ export interface ObClient {
   id: number;
   /** @maxLength 200 */
   name: string;
+  /**
+   * The operations team's own filing key, typed rather than generated,
+and unique across `ob_clients`.
+
+**Nullable, and required of every new client** — not a
+contradiction. Every client boarded through the retired OB-04
+wizard has none, and there is no value to backfill that would not
+be invented; the service requires one of anything created from
+here on, which is a rule about new rows that no column can express.
+
+   * @maxLength 32
+   */
+  clientCode?: ObClientClientCode;
+  /**
+   * Free text. The module has no city master, and inventing one to hold
+a label would be a screen nobody asked for.
+
+   * @maxLength 120
+   */
+  city?: ObClientCity;
+  /** On the list row as well as the detail, unlike `pan`. It is not
+identity data — it is how two similarly named trusts are told apart
+on the Clients master, which is the screen this row is drawn for.
+ */
+  address?: ObClientAddress;
   onboardingDate: string;
   status: ObClientStatus;
   /** Worst across the client's **open** journeys. Null while every

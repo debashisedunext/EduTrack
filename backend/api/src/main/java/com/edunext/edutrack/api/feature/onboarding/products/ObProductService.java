@@ -1,5 +1,6 @@
 package com.edunext.edutrack.api.feature.onboarding.products;
 
+import com.edunext.edutrack.api.feature.onboarding.journeys.JourneyTatCalculator;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
@@ -9,6 +10,8 @@ import com.edunext.edutrack.domain.onboarding.ObProductRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -114,7 +117,7 @@ public class ObProductService {
         }
         List<Long> ids = rows.stream().map(ObProduct::getId).toList();
         Set<Long> withTemplate = Set.copyOf(products.findProductIdsWithAnActiveTemplate(ids));
-        Map<Long, Long> tatDays = tally(products.sumActiveTemplateTatDays(ids));
+        Map<Long, Integer> tatDays = totalTatDaysByProduct(products.activeTemplateTasks(ids));
         Map<Long, Long> journeys = tally(products.countJourneysByProduct(ids));
         // C-123 · one more batched read for the catalogue's own three fields —
         // ObJourneyTemplateRepository, not a fourth ObProductRepository query,
@@ -156,7 +159,7 @@ public class ObProductService {
                             row.getName(),
                             row.isActive(),
                             hasTemplate,
-                            hasTemplate ? Math.toIntExact(tatDays.getOrDefault(row.getId(), 0L)) : null,
+                            hasTemplate ? tatDays.getOrDefault(row.getId(), 0) : null,
                             Math.toIntExact(journeys.getOrDefault(row.getId(), 0L)),
                             active == null ? null : active.getId(),
                             active == null ? null : active.getSequence(),
@@ -164,6 +167,51 @@ public class ObProductService {
                                     : dependsOn.getOrDefault(active.getId(), List.of()));
                 })
                 .toList();
+    }
+
+    /**
+     * {@code totalTatDays} per product — <b>the critical path through each of
+     * its services, summed across the services</b>.
+     *
+     * <h2>The two levels answer differently, and both are right</h2>
+     *
+     * <p>Inside one service, tasks that wait for nothing run at the same time,
+     * so the service's figure is its longest chain rather than its total work
+     * — {@link JourneyTatCalculator} carries that reasoning in full. It was a
+     * {@code sum(tat_days)} until it was noticed that the two readings
+     * disagree wherever a service has parallel tasks, which is most of them.
+     *
+     * <p>Across services the sum stands, and is not the same oversight
+     * repeated a level up: a product's Module Services are boarded one after
+     * another in catalogue sequence, and one held behind another by
+     * {@code ob_journey_template_dependencies} cannot start until it
+     * completes. Adding them is the pessimistic reading of a set that is
+     * genuinely sequential more often than not, and a product-level critical
+     * path would have to resolve service dependencies that are declared
+     * between template <em>versions</em> and held between journeys — a
+     * different graph, and not one this catalogue row can see.
+     *
+     * <p>A product with an active template and no tasks in it is absent from
+     * {@code rows} and answers {@code 0} at the call site; {@code null} is
+     * reserved for having no active template, which the caller decides.
+     */
+    private static Map<Long, Integer> totalTatDaysByProduct(
+            List<ObProductRepository.ActiveTemplateTask> rows) {
+        // Product → service → its tasks. Grouped by service and not only by
+        // product because a dependency never crosses a template — the
+        // composite foreign key sees to that — so each service's chain is
+        // walked on its own set.
+        Map<Long, Map<Long, List<JourneyTatCalculator.Task>>> byProduct = new LinkedHashMap<>();
+        for (ObProductRepository.ActiveTemplateTask row : rows) {
+            byProduct.computeIfAbsent(row.getProductId(), id -> new LinkedHashMap<>())
+                    .computeIfAbsent(row.getTemplateId(), id -> new ArrayList<>())
+                    .add(new JourneyTatCalculator.Task(
+                            row.getTaskId(), row.getTatDays(), row.getDependsOnTaskId()));
+        }
+        Map<Long, Integer> totals = new LinkedHashMap<>();
+        byProduct.forEach((productId, services) -> totals.put(productId,
+                services.values().stream().mapToInt(JourneyTatCalculator::criticalPathDays).sum()));
+        return totals;
     }
 
     private static Map<Long, Long> tally(List<ObProductRepository.Tally> rows) {

@@ -16,20 +16,30 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepRepository;
+import com.edunext.edutrack.domain.onboarding.ObProject;
+import com.edunext.edutrack.domain.onboarding.ObProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * C-103 · Instantiation — plan §5.2. One LOCKED journey per purchased
  * product, {@code template_id + version} pinned at creation, owners
- * resolved where they can be, clocks dead until the gate opens.
+ * resolved where they can be, and no clock started here.
+ *
+ * <p>A journey born {@code LOCKED} still activates nothing — the kick at the
+ * end of {@link #instantiate} is guarded on {@code OPEN} and stays that way.
+ * What changed with the advisory checklist is only that its owners may now
+ * press Start themselves rather than waiting on the gate; see
+ * {@link ObJourneyStepLifecycleService#start}.
  *
  * <h2>What this service does not do</h2>
  *
@@ -43,11 +53,17 @@ import java.util.Map;
  *       completes — and re-pointing it at the next outstanding one, since a
  *       service may wait behind several — is
  *       {@link ObJourneyDependencyRelease}'s.</li>
- *   <li><b>No role→user resolution.</b> A template step's {@code ownerRole}
- *       is never consulted — there is no per-client role→user resolver
- *       anywhere yet (OB-08's "Responsibility" admin, not built). Only a
- *       pinned {@code ownerUserId} carries forward; everything else lands on
- *       {@link #unassignedSteps()}.</li>
+ *   <li><b>No role→user resolution, because there is no role left to
+ *       resolve.</b> A template step used to carry an {@code ownerRole} this
+ *       service never consulted — no per-client role→user resolver exists
+ *       (OB-08's "Responsibility" admin, not built), so a task naming only a
+ *       role instantiated onto nobody. The column is gone
+ *       ({@code V20260914_1830}) and its job is done by a person instead: a
+ *       task with no pinned {@code ownerUserId} falls back to the project's
+ *       implementor. See {@link #defaultImplementorOf}.
+ *       {@link #unassignedSteps()} still exists and is now the narrow case it
+ *       was meant to be — a project with no implementor and no creator —
+ *       rather than where most of a journey lands.</li>
  * </ul>
  *
  * <p><b>C-119 · the one exception.</b> Every step is still born
@@ -77,6 +93,7 @@ public class ObJourneyInstantiationService {
     private final PurchasedProductAccess purchasedProducts;
     private final ObJourneyStepLifecycleService stepLifecycle;
     private final ObDemoStepDocumentSeeder demoDocuments;
+    private final ObProjectRepository projects;
 
     public ObJourneyInstantiationService(ObJourneyRepository journeys,
                                           ObJourneyStepRepository journeySteps,
@@ -87,7 +104,8 @@ public class ObJourneyInstantiationService {
                                           ObJourneyTemplateStepItemRepository templateStepItems,
                                           PurchasedProductAccess purchasedProducts,
                                           ObJourneyStepLifecycleService stepLifecycle,
-                                          ObDemoStepDocumentSeeder demoDocuments) {
+                                          ObDemoStepDocumentSeeder demoDocuments,
+                                          ObProjectRepository projects) {
         this.journeys = journeys;
         this.journeySteps = journeySteps;
         this.journeyStepItems = journeyStepItems;
@@ -98,6 +116,7 @@ public class ObJourneyInstantiationService {
         this.purchasedProducts = purchasedProducts;
         this.stepLifecycle = stepLifecycle;
         this.demoDocuments = demoDocuments;
+        this.projects = projects;
     }
 
     /**
@@ -126,11 +145,69 @@ public class ObJourneyInstantiationService {
      */
     @Transactional
     public List<ObJourney> instantiate(long obClientId, long productId) {
+        ObProject project = projects.findByObClientIdAndProductId(obClientId, productId)
+                .orElseThrow(() -> new ProjectNotFoundForPairException(obClientId, productId));
+        return instantiateInto(project,
+                templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId));
+    }
+
+    /**
+     * The Projects screen's create — <b>only the Module Services the form left
+     * checked</b>.
+     *
+     * <p>{@link #instantiate} boards a client through every service its product
+     * publishes, which was the only behaviour that existed while a purchase was
+     * a checkbox on a wizard. A project is chosen service by service, so the
+     * two differ in exactly one respect: which templates reach
+     * {@link #instantiateInto}. Everything after that — pinned sequence,
+     * gate inheritance, the held-behind cursor, the step clone — is the same
+     * code, because a journey created from a checked service is not a different
+     * kind of journey.
+     *
+     * <p>The project is passed in rather than looked up, because this is the
+     * one caller that has just written it and is inside the same transaction.
+     *
+     * @param templateIds the checked services, in any order — catalogue
+     *                    sequence is re-imposed here, so a form that submits
+     *                    them shuffled still instantiates a dependency before
+     *                    the service held behind it
+     * @throws UnknownModuleServiceException an id that is not an active service
+     *                                       of this project's product, which is
+     *                                       a form built against a catalogue
+     *                                       that has since changed
+     */
+    @Transactional
+    public List<ObJourney> instantiateSelected(ObProject project, List<Long> templateIds) {
+        List<ObJourneyTemplate> active =
+                templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(project.getProductId());
+        Set<Long> wanted = new LinkedHashSet<>(templateIds);
+        List<Long> offered = active.stream().map(ObJourneyTemplate::getId).toList();
+        for (Long id : wanted) {
+            if (!offered.contains(id)) {
+                throw new UnknownModuleServiceException(project.getProductId(), id);
+            }
+        }
+        // Filtered out of `active` rather than fetched by id, so the result
+        // keeps the catalogue's own ordering without a second sort.
+        return instantiateInto(project, active.stream().filter(t -> wanted.contains(t.getId())).toList());
+    }
+
+    /**
+     * The shared half of the two entry points above: a project, and the
+     * services it is to be boarded through.
+     *
+     * <p><b>Services already running are skipped, not refused.</b> A product
+     * whose catalogue grew a service after this client was boarded
+     * instantiates the new one on the next call and leaves the rest alone;
+     * only a call with nothing left to instantiate raises
+     * {@link JourneyAlreadyExistsException}.
+     */
+    private List<ObJourney> instantiateInto(ObProject project, List<ObJourneyTemplate> services) {
+        long obClientId = project.getObClientId();
+        long productId = project.getProductId();
         if (!purchasedProducts.isPurchased(obClientId, productId)) {
             throw new ProductNotPurchasedException(obClientId, productId);
         }
-        List<ObJourneyTemplate> services =
-                templates.findByProductIdAndIsActiveTrueOrderBySequenceAscIdAsc(productId);
         if (services.isEmpty()) {
             throw new NoActiveTemplateForProductException(productId);
         }
@@ -141,7 +218,7 @@ public class ObJourneyInstantiationService {
                     obClientId, productId, service.getName())) {
                 continue;
             }
-            created.add(instantiateService(obClientId, productId, service));
+            created.add(instantiateService(project, service));
         }
         if (created.isEmpty()) {
             throw new JourneyAlreadyExistsException(obClientId, productId);
@@ -149,9 +226,15 @@ public class ObJourneyInstantiationService {
         return created;
     }
 
-    /** One service of one product, the caller having already settled that it is missing. */
-    private ObJourney instantiateService(long obClientId, long productId, ObJourneyTemplate template) {
+    /** One service of one project, the caller having already settled that it is missing. */
+    private ObJourney instantiateService(ObProject project, ObJourneyTemplate template) {
+        long obClientId = project.getObClientId();
+        long productId = project.getProductId();
         ObJourney journey = new ObJourney();
+        // The three are written together here and nowhere else — the
+        // denormalisation ObJourney#getProjectId() documents holds because
+        // this is its only writer.
+        journey.setProjectId(project.getId());
         journey.setObClientId(obClientId);
         journey.setProductId(productId);
         journey.setServiceName(template.getName());
@@ -198,7 +281,7 @@ public class ObJourneyInstantiationService {
                 .findFirst().orElse(null));
 
         ObJourney saved = journeys.save(journey);
-        cloneSteps(template.getId(), saved.getId());
+        cloneSteps(template.getId(), saved.getId(), project);
         if (saved.getGateStatus() == ObGateStatus.OPEN) {
             // C-119 · the "instantiate directly OPEN" edge case ObJourneyStep's
             // own class javadoc assigns here: nothing else will ever call
@@ -286,8 +369,9 @@ public class ObJourneyInstantiationService {
         return journeySteps.findByOwnerUserIdIsNullOrderByIdAsc();
     }
 
-    private void cloneSteps(long templateId, long journeyId) {
+    private void cloneSteps(long templateId, long journeyId, ObProject project) {
         List<ObJourneyTemplateStep> sourceSteps = templateSteps.findByTemplateIdOrderBySequenceAsc(templateId);
+        Long fallbackOwner = defaultImplementorOf(project);
 
         // First pass: clone every step without depends_on_step_id, since the
         // target ids a later step might point at do not exist yet — same
@@ -302,10 +386,19 @@ public class ObJourneyInstantiationService {
             clone.setName(source.getName());
             clone.setDescription(source.getDescription());
             clone.setTatDays(source.getTatDays());
-            // Pinned user only — see the class javadoc on why ownerRole is
-            // never consulted here.
-            clone.setOwnerUserId(source.getOwnerUserId());
-            clone.setBackupOwnerUserId(source.getBackupOwnerUserId());
+            /*
+              The template's pinned implementor, or the project's own when the
+              task names nobody. See `defaultImplementorOf`: a task with no
+              owner used to instantiate onto nobody and land on the Manager's
+              unassigned list, which is a worse answer than the one the
+              project has been carrying all along.
+
+              No backup is seeded, because the template no longer has one to
+              seed from (V20260914_1830). `ob_journey_steps.backup_owner_user_id`
+              is untouched and still set per journey — leave coverage is a fact
+              about this client's March, not about the plan.
+            */
+            clone.setOwnerUserId(source.getOwnerUserId() != null ? source.getOwnerUserId() : fallbackOwner);
             clone.setRequiresSignoff(source.isRequiresSignoff());
             ObJourneyStep savedClone = journeySteps.save(clone);
             sourceToClonedStepId.put(source.getId(), savedClone.getId());
@@ -341,5 +434,51 @@ public class ObJourneyInstantiationService {
                                     + source.getId() + " and has vanished mid-instantiation"));
             clone.setDependsOnStepId(clonedDependsOn);
         }
+    }
+
+    /**
+     * Who a task with nobody named on it is put on — <b>the project's own
+     * implementor</b>, and the person who created the project after that.
+     *
+     * <h2>Why a template task is usually nameless, and why that stopped
+     * meaning unassigned</h2>
+     *
+     * <p>A Module Service is authored once and boarded for every client that
+     * buys the product. Naming a person on a task there says "Priya does the
+     * data migration for everyone, for ever", which is true of almost no task
+     * — so almost every task was left blank, instantiated onto nobody, and
+     * arrived on {@link #unassignedSteps()} for a manager to hand out one by
+     * one. A designer field that is correctly left empty on nearly every row
+     * is not a default; it is a form nobody can fill in.
+     *
+     * <p>The project knows the answer. {@code ob_projects.implementor_user_id}
+     * is asked for on the create form and is exactly "who is running this
+     * implementation", so a nameless task lands on them and a manager
+     * reassigns the handful that belong to somebody else — the opposite of
+     * assigning every step of every journey by hand.
+     *
+     * <p>{@code created_by} is the second fallback rather than a co-equal:
+     * whoever set the project up is a real person who can see it and can pass
+     * the work on, which beats nobody. Both columns are nullable, and a
+     * project with neither leaves the task unowned exactly as before — the
+     * unassigned list did not go away, it just stopped being where every task
+     * goes.
+     *
+     * <p><b>The template still wins when it names somebody.</b> This is a
+     * fallback for null, not an override: a task pinned to one person is
+     * pinned deliberately, and a project implementor quietly replacing them
+     * would make the designer's own field advisory.
+     *
+     * <p>Resolved once per journey rather than per task, and deliberately not
+     * re-resolved later: the journey step is a <em>snapshot</em>, the same way
+     * its name and TAT are. Changing a project's implementor next month
+     * reassigns nothing already boarded, which is the behaviour a running
+     * journey needs — the alternative silently moves live work off somebody's
+     * plate.
+     */
+    private static Long defaultImplementorOf(ObProject project) {
+        return project.getImplementorUserId() != null
+                ? project.getImplementorUserId()
+                : project.getCreatedBy();
     }
 }

@@ -1,10 +1,14 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
+import com.edunext.edutrack.domain.onboarding.ObImplementationStage;
+import com.edunext.edutrack.domain.onboarding.ObImplementationStageRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyId;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStage;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStageRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository;
@@ -30,10 +34,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * C-101 · {@link ObJourneyTemplateService}. The four repositories are mocked
@@ -97,9 +104,131 @@ class ObJourneyTemplateServiceTest {
     private final ObJourneyTemplateStepRepository steps = mock(ObJourneyTemplateStepRepository.class);
     private final ObJourneyTemplateStepItemRepository stepItems = mock(ObJourneyTemplateStepItemRepository.class);
     private final ObJourneyTemplateStepDocRepository stepDocs = mock(ObJourneyTemplateStepDocRepository.class);
+    private final ObImplementationStageRepository implementationStages =
+            mock(ObImplementationStageRepository.class);
+    private final ObJourneyTemplateStageRepository stageGroups =
+            mock(ObJourneyTemplateStageRepository.class);
+
+    /**
+     * B-131 · mocked, and answering {@code 0} unless a test says otherwise.
+     *
+     * <p>Its own behaviour — which live steps a new item reaches, and at what
+     * sequence — is {@link LiveChecklistBackfillTest}'s subject, against its
+     * own repository fakes. What matters here is the half this service owns:
+     * which template versions accept the call at all, and that the count comes
+     * back out untouched.
+     */
+    private final LiveChecklistBackfill liveChecklistBackfill = mock(LiveChecklistBackfill.class);
 
     private final ObJourneyTemplateService service =
-            new ObJourneyTemplateService(templates, dependencies, steps, stepItems, stepDocs);
+            new ObJourneyTemplateService(templates, dependencies, steps, stepItems, stepDocs,
+                    implementationStages, stageGroups, liveChecklistBackfill);
+
+    /** {@code ob_journey_template_stages}, in memory. */
+    private final Map<Long, ObJourneyTemplateStage> groupRows = new LinkedHashMap<>();
+    private final AtomicLong groupIds = new AtomicLong();
+
+    private List<ObJourneyTemplateStage> groupsFor(Long templateId) {
+        return groupRows.values().stream()
+                .filter(g -> g.getTemplateId().equals(templateId))
+                .sorted(Comparator.comparingInt(ObJourneyTemplateStage::getSequence)
+                        .thenComparing(ObJourneyTemplateStage::getId))
+                .toList();
+    }
+
+    /**
+     * The stage group a template holds under {@code stageName} — what
+     * {@code addTask} takes where {@code addStep} used to take an
+     * implementation-stage id.
+     *
+     * <p><b>Created on demand if the template has none.</b> Almost every test
+     * in this file wants somewhere to put a task so it can then assert
+     * something about reordering, publishing or revising; which stage that is
+     * is a fixture detail, and requiring each of them to fill the master
+     * before creating its template would be ceremony in service of nothing.
+     * That {@code createTemplate} really does seed the groups is proved by
+     * {@link SeedsImplementationStages}, which fills the master first and
+     * checks the groups it produced — one place, deliberately, rather than
+     * incidentally in fifty.
+     */
+    private long groupId(long templateId, String stageName) {
+        return groupsFor(templateId).stream()
+                .filter(g -> g.getName().equals(stageName))
+                .findFirst()
+                .orElseGet(() -> {
+                    ObJourneyTemplateStage group = new ObJourneyTemplateStage(
+                            templateId, stageId(stageName), stageName, groupsFor(templateId).size() + 1);
+                    group.setId(groupIds.incrementAndGet());
+                    groupRows.put(group.getId(), group);
+                    return group;
+                })
+                .getId();
+    }
+
+    /**
+     * Adds a task named after the stage it goes in — the shape almost every
+     * test below wants, since they were written when a step <em>was</em> a
+     * stage and named after one.
+     */
+    private ObJourneyTemplateStep addTaskIn(long templateId, String stageName, String description, int tatDays,
+                                          Long ownerUserId, boolean requiresSignoff, Long dependsOnStepId) {
+        return service.addTask(groupId(templateId, stageName), stageName, description, tatDays, ownerUserId,
+                               requiresSignoff, dependsOnStepId);
+    }
+
+    /**
+     * The OB-15 master, as far as these tests are concerned — empty until a
+     * test names a stage.
+     *
+     * <p>Empty is the deliberate default. {@code createTemplate} now seeds one
+     * step per <em>active</em> stage, so a master with none in it leaves every
+     * test that was written before this feature asserting exactly what it
+     * asserted before: a brand-new template with no steps on it. The seeding
+     * is proved by {@link SeedsImplementationStages}, which fills the master
+     * first, rather than by making every other test in this file work around
+     * six steps it did not ask for.
+     */
+    private final Map<Long, ObImplementationStage> stageRows = new LinkedHashMap<>();
+    private final AtomicLong stageIds = new AtomicLong();
+
+    /**
+     * Registers a stage under this name if it is new, and answers its id —
+     * the argument {@code addStep} now takes where it used to take a name.
+     */
+    private long stageId(String name) {
+        return stageRows.values().stream()
+                .filter(stage -> stage.getName().equals(name))
+                .map(ObImplementationStage::getId)
+                .findFirst()
+                .orElseGet(() -> newStage(name, true));
+    }
+
+    private long newStage(String name, boolean active) {
+        long id = stageIds.incrementAndGet();
+        ObImplementationStage stage = new ObImplementationStage(name, (int) id, active, null);
+        // The entity's id is database-generated, so the fake sets it the way
+        // the step and template fakes above set theirs.
+        try {
+            java.lang.reflect.Field field = ObImplementationStage.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(stage, id);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("ObImplementationStage.id is no longer a field called id", e);
+        }
+        stageRows.put(id, stage);
+        return id;
+    }
+
+    @BeforeEach
+    void wireStageMaster() {
+        lenient().when(implementationStages.findById(any())).thenAnswer(inv ->
+                Optional.ofNullable(stageRows.get(inv.<Long>getArgument(0))));
+        lenient().when(implementationStages.findAllByIsActiveOrderBySequenceAscIdAsc(anyBoolean()))
+                .thenAnswer(inv -> stageRows.values().stream()
+                        .filter(stage -> stage.isActive() == inv.<Boolean>getArgument(0))
+                        .sorted(Comparator.comparingInt(ObImplementationStage::getSequence))
+                        .toList());
+    }
 
     @BeforeEach
     void wireFakes() {
@@ -234,6 +363,43 @@ class ObJourneyTemplateServiceTest {
             return null;
         }).when(steps).deleteAll(any());
 
+        lenient().when(stageGroups.save(any())).thenAnswer(inv -> {
+            ObJourneyTemplateStage g = inv.getArgument(0);
+            if (g.getId() == null) {
+                g.setId(groupIds.incrementAndGet());
+            }
+            groupRows.put(g.getId(), g);
+            return g;
+        });
+        lenient().when(stageGroups.findById(any())).thenAnswer(inv ->
+                Optional.ofNullable(groupRows.get(inv.<Long>getArgument(0))));
+        lenient().when(stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(any()))
+                .thenAnswer(inv -> groupsFor(inv.getArgument(0)));
+        lenient().when(stageGroups.findByTemplateIdAndImplementationStageId(any(), any()))
+                .thenAnswer(inv -> {
+                    Long templateId = inv.getArgument(0);
+                    Long stageId = inv.getArgument(1);
+                    return groupRows.values().stream()
+                            .filter(g -> g.getTemplateId().equals(templateId)
+                                    && stageId.equals(g.getImplementationStageId()))
+                            .findFirst();
+                });
+        lenient().when(stageGroups.findByTemplateIdAndImplementationStageIdIsNull(any()))
+                .thenAnswer(inv -> {
+                    Long templateId = inv.getArgument(0);
+                    return groupRows.values().stream()
+                            .filter(g -> g.getTemplateId().equals(templateId)
+                                    && g.getImplementationStageId() == null)
+                            .findFirst();
+                });
+        lenient().when(stageGroups.countByTemplateId(any()))
+                .thenAnswer(inv -> (long) groupsFor(inv.getArgument(0)).size());
+        lenient().doAnswer(inv -> {
+            Long templateId = inv.getArgument(0);
+            groupRows.values().removeIf(g -> g.getTemplateId().equals(templateId));
+            return null;
+        }).when(stageGroups).deleteByTemplateId(any());
+
         lenient().when(steps.save(any())).thenAnswer(inv -> {
             ObJourneyTemplateStep s = inv.getArgument(0);
             if (s.getId() == null) {
@@ -309,6 +475,325 @@ class ObJourneyTemplateServiceTest {
         return result;
     }
 
+    /**
+     * The feature this whole change exists for: a new Module Service arrives
+     * already described in the organisation's own vocabulary.
+     */
+    @Nested
+    @DisplayName("createTemplate seeds the implementation stages as empty groups")
+    class SeedsImplementationStages {
+
+        @BeforeEach
+        void fillTheMaster() {
+            stageId("Configuration");
+            stageId("Data Migration");
+            stageId("Reports");
+            stageId("Training");
+            stageId("Communication");
+            stageId("Third Party Integration");
+        }
+
+        @Test
+        @DisplayName("a new service holds one group per active stage, in the master's order")
+        void seedsOneGroupPerStage() {
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+
+            assertThat(service.getStages(created.getId()))
+                    .extracting(ObJourneyTemplateStage::getName)
+                    .containsExactly("Configuration", "Data Migration", "Reports", "Training",
+                            "Communication", "Third Party Integration");
+        }
+
+        /**
+         * Groups, not tasks — the whole point of the four-level model.
+         * Seeding a task per stage would invent work nobody described:
+         * "Configuration" names a phase, not something to do, and an admin
+         * would clear six of them out before writing the real ones.
+         */
+        @Test
+        @DisplayName("and no tasks at all, because a stage is not work")
+        void seedsNoTasks() {
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(created.getId())).isEmpty();
+        }
+
+        /**
+         * Each group names the stage it came from, so a group is
+         * distinguishable from one somebody's migration produced by hand.
+         */
+        @Test
+        @DisplayName("each seeded group points at the stage it was seeded from")
+        void seededGroupsNameTheirStage() {
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+
+            assertThat(service.getStages(created.getId()))
+                    .extracting(ObJourneyTemplateStage::getImplementationStageId)
+                    .containsExactly(stageId("Configuration"), stageId("Data Migration"),
+                            stageId("Reports"), stageId("Training"), stageId("Communication"),
+                            stageId("Third Party Integration"));
+        }
+
+        @Test
+        @DisplayName("a retired stage is not seeded")
+        void retiredStagesAreNotSeeded() {
+            newStage("Decommissioned Thing", false);
+
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+
+            assertThat(service.getStages(created.getId()))
+                    .extracting(ObJourneyTemplateStage::getName)
+                    .doesNotContain("Decommissioned Thing");
+        }
+
+        /**
+         * A stage holds many tasks. This is the rule
+         * {@code uq_ob_journey_template_steps_stage} used to forbid and that
+         * {@code V20260911_1630} drops — asserted, because it is the single
+         * behavioural difference the whole migration exists for.
+         */
+        @Test
+        @DisplayName("a stage takes as many tasks as somebody writes into it")
+        void aStageHoldsManyTasks() {
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+            long configuration = groupId(created.getId(), "Configuration");
+
+            service.addTask(configuration, "Create tenant", null, 2, null, false, null);
+            service.addTask(configuration, "Brand the portal", null, 1, null, false, null);
+
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(created.getId()))
+                    .extracting(ObJourneyTemplateStep::getName)
+                    .containsExactly("Create tenant", "Brand the portal");
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(created.getId()))
+                    .allMatch(task -> task.getTemplateStageId().equals(configuration));
+        }
+
+        /**
+         * `sequence` walks groups in order, then tasks within a group — the
+         * invariant that lets instantiation, the parallel-group layering and
+         * the designer tree all keep sorting by this one column.
+         */
+        @Test
+        @DisplayName("sequence walks the groups in order, then the tasks inside each")
+        void sequenceWalksGroupsThenTasks() {
+            ObJourneyTemplate created = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+
+            // Written out of order on purpose: Training first, then two into
+            // Configuration, which sorts ahead of it.
+            service.addTask(groupId(created.getId(), "Training"), "Train admins", null, 2, null, false, null);
+            service.addTask(groupId(created.getId(), "Configuration"), "Create tenant", null, 2, null, false, null);
+            service.addTask(groupId(created.getId(), "Configuration"), "Brand the portal", null, 1, null, false, null);
+
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(created.getId()))
+                    .extracting(ObJourneyTemplateStep::getName)
+                    .containsExactly("Create tenant", "Brand the portal", "Train admins");
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(created.getId()))
+                    .extracting(ObJourneyTemplateStep::getSequence)
+                    .containsExactly(1, 2, 3);
+        }
+
+        @Test
+        @DisplayName("adding a task to a stage that does not exist is a 404, not a stray row")
+        void unknownStageGroupIsRefused() {
+            assertThatThrownBy(() ->
+                    service.addTask(9_999L, "Orphan", null, 2, null, false, null))
+                    .isInstanceOf(StageGroupNotFoundException.class);
+        }
+
+        /**
+         * The clone has to carry the groups, or a revision's tasks would point
+         * into the published version's stages — and editing the draft would
+         * then edit what the published version renders.
+         */
+        @Test
+        @DisplayName("a revision clones the stage groups, and re-points its tasks at the clones")
+        void revisionClonesTheGroups() {
+            ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+            service.addTask(groupId(v1.getId(), "Configuration"), "Create tenant", null, 2, null, false, null);
+            service.publish(v1.getId(), ADMIN);
+
+            ObJourneyTemplate v2 = service.beginRevision(v1.getId(), ADMIN);
+
+            assertThat(service.getStages(v2.getId()))
+                    .extracting(ObJourneyTemplateStage::getName)
+                    .containsExactlyElementsOf(service.getStages(v1.getId()).stream()
+                            .map(ObJourneyTemplateStage::getName).toList());
+
+            List<Long> v1GroupIds = service.getStages(v1.getId()).stream()
+                    .map(ObJourneyTemplateStage::getId).toList();
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(v2.getId()))
+                    .extracting(ObJourneyTemplateStep::getTemplateStageId)
+                    .doesNotContainAnyElementsOf(v1GroupIds);
+        }
+    }
+
+    /**
+     * The edit the seeded stages made necessary — see
+     * {@code ObJourneyTemplateService#updateStep}. Six steps nobody typed
+     * arrive with a one-day TAT and no owner, so "configure this service"
+     * means editing them, and remove-and-re-add would take their task lists
+     * with it.
+     */
+    @Nested
+    @DisplayName("updateStep — editing a task")
+    class UpdateStep {
+
+        private ObJourneyTemplate draft;
+        private ObJourneyTemplateStep configuration;
+
+        /*
+          A task, written into the Configuration stage. The stages themselves
+          arrive empty now, so the thing under edit has to be added rather
+          than picked off the seeded six: a stage is a container, and an edit
+          route acts on work.
+        */
+        @BeforeEach
+        void aServiceWithItsStages() {
+            stageId("Configuration");
+            stageId("Data Migration");
+            draft = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+            configuration = addTaskIn(draft.getId(), "Configuration", null, 1, null, false, null);
+        }
+
+        @Test
+        @DisplayName("sets the TAT, the description and the sign-off flag")
+        void setsTheEditableFields() {
+            ObJourneyTemplateStep updated = service.updateStep(configuration.getId(), null, "Gateway keys and callbacks",
+                                                            5, null, true, null, false, false);
+
+            assertThat(updated.getTatDays()).isEqualTo(5);
+            assertThat(updated.isRequiresSignoff()).isTrue();
+            assertThat(updated.getDescription()).isEqualTo("Gateway keys and callbacks");
+        }
+
+        /**
+         * The named person, which is what a journey instance carries into the
+         * ribbon — and now the <em>only</em> owner a template task has, since
+         * {@code V20260914_1830} dropped the owning role and the backup owner
+         * that used to sit beside it.
+         */
+        @Test
+        @DisplayName("names the implementor")
+        void namesTheImplementor() {
+            ObJourneyTemplateStep updated = service.updateStep(configuration.getId(), null, null, null, 7L, null, null,
+                                                            false, false);
+
+            assertThat(updated.getOwnerUserId()).isEqualTo(7L);
+        }
+
+        /**
+         * The gap the clear flag closes: a {@code Long} has no blank value, so
+         * without it a person could be named and never taken off again.
+         *
+         * <p><b>Cleared is not unassigned.</b> A task with no implementor falls
+         * back to the <em>project's</em> implementor when a journey is created
+         * from this service — {@code ObJourneyInstantiationService} owns that
+         * half of the rule and asserts it.
+         */
+        @Test
+        @DisplayName("clears the implementor, leaving the project's own to answer at instantiation")
+        void clearsTheImplementor() {
+            service.updateStep(configuration.getId(), null, null, null, 7L, null, null, false, false);
+
+            ObJourneyTemplateStep cleared = service.updateStep(configuration.getId(), null, null, null, null, null, null,
+                                                            false, true);
+
+            assertThat(cleared.getOwnerUserId()).isNull();
+        }
+
+        /**
+         * Clear wins over set. A caller that sent both asked for the removal,
+         * and the alternative is an order-dependent answer to one request.
+         */
+        @Test
+        @DisplayName("a clear beats a person sent in the same request")
+        void clearBeatsSet() {
+            service.updateStep(configuration.getId(), null, null, null, 7L, null, null, false, false);
+
+            ObJourneyTemplateStep cleared = service.updateStep(configuration.getId(), null, null, null, 4L, null, null,
+                                                            false, true);
+
+            assertThat(cleared.getOwnerUserId()).isNull();
+        }
+
+        /**
+         * A PATCH says nothing about what it omits. Asserted because the
+         * tempting implementation — copy every field off the request — would
+         * silently reset the TAT of a step whose owner was the only thing
+         * being changed.
+         */
+        @Test
+        @DisplayName("an omitted field is left alone rather than cleared")
+        void omittedFieldsSurvive() {
+            service.updateStep(configuration.getId(), null, null, 7, 7L, true, null, false, false);
+
+            ObJourneyTemplateStep updated = service.updateStep(configuration.getId(), null, null, null, null, null, null,
+                                                            false, false);
+
+            assertThat(updated.getTatDays()).isEqualTo(7);
+            assertThat(updated.getOwnerUserId()).isEqualTo(7L);
+            assertThat(updated.isRequiresSignoff()).isTrue();
+        }
+
+        @Test
+        @DisplayName("chains one stage behind another, and clears it again")
+        void setsAndClearsTheDependency() {
+            ObJourneyTemplateStep migration = addTaskIn(draft.getId(), "Data Migration", null, 1, null, false, null);
+
+            ObJourneyTemplateStep chained = service.updateStep(migration.getId(), null, null, null, null, null,
+                                                            configuration.getId(), false, false);
+            assertThat(chained.getDependsOnStepId()).isEqualTo(configuration.getId());
+
+            ObJourneyTemplateStep unheld = service.updateStep(migration.getId(), null, null, null, null, null, null,
+                                                           true, false);
+            assertThat(unheld.getDependsOnStepId()).isNull();
+        }
+
+        /**
+         * The check {@code addStep} never needed. A new step always holds the
+         * highest sequence, so everything it could name is earlier; an edit
+         * re-points a step other steps already hang off, and A waiting for B
+         * waiting for A is a pair the foreign key accepts and the designer's
+         * tree walker does not survive.
+         */
+        @Test
+        @DisplayName("refuses a dependency that would make a step wait on itself")
+        void refusesACycle() {
+            ObJourneyTemplateStep migration = addTaskIn(draft.getId(), "Data Migration", null, 1, null, false, null);
+            service.updateStep(migration.getId(), null, null, null, null, null, configuration.getId(), false, false);
+
+            assertThatThrownBy(() -> service.updateStep(configuration.getId(), null, null, null, null, null,
+                                                     migration.getId(), false, false))
+                    .isInstanceOf(StepDependencyCycleException.class);
+        }
+
+        @Test
+        @DisplayName("refuses a dependency on a step of another template")
+        void refusesAForeignDependency() {
+            ObJourneyTemplate other = service.createTemplate(PRODUCT, "Another Service", 2, null, ADMIN);
+            ObJourneyTemplateStep foreign = addTaskIn(other.getId(), "Configuration", null, 1, null, false, null);
+
+            assertThatThrownBy(() -> service.updateStep(configuration.getId(), null, null, null, null, null,
+                                                     foreign.getId(), false, false))
+                    .isInstanceOf(StepNotFoundException.class);
+        }
+
+        /**
+         * The rule the whole designer is built on. A route that could edit a
+         * published step would rewrite what every in-flight journey pinned to
+         * that version is rendering.
+         */
+        @Test
+        @DisplayName("a published version refuses the edit")
+        void publishedIsFrozen() {
+            service.publish(draft.getId(), ADMIN);
+
+            assertThatThrownBy(() -> service.updateStep(configuration.getId(), null, null, 9, null, null, null, false,
+                                                     false))
+                    .isInstanceOf(TemplateNotEditableException.class);
+        }
+    }
+
     @Nested
     @DisplayName("createTemplate — a product's first draft")
     class CreateTemplate {
@@ -368,7 +853,7 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("a draft with steps publishes and becomes active")
         void publishesADraftWithSteps() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            service.addStep(draft.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            addTaskIn(draft.getId(), "Kickoff", null, 2, null, false, null);
 
             ObJourneyTemplate published = service.publish(draft.getId(), ADMIN);
 
@@ -390,7 +875,7 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("publishing twice is refused — a version publishes exactly once")
         void publishTwiceRefused() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            service.addStep(draft.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            addTaskIn(draft.getId(), "Kickoff", null, 2, null, false, null);
             service.publish(draft.getId(), ADMIN);
 
             assertThatThrownBy(() -> service.publish(draft.getId(), ADMIN))
@@ -401,7 +886,7 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("publishing a revision retires the version it supersedes")
         void publishingARevisionRetiresThePrevious() {
             ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            service.addStep(v1.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
             service.publish(v1.getId(), ADMIN);
 
             ObJourneyTemplate v2Draft = service.beginRevision(v1.getId(), ADMIN);
@@ -433,8 +918,8 @@ class ObJourneyTemplateServiceTest {
         void clonesStepsItemsAndDocs() {
             ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep kickoff =
-                    service.addStep(v1.getId(), "Kickoff", "desc", 2, null, "PM", null, false, null);
-            service.addStep(v1.getId(), "Data migration", null, 5, null, "DEV", null, true, kickoff.getId());
+                    addTaskIn(v1.getId(), "Kickoff", "desc", 2, null, false, null);
+            addTaskIn(v1.getId(), "Data migration", null, 5, null, true, kickoff.getId());
             service.addStepItem(kickoff.getId(), "Signed requirement sheet received", true);
             service.addStepDoc(kickoff.getId(), "Signed requirement sheet", true);
             service.publish(v1.getId(), ADMIN);
@@ -468,11 +953,11 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("editing the currently active version is refused")
         void editingActiveRefused() {
             ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            service.addStep(v1.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
             service.publish(v1.getId(), ADMIN);
 
             assertThatThrownBy(() ->
-                    service.addStep(v1.getId(), "Sneaky extra step", null, 1, null, "PM", null, false, null))
+                    addTaskIn(v1.getId(), "Sneaky extra step", null, 1, null, false, null))
                     .isInstanceOf(TemplateNotEditableException.class);
         }
 
@@ -480,23 +965,130 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("editing a RETIRED version — superseded by a later publish — is also refused")
         void editingARetiredVersionIsRefused() {
             ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            service.addStep(v1.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+            addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
             service.publish(v1.getId(), ADMIN);
 
             ObJourneyTemplate v2Draft = service.beginRevision(v1.getId(), ADMIN);
-            service.addStep(v2Draft.getId(), "Kickoff (v2)", null, 2, null, "PM", null, false, null);
+            addTaskIn(v2Draft.getId(), "Kickoff (v2)", null, 2, null, false, null);
             service.publish(v2Draft.getId(), ADMIN);
 
             // v1 is now retired: publishedAt is still set, isActive is now false.
             // A journey instantiated while v1 was active still pins it — this must stay frozen.
             assertThatThrownBy(() ->
-                    service.addStep(v1.getId(), "Corrupting a live journey's ribbon", null, 1,
-                            null, "PM", null, false, null))
+                    addTaskIn(v1.getId(), "Corrupting a live journey's ribbon", null, 1, null, false, null))
                     .isInstanceOf(TemplateNotEditableException.class);
 
             long v1KickoffId = steps.findByTemplateIdOrderBySequenceAsc(v1.getId()).get(0).getId();
             assertThatThrownBy(() -> service.removeStep(v1KickoffId))
                     .isInstanceOf(TemplateNotEditableException.class);
+        }
+    }
+
+    /**
+     * B-131 · the one write {@link Immutability} does not cover.
+     *
+     * <p>Adding a Task List entry is allowed on the <b>active</b> version and
+     * back-filled onto the journeys running from it. The tests here are as much
+     * about what stayed shut as what opened: the exception is one method wide,
+     * and a guard that quietly relaxed for {@code removeStepItem} or
+     * {@code addStepDoc} as well would let a service in use lose a checklist
+     * entry a client had already answered.
+     */
+    @Nested
+    @DisplayName("B-131 · a live service accepts a new checklist item, and nothing else")
+    class AddingToALiveService {
+
+        /** Publishes v1 and hands back its only step. */
+        private ObJourneyTemplateStep liveServiceWithOneStep() {
+            ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep kickoff = addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
+            service.publish(v1.getId(), ADMIN);
+            return kickoff;
+        }
+
+        @Test
+        @DisplayName("the active version accepts one, and reports how many clients it reached")
+        void activeVersionAcceptsAnItem() {
+            ObJourneyTemplateStep kickoff = liveServiceWithOneStep();
+            when(liveChecklistBackfill.addToLiveJourneys(anyLong(), any())).thenReturn(4);
+
+            ObJourneyTemplateService.StepItemAdded added =
+                    service.addStepItem(kickoff.getId(), "Firewall exception approved", true);
+
+            assertThat(added.item().getLabel()).isEqualTo("Firewall exception approved");
+            assertThat(added.backfilledJourneyCount()).isEqualTo(4);
+            verify(liveChecklistBackfill).addToLiveJourneys(kickoff.getId(), added.item());
+        }
+
+        /**
+         * The version is published and superseded. Its only remaining job is to
+         * render what the journeys pinned to it were boarded on — and unlike
+         * the active version, it is not what the service offers anybody now, so
+         * there is no client an addition here could be <em>for</em>.
+         */
+        @Test
+        @DisplayName("a retired version still refuses, and back-fills nothing")
+        void retiredVersionStillRefuses() {
+            ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep v1Kickoff = addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
+            service.publish(v1.getId(), ADMIN);
+
+            ObJourneyTemplate v2Draft = service.beginRevision(v1.getId(), ADMIN);
+            addTaskIn(v2Draft.getId(), "Kickoff (v2)", null, 2, null, false, null);
+            service.publish(v2Draft.getId(), ADMIN);
+
+            assertThatThrownBy(() -> service.addStepItem(v1Kickoff.getId(), "Too late", true))
+                    .isInstanceOf(TemplateNotEditableException.class);
+            verify(liveChecklistBackfill, never()).addToLiveJourneys(anyLong(), any());
+        }
+
+        /**
+         * The regression this whole group exists to hold. {@code requireOfferable}
+         * is {@link ObJourneyTemplateService#addStepItem}'s guard and nothing
+         * else's; every other mutation still routes through
+         * {@code requireEditable}.
+         */
+        @Test
+        @DisplayName("every other edit to the active version is still refused")
+        void nothingElseOpened() {
+            ObJourneyTemplateStep kickoff = liveServiceWithOneStep();
+
+            assertThatThrownBy(() -> service.addStepDoc(kickoff.getId(), "Signed sheet", true))
+                    .isInstanceOf(TemplateNotEditableException.class);
+            assertThatThrownBy(() -> service.removeStep(kickoff.getId()))
+                    .isInstanceOf(TemplateNotEditableException.class);
+            assertThatThrownBy(() ->
+                    service.updateStep(kickoff.getId(), "Renamed", null, 3, null, null, null, null))
+                    .isInstanceOf(TemplateNotEditableException.class);
+        }
+
+        /**
+         * Removing is the asymmetry, and it is deliberate. A client may already
+         * have answered the row; taking it back out would delete their answer
+         * and change what the step was signed off against.
+         */
+        @Test
+        @DisplayName("an item added to a live service cannot then be removed from it")
+        void addedButNotRemovable() {
+            ObJourneyTemplateStep kickoff = liveServiceWithOneStep();
+            ObJourneyTemplateStepItem item =
+                    service.addStepItem(kickoff.getId(), "Firewall exception approved", true).item();
+
+            assertThatThrownBy(() -> service.removeStepItem(item.getId()))
+                    .isInstanceOf(TemplateNotEditableException.class);
+        }
+
+        @Test
+        @DisplayName("a draft still works, and reaches nobody")
+        void draftUnchanged() {
+            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            ObJourneyTemplateStep kickoff = addTaskIn(draft.getId(), "Kickoff", null, 2, null, false, null);
+
+            ObJourneyTemplateService.StepItemAdded added =
+                    service.addStepItem(kickoff.getId(), "Firewall exception approved", true);
+
+            assertThat(added.item().getSequence()).isEqualTo(1);
+            assertThat(added.backfilledJourneyCount()).isZero();
         }
     }
 
@@ -508,8 +1100,8 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("steps are sequenced 1, 2, 3, ... in add order")
         void stepsAreSequencedInOrder() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep first = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep second = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep first = addTaskIn(draft.getId(), "A", null, 1, null, false, null);
+            ObJourneyTemplateStep second = addTaskIn(draft.getId(), "B", null, 1, null, false, null);
 
             assertThat(first.getSequence()).isEqualTo(1);
             assertThat(second.getSequence()).isEqualTo(2);
@@ -521,7 +1113,7 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
 
             assertThatThrownBy(() ->
-                    service.addStep(draft.getId(), "Migration", null, 1, null, null, null, false, 404L))
+                    addTaskIn(draft.getId(), "Migration", null, 1, null, false, 404L))
                     .isInstanceOf(StepNotFoundException.class);
         }
 
@@ -531,10 +1123,10 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplate draftOne = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplate draftTwo = service.createTemplate(PRODUCT + 1, "Payroll Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep foreign =
-                    service.addStep(draftTwo.getId(), "Kickoff", null, 1, null, null, null, false, null);
+                    addTaskIn(draftTwo.getId(), "Kickoff", null, 1, null, false, null);
 
             assertThatThrownBy(() ->
-                    service.addStep(draftOne.getId(), "Migration", null, 1, null, null, null, false, foreign.getId()))
+                    addTaskIn(draftOne.getId(), "Migration", null, 1, null, false, foreign.getId()))
                     .isInstanceOf(StepNotFoundException.class);
         }
 
@@ -542,9 +1134,9 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("deleting a step other steps depend on is refused, naming the dependents")
         void deletingADependedOnStepRefused() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep kickoff = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep kickoff = addTaskIn(draft.getId(), "Kickoff", null, 1, null, false, null);
             ObJourneyTemplateStep migration =
-                    service.addStep(draft.getId(), "Migration", null, 1, null, null, null, false, kickoff.getId());
+                    addTaskIn(draft.getId(), "Migration", null, 1, null, false, kickoff.getId());
 
             assertThatThrownBy(() -> service.removeStep(kickoff.getId()))
                     .isInstanceOf(StepHasDependentsException.class)
@@ -555,10 +1147,10 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("step items are sequenced independently per step")
         void stepItemsSequencedPerStep() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep step = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep step = addTaskIn(draft.getId(), "Kickoff", null, 1, null, false, null);
 
             service.addStepItem(step.getId(), "Item A", true);
-            ObJourneyTemplateStepItem itemB = service.addStepItem(step.getId(), "Item B", true);
+            ObJourneyTemplateStepItem itemB = service.addStepItem(step.getId(), "Item B", true).item();
 
             assertThat(itemB.getSequence()).isEqualTo(2);
             assertThat(stepItems.findByStepIdOrderBySequenceAsc(step.getId())).hasSize(2);
@@ -571,7 +1163,7 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("step docs default to required and can be removed")
         void stepDocsAddAndRemove() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep step = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep step = addTaskIn(draft.getId(), "Kickoff", null, 1, null, false, null);
 
             ObJourneyTemplateStepDoc doc = service.addStepDoc(step.getId(), "Signed requirement sheet", true);
             assertThat(doc.isRequired()).isTrue();
@@ -584,10 +1176,10 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("an item's mandatory flag is whatever the caller asked for, both ways")
         void mandatoryFlagRoundTrips() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep step = service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep step = addTaskIn(draft.getId(), "Kickoff", null, 1, null, false, null);
 
-            ObJourneyTemplateStepItem mandatoryItem = service.addStepItem(step.getId(), "Mandatory item", true);
-            ObJourneyTemplateStepItem optionalItem = service.addStepItem(step.getId(), "Optional item", false);
+            ObJourneyTemplateStepItem mandatoryItem = service.addStepItem(step.getId(), "Mandatory item", true).item();
+            ObJourneyTemplateStepItem optionalItem = service.addStepItem(step.getId(), "Optional item", false).item();
 
             assertThat(mandatoryItem.isMandatory()).isTrue();
             assertThat(optionalItem.isMandatory()).isFalse();
@@ -603,7 +1195,7 @@ class ObJourneyTemplateServiceTest {
         void optionalItemStaysOptionalAfterRevision() {
             ObJourneyTemplate v1 = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep kickoff =
-                    service.addStep(v1.getId(), "Kickoff", null, 2, null, "PM", null, false, null);
+                    addTaskIn(v1.getId(), "Kickoff", null, 2, null, false, null);
             service.addStepItem(kickoff.getId(), "Mandatory item", true);
             service.addStepItem(kickoff.getId(), "Optional item", false);
             service.publish(v1.getId(), ADMIN);
@@ -623,18 +1215,40 @@ class ObJourneyTemplateServiceTest {
     }
 
     @Nested
-    @DisplayName("reorderSteps — the OB-07 ↑/↓ control")
+    @DisplayName("reorderTasks — the OB-07 ↑/↓ control, within one stage")
     class Reorder {
+
+        /**
+         * Three tasks in one stage, which is the unit the route now acts on.
+         *
+         * <p>They used to be three tasks in three stages, because a step
+         * <em>was</em> a stage and the route took the whole template. Under
+         * four levels, "reorder the template's steps" is not a thing anybody
+         * can ask for: the tasks of Configuration have an order, and so do
+         * the tasks of Training, and there is no order that spans them which
+         * is not just the stage order.
+         */
+        private ObJourneyTemplate draft;
+        private long configuration;
+
+        @BeforeEach
+        void aStageWithTasks() {
+            draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
+            configuration = groupId(draft.getId(), "Configuration");
+        }
+
+        private ObJourneyTemplateStep task(String name) {
+            return service.addTask(configuration, name, null, 1, null, false, null);
+        }
 
         @Test
         @DisplayName("persists the caller's exact ordering as sequence 1..N")
         void persistsRequestedOrder() {
-            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep c = service.addStep(draft.getId(), "C", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep a = task("A");
+            ObJourneyTemplateStep b = task("B");
+            ObJourneyTemplateStep c = task("C");
 
-            service.reorderSteps(draft.getId(), List.of(c.getId(), a.getId(), b.getId()));
+            service.reorderTasks(configuration, List.of(c.getId(), a.getId(), b.getId()));
 
             List<ObJourneyTemplateStep> reordered = steps.findByTemplateIdOrderBySequenceAsc(draft.getId());
             assertThat(reordered).extracting(ObJourneyTemplateStep::getId)
@@ -644,21 +1258,20 @@ class ObJourneyTemplateServiceTest {
         }
 
         @Test
-        @DisplayName("swapping two adjacent steps' positions does not trip the (template_id, sequence) unique index")
+        @DisplayName("swapping two adjacent tasks does not trip the (template_id, sequence) unique index")
         void adjacentSwapDoesNotCollide() {
             // The collision case named in the service's own javadoc: writing
-            // step A's new sequence to what step B currently holds, before B
+            // task A's new sequence to what task B currently holds, before B
             // has been moved off it, would violate
             // uq_ob_journey_template_steps_seq under a real unique index. An
             // in-memory fake cannot enforce that constraint, so this test
             // proves the two-pass shape ran (final state is the swap) rather
             // than proving MySQL accepted it — that half is CI's job against
             // a real database.
-            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep first = service.addStep(draft.getId(), "First", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep second = service.addStep(draft.getId(), "Second", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep first = task("First");
+            ObJourneyTemplateStep second = task("Second");
 
-            service.reorderSteps(draft.getId(), List.of(second.getId(), first.getId()));
+            service.reorderTasks(configuration, List.of(second.getId(), first.getId()));
 
             List<ObJourneyTemplateStep> reordered = steps.findByTemplateIdOrderBySequenceAsc(draft.getId());
             assertThat(reordered).extracting(ObJourneyTemplateStep::getId)
@@ -667,25 +1280,45 @@ class ObJourneyTemplateServiceTest {
                     .containsExactly(1, 2);
         }
 
+        /**
+         * The rule that makes a per-stage reorder safe: a stage occupies a
+         * contiguous block of the template's positions, and permuting inside
+         * it cannot move anything out of that block.
+         */
         @Test
-        @DisplayName("a list missing a step is refused")
-        void missingStepRefused() {
-            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+        @DisplayName("reordering one stage leaves every other stage's tasks where they were")
+        void otherStagesAreUndisturbed() {
+            ObJourneyTemplateStep a = task("A");
+            ObJourneyTemplateStep b = task("B");
+            long training = groupId(draft.getId(), "Training");
+            ObJourneyTemplateStep t =
+                    service.addTask(training, "Train admins", null, 1, null, false, null);
 
-            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId())))
+            service.reorderTasks(configuration, List.of(b.getId(), a.getId()));
+
+            assertThat(steps.findByTemplateIdOrderBySequenceAsc(draft.getId()))
+                    .extracting(ObJourneyTemplateStep::getId)
+                    .containsExactly(b.getId(), a.getId(), t.getId());
+            assertThat(steps.findById(t.getId()).orElseThrow().getSequence()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("a list missing a task is refused")
+        void missingStepRefused() {
+            ObJourneyTemplateStep a = task("A");
+            task("B");
+
+            assertThatThrownBy(() -> service.reorderTasks(configuration, List.of(a.getId())))
                     .isInstanceOf(StepReorderMismatchException.class);
         }
 
         @Test
         @DisplayName("a list naming an id twice is refused")
         void duplicateIdRefused() {
-            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep a = task("A");
+            ObJourneyTemplateStep b = task("B");
 
-            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId(), a.getId())))
+            assertThatThrownBy(() -> service.reorderTasks(configuration, List.of(a.getId(), a.getId())))
                     .isInstanceOf(StepReorderMismatchException.class);
 
             // Refused before anything is written — b's original sequence still stands.
@@ -693,27 +1326,33 @@ class ObJourneyTemplateServiceTest {
         }
 
         @Test
-        @DisplayName("a list naming a step from a different template is refused")
+        @DisplayName("a list naming a task from another stage is refused")
         void foreignStepRefused() {
-            ObJourneyTemplate draftOne = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draftOne.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplate draftTwo = service.createTemplate(600L, "Biometric Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep x = service.addStep(draftTwo.getId(), "X", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep a = task("A");
+            long training = groupId(draft.getId(), "Training");
+            ObJourneyTemplateStep t =
+                    service.addTask(training, "Train admins", null, 1, null, false, null);
 
-            assertThatThrownBy(() -> service.reorderSteps(draftOne.getId(), List.of(x.getId())))
+            assertThatThrownBy(() -> service.reorderTasks(configuration, List.of(t.getId())))
                     .isInstanceOf(StepReorderMismatchException.class);
-            assertThatThrownBy(() -> service.reorderSteps(draftOne.getId(), List.of(a.getId(), x.getId())))
+            assertThatThrownBy(() -> service.reorderTasks(configuration, List.of(a.getId(), t.getId())))
                     .isInstanceOf(StepReorderMismatchException.class);
+        }
+
+        @Test
+        @DisplayName("an unknown stage group is refused")
+        void unknownStageRefused() {
+            assertThatThrownBy(() -> service.reorderTasks(9_999L, List.of(1L)))
+                    .isInstanceOf(StageGroupNotFoundException.class);
         }
 
         @Test
         @DisplayName("a published template cannot be reordered")
         void publishedTemplateRefused() {
-            ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep a = task("A");
             service.publish(draft.getId(), ADMIN);
 
-            assertThatThrownBy(() -> service.reorderSteps(draft.getId(), List.of(a.getId())))
+            assertThatThrownBy(() -> service.reorderTasks(configuration, List.of(a.getId())))
                     .isInstanceOf(TemplateNotEditableException.class);
         }
     }
@@ -726,8 +1365,8 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("every step with no dependency is layer 0, all in one group")
         void allParallelIsOneGroup() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, null);
+            ObJourneyTemplateStep a = addTaskIn(draft.getId(), "A", null, 1, null, false, null);
+            ObJourneyTemplateStep b = addTaskIn(draft.getId(), "B", null, 1, null, false, null);
 
             List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
 
@@ -740,9 +1379,9 @@ class ObJourneyTemplateServiceTest {
         @DisplayName("a straight chain is one step per layer")
         void chainIsOnePerLayer() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
-            ObJourneyTemplateStep a = service.addStep(draft.getId(), "A", null, 1, null, null, null, false, null);
-            ObJourneyTemplateStep b = service.addStep(draft.getId(), "B", null, 1, null, null, null, false, a.getId());
-            ObJourneyTemplateStep c = service.addStep(draft.getId(), "C", null, 1, null, null, null, false, b.getId());
+            ObJourneyTemplateStep a = addTaskIn(draft.getId(), "A", null, 1, null, false, null);
+            ObJourneyTemplateStep b = addTaskIn(draft.getId(), "B", null, 1, null, false, a.getId());
+            ObJourneyTemplateStep c = addTaskIn(draft.getId(), "C", null, 1, null, false, b.getId());
 
             List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
 
@@ -757,11 +1396,11 @@ class ObJourneyTemplateServiceTest {
         void forkLandsSiblingsInSameLayer() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep kickoff =
-                    service.addStep(draft.getId(), "Kickoff", null, 1, null, null, null, false, null);
+                    addTaskIn(draft.getId(), "Kickoff", null, 1, null, false, null);
             ObJourneyTemplateStep migration =
-                    service.addStep(draft.getId(), "Migration", null, 1, null, null, null, false, kickoff.getId());
+                    addTaskIn(draft.getId(), "Migration", null, 1, null, false, kickoff.getId());
             ObJourneyTemplateStep training =
-                    service.addStep(draft.getId(), "Training", null, 1, null, null, null, false, kickoff.getId());
+                    addTaskIn(draft.getId(), "Training", null, 1, null, false, kickoff.getId());
 
             List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
 
@@ -776,13 +1415,13 @@ class ObJourneyTemplateServiceTest {
         void mixedGraphLayersByLongestPath() {
             ObJourneyTemplate draft = service.createTemplate(PRODUCT, "ERP Rollout", 1, null, ADMIN);
             ObJourneyTemplateStep root =
-                    service.addStep(draft.getId(), "Root", null, 1, null, null, null, false, null);
+                    addTaskIn(draft.getId(), "Root", null, 1, null, false, null);
             ObJourneyTemplateStep branchA =
-                    service.addStep(draft.getId(), "BranchA", null, 1, null, null, null, false, root.getId());
+                    addTaskIn(draft.getId(), "BranchA", null, 1, null, false, root.getId());
             ObJourneyTemplateStep branchAChild =
-                    service.addStep(draft.getId(), "BranchAChild", null, 1, null, null, null, false, branchA.getId());
+                    addTaskIn(draft.getId(), "BranchAChild", null, 1, null, false, branchA.getId());
             ObJourneyTemplateStep branchB =
-                    service.addStep(draft.getId(), "BranchB", null, 1, null, null, null, false, root.getId());
+                    addTaskIn(draft.getId(), "BranchB", null, 1, null, false, root.getId());
 
             List<List<ObJourneyTemplateStep>> groups = service.parallelGroups(draft.getId());
 
@@ -1271,8 +1910,8 @@ class ObJourneyTemplateServiceTest {
             ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, false);
             ObJourneyTemplate v2 = version("Standard SaaS Onboarding", 2, true);
             ObJourneyTemplate survivor = version("Enterprise", 1, false);
-            service.addStep(v1.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
-            service.addStep(v2.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
+            addTaskIn(v1.getId(), "Kickoff", null, 3, null, false, null);
+            addTaskIn(v2.getId(), "Kickoff", null, 3, null, false, null);
 
             service.deleteModuleService(v2.getId());
 
@@ -1290,10 +1929,9 @@ class ObJourneyTemplateServiceTest {
         void chainedStepsDeleteInDependencyOrder() {
             ObJourneyTemplate v1 = version("Standard SaaS Onboarding", 1, true);
             ObJourneyTemplateStep first =
-                    service.addStep(v1.getId(), "Kickoff", null, 3, null, "PM", null, false, null);
-            ObJourneyTemplateStep second = service.addStep(
-                    v1.getId(), "Provisioning", null, 4, null, "DEPLOYMENT", null, false, first.getId());
-            service.addStep(v1.getId(), "Migration", null, 8, null, "DEVELOPER", null, false, second.getId());
+                    addTaskIn(v1.getId(), "Kickoff", null, 3, null, false, null);
+            ObJourneyTemplateStep second = addTaskIn(v1.getId(), "Provisioning", null, 4, null, false, first.getId());
+            addTaskIn(v1.getId(), "Migration", null, 8, null, false, second.getId());
 
             service.deleteModuleService(v1.getId());
 

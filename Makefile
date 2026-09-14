@@ -32,6 +32,19 @@ api: ## Run the API on :8080 with the local profile
 web: ## Run the frontend on :5173
 	cd frontend && npm run dev
 
+worker: ## Run the schedulers on no port - REQUIRED for any dashboard to show figures
+	@echo "  The api process writes no summary table. Every dashboard figure -"
+	@echo "  the six OB-02 counters, the implementor workload grid, A-050's"
+	@echo "  ticketing widgets - is read from a pre-aggregated table that only"
+	@echo "  this process fills. Without it the board is not stale, it is empty,"
+	@echo "  and every card reads 'No summary has been computed yet'."
+	@echo ""
+	@echo "  Thirty seconds locally rather than the committed five minutes, so"
+	@echo "  creating a project and watching the card move is one wait and not"
+	@echo "  five. Production keeps PT5M - see edutrack.ob-stats in the worker's"
+	@echo "  application.yml."
+	cd backend && OB_STATS_REFRESH_INTERVAL=PT30S STATS_REFRESH_INTERVAL=PT30S ./mvnw -pl worker spring-boot:run
+
 verify: ## Everything CI runs — ~1h. Since 17 Aug CI does this for you; prefer `make check`
 	@echo "  Note: the repo is public, so GitHub Actions runs this on every push."
 	@echo "  This takes the best part of an hour locally. Ctrl-C and use 'make check'"

@@ -50,4 +50,14 @@ import type { ObJourneyTemplateStepItem } from './obJourneyTemplateStepItem';
 
 export interface ObJourneyTemplateStepItemResponse {
   data: ObJourneyTemplateStepItem;
+  /** B-131. How many running journeys the new item was back-filled
+onto as well as the catalogue. `0` on a draft, and on an active
+version nobody is currently onboarding with.
+
+Returned because an admin adding an item to a service already in
+use has no other way to tell whether the edit reached the clients
+it was added for: a running step is a snapshot, so before this
+task the edit reached only the clients boarded afterwards.
+ */
+  backfilledJourneyCount: number;
 }

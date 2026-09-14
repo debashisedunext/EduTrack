@@ -23,22 +23,30 @@ import java.time.Instant;
  * provenance only, exactly as the migration header describes. An admin
  * editing the template later must never change what this row says.
  *
- * <p><b>Owner resolution, C-103's own scope boundary.</b> A template step
- * carries either a pinned {@code ownerUserId} or a free-text
- * {@code ownerRole} (or neither). This entity only ever receives the pinned
- * user id — there is no per-client role→user resolver anywhere in the
- * codebase yet (that is OB-08's "Responsibility" admin, not built). A step
- * whose template only named a role, or named nobody, instantiates with
- * {@link #ownerUserId} {@code null}: <b>unresolved</b>, and findable on the
- * Manager's unassigned list via {@code ix_ob_journey_steps_owner
- * (owner_user_id, status)} — see
- * {@code ObJourneyStepRepository#findByOwnerUserIdIsNull}. Nothing marks
- * *why* a step is unassigned; the template's own {@code ownerRole} is where
- * that answer lives, one join away, once OB-08 exists to act on it.
+ * <p><b>Owner resolution.</b> A template step carries one owner — a pinned
+ * {@code ownerUserId}, the <em>implementor</em> — and usually carries none,
+ * because a Module Service is authored once and boarded for every client that
+ * buys the product. A step the template pins nobody to takes the
+ * <b>project's</b> implementor ({@code ob_projects.implementor_user_id}, then
+ * its creator), which is where "who, for this client" is actually known. See
+ * {@code ObJourneyInstantiationService#defaultImplementorOf}.
+ *
+ * <p>{@link #ownerUserId} {@code null} therefore means what it says —
+ * genuinely nobody to hand it to, a project with neither an implementor nor a
+ * recorded creator — and is findable on the Manager's unassigned list via
+ * {@code ix_ob_journey_steps_owner (owner_user_id, status)}; see
+ * {@code ObJourneyStepRepository#findByOwnerUserIdIsNull}. Until
+ * {@code V20260914_1830} it meant something much broader: a template step
+ * could name an {@code owner_role} instead of a person, nothing ever resolved
+ * one — no per-client role→user resolver exists, that being OB-08's
+ * "Responsibility" admin, not built — so most of a journey landed on the
+ * unassigned list at birth. The role column is gone and the project answers
+ * instead.
  *
  * <p>Every step is born {@link ObJourneyStepStatus#PENDING}, {@code due_at}
- * {@code null} — "clocks dead until the gate opens" is this task's own
- * line. Even a journey instantiated already {@link ObGateStatus#OPEN}
+ * {@code null} — nothing instantiated here has started, and the clock is
+ * stamped by whatever starts it. Even a journey instantiated already
+ * {@link ObGateStatus#OPEN}
  * (a product bought after the client's gate cleared, plan §5.3 item 3)
  * still gets PENDING steps here: activating the first wave of
  * dependency-free steps is C-119's job, evaluated the same way a step

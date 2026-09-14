@@ -1,5 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 
+import { ApiError } from '@/api/http'
+
 /**
  * The app's one query cache.
  *
@@ -29,5 +31,41 @@ import { QueryClient } from '@tanstack/react-query'
  * app showing somebody else's work.
  */
 export const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: retryServerFailuresOnly,
+    },
+  },
 })
+
+/**
+ * Retry what might succeed next time. Never retry an answer.
+ *
+ * <p>React Query's default is three retries for <em>any</em> rejection, which
+ * is right for a dropped connection and wrong for a 4xx: the server has already
+ * decided, and asking again three times with exponential backoff spends about
+ * seven seconds arriving at the same answer. Every one of those seconds is
+ * spent with {@code isPending} still true, so the screen holds a loading
+ * skeleton rather than rendering what the status actually means.
+ *
+ * <p><b>The screen this was found on is the case worth remembering.</b> The
+ * prerequisites master answers {@code 404} when nobody has authored a
+ * checklist yet — its own documentation calls that "the first visit, not a
+ * failure", and it renders an empty state offering to write one. With the
+ * default policy the most common first experience of that screen was seven
+ * seconds of skeleton, which reads as a page that will not open.
+ *
+ * <p>A 5xx and a network failure still get three attempts, because those are
+ * the ones a retry can actually fix. 408 and 429 are deliberately on that side
+ * of the line too: a timeout and a rate limit are both "not now" rather than
+ * "no".
+ */
+function retryServerFailuresOnly(failureCount: number, error: unknown): boolean {
+  if (error instanceof ApiError && error.status >= 400 && error.status < 500
+      && error.status !== 408 && error.status !== 429) {
+    return false;
+  }
+  return failureCount < 3;
+}

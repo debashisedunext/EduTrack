@@ -1,9 +1,13 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
+import com.edunext.edutrack.domain.onboarding.ObImplementationStage;
+import com.edunext.edutrack.domain.onboarding.ObImplementationStageRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplate;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependency;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateDependencyRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateRepository;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStage;
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStageRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository;
@@ -19,6 +23,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -26,6 +31,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * C-101 · Module Service (journey template) domain and versioning.
@@ -70,18 +76,39 @@ public class ObJourneyTemplateService {
     private final ObJourneyTemplateStepRepository steps;
     private final ObJourneyTemplateStepItemRepository stepItems;
     private final ObJourneyTemplateStepDocRepository stepDocs;
+    private final ObImplementationStageRepository implementationStages;
+    private final ObJourneyTemplateStageRepository stageGroups;
+    private final LiveChecklistBackfill liveChecklistBackfill;
 
     public ObJourneyTemplateService(ObJourneyTemplateRepository templates,
                                      ObJourneyTemplateDependencyRepository dependencies,
                                      ObJourneyTemplateStepRepository steps,
                                      ObJourneyTemplateStepItemRepository stepItems,
-                                     ObJourneyTemplateStepDocRepository stepDocs) {
+                                     ObJourneyTemplateStepDocRepository stepDocs,
+                                     ObImplementationStageRepository implementationStages,
+                                     ObJourneyTemplateStageRepository stageGroups,
+                                     LiveChecklistBackfill liveChecklistBackfill) {
         this.templates = templates;
         this.dependencies = dependencies;
         this.steps = steps;
         this.stepItems = stepItems;
         this.stepDocs = stepDocs;
+        this.implementationStages = implementationStages;
+        this.stageGroups = stageGroups;
+        this.liveChecklistBackfill = liveChecklistBackfill;
     }
+
+    /** A newly added task's TAT, in working days, until somebody edits it. */
+    private static final int DEFAULT_STAGE_TAT_DAYS = 1;
+
+    /**
+     * Where the Ungrouped group sorts — after every real stage.
+     *
+     * <p>It only exists on templates carrying tasks written before
+     * {@code V20260911_1600}, and on a template that has both, the vocabulary
+     * reads first and the history last.
+     */
+    private static final int UNGROUPED_SEQUENCE = 9999;
 
     /**
      * "+ Create module service" (OB-07) — the way a new service is born.
@@ -128,7 +155,72 @@ public class ObJourneyTemplateService {
         */
         templates.flush();
         replaceEdges(saved.getId(), dependsOnTemplateIds);
+        seedStageGroups(saved.getId());
         return saved;
+    }
+
+    /**
+     * Every active implementation stage, as an <b>empty group</b>, the moment
+     * a Module Service is born.
+     *
+     * <h2>Groups, not tasks</h2>
+     *
+     * <p>This used to seed six <em>steps</em>, because a step was a stage. In
+     * the four-level model a stage is a container and a task is what goes in
+     * it, so what a new Module Service arrives holding is six empty stages and
+     * no tasks. Seeding a task per stage would be inventing work nobody has
+     * described — "Configuration" is the name of a phase, not of something to
+     * do — and an admin would have to clear six of them out before writing the
+     * real ones.
+     *
+     * <h2>Why the server does this rather than the screen</h2>
+     *
+     * <p>The requirement is that a new Module Service <em>has</em> the stages,
+     * not that a screen offers to add them. A designer that posted six groups
+     * after the create would leave a service with three of them behind any
+     * failure in the middle, and a second caller — the fixtures, a test, a
+     * script — would produce a service with none. Here it is one transaction
+     * with the create: the service exists with its stages or it does not exist
+     * at all.
+     *
+     * <h2>A retired stage seeds nothing</h2>
+     *
+     * <p>Active only, read at create time. A service created today carries the
+     * vocabulary as it stands today, and a stage retired tomorrow leaves it
+     * alone — which is the whole of what retiring means on OB-15.
+     */
+    private void seedStageGroups(long templateId) {
+        for (ObImplementationStage stage : implementationStages.findAllByIsActiveOrderBySequenceAscIdAsc(true)) {
+            if (stageGroups.findByTemplateIdAndImplementationStageId(templateId, stage.getId()).isPresent()) {
+                // Idempotent rather than assumed-once. `uq_ob_template_stages`
+                // would refuse the second insert with a constraint violation,
+                // which is a correct outcome expressed as a stack trace; this
+                // is the same outcome expressed as nothing happening.
+                continue;
+            }
+            stageGroups.save(new ObJourneyTemplateStage(
+                    templateId, stage.getId(), stage.getName(), stage.getSequence()));
+        }
+    }
+
+    /**
+     * The group that holds tasks belonging to no stage, created on demand.
+     *
+     * <p>Only reachable through {@link #cloneStageGroups} — a revision of a
+     * template that predates {@code V20260911_1600} has to reproduce the
+     * Ungrouped group its source carries. Nothing creates one on a new Module
+     * Service, because every task on one of those is added inside a stage.
+     *
+     * <p>One per template is this method's invariant, not the index's:
+     * {@code uq_ob_template_stages} cannot hold it, since MySQL treats nulls
+     * in a unique index as distinct. That is the same division of labour
+     * {@code ObImplementationStageService} draws for its contiguous
+     * {@code sequence}, and it is safe for the same reason — one writer.
+     */
+    private ObJourneyTemplateStage ungroupedGroupOf(long templateId) {
+        return stageGroups.findByTemplateIdAndImplementationStageIdIsNull(templateId)
+                .orElseGet(() -> stageGroups.save(new ObJourneyTemplateStage(
+                        templateId, null, "Ungrouped", UNGROUPED_SEQUENCE)));
     }
 
     /**
@@ -194,7 +286,37 @@ public class ObJourneyTemplateService {
         return savedDraft;
     }
 
+    /**
+     * Copies a template's stage groups onto the revision, and reports which
+     * clone stands for which source group.
+     *
+     * <h2>Copied, not re-seeded from OB-15</h2>
+     *
+     * <p>Seeding the new draft from the live master instead would be a
+     * different and wrong thing: a stage renamed since the source was
+     * published would arrive under its new name, a stage retired since would
+     * vanish and take its tasks' home with it, and a stage <em>added</em>
+     * since would appear in a revision nobody put it in. A revision reproduces
+     * the version it clones — that is the whole rule the designer is built on.
+     *
+     * @return source group id → cloned group id, for the step clone to
+     *         re-point through
+     */
+    private Map<Long, Long> cloneStageGroups(long sourceTemplateId, long targetTemplateId) {
+        Map<Long, Long> sourceToClonedGroupId = new LinkedHashMap<>();
+        for (ObJourneyTemplateStage source : stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(sourceTemplateId)) {
+            ObJourneyTemplateStage clone = stageGroups.save(new ObJourneyTemplateStage(
+                    targetTemplateId,
+                    source.getImplementationStageId(),
+                    source.getName(),
+                    source.getSequence()));
+            sourceToClonedGroupId.put(source.getId(), clone.getId());
+        }
+        return sourceToClonedGroupId;
+    }
+
     private void cloneSteps(long sourceTemplateId, long targetTemplateId) {
+        Map<Long, Long> sourceToClonedGroupId = cloneStageGroups(sourceTemplateId, targetTemplateId);
         List<ObJourneyTemplateStep> sourceSteps = steps.findByTemplateIdOrderBySequenceAsc(sourceTemplateId);
 
         // First pass: clone every step without depends_on_step_id, since the
@@ -204,12 +326,23 @@ public class ObJourneyTemplateService {
             ObJourneyTemplateStep clone = new ObJourneyTemplateStep();
             clone.setTemplateId(targetTemplateId);
             clone.setSequence(source.getSequence());
+            // Re-pointed at the clone of the group it was in, never at the
+            // source's group: the two templates are separate versions, and a
+            // task on the new draft pointing into the old version's stage
+            // would make editing the draft edit what the published version
+            // renders. Same shape as the depends_on_step_id re-pointing
+            // below, and the same reason.
+            Long clonedGroupId = sourceToClonedGroupId.get(source.getTemplateStageId());
+            if (clonedGroupId == null) {
+                throw new IllegalStateException("step " + source.getId() + " is in stage group "
+                        + source.getTemplateStageId() + ", which is not a group of template "
+                        + sourceTemplateId);
+            }
+            clone.setTemplateStageId(clonedGroupId);
             clone.setName(source.getName());
             clone.setDescription(source.getDescription());
             clone.setTatDays(source.getTatDays());
             clone.setOwnerUserId(source.getOwnerUserId());
-            clone.setOwnerRole(source.getOwnerRole());
-            clone.setBackupOwnerUserId(source.getBackupOwnerUserId());
             clone.setRequiresSignoff(source.isRequiresSignoff());
             ObJourneyTemplateStep savedClone = steps.save(clone);
             sourceToClonedStepId.put(source.getId(), savedClone.getId());
@@ -269,28 +402,161 @@ public class ObJourneyTemplateService {
      *         through this method.
      */
     @Transactional
-    public ObJourneyTemplateStep addStep(long templateId, String name, String description, int tatDays,
-                                          Long ownerUserId, String ownerRole, Long backupOwnerUserId,
-                                          boolean requiresSignoff, Long dependsOnStepId) {
-        ObJourneyTemplate template = requireEditable(templateId);
+    public ObJourneyTemplateStep addTask(long stageGroupId, String name, String description, int tatDays,
+                                          Long ownerUserId, boolean requiresSignoff, Long dependsOnStepId) {
+        ObJourneyTemplateStage group = stageGroups.findById(stageGroupId)
+                .orElseThrow(() -> new StageGroupNotFoundException(stageGroupId));
+        ObJourneyTemplate template = requireEditable(group.getTemplateId());
+
         if (dependsOnStepId != null) {
             steps.findById(dependsOnStepId)
                     .filter(dependency -> dependency.getTemplateId().equals(template.getId()))
                     .orElseThrow(() -> new StepNotFoundException(dependsOnStepId));
         }
 
-        ObJourneyTemplateStep step = new ObJourneyTemplateStep();
-        step.setTemplateId(template.getId());
-        step.setSequence(nextStepSequence(templateId));
-        step.setName(name);
-        step.setDescription(description);
-        step.setTatDays(tatDays);
-        step.setOwnerUserId(ownerUserId);
-        step.setOwnerRole(ownerRole);
-        step.setBackupOwnerUserId(backupOwnerUserId);
-        step.setRequiresSignoff(requiresSignoff);
-        step.setDependsOnStepId(dependsOnStepId);
+        ObJourneyTemplateStep task = new ObJourneyTemplateStep();
+        task.setTemplateId(template.getId());
+        task.setTemplateStageId(group.getId());
+        // A placeholder, immediately overwritten by the renumber below. It
+        // cannot be the real position yet: inserting at the end of stage 2
+        // shifts every task in stages 3..6, and `uq_..._seq` refuses to hold
+        // two rows at one position while that shift is half-applied.
+        task.setSequence(nextStepSequence(template.getId()));
+        task.setName(name);
+        task.setDescription(description);
+        task.setTatDays(tatDays);
+        task.setOwnerUserId(ownerUserId);
+        task.setRequiresSignoff(requiresSignoff);
+        task.setDependsOnStepId(dependsOnStepId);
+        ObJourneyTemplateStep saved = steps.save(task);
+        steps.flush();
+
+        renumberByStage(template.getId());
+        return saved;
+    }
+
+    /**
+     * Edit a step of a draft - everything about it except which stage it is.
+     *
+     * <h2>Why this route had to exist for the stages to be useful</h2>
+     *
+     * <p>Before it, the designer's own header said it plainly: "the backend
+     * exposes add and remove on a step, never an edit", so correcting a step
+     * meant removing and re-adding it. That was survivable while an admin
+     * typed every step themselves - the step they wanted was one add away. It
+     * stopped being survivable the moment a task grew a task list under it:
+     * "delete the task and add it again" is not an edit, it is a way to lose
+     * the task list and the required documents underneath it.
+     *
+     * <h2>The name is editable again</h2>
+     *
+     * <p>It was not, for the six hours in which a step <em>was</em> a stage
+     * and took the stage's name — renaming one would have meant a step whose
+     * name disagreed with the stage it claimed to be. A task is named by the
+     * person who writes it, so a typo in one is an ordinary correction. Blank
+     * is ignored rather than applied: the column is {@code NOT NULL}, and a
+     * caller sending an empty string is far more likely to have a bug than to
+     * want a nameless task.
+     *
+     * <h2>What it deliberately will not change</h2>
+     *
+     * <p><b>Which stage the task is in.</b> Moving a task between stages is a
+     * reasonable thing to want and is not this route — it would have to
+     * renumber both groups, and doing it silently inside a PATCH that also
+     * edits six other fields is how an admin discovers their Configuration
+     * task in Training. Nothing offers it yet; when something does, it will be
+     * its own move-task route.
+     *
+     * <p>Every field is optional and null means "say nothing about this"
+     * rather than "clear it" - except the two id-valued ones, which have no
+     * other way to be cleared. {@code clearDependsOn} and
+     * {@code clearOwnerUserId} are how a caller asks for that explicitly, so
+     * "unheld" and "nobody named" are things you can ask for rather than side
+     * effects of omitting a field.
+     *
+     * <p><b>Clearing the owner does not leave the task unassigned.</b> A task
+     * with no {@code ownerUserId} falls back at instantiation to the
+     * project's own implementor — see
+     * {@code ObJourneyInstantiationService#cloneSteps} — which is why the
+     * owning role and the backup owner that used to sit beside it are gone
+     * rather than replaced. One column answers "who does this", and a service
+     * authored once still lands on the right person for every project boarded
+     * from it.
+     *
+     * @throws TemplateNotEditableException if the step's template has ever
+     *         been published - the rule the whole designer is built on, and
+     *         this route is no exception to it
+     * @throws StepNotFoundException C-119's check, unchanged: a dependency
+     *         must name a step of this same template
+     */
+    @Transactional
+    public ObJourneyTemplateStep updateStep(long stepId, String name, String description, Integer tatDays,
+                                             Long ownerUserId, Boolean requiresSignoff, Long dependsOnStepId,
+                                             boolean clearDependsOn, boolean clearOwnerUserId) {
+        ObJourneyTemplateStep step = requireStep(stepId);
+        requireEditable(step.getTemplateId());
+
+        if (name != null && !name.isBlank()) {
+            step.setName(name.trim());
+        }
+        if (description != null) {
+            step.setDescription(description.isBlank() ? null : description);
+        }
+        if (tatDays != null) {
+            step.setTatDays(tatDays);
+        }
+        // Clear wins over set, the same precedence clearDependsOn has: a
+        // caller that sent both asked for the removal, and the alternative is
+        // an order-dependent answer to one request.
+        if (clearOwnerUserId) {
+            step.setOwnerUserId(null);
+        } else if (ownerUserId != null) {
+            step.setOwnerUserId(ownerUserId);
+        }
+        if (requiresSignoff != null) {
+            step.setRequiresSignoff(requiresSignoff);
+        }
+        if (clearDependsOn) {
+            step.setDependsOnStepId(null);
+        } else if (dependsOnStepId != null) {
+            /*
+              Two checks, and the second is the one C-119's "earlier step"
+              argument no longer covers. addStep could reason that a new step
+              always holds the highest sequence, so anything it could name is
+              earlier and a cycle is unreachable. An *edit* has no such
+              guarantee: step 1 pointed at step 5, which points at step 1, is a
+              pair the composite foreign key accepts and the tree walker does
+              not survive.
+            */
+            ObJourneyTemplateStep dependency = steps.findById(dependsOnStepId)
+                    .filter(candidate -> candidate.getTemplateId().equals(step.getTemplateId()))
+                    .orElseThrow(() -> new StepNotFoundException(dependsOnStepId));
+            requireNoStepCycle(step, dependency);
+            step.setDependsOnStepId(dependency.getId());
+        }
         return steps.save(step);
+    }
+
+    /**
+     * Walks up from the proposed dependency to the root, refusing if it
+     * arrives back at the step being edited.
+     *
+     * <p>The depth guard is a second belt: the data it walks is already
+     * acyclic by this method's own invariant, so exhausting it means something
+     * else has written a cycle, and looping forever inside a request is a
+     * worse way to find that out than a refusal.
+     */
+    private void requireNoStepCycle(ObJourneyTemplateStep step, ObJourneyTemplateStep dependency) {
+        Map<Long, ObJourneyTemplateStep> byId = steps.findByTemplateIdOrderBySequenceAsc(step.getTemplateId()).stream()
+                .collect(Collectors.toMap(ObJourneyTemplateStep::getId, s -> s, (a, b) -> a));
+        ObJourneyTemplateStep cursor = dependency;
+        for (int guard = 0; cursor != null && guard <= byId.size(); guard++) {
+            if (cursor.getId().equals(step.getId())) {
+                throw new StepDependencyCycleException(step.getName(), dependency.getName());
+            }
+            Long next = cursor.getDependsOnStepId();
+            cursor = next == null ? null : byId.get(next);
+        }
     }
 
     @Transactional
@@ -305,6 +571,82 @@ public class ObJourneyTemplateService {
             throw new StepHasDependentsException(stepId, dependents);
         }
         steps.delete(step);
+        steps.flush();
+        // Closes the gap the delete left, so `sequence` stays 1..N and the
+        // next add does not collide with a hole. Same invariant
+        // `renumberByStage` exists for; see its javadoc.
+        renumberByStage(step.getTemplateId());
+    }
+
+    /**
+     * Rewrites {@code sequence} 1..N over a template so that ascending order
+     * walks <b>stage groups in order, then tasks within a group in order</b>.
+     *
+     * <h2>This is what lets four other readers stay unchanged</h2>
+     *
+     * <p>Instantiation, the parallel-group layering, the revision clone and
+     * the designer's own tree all sort steps by this one column. The
+     * alternative — a {@code sequence} that restarts inside each group — would
+     * require every one of them to learn a two-column sort, and any that was
+     * missed would not fail, it would quietly interleave two stages' tasks.
+     * Holding the invariant here means a template-wide sort is still the right
+     * sort, everywhere, by construction.
+     *
+     * <h2>Two passes, for {@code uq_ob_journey_template_steps_seq}</h2>
+     *
+     * <p>Same reason {@link #reorderSteps} needs them, and the same technique:
+     * a single pass writing final positions in order can ask MySQL to set a
+     * step to a value another, not-yet-moved step still holds, and the unique
+     * index refuses that collision even though the two writes do not conflict
+     * once both have landed. Pass one parks every row on a negative,
+     * mutually-distinct placeholder; pass two writes the real 1..N.
+     *
+     * <p>Only rows whose position actually changed are written in pass two, so
+     * adding a task to the last stage does not restamp the whole template.
+     */
+    private void renumberByStage(long templateId) {
+        Map<Long, Integer> groupOrder = new HashMap<>();
+        for (ObJourneyTemplateStage group : stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(templateId)) {
+            groupOrder.put(group.getId(), groupOrder.size());
+        }
+
+        List<ObJourneyTemplateStep> current = new ArrayList<>(steps.findByTemplateIdOrderBySequenceAsc(templateId));
+        current.sort(Comparator
+                // A group id the template does not carry sorts last rather
+                // than throwing: renumbering is housekeeping, and refusing to
+                // number the rows would be a worse answer than numbering them
+                // in a defensible order.
+                .comparingInt((ObJourneyTemplateStep step) ->
+                        groupOrder.getOrDefault(step.getTemplateStageId(), Integer.MAX_VALUE))
+                .thenComparingInt(ObJourneyTemplateStep::getSequence)
+                .thenComparing(ObJourneyTemplateStep::getId));
+
+        List<ObJourneyTemplateStep> moved = new ArrayList<>();
+        for (int i = 0; i < current.size(); i++) {
+            if (current.get(i).getSequence() != i + 1) {
+                moved.add(current.get(i));
+            }
+        }
+        if (moved.isEmpty()) {
+            return;
+        }
+
+        int placeholder = 1;
+        for (ObJourneyTemplateStep step : moved) {
+            step.setSequence(-placeholder);
+            steps.save(step);
+            placeholder++;
+        }
+        steps.flush();
+
+        for (int i = 0; i < current.size(); i++) {
+            ObJourneyTemplateStep step = current.get(i);
+            if (step.getSequence() != i + 1) {
+                step.setSequence(i + 1);
+                steps.save(step);
+            }
+        }
+        steps.flush();
     }
 
     /**
@@ -328,48 +670,60 @@ public class ObJourneyTemplateService {
      * ever asks the unique index to hold two rows at the same value at once.
      */
     @Transactional
-    public void reorderSteps(long templateId, List<Long> orderedStepIds) {
+    public void reorderTasks(long stageGroupId, List<Long> orderedTaskIds) {
+        ObJourneyTemplateStage group = stageGroups.findById(stageGroupId)
+                .orElseThrow(() -> new StageGroupNotFoundException(stageGroupId));
+        long templateId = group.getTemplateId();
         requireEditable(templateId);
 
-        List<ObJourneyTemplateStep> current = steps.findByTemplateIdOrderBySequenceAsc(templateId);
+        List<ObJourneyTemplateStep> inGroup = steps.findByTemplateIdOrderBySequenceAsc(templateId).stream()
+                .filter(step -> group.getId().equals(step.getTemplateStageId()))
+                .toList();
+
         Set<Long> currentIds = new LinkedHashSet<>();
-        for (ObJourneyTemplateStep step : current) {
+        for (ObJourneyTemplateStep step : inGroup) {
             currentIds.add(step.getId());
         }
 
-        Set<Long> requestedIds = new LinkedHashSet<>(orderedStepIds);
-        if (requestedIds.size() != orderedStepIds.size()) {
+        Set<Long> requestedIds = new LinkedHashSet<>(orderedTaskIds);
+        if (requestedIds.size() != orderedTaskIds.size()) {
             throw new StepReorderMismatchException(templateId,
-                    "the same step id appears more than once");
+                    "the same task id appears more than once");
         }
         if (!requestedIds.equals(currentIds)) {
             throw new StepReorderMismatchException(templateId,
-                    "the given ids are not exactly this template's current step set");
+                    "the given ids are not exactly this stage's current task set");
         }
 
         Map<Long, ObJourneyTemplateStep> byId = new HashMap<>();
-        for (ObJourneyTemplateStep step : current) {
+        for (ObJourneyTemplateStep step : inGroup) {
             byId.put(step.getId(), step);
         }
 
-        // Pass 1: every step to a negative, distinct placeholder. See the
-        // javadoc above — this is what keeps pass 2 collision-free.
+        // The group's own block of positions, which the caller is permuting
+        // within. Taken from the rows rather than computed from the group's
+        // index, because `renumberByStage` is what guarantees the block is
+        // contiguous and this method should read that guarantee rather than
+        // restate it.
+        List<Integer> slots = inGroup.stream().map(ObJourneyTemplateStep::getSequence).sorted().toList();
+
+        // Pass 1: every task to a negative, distinct placeholder — the
+        // collision avoidance `renumberByStage` documents.
         int placeholder = 1;
-        for (Long stepId : orderedStepIds) {
-            ObJourneyTemplateStep step = byId.get(stepId);
-            step.setSequence(-placeholder);
-            steps.save(step);
+        for (Long taskId : orderedTaskIds) {
+            byId.get(taskId).setSequence(-placeholder);
+            steps.save(byId.get(taskId));
             placeholder++;
         }
         steps.flush();
 
-        // Pass 2: the real ordering, 1..N in the caller's requested order.
-        int sequence = 1;
-        for (Long stepId : orderedStepIds) {
-            ObJourneyTemplateStep step = byId.get(stepId);
-            step.setSequence(sequence);
+        // Pass 2: the caller's order, laid into the same slots. Tasks in
+        // every other stage keep the positions they had, so reordering inside
+        // Configuration cannot disturb Data Migration.
+        for (int i = 0; i < orderedTaskIds.size(); i++) {
+            ObJourneyTemplateStep step = byId.get(orderedTaskIds.get(i));
+            step.setSequence(slots.get(i));
             steps.save(step);
-            sequence++;
         }
         steps.flush();
     }
@@ -464,17 +818,76 @@ public class ObJourneyTemplateService {
         return layer;
     }
 
+    /**
+     * What {@link #addStepItem} did, and how far it reached.
+     *
+     * @param item                    the catalogue row that was created
+     * @param backfilledJourneyCount  how many running journeys picked it up —
+     *                                {@code 0} on a draft, and on a live
+     *                                service with nobody currently on it
+     */
+    public record StepItemAdded(ObJourneyTemplateStepItem item, int backfilledJourneyCount) {
+    }
+
+    /**
+     * B-131 · adds one Task List entry — <b>and is the one write on this
+     * service that a published version accepts.</b>
+     *
+     * <h2>Why this one is not {@link #requireEditable}</h2>
+     *
+     * <p>Every other mutation here refuses a published template because
+     * changing it would change what a client already onboarding is looking
+     * at: rename a task, drop a step, re-point a dependency, and a journey
+     * mid-flight silently becomes a different journey from the one it was
+     * sold. {@code TemplateNotEditableException} exists for that, and it still
+     * guards {@link #updateStep}, {@link #removeStep}, {@link #removeStepItem},
+     * {@link #addStepDoc} and the rest.
+     *
+     * <p><b>Adding a checklist entry is not that kind of change.</b> It takes
+     * nothing away and contradicts nothing already recorded — every existing
+     * item keeps its label, its sequence and any answer given to it. It is the
+     * one edit an admin genuinely needs on a service already in use, because
+     * the thing that prompts it is usually a client: a step turns out to need
+     * a tick nobody anticipated, and the clients who need it are precisely the
+     * ones already onboarding. Routing that through
+     * {@link #beginRevision} + {@link #publish} answers it for future clients
+     * and nobody else, which is the wrong half.
+     *
+     * <p>So the guard here is narrower by exactly one case: a version that is
+     * <b>active</b> accepts a new item, and it lands on the live journeys too
+     * ({@link LiveChecklistBackfill}). A draft accepts one as it always did.
+     *
+     * <h2>What is still refused</h2>
+     *
+     * <p><b>A retired version.</b> Published, superseded, and read-only for
+     * good — its only remaining job is to render exactly what the journeys
+     * pinned to it were boarded on, and that is the guarantee
+     * {@code ModuleServiceInUseException} spells out. An admin who wants a new
+     * item on a live service adds it to the version that service is
+     * <em>currently</em> offering; there is no case for editing history.
+     *
+     * @return the new item and the number of running journeys it reached
+     * @throws TemplateNotEditableException if the step's template is a retired
+     *                                      version
+     */
     @Transactional
-    public ObJourneyTemplateStepItem addStepItem(long stepId, String label, boolean mandatory) {
+    public StepItemAdded addStepItem(long stepId, String label, boolean mandatory) {
         ObJourneyTemplateStep step = requireStep(stepId);
-        requireEditable(step.getTemplateId());
+        requireOfferable(step.getTemplateId());
 
         ObJourneyTemplateStepItem item = new ObJourneyTemplateStepItem();
         item.setStepId(stepId);
         item.setSequence(nextItemSequence(stepId));
         item.setLabel(label);
         item.setMandatory(mandatory);
-        return stepItems.save(item);
+        ObJourneyTemplateStepItem saved = stepItems.save(item);
+        // Flushed before the back-fill reads it: `templateItemId` on every
+        // instance row is this row's id, and an IDENTITY insert that has not
+        // run yet has none to give.
+        stepItems.flush();
+
+        int backfilled = liveChecklistBackfill.addToLiveJourneys(step.getId(), saved);
+        return new StepItemAdded(saved, backfilled);
     }
 
     @Transactional
@@ -559,6 +972,32 @@ public class ObJourneyTemplateService {
     }
 
     /**
+     * A template's stage groups, in display order — the second level of the
+     * OB-07 detail read.
+     *
+     * <p>Returned even when a group holds no tasks, which is the usual state
+     * of a service somebody has just created: all six stages exist and none of
+     * them has been filled in yet. A read that dropped the empty ones would
+     * leave the designer with nowhere to hang "+ Add a task".
+     */
+    @Transactional(readOnly = true)
+    public List<ObJourneyTemplateStage> getStages(long templateId) {
+        return stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(templateId);
+    }
+
+    /**
+     * Which template a stage group belongs to — what the per-stage routes need
+     * to check an {@code If-Match} against, since the tag they use is the
+     * template's.
+     */
+    @Transactional(readOnly = true)
+    public long templateIdOfStage(long stageGroupId) {
+        return stageGroups.findById(stageGroupId)
+                .orElseThrow(() -> new StageGroupNotFoundException(stageGroupId))
+                .getTemplateId();
+    }
+
+    /**
      * The OB-07 catalogue's rows — every service, or every service one product
      * sells, newest version of each first.
      *
@@ -578,12 +1017,23 @@ public class ObJourneyTemplateService {
                 : templates.findByProductIdOrderByNameAscVersionDesc(productId);
     }
 
-    /** Σ of a service's step TATs — what a journey for it costs, on the card. */
+    /**
+     * How long a journey for this service <b>takes</b>, in working days — the
+     * critical path through its tasks, on the OB-07 card.
+     *
+     * <p>It was Σ of the task TATs, which is a different question and was
+     * being read as this one. {@link JourneyTatCalculator} carries the whole
+     * argument; the short form is that tasks waiting for nothing run
+     * alongside each other, so 1 day beside 2 days is 2, and 1 day followed
+     * by 2 days is 3.
+     */
     @Transactional(readOnly = true)
     public int totalTatDays(long templateId) {
-        return steps.findByTemplateIdOrderBySequenceAsc(templateId).stream()
-                .mapToInt(ObJourneyTemplateStep::getTatDays)
-                .sum();
+        return JourneyTatCalculator.criticalPathDays(
+                steps.findByTemplateIdOrderBySequenceAsc(templateId).stream()
+                        .map(step -> new JourneyTatCalculator.Task(
+                                step.getId(), step.getTatDays(), step.getDependsOnStepId()))
+                        .toList());
     }
 
     /** How many services this step count belongs to — the card's "N services". */
@@ -737,6 +1187,31 @@ public class ObJourneyTemplateService {
         return dependencies.findByIdTemplateIdOrderByIdDependsOnTemplateIdAsc(templateId).stream()
                 .map(ObJourneyTemplateDependency::getDependsOnTemplateId)
                 .toList();
+    }
+
+    /**
+     * The stage groups of several templates at once, keyed by template.
+     *
+     * <p>The catalogue's "Category" column and the New Project form's service
+     * picker both print a service's stages, and both draw every service of a
+     * product at once. Read per row this would be a query per card; read here
+     * it is one statement for the page, on {@link #dependsOnByTemplate}'s own
+     * reasoning.
+     *
+     * <p>Display order is the repository's — {@code sequence} then id, because
+     * {@code sequence} is deliberately not unique and an ordering that did not
+     * break ties would be non-deterministic exactly while something renumbers
+     * against it.
+     */
+    public Map<Long, List<ObJourneyTemplateStage>> stagesByTemplate(Collection<Long> templateIds) {
+        Map<Long, List<ObJourneyTemplateStage>> byTemplate = new LinkedHashMap<>();
+        if (templateIds.isEmpty()) {
+            return byTemplate;
+        }
+        for (ObJourneyTemplateStage group : stageGroups.findByTemplateIdInOrderBySequenceAscIdAsc(templateIds)) {
+            byTemplate.computeIfAbsent(group.getTemplateId(), key -> new ArrayList<>()).add(group);
+        }
+        return byTemplate;
     }
 
     /**
@@ -1109,6 +1584,13 @@ public class ObJourneyTemplateService {
             steps.flush();
             remaining.removeAll(leaves);
         }
+
+        // The groups go after the tasks, never before:
+        // `fk_ob_template_steps_stage_group` is RESTRICT, so a group still
+        // holding a task refuses to be deleted — which is the right refusal
+        // and the wrong order to discover it in.
+        stageGroups.deleteByTemplateId(versionId);
+        stageGroups.flush();
     }
 
     /** Every version sharing this row's {@code (productId, name)} — the service itself. */
@@ -1143,6 +1625,29 @@ public class ObJourneyTemplateService {
      */
     private static String serviceKey(ObJourneyTemplate row) {
         return row.getProductId() + " " + row.getName();
+    }
+
+    /**
+     * B-131 · {@link #requireEditable} minus one case: a version currently
+     * <b>offered</b> — a draft, or the active version — rather than only a
+     * draft.
+     *
+     * <p>Kept as its own method rather than a boolean argument on
+     * {@code requireEditable}, so that a reader of any other mutation here
+     * sees the strict guard and nothing to opt out of. {@link #addStepItem}
+     * is the single caller and its javadoc carries the argument for why.
+     *
+     * @throws TemplateNotEditableException if the template is a retired
+     *                                      version — published, and no longer
+     *                                      the one the service offers
+     */
+    private ObJourneyTemplate requireOfferable(long templateId) {
+        ObJourneyTemplate template = templates.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+        if (template.getPublishedAt() != null && !template.isActive()) {
+            throw TemplateNotEditableException.retired(templateId);
+        }
+        return template;
     }
 
     /** @throws TemplateNotEditableException if the template has ever been published. */

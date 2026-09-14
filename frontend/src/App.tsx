@@ -66,14 +66,20 @@ const ObClientDetailPage = lazy(() =>
 const ObClientProductPage = lazy(() =>
   import('./features/onboarding/journey/clientDetail/ObClientProductPage').then((m) => ({ default: m.ObClientProductPage })),
 )
-const ObClientListPage = lazy(() =>
-  import('./features/onboarding/clients/ObClientListPage').then((m) => ({ default: m.ObClientListPage })),
+const ObClientMasterPage = lazy(() =>
+  import('./features/onboarding/clients/ObClientMasterPage').then((m) => ({ default: m.ObClientMasterPage })),
+)
+const ObProjectListPage = lazy(() =>
+  import('./features/onboarding/projects/ObProjectListPage').then((m) => ({ default: m.ObProjectListPage })),
+)
+const NewObProjectPage = lazy(() =>
+  import('./features/onboarding/projects/NewObProjectPage').then((m) => ({ default: m.NewObProjectPage })),
+)
+const ObProjectDetailPage = lazy(() =>
+  import('./features/onboarding/projects/ObProjectDetailPage').then((m) => ({ default: m.ObProjectDetailPage })),
 )
 const ObDashboardPage = lazy(() =>
   import('./features/onboarding/dashboard/ObDashboardPage').then((m) => ({ default: m.ObDashboardPage })),
-)
-const NewObClientWizardPage = lazy(() =>
-  import('./features/onboarding/clients/NewObClientWizardPage').then((m) => ({ default: m.NewObClientWizardPage })),
 )
 const ObNotificationCentrePage = lazy(() =>
   import('./features/onboarding/notifications/ObNotificationCentrePage').then((m) => ({ default: m.ObNotificationCentrePage })),
@@ -137,6 +143,11 @@ const PortalPrereqTaskDetailPage = lazy(() =>
 const PortalSignoffListPage = lazy(() =>
   import('./features/portal/onboarding/PortalSignoffListPage').then((m) => ({
     default: m.PortalSignoffListPage,
+  })),
+)
+const PortalSignoffDetailPage = lazy(() =>
+  import('./features/portal/onboarding/PortalSignoffDetailPage').then((m) => ({
+    default: m.PortalSignoffDetailPage,
   })),
 )
 const PortalTicketListPage = lazy(() =>
@@ -337,6 +348,14 @@ export default function App() {
                   same tree as CP-03/CP-04 since `ClientPrincipal.obClientId`
                   scopes it the same way. */}
               <Route path="onboarding/signoffs" element={withSuspense(<PortalSignoffListPage />)} />
+              {/* Deciding one, without the emailed link or the OTP — the
+                  portal's own OB-09. `PublicSignoffPage` at `/signoff` is
+                  untouched and still serves clients with no portal account,
+                  which plan §8 keeps as the legal record. */}
+              <Route
+                path="onboarding/signoffs/:signoffId"
+                element={withSuspense(<PortalSignoffDetailPage />)}
+              />
 
               {/* CP-06/CP-07 — C-122. The chooser's Ticketing card has linked
                   here since C-121; this is the task that resolves it. */}
@@ -691,17 +710,31 @@ export default function App() {
               destination: a client roster is the module's natural landing
               screen, the same call `/tickets` makes for the ticketing side.
             */}
-            <Route path="/onboarding/clients" element={withSuspense(<ObClientListPage />)} />
+            <Route path="/onboarding/clients" element={withSuspense(<ObClientMasterPage />)} />
             {/*
-              B-109 · OB-04, the four-step new client wizard. Registered
-              *before* `/onboarding/clients/:obClientId` for the identical
-              reason `/onboarding/clients` is — a literal path outranks a
-              parameterised one regardless of order, but readability still
-              wants the concrete route next to the id-bearing one it resembles.
-              `ObClientListPage`'s "New client" button is the only link to it;
-              nothing 404s any more.
+              The Projects grid and its two children.
+
+              `/new` is registered before `/:obProjectId` for the reason the
+              client routes already state: a literal path outranks a
+              parameterised one regardless of order, but readability wants the
+              concrete route beside the id-bearing one it resembles.
             */}
-            <Route path="/onboarding/clients/new" element={withSuspense(<NewObClientWizardPage />)} />
+            <Route path="/onboarding/projects" element={withSuspense(<ObProjectListPage />)} />
+            <Route path="/onboarding/projects/new" element={withSuspense(<NewObProjectPage />)} />
+            <Route
+              path="/onboarding/projects/:obProjectId"
+              element={withSuspense(<ObProjectDetailPage />)}
+            />
+            {/*
+              `/onboarding/clients/new` is gone with the four-step wizard it
+              served. Adding a client is a dialog on the master now — four
+              fields, no steps, nothing to resume — so there is no page to give
+              it a URL of its own. What that wizard also captured (PAN, SPOC
+              contacts, commercials, requirements, the portal-login checkbox)
+              is not deleted from the system: every one of those still has its
+              own panel on the client page. It is only no longer asked for at
+              the moment a company is first recorded.
+            */}
             <Route
               path="/onboarding/clients/:obClientId"
               element={withSuspense(<ObClientDetailPage />)}

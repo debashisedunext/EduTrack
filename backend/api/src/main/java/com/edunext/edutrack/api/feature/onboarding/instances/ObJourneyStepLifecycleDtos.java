@@ -120,10 +120,16 @@ final class ObJourneyStepLifecycleDtos {
      * ObJourneyStepLifecycleService#answerItem}. Mapping this to "answered
      * True" instead would show an item as outstanding that the server is
      * perfectly willing to complete over.
+     *
+     * @param isDone answered, either way — {@code answer != null}.
+     * @param answer the three states the column actually holds: True, False,
+     *               and null for not yet answered.
+     * @param remark why, on a False. Mandatory there, absent otherwise.
      */
     record ObJourneyStepItem(
             Long id, Long stepId, int sequence, String label,
-            boolean isMandatory, boolean isDone, Instant doneAt, UserRef doneBy) {
+            boolean isMandatory, boolean isDone, Boolean answer, String remark,
+            Instant doneAt, UserRef doneBy) {
     }
 
     /**
@@ -182,7 +188,64 @@ final class ObJourneyStepLifecycleDtos {
             int tatDays, boolean requiresSignoff, Long dependsOnStepId,
             String skipReason, Long skippedByUserId,
             List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs,
-            Long effectiveOwnerUserId) {
+            Long effectiveOwnerUserId,
+            Long stageKey, String stageName, Double tatUsedPercent) {
+
+        /**
+         * The same step, told which implementation stage it belongs to.
+         *
+         * <h2>A copy rather than two more factory parameters</h2>
+         *
+         * <p>Eleven call sites build this record and exactly one of them — the
+         * journey read — knows the stage. The stage is resolved by a join back
+         * to the template, so the five lifecycle transitions and the ETag
+         * precondition would each have to run that query to fill in an argument
+         * their callers never read.
+         *
+         * <p>So the stage is absent everywhere by default and added by the one
+         * caller that has it. Absent is honest here: it is null because nothing
+         * looked it up, not because the task belongs to no stage — a task
+         * outside a stage reports key {@code 0} and the name {@code Ungrouped},
+         * which is a different answer and stays distinguishable from this one.
+         *
+         * @param stageKey  folded identically to {@code ObProjectStage.stageKey}
+         *                  and {@code ObStepDot.stageKey} — see
+         *                  {@code ObJourneyReadRepository#stagesOfJourney}.
+         * @param stageName the stage's published name.
+         */
+        ObJourneyStepDetail withStage(Long stageKey, String stageName) {
+            return new ObJourneyStepDetail(
+                    id, journeyId, sequence, name, status,
+                    ownerUserId, backupOwnerUserId,
+                    blockedReasonCode, blockedNote,
+                    startedAt, finishedAt, dueAt,
+                    description, clockState, rag,
+                    tatDays, requiresSignoff, dependsOnStepId,
+                    skipReason, skippedByUserId,
+                    items, docs, effectiveOwnerUserId,
+                    stageKey, stageName, tatUsedPercent);
+        }
+
+        /**
+         * The same task, carrying what fraction of its TAT budget is gone.
+         *
+         * <p>A second copy method rather than two more factory parameters, on
+         * {@link #withStage}'s reasoning exactly: one caller — the journey read
+         * — can compute this, and the five transitions would each have to run
+         * the calculation to fill in an argument their callers never read.
+         */
+        ObJourneyStepDetail withTatUsed(Double percent) {
+            return new ObJourneyStepDetail(
+                    id, journeyId, sequence, name, status,
+                    ownerUserId, backupOwnerUserId,
+                    blockedReasonCode, blockedNote,
+                    startedAt, finishedAt, dueAt,
+                    description, clockState, rag,
+                    tatDays, requiresSignoff, dependsOnStepId,
+                    skipReason, skippedByUserId,
+                    items, docs, effectiveOwnerUserId,
+                    stageKey, stageName, percent);
+        }
 
         /**
          * C-108 · {@code effectiveOwnerUserId} needs {@link ObBackupOwnerResolver},
@@ -215,7 +278,8 @@ final class ObJourneyStepLifecycleDtos {
                     s.getDescription(), ObStepClockState.of(s.getStatus()), rag,
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
-                    items, docs, effectiveOwnerUserId);
+                    items, docs, effectiveOwnerUserId,
+                    null, null, null);
         }
     }
 
@@ -245,7 +309,14 @@ final class ObJourneyStepLifecycleDtos {
      * clean {@code 400} from {@code @NotNull} instead of silently defaulting
      * to {@code false} and un-answering an item the caller never mentioned.
      */
-    record ObJourneyStepItemUpdateRequest(@NotNull Boolean isDone) {
+    /**
+     * @param answer {@code true}, {@code false}, or {@code null} to clear back
+     *               to unanswered. Deliberately <b>not</b> {@code @NotNull}:
+     *               null is a meaningful value here, not a missing one.
+     * @param remark required when {@code answer} is false — see
+     *               {@link StepItemRemarkRequiredException}.
+     */
+    record ObJourneyStepItemUpdateRequest(Boolean answer, @Size(max = 500) String remark) {
     }
 
     record ObJourneyStepItemResponse(ObJourneyStepItem data) {

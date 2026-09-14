@@ -142,8 +142,8 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/journey-templates", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/revisions", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/publish", ADMIN_ONLY);
-        put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/steps", ADMIN_ONLY);
-        put(m, "PUT", "/api/v1/onboarding/journey-templates/{templateId}/steps/order", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/journey-template-stages/{stageId}/tasks", ADMIN_ONLY);
+        put(m, "PUT", "/api/v1/onboarding/journey-template-stages/{stageId}/tasks/order", ADMIN_ONLY);
         // C-123 · the Module Service catalogue's own two writes — the same
         // ADMIN_ONLY every other journey-templates write above already carries.
         put(m, "PUT", "/api/v1/onboarding/journey-templates/order", ADMIN_ONLY);
@@ -155,6 +155,7 @@ public class ObModuleRoleRules {
         // blast radius, so if any of the above is Admin-only these are.
         put(m, "PATCH", "/api/v1/onboarding/journey-templates/{templateId}", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/journey-templates/{templateId}", ADMIN_ONLY);
+        put(m, "PATCH", "/api/v1/onboarding/journey-template-steps/{stepId}", ADMIN_ONLY);
         put(m, "DELETE", "/api/v1/onboarding/journey-template-steps/{stepId}", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/docs", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/journey-template-steps/{stepId}/items", ADMIN_ONLY);
@@ -245,6 +246,28 @@ public class ObModuleRoleRules {
         put(m, "GET", "/api/v1/onboarding/clients/{obClientId}", EVERY_ROLE);
         put(m, "POST", "/api/v1/onboarding/clients", ADMIN_AND_SALES);
         put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
+        // Delete takes the same pair as the edit rather than a narrower one.
+        // It is not a destructive power in the way the verb suggests: the
+        // service refuses any client with a project, a checklist, a document or
+        // a portal login, so what remains deletable is a row typed in wrong
+        // minutes ago — and whoever typed it is exactly who should be able to
+        // take it back. Narrowing this to OB_ADMIN would make a Sales user's
+        // own typo somebody else's errand.
+        put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
+
+        // The Projects grid. A project is scoped by its client, so the reads
+        // are every role's for the reason the client reads are, and the writes
+        // take the client's own pair: a project is what Sales sells, and
+        // creating one is the natural continuation of boarding the company.
+        put(m, "GET", "/api/v1/onboarding/projects", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/projects/{obProjectId}", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/projects", ADMIN_AND_SALES);
+        put(m, "PATCH", "/api/v1/onboarding/projects/{obProjectId}", ADMIN_AND_SALES);
+        // Delete takes the same pair as the edit, on the client delete's
+        // reasoning: the service refuses any project anything points at, so
+        // what stays deletable is one created against the wrong client minutes
+        // ago — and whoever created it is who should be able to take it back.
+        put(m, "DELETE", "/api/v1/onboarding/projects/{obProjectId}", ADMIN_AND_SALES);
 
         // B-103 · the SPOC contacts, which are part of the client record
         // rather than of a journey, so they take the client's own rule.

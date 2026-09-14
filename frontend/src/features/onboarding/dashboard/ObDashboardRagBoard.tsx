@@ -5,6 +5,8 @@ import type { ObClient } from '@/api/generated/model/obClient'
 import type { ObRag } from '@/api/generated/model/obRag'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
+
 /** One page per column. A board, not an archive — {@link ObDashboardDrillPanel}'s own reasoning for the identical limit. */
 const COLUMN_LIMIT = 20
 
@@ -56,9 +58,10 @@ export function ObDashboardRagBoard() {
 
 function RagColumn({ column }: { column: Column }) {
   const navigate = useNavigate()
-  const { data, isPending, isError } = useListObClients({
-    status: 'ONBOARDING', rag: column.rag, limit: COLUMN_LIMIT,
-  })
+  const { data, isPending, isError } = useListObClients(
+    { status: 'ONBOARDING', rag: column.rag, limit: COLUMN_LIMIT },
+    { query: OB_DASHBOARD_QUERY },
+  )
   const clients = data?.data ?? []
 
   return (

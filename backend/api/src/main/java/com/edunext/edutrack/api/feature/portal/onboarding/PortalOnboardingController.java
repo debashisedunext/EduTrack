@@ -3,11 +3,13 @@ package com.edunext.edutrack.api.feature.portal.onboarding;
 import com.edunext.edutrack.api.feature.onboarding.escalations.ObClientEscalationService;
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
 import com.edunext.edutrack.api.feature.onboarding.prereqs.ObPrereqTaskService;
+import com.edunext.edutrack.api.feature.onboarding.signoff.PortalSignoffDecisionService;
 import com.edunext.edutrack.api.feature.portal.ClientPrincipal;
 import com.edunext.edutrack.domain.onboarding.ObClientPrereqTask;
 import com.edunext.edutrack.domain.onboarding.ObPrereqActorType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -84,6 +86,7 @@ public class PortalOnboardingController {
     private final PortalPrereqAttachmentService attachments;
     private final PortalPrimaryContactReader clients;
     private final PortalSignoffReader signoffs;
+    private final PortalSignoffDecisionService signoffDecisions;
     private final PortalEscalationStepReader escalationSteps;
     private final ObClientEscalationService clientEscalations;
 
@@ -96,6 +99,7 @@ public class PortalOnboardingController {
                                PortalPrereqAttachmentService attachments,
                                PortalPrimaryContactReader clients,
                                PortalSignoffReader signoffs,
+                               PortalSignoffDecisionService signoffDecisions,
                                PortalEscalationStepReader escalationSteps,
                                ObClientEscalationService clientEscalations) {
         this.prereqs = prereqs;
@@ -107,6 +111,7 @@ public class PortalOnboardingController {
         this.attachments = attachments;
         this.clients = clients;
         this.signoffs = signoffs;
+        this.signoffDecisions = signoffDecisions;
         this.escalationSteps = escalationSteps;
         this.clientEscalations = clientEscalations;
     }
@@ -157,6 +162,102 @@ public class PortalOnboardingController {
     ResponseEntity<PortalOnboardingDtos.PortalSignoffListResponse> signoffs(Authentication caller) {
         long obClientId = obClientId(caller);
         return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffListResponse(signoffs.listFor(obClientId)));
+    }
+
+    /**
+     * CP-05 · what is being signed, read on the authenticated surface.
+     *
+     * <p>The portal's own OB-09. Unlike that page there is no token to present
+     * and no code to type — {@link ClientPrincipal#obClientId()} already
+     * identifies the client, and {@link PortalSignoffDecisionService} explains
+     * at length why a portal session is a stronger proof of the same two facts
+     * the link-plus-OTP pair establishes rather than a weaker one.
+     *
+     * <p>Returns any status this client owns, {@code canDecide} carrying
+     * whether the forms render. A sign-off on another client's onboarding is
+     * the same 404 as one that does not exist.
+     */
+    @GetMapping(path = "/signoffs/{signoffId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getPortalSignoff", summary = "One sign-off, ready to decide (CP-05)")
+    ResponseEntity<PortalOnboardingDtos.PortalSignoffReviewResponse> signoff(
+            @PathVariable long signoffId,
+            @RequestHeader(name = "If-None-Match", required = false) String ifNoneMatch,
+            Authentication caller) {
+
+        PortalOnboardingDtos.PortalSignoffReview review =
+                reviewOf(signoffDecisions.review(signoffId, obClientId(caller)));
+
+        String etag = Integer.toHexString(review.hashCode());
+        if (etag.equals(unquoted(ifNoneMatch))) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
+        }
+        return ResponseEntity.ok().eTag(etag)
+                .body(new PortalOnboardingDtos.PortalSignoffReviewResponse(review));
+    }
+
+    /**
+     * CP-05 · accept, from the portal.
+     *
+     * <p>{@code 200} rather than {@code 201}: this decides a row staff already
+     * created, it does not create one. That is also why no
+     * {@code Idempotency-Key} is taken — the row's own {@code PENDING} status
+     * is the idempotency key, and a second accept answers
+     * {@code portal-signoff-not-pending} rather than signing twice.
+     *
+     * <p>The {@link HttpServletRequest} is passed through so the acceptance
+     * records the IP and user agent it came from, exactly as the public page's
+     * does. That is the same evidence panel either way, from a caller who
+     * authenticated rather than one who followed a link.
+     */
+    @PostMapping(path = "/signoffs/{signoffId}/accept",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "acceptPortalSignoff", summary = "Accept a sign-off from the portal (CP-05)")
+    ResponseEntity<PortalOnboardingDtos.PortalSignoffDecisionResponse> acceptSignoff(
+            @PathVariable long signoffId,
+            @Valid @RequestBody PortalOnboardingDtos.PortalSignoffAcceptRequest request,
+            Authentication caller,
+            HttpServletRequest http) {
+
+        return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffDecisionResponse(
+                decisionOf(signoffDecisions.accept(signoffId, obClientId(caller),
+                        request.acceptedName(), request.note(), http))));
+    }
+
+    /**
+     * CP-05 · object, from the portal.
+     *
+     * <p>Terminal in the same sense accepting is — there is no un-object here
+     * either. The contract's own line: "a client who changes their mind is a
+     * new sign-off request, which is a staff action with its own record."
+     */
+    @PostMapping(path = "/signoffs/{signoffId}/object",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "objectPortalSignoff", summary = "Raise an objection instead of accepting (CP-05)")
+    ResponseEntity<PortalOnboardingDtos.PortalSignoffDecisionResponse> objectSignoff(
+            @PathVariable long signoffId,
+            @Valid @RequestBody PortalOnboardingDtos.PortalSignoffObjectRequest request,
+            Authentication caller) {
+
+        return ResponseEntity.ok(new PortalOnboardingDtos.PortalSignoffDecisionResponse(
+                decisionOf(signoffDecisions.object(signoffId, obClientId(caller), request.note()))));
+    }
+
+    /**
+     * CP-05 · B-119's go-live survey, answered in the portal.
+     *
+     * <p>{@code 204}: there is nothing to hand back, and the acceptance the
+     * survey follows was already final before the question was drawn. Skipping
+     * it is simply never calling this.
+     */
+    @PostMapping(path = "/signoffs/{signoffId}/csat", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "submitPortalCsat", summary = "Answer the go-live survey (CP-05)")
+    ResponseEntity<Void> csat(
+            @PathVariable long signoffId,
+            @Valid @RequestBody PortalOnboardingDtos.PortalCsatRequest request,
+            Authentication caller) {
+
+        signoffDecisions.submitCsat(signoffId, obClientId(caller), request.score(), request.comment());
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -339,6 +440,43 @@ public class PortalOnboardingController {
         } catch (IOException unreadable) {
             throw new UncheckedIOException("the uploaded part could not be read", unreadable);
         }
+    }
+
+    /**
+     * {@link PortalSignoffDecisionService.Review} to the wire shape.
+     *
+     * <p>A hand-written mapping between two records with the same fields, kept
+     * rather than collapsed into one shared type: the service record belongs to
+     * {@code feature/onboarding/signoff} and is free to grow a field for a
+     * staff caller, and sharing it would grow that field on the portal wire too
+     * without anybody deciding — {@code PortalSignoffReader}'s own argument for
+     * writing a second narrower query rather than reusing the staff one, at the
+     * DTO layer instead of the SQL layer.
+     */
+    private static PortalOnboardingDtos.PortalSignoffReview reviewOf(
+            PortalSignoffDecisionService.Review review) {
+
+        return new PortalOnboardingDtos.PortalSignoffReview(
+                review.id(), review.kind(), review.status(),
+                review.clientName(), review.productName(), review.stepTitle(),
+                review.requestedAt(), review.canDecide(), review.csatOffered(),
+                review.checklist().stream()
+                        .map(item -> new PortalOnboardingDtos.PortalSignoffChecklistItem(
+                                item.id(), item.sequence(), item.label(),
+                                item.isMandatory(), item.isDone()))
+                        .toList());
+    }
+
+    /** {@link #reviewOf}'s reasoning, for the decision shape. */
+    private static PortalOnboardingDtos.PortalSignoffDecision decisionOf(
+            PortalSignoffDecisionService.Decision decision) {
+
+        return new PortalOnboardingDtos.PortalSignoffDecision(
+                decision.id(), decision.status(),
+                decision.signedAt(), decision.signedName(), decision.acceptanceNote(),
+                decision.objectedAt(), decision.objectionNote(),
+                decision.stepCompleted(), decision.gateFailures(), decision.clientWentLive(),
+                decision.hasCertificate(), decision.csatOffered());
     }
 
     private static String unquoted(String etag) {

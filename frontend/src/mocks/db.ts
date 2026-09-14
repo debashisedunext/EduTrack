@@ -678,6 +678,15 @@ export interface ObStep {
   /** The one service this waits for; null runs in parallel. */
   dependsOnStepId: number | null;
   /**
+   * Which template task this was cloned from.
+   *
+   * <p>Optional, so no existing fixture has to be touched: the stage roll-up
+   * falls back to matching the template's tasks by name, which is exact for
+   * every fixture because the clone copies the name. Journeys created through
+   * `POST /onboarding/projects` carry the real id.
+   */
+  templateStepId?: number | null;
+  /**
    * C-104 · optional so every step predating this task need not be touched —
    * `?? null` at the handler boundary is what a step naming nobody already
    * means on the real row (C-103).
@@ -716,6 +725,14 @@ export interface ObStep {
 export interface ObStepItem {
   id: number; sequence: number; label: string;
   isMandatory: boolean; isDone: boolean;
+  /**
+   * The three states the real column has: true, false, and null for not yet
+   * answered. `isDone` is "answered, either way" and is derived from it — the
+   * completion gate is satisfied by a False exactly as by a True.
+   */
+  answer?: boolean | null;
+  /** Why, on a False. Mandatory there — `ck_ob_journey_step_items_remark`. */
+  remark?: string | null;
   doneAt?: string | null; doneById?: number | null;
 }
 
@@ -833,7 +850,11 @@ export interface ObAttachmentRow {
 
 /** `ob_clients`. No payment columns — see {@link ObApplication}. */
 export interface ObClient {
-  id: number; name: string; description: string | null; onboardingDate: string;
+  id: number; name: string;
+  /** The Clients master's filing key. Unique; nullable only for rows boarded before it existed. */
+  clientCode: string | null;
+  city: string | null;
+  description: string | null; onboardingDate: string;
   /** Stored unmasked here; every read masks it. Unique — the duplicate guard's key. */
   pan: string | null;
   address: string | null; licenseType: string | null;
@@ -847,6 +868,75 @@ export interface ObClient {
   attachments: ObAttachmentRow[];
   journeys: ObJourney[];
   createdById: number; createdAt: string;
+}
+
+/**
+ * `ob_projects` — one engagement: one client, one product, and the module
+ * services they were boarded through.
+ *
+ * <p><b>Derived from the client fixtures rather than written out.</b> A project
+ * is a (client, product) pair, and those pairs are already in
+ * `ObClient.applications`; a second hand-written list would drift from it the
+ * first time somebody added a purchase to a fixture and forgot the project. The
+ * derivation below is what the real migration's backfill does, applied to the
+ * mock corpus — including the name it derives, "<Client> — <Product>", so the
+ * fixtures look exactly like rows nobody has renamed yet.
+ */
+export interface ObProjectRow {
+  id: number;
+  obClientId: number;
+  productId: number;
+  name: string;
+  startDate: string;
+  salesPersonId: number | null;
+  implementorUserId: number | null;
+  status: 'RUNNING' | 'COMPLETED' | 'ON_HOLD' | 'DROPPED';
+  statusReason: string | null;
+  createdById: number | null;
+  createdAt: string;
+}
+
+/**
+ * The backfill, in one function.
+ *
+ * <p>`implementorUserId` is taken from the owner of the pair's first journey
+ * step where there is one — the mock can afford that guess where the migration
+ * could not, because these are fixtures rather than somebody's real data, and a
+ * grid with every implementor column empty would show nothing worth looking at.
+ */
+function deriveObProjects(clients: ObClient[], products: ObProduct[]): ObProjectRow[] {
+  const rows: ObProjectRow[] = [];
+  let id = 0;
+  for (const client of clients) {
+    for (const application of client.applications) {
+      const product = products.find((p) => p.id === application.productId);
+      const journeys = client.journeys.filter((j) => j.productId === application.productId);
+      const live = journeys.filter((j) => j.archivedAt == null);
+      const allDone = live.length > 0 && live.every((j) => j.completedAt != null);
+      rows.push({
+        id: ++id,
+        obClientId: client.id,
+        productId: application.productId,
+        name: `${client.name} — ${product?.name ?? 'Product ' + application.productId}`.slice(0, 200),
+        startDate: application.licenseStart ?? client.onboardingDate,
+        salesPersonId: client.salesPersonId,
+        implementorUserId:
+          live.flatMap((j) => j.steps).find((s) => s.ownerUserId != null)?.ownerUserId ?? null,
+        // The client's own hold or drop outranks anything derived from journeys,
+        // exactly as the migration's second UPDATE has it.
+        status:
+          client.status === 'ON_HOLD' || client.status === 'DROPPED'
+            ? client.status
+            : allDone
+              ? 'COMPLETED'
+              : 'RUNNING',
+        statusReason: null,
+        createdById: client.createdById,
+        createdAt: client.createdAt,
+      });
+    }
+  }
+  return rows;
 }
 
 /**
@@ -879,12 +969,35 @@ export interface ObJourneyTemplateRow {
   publishedBy: number | null; publishedAt: string | null;
 }
 
-/** `ob_journey_template_steps` — a Service within a Module Service (C-102). */
+/**
+ * `ob_journey_template_stages` — a **stage group**, the second of OB-07's
+ * four levels (Module Service, stage, task, task list).
+ *
+ * Carries no TAT, owner or sign-off: those belong to a task. Its TAT on the
+ * designer is derived by summing its tasks.
+ */
+export interface ObJourneyTemplateStageRow {
+  id: number; templateId: number; sequence: number; name: string;
+  /**
+   * `ob_implementation_stages.id`, or null on the "Ungrouped" group that
+   * holds tasks predating `V20260911_1600` and belonging to no stage.
+   */
+  implementationStageId: number | null;
+}
+
+/** `ob_journey_template_steps` — a **task** inside a stage group (C-102). */
 export interface ObJourneyTemplateStepRow {
-  id: number; templateId: number; sequence: number; name: string; description: string | null;
+  id: number; templateId: number; sequence: number; name: string;
+  /**
+   * `ob_journey_template_stages.id` — the stage group this task sits in.
+   * Never null: a task outside a stage is not a state this model has.
+   */
+  templateStageId: number;
+  description: string | null;
   /** Working days, not hours — the v1.2 unit change. */
   tatDays: number;
-  ownerUserId: number | null; ownerRole: string | null; backupOwnerUserId: number | null;
+  /** The implementor. Null falls back to the project's own at instantiation. */
+  ownerUserId: number | null;
   requiresSignoff: boolean;
   /** Null means this step runs in parallel from journey start — plan §5.6. */
   dependsOnStepId: number | null;
@@ -978,8 +1091,10 @@ export interface Db {
   obImplementationStages: ObImplementationStage[];
   obProducts: ObProduct[];
   obClients: ObClient[];
+  obProjects: ObProjectRow[];
   /** C-102 · OB-07's designer. See {@link ObJourneyTemplateRow}'s own note on why this is here. */
   obJourneyTemplates: ObJourneyTemplateRow[];
+  obJourneyTemplateStages: ObJourneyTemplateStageRow[];
   obJourneyTemplateSteps: ObJourneyTemplateStepRow[];
   obJourneyTemplateStepItems: ObJourneyTemplateStepItemRow[];
   obJourneyTemplateStepDocs: ObJourneyTemplateStepDocRow[];
@@ -2108,7 +2223,7 @@ const obComm = (
 
 const OB_CLIENTS: ObClient[] = [
   {
-    id: 1, name: 'GreenValley International School', description: 'K-12 chain, 3 campuses, moving off spreadsheets.',
+    id: 1, name: 'GreenValley International School', clientCode: 'GVI-001', city: 'Pune', description: 'K-12 chain, 3 campuses, moving off spreadsheets.',
     onboardingDate: '2026-06-12', pan: 'AAGCG1204F', address: '14 Ridge Rd, Aundh, Pune 411007',
     licenseType: 'Enterprise · Annual', salesPersonId: 9, status: 'LIVE',
     liveAt: '2026-08-07T11:40:00.000Z',
@@ -2189,7 +2304,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 9, createdAt: iso('2026-06-12T09:20:00'),
   },
   {
-    id: 2, name: 'Sunrise EdTech Pvt Ltd', description: 'Test-prep startup, 40 counsellors.',
+    id: 2, name: 'Sunrise EdTech Pvt Ltd', clientCode: 'SUN-002', city: 'Bengaluru', description: 'Test-prep startup, 40 counsellors.',
     onboardingDate: '2026-07-28', pan: 'AASCS8821K', address: '77 Residency Rd, Bengaluru 560025',
     licenseType: 'Professional · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2228,7 +2343,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 9, createdAt: iso('2026-07-28T14:05:00'),
   },
   {
-    id: 3, name: 'Horizon Academy', description: 'CBSE senior secondary, 2,100 students.',
+    id: 3, name: 'Horizon Academy', clientCode: 'HRZ-003', city: 'Hyderabad', description: 'CBSE senior secondary, 2,100 students.',
     onboardingDate: '2026-08-03', pan: 'AAHCH3310Q', address: '5-9-22 Banjara Hills, Hyderabad 500034',
     licenseType: 'Professional · Annual', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2261,7 +2376,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 1, createdAt: iso('2026-08-03T10:00:00'),
   },
   {
-    id: 4, name: 'Bluebell Public School', description: 'Single campus, first ERP purchase.',
+    id: 4, name: 'Bluebell Public School', clientCode: 'BLU-004', city: 'Jaipur', description: 'Single campus, first ERP purchase.',
     onboardingDate: '2026-08-10', pan: 'AABCB9022L', address: 'C-31 Malviya Nagar, Jaipur 302017',
     licenseType: 'Starter · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2296,7 +2411,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 9, createdAt: iso('2026-08-10T14:05:00'),
   },
   {
-    id: 5, name: 'Nalanda Group of Institutions', description: '3 colleges + 2 schools under one trust.',
+    id: 5, name: 'Nalanda Group of Institutions', clientCode: 'NAL-005', city: 'Patna', description: '3 colleges + 2 schools under one trust.',
     onboardingDate: '2026-08-12', pan: 'AANCN5540D', address: 'Boring Rd, Patna 800001',
     licenseType: 'Enterprise · 3-year', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2325,7 +2440,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 1, createdAt: iso('2026-08-12T10:00:00'),
   },
   {
-    id: 6, name: 'Cambridge Heights School', description: 'IB curriculum, high-touch onboarding.',
+    id: 6, name: 'Cambridge Heights School', clientCode: 'CAM-006', city: 'Kolkata', description: 'IB curriculum, high-touch onboarding.',
     onboardingDate: '2026-07-20', pan: 'AACCC7714M', address: 'Linking Rd, Bandra W, Mumbai 400050',
     licenseType: 'Professional · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2356,7 +2471,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 9, createdAt: iso('2026-07-20T10:00:00'),
   },
   {
-    id: 7, name: 'Little Scholars Preschool', description: 'Preschool chain, 6 centres.',
+    id: 7, name: 'Little Scholars Preschool', clientCode: 'LIT-007', city: 'Kochi', description: 'Preschool chain, 6 centres.',
     onboardingDate: '2026-08-19', pan: 'AALCL2201B', address: 'MG Rd, Kochi 682016',
     licenseType: 'Starter · Annual', salesPersonId: 9, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2377,7 +2492,7 @@ const OB_CLIENTS: ObClient[] = [
     createdById: 9, createdAt: iso('2026-08-19T09:20:00'),
   },
   {
-    id: 8, name: 'Trinity College of Commerce', description: 'UG college, 4,000 students.',
+    id: 8, name: 'Trinity College of Commerce', clientCode: 'TRI-008', city: 'Chennai', description: 'UG college, 4,000 students.',
     onboardingDate: '2026-07-25', pan: 'AATCT6635H', address: 'Anna Salai, Chennai 600002',
     licenseType: 'Professional · Annual', salesPersonId: 1, status: 'ONBOARDING', liveAt: null,
     hasPortalLogin: false,
@@ -2563,16 +2678,41 @@ const OB_JOURNEY_TEMPLATES: ObJourneyTemplateRow[] = [
   },
 ];
 
+/*
+  Two shapes on purpose, because an upgraded database holds both.
+
+  Template 1 is the pre-`V20260911_1630` case: hand-named steps belonging to
+  no stage, collected into the one "Ungrouped" group the migration gives them
+  rather than guessed into the vocabulary by name-matching. The designer has
+  to keep rendering it.
+
+  Template 2 is the shape everything created from here on has: one group per
+  active implementation stage, most of them empty, tasks written inside them.
+  Empty groups are the usual state of a new service and the designer draws
+  them, so the fixture carries four.
+*/
+const OB_JOURNEY_TEMPLATE_STAGES: ObJourneyTemplateStageRow[] = [
+  { id: 101, templateId: 1, sequence: 9999, name: 'Ungrouped', implementationStageId: null },
+  { id: 201, templateId: 2, sequence: 1, name: 'Configuration', implementationStageId: 1 },
+  { id: 202, templateId: 2, sequence: 2, name: 'Data Migration', implementationStageId: 2 },
+  { id: 203, templateId: 2, sequence: 3, name: 'Reports', implementationStageId: 3 },
+  { id: 204, templateId: 2, sequence: 4, name: 'Training', implementationStageId: 4 },
+  { id: 205, templateId: 2, sequence: 5, name: 'Communication', implementationStageId: 5 },
+  { id: 206, templateId: 2, sequence: 6, name: 'Third Party Integration', implementationStageId: 6 },
+];
+
 const OB_JOURNEY_TEMPLATE_STEPS: ObJourneyTemplateStepRow[] = [
-  // Template 1 — published, read-only.
-  { id: 1, templateId: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', description: null, tatDays: 3, ownerUserId: null, ownerRole: 'PM', backupOwnerUserId: null, requiresSignoff: true, dependsOnStepId: null },
-  { id: 2, templateId: 1, sequence: 2, name: 'Environment Provisioning', description: null, tatDays: 4, ownerUserId: null, ownerRole: 'DEPLOYMENT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 1 },
-  { id: 3, templateId: 1, sequence: 3, name: 'Data Migration', description: 'Import from the client’s existing system.', tatDays: 8, ownerUserId: null, ownerRole: 'DEVELOPER', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 2 },
-  { id: 4, templateId: 1, sequence: 4, name: 'User Training', description: null, tatDays: 5, ownerUserId: null, ownerRole: 'SUPPORT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: null },
-  { id: 5, templateId: 1, sequence: 5, name: 'Go-live Readiness', description: null, tatDays: 4, ownerUserId: null, ownerRole: 'PM', backupOwnerUserId: null, requiresSignoff: true, dependsOnStepId: 3 },
-  // Template 2 — draft, every write reachable.
-  { id: 10, templateId: 2, sequence: 1, name: 'Device Rollout', description: null, tatDays: 6, ownerUserId: null, ownerRole: 'DEPLOYMENT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: null },
-  { id: 11, templateId: 2, sequence: 2, name: 'Attendance Policy Mapping', description: null, tatDays: 3, ownerUserId: null, ownerRole: 'SUPPORT', backupOwnerUserId: null, requiresSignoff: false, dependsOnStepId: 10 },
+  // Template 1 — published, read-only. Every task in the Ungrouped group.
+  { id: 1, templateId: 1, sequence: 1, name: 'Kickoff & Requirement Sign-off', templateStageId: 101, description: null, tatDays: 3, ownerUserId: null, requiresSignoff: true, dependsOnStepId: null },
+  { id: 2, templateId: 1, sequence: 2, name: 'Environment Provisioning', templateStageId: 101, description: null, tatDays: 4, ownerUserId: null, requiresSignoff: false, dependsOnStepId: 1 },
+  { id: 3, templateId: 1, sequence: 3, name: 'Data Migration', templateStageId: 101, description: 'Import from the client’s existing system.', tatDays: 8, ownerUserId: null, requiresSignoff: false, dependsOnStepId: 2 },
+  { id: 4, templateId: 1, sequence: 4, name: 'User Training', templateStageId: 101, description: null, tatDays: 5, ownerUserId: null, requiresSignoff: false, dependsOnStepId: null },
+  { id: 5, templateId: 1, sequence: 5, name: 'Go-live Readiness', templateStageId: 101, description: null, tatDays: 4, ownerUserId: null, requiresSignoff: true, dependsOnStepId: 3 },
+  // Template 2 — draft, every write reachable. Two tasks in Configuration,
+  // the other five stages empty, which is what the "+ Add a task" control and
+  // the empty-stage row are drawn against.
+  { id: 10, templateId: 2, sequence: 1, name: 'Device Rollout', templateStageId: 201, description: null, tatDays: 6, ownerUserId: null, requiresSignoff: false, dependsOnStepId: null },
+  { id: 11, templateId: 2, sequence: 2, name: 'Attendance Policy Mapping', templateStageId: 201, description: null, tatDays: 3, ownerUserId: null, requiresSignoff: false, dependsOnStepId: 10 },
 ];
 
 const OB_JOURNEY_TEMPLATE_STEP_ITEMS: ObJourneyTemplateStepItemRow[] = [
@@ -2643,8 +2783,10 @@ export function createDb(): Db {
     obImplementationStages: structuredClone(OB_IMPLEMENTATION_STAGES),
     obProducts: structuredClone(OB_PRODUCTS),
     obClients: structuredClone(OB_CLIENTS),
+    obProjects: deriveObProjects(OB_CLIENTS, OB_PRODUCTS),
     // C-102 · see OB_JOURNEY_TEMPLATES's own note.
     obJourneyTemplates: structuredClone(OB_JOURNEY_TEMPLATES),
+    obJourneyTemplateStages: structuredClone(OB_JOURNEY_TEMPLATE_STAGES),
     obJourneyTemplateSteps: structuredClone(OB_JOURNEY_TEMPLATE_STEPS),
     obJourneyTemplateStepItems: structuredClone(OB_JOURNEY_TEMPLATE_STEP_ITEMS),
     obJourneyTemplateStepDocs: structuredClone(OB_JOURNEY_TEMPLATE_STEP_DOCS),

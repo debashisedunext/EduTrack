@@ -5,7 +5,6 @@ import com.edunext.edutrack.domain.masters.WorkingCalendarRepository;
 import com.edunext.edutrack.domain.masters.WorkingHoursService;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentRepository;
 import com.edunext.edutrack.domain.onboarding.ObAttachmentScanStatus;
-import com.edunext.edutrack.domain.onboarding.ObGateStatus;
 import com.edunext.edutrack.domain.onboarding.ObJourney;
 import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import com.edunext.edutrack.domain.onboarding.ObJourneyRepository;
@@ -187,10 +186,27 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
-     * {@code PENDING → IN_PROGRESS}. Refused while the journey's own gate is
-     * still {@code LOCKED} or the journey is held by another
-     * ({@code held_by_journey_id}) — "clocks dead until the gate opens" is
-     * literal, not merely about the initial instantiation.
+     * {@code PENDING → IN_PROGRESS}. Refused while the journey is held by
+     * another ({@code held_by_journey_id}) — that hold waits on work nobody
+     * on this journey can do.
+     *
+     * <h3>The prerequisite gate no longer refuses a start</h3>
+     *
+     * <p>Plan §5.2/§5.3's "clocks dead until the gate opens" held for every
+     * path into {@code IN_PROGRESS}, so a client whose checklist was one
+     * unverified document short could not begin any implementation work at
+     * all. Operations asked for the checklist to be advisory: a
+     * {@code LOCKED} gate is now something the screens <em>report</em> — the
+     * chip, the banner and the checklist are all unchanged — and not
+     * something that refuses the owner's own Start.
+     *
+     * <p>What the gate still does is the automatic half: {@link
+     * ObPrerequisiteGateService} flips every {@code LOCKED} journey
+     * {@code OPEN} when the last mandatory task verifies, activates the
+     * first wave of steps and fires the kickoff mail. A journey born
+     * {@code LOCKED} still activates nothing by itself — its owners choose
+     * when to start, which is the whole of what "optional" buys them — so no
+     * TAT clock starts behind anybody's back.
      *
      * <p>C-105 · {@code due_at} is computed here, working-calendar aware,
      * from {@link ObJourneyStep#getTatDays()} — see {@link
@@ -201,7 +217,7 @@ public class ObJourneyStepLifecycleService {
      *
      * @throws JourneyStepNotFoundException     no such step
      * @throws NotStepOwnerException             caller is neither owner nor backup owner
-     * @throws JourneyNotOpenException           the journey is locked or held
+     * @throws JourneyNotOpenException           the journey is held behind a sibling
      * @throws InvalidStepTransitionException    step is not {@code PENDING}
      * @throws StepDependencyNotSatisfiedException C-119 · {@code dependsOnStepId} has not finished
      */
@@ -214,9 +230,8 @@ public class ObJourneyStepLifecycleService {
         ObJourney journey = journeys.findById(step.getJourneyId())
                 .orElseThrow(() -> new IllegalStateException(
                         "journey step " + stepId + " points at journey " + step.getJourneyId() + " which does not exist"));
-        if (journey.getGateStatus() != ObGateStatus.OPEN || journey.getHeldByJourneyId() != null) {
-            throw new JourneyNotOpenException(journey.getId(),
-                    journey.getGateStatus() != ObGateStatus.OPEN, journey.getHeldByJourneyId());
+        if (journey.getHeldByJourneyId() != null) {
+            throw new JourneyNotOpenException(journey.getId(), journey.getHeldByJourneyId());
         }
         requireDependencySatisfied(step);
 
@@ -859,34 +874,39 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
-     * C-111 · answer one Task List entry — OB-06's checkbox.
+     * C-111 · answer one Task List entry — OB-06's True / False / remark.
      *
-     * <p><b>{@code isDone} means "answered", and that is the only reading
-     * under which the panel and the completion gate agree.</b> {@link
-     * #requireCompletionGate} filters on {@code getAnswer() == null}: an
-     * item answered <em>False</em> satisfies the gate exactly as one
-     * answered True does, because §5.8's question is whether the owner has
-     * addressed the item, not whether the answer was yes. So {@code
-     * isDone: true} records True, and {@code false} returns it to
-     * unanswered.
+     * <h2>Three states, because the question has three answers</h2>
      *
-     * <p>🔴 <b>The consequence is that False-with-remark is unreachable
-     * through this route, and that is a defect in the contract rather than
-     * a choice made here.</b> {@code ObJourneyStepItemUpdateRequest} carries
-     * one boolean; the column it writes is a three-state {@code Boolean}
-     * whose False arm requires a remark ({@code
-     * ck_ob_journey_step_items_remark}). Two states cannot express three.
-     * Recording "no, and here is why" needs a contract change — Stream A's,
-     * since A-118 owns the schema — and until then this writes only the two
-     * states it can name honestly rather than inventing a remark to satisfy
-     * a check constraint.
+     * <p>{@code answer} is {@code true}, {@code false}, or {@code null} for not
+     * yet answered. A task list entry is a question — <em>was the source data
+     * received?</em> — and "no, the client has not sent it" is an answer rather
+     * than the absence of one.
+     *
+     * <p><b>This route used to carry a single boolean</b>, and a standing 🔴
+     * note here said so: two states cannot express three, so False-with-a-reason
+     * was unreachable and {@code isDone: false} had to mean "return it to
+     * unanswered". The column has been a nullable {@code Boolean} beside a
+     * {@code remark} since A-118 wrote it; only the request was binary. It is
+     * now {@code {answer, remark}} and the note is gone rather than reworded.
+     *
+     * <p><b>{@code isDone} still means "answered", not "answered yes"</b>, and
+     * that is the reading under which this and {@link #requireCompletionGate}
+     * agree — the gate filters on {@code getAnswer() == null}, so an item
+     * answered False satisfies it exactly as a True does. §5.8 asks whether the
+     * owner has addressed the item, not whether the answer was favourable.
+     *
+     * <p>A remark is kept only while the answer it explains stands: clearing to
+     * unanswered clears it too, because a reason for a decision no longer
+     * recorded is a sentence about nothing.
      *
      * @throws JourneyStepItemNotFoundException no such item
      * @throws NotStepOwnerException            caller is neither owner nor backup owner of its step
      * @throws StepAlreadyTerminalException     the step is {@code DONE} or {@code SKIPPED}
+     * @throws StepItemRemarkRequiredException  answered False with no reason — see that class
      */
     @Transactional
-    public ObJourneyStepItem answerItem(long itemId, long callerId, boolean isDone) {
+    public ObJourneyStepItem answerItem(long itemId, long callerId, Boolean answer, String remark) {
         ObJourneyStepItem item = stepItems.findById(itemId)
                 .orElseThrow(() -> new JourneyStepItemNotFoundException(itemId));
         ObJourneyStep step = requireStep(item.getStepId());
@@ -900,15 +920,17 @@ public class ObJourneyStepLifecycleService {
             throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
         }
 
-        item.setAnswer(isDone ? Boolean.TRUE : null);
-        item.setAnsweredBy(isDone ? callerId : null);
-        item.setAnsweredAt(isDone ? Instant.now() : null);
-        if (!isDone) {
-            // A remark belongs to the answer it explains. Keeping one after
-            // clearing the other leaves a reason for a decision no longer
-            // recorded.
-            item.setRemark(null);
+        String trimmed = remark == null || remark.isBlank() ? null : remark.trim();
+        if (Boolean.FALSE.equals(answer) && trimmed == null) {
+            // Refused here rather than left to `ck_ob_journey_step_items_remark`,
+            // which would surface as a 500 naming a database object.
+            throw new StepItemRemarkRequiredException(itemId);
         }
+
+        item.setAnswer(answer);
+        item.setAnsweredBy(answer == null ? null : callerId);
+        item.setAnsweredAt(answer == null ? null : Instant.now());
+        item.setRemark(answer == null ? null : trimmed);
         return item;
     }
 
@@ -1023,11 +1045,22 @@ public class ObJourneyStepLifecycleService {
      * already {@code OPEN}, where this is the first evaluation any step in
      * it has ever had.
      *
-     * <p>A no-op while the journey is {@code LOCKED} or held: {@link #skip}
-     * does not itself require the journey be open (its own javadoc), so
+     * <p>A no-op while the journey is held behind a sibling: {@link #skip}
+     * does not itself require the journey be unheld (its own javadoc), so
      * this re-checks fresh rather than trusting the caller's own state —
-     * the same defence-in-depth {@link #start}'s own gate check already
+     * the same defence-in-depth {@link #start}'s own hold check already
      * applies to a manual transition.
+     *
+     * <p><b>It no longer re-asserts the prerequisite gate.</b> Since
+     * {@link #start} admits a {@code LOCKED} journey, a step in one can be
+     * running, and the step after it has to follow when that one completes
+     * — a chain that activated its second step only once the checklist
+     * cleared would be a worse answer than refusing the first one outright.
+     * The two callers that <em>do</em> want the gate checked still check it
+     * themselves and are unaffected: {@code ObJourneyInstantiationService}
+     * kicks the first wave only for a journey born {@code OPEN}, and
+     * {@link ObPrerequisiteGateService} calls this precisely because the
+     * gate has just opened.
      *
      * <p>One pass over every {@code PENDING} step is enough — activating a
      * step moves it to {@code IN_PROGRESS}, which does not itself satisfy
@@ -1038,7 +1071,7 @@ public class ObJourneyStepLifecycleService {
     void activateEligibleSteps(long journeyId) {
         ObJourney journey = journeys.findById(journeyId)
                 .orElseThrow(() -> new IllegalStateException("journey " + journeyId + " does not exist"));
-        if (journey.getGateStatus() != ObGateStatus.OPEN || journey.getHeldByJourneyId() != null) {
+        if (journey.getHeldByJourneyId() != null) {
             return;
         }
 
@@ -1095,9 +1128,10 @@ public class ObJourneyStepLifecycleService {
         journey.setCompletedAt(Instant.now());
 
         for (long released : dependencyRelease.release(journeyId)) {
-            // The hold is gone; the gate decides the rest. A released journey
-            // whose client has not cleared prerequisites stays PENDING here
-            // and starts when C-118's gate opens it, exactly like any other.
+            // The hold is gone, and with the prerequisite gate advisory there
+            // is nothing left to wait for: a released journey activates its
+            // first wave here whether or not its client's checklist has
+            // cleared, exactly like any other.
             activateEligibleSteps(released);
             dependencyRelease.notifyUnblocked(released, journeyId);
         }

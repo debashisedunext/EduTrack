@@ -7767,24 +7767,39 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
-  /onboarding/journey-templates/{templateId}/steps:
-    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+  /onboarding/journey-template-stages/{stageId}/tasks:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateStageId' }]
     post:
       tags: [onboarding-journeys]
-      operationId: addObJourneyTemplateStep
-      summary: Add a service to a draft template (OB-07)
+      operationId: addObJourneyTemplateTask
+      summary: Add a task to a stage of a draft template (OB-07)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       description: |
-        `dependsOnStepId` null means the step runs in parallel from journey
-        start, not "first" (plan §5.6). The database enforces only that a
-        dependency stays inside the same template; that it names an
-        *earlier* step in that template is C-119's job, evaluated by the
-        designer on every add, reorder and delete.
+        A **task** is the third of OB-07's four levels — Module Service,
+        stage, task, task list — and the one that carries the TAT, the
+        owner and the required documents. The stage it goes in is in the
+        path, because a task is created inside a stage and never floats
+        with a stage id attached.
+
+        **There is deliberately no route that creates a stage.** A Module
+        Service is born holding one group per active implementation stage,
+        and which stages exist is decided on OB-15 and nowhere else — two
+        places to decide one thing is how two services end up described in
+        different vocabularies.
+
+        `dependsOnStepId` null means the task runs in parallel from journey
+        start, not "first" (plan §5.6). A dependency may name a task in
+        **another stage** of the same template: Data Migration genuinely
+        waits on Configuration, and forbidding that would push people into
+        inventing filler tasks to express a real order. The designer nests
+        by dependency within a stage and captions a cross-stage one
+        instead, since a row cannot be indented under a parent in another
+        group.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ObJourneyTemplateStepWriteRequest' }
+            schema: { $ref: '#/components/schemas/ObJourneyTemplateTaskWriteRequest' }
       responses:
         '201':
           description: Created.
@@ -7792,9 +7807,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ObJourneyTemplateStepResponse' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
-        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '404':
+          description: |
+            The module is not granted to this caller, or `stageId` names no
+            stage group.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '409':
-          description: The template has ever been published — only a draft accepts new steps.
+          description: |
+            The stage's template has ever been published — only a draft
+            accepts new tasks.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -7879,36 +7902,37 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
-  /onboarding/journey-templates/{templateId}/steps/order:
-    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+  /onboarding/journey-template-stages/{stageId}/tasks/order:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateStageId' }]
     put:
       tags: [onboarding-journeys]
-      operationId: reorderObJourneyTemplateSteps
-      summary: The OB-07 ↑/↓ control, applied in one call (draft only)
+      operationId: reorderObJourneyTemplateTasks
+      summary: The OB-07 ↑/↓ control, within one stage (draft only)
       parameters: [{ $ref: '#/components/parameters/IfMatch' }]
       description: |
-        `stepIds` is the caller's full desired ordering, not a delta —
-        every step id the template currently has, each named exactly once.
-        Persisted as `sequence` 1..N in that order.
+        `taskIds` is the caller's full desired ordering for the tasks of the
+        stage named in the path — not a delta, and not the template's whole
+        task set. Tasks in every other stage keep the positions they had, so
+        reordering inside Configuration cannot disturb Data Migration.
 
         `If-Match` is required, not optional — a write without one is
         refused with `428`, the `GET /users/{userId}` argument applied
         again: treating a missing precondition as "no conflict" protects
         only the callers that already opted in, which is the set that
-        needed it least. Read the current tag from `GET
+        needed it least. The tag is the **template's**, since a stage group
+        has no mutable state of its own to conflict over. Read it from `GET
         /onboarding/journey-templates/{templateId}`.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ObJourneyTemplateStepOrderRequest' }
+            schema: { $ref: '#/components/schemas/ObJourneyTemplateTaskOrderRequest' }
       responses:
         '204': { description: Reordered. }
         '400':
           description: |
-            The given ids are not exactly the template's current step set —
-            one missing, one named twice, or one belonging to a different
-            template.
+            The given ids are not exactly that stage's current task set —
+            one missing, one named twice, or one belonging to another stage.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -7927,6 +7951,61 @@ paths:
 
   /onboarding/journey-template-steps/{stepId}:
     parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateStepId' }]
+    patch:
+      tags: [onboarding-journeys]
+      operationId: updateObJourneyTemplateStep
+      summary: Edit a step of a draft template (OB-07)
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        TAT, owner, backup owner, sign-off, description and the step
+        dependency. **Neither the implementation stage nor the name can be
+        changed** — a step *is* its stage, and swapping it is remove plus
+        add, which is also what makes it obvious that the step's task list
+        and documents go with it.
+
+        This route exists because a Module Service is now created holding
+        one step per implementation stage, each with a one-day TAT and no
+        owner. Configuring a service is therefore editing steps rather than
+        adding them, and before this the only edit available was
+        remove-and-re-add, which destroys the task list underneath.
+
+        Every field is optional; `null` means "say nothing about this".
+        `dependsOnStepId` is the exception — null there cannot be told from
+        an omitted field, so `clearDependsOn: true` is how a caller asks for
+        a step that waits for nothing.
+
+        `If-Match` is **required**, and the tag is the *template's*, from
+        `getObJourneyTemplate`. A step has no read of its own to draw one
+        from, and the template's tag covers every step on it — which is the
+        tag that notices the edit this route can silently destroy, somebody
+        else's dependency change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObJourneyTemplateStepUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyTemplateStepResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            The template has ever been published, or the new dependency
+            would make this step wait on itself through a chain.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428':
+          description: |
+            `If-Match` absent. GET the template and send back its `ETag`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
     delete:
       tags: [onboarding-journeys]
       operationId: removeObJourneyTemplateStep
@@ -7963,6 +8042,20 @@ paths:
         predates this field: before this task, plan §5.8's "a service
         completes only when every item is answered" applied to all of them
         with no exception.
+
+        **B-131 — this is the one write a published version accepts.** Every
+        other edit to a journey template is refused once it has been
+        published, because it would change what a client already onboarding
+        is looking at. Adding a checklist entry takes nothing away and
+        contradicts no answer already given, and the clients who need it are
+        usually the ones already running — so the **active** version accepts
+        one, and the item is back-filled onto every live journey
+        instantiated from that version. `backfilledJourneyCount` reports how
+        many.
+
+        Only that version's journeys: clients boarded on an *earlier*
+        version keep the checklist they were boarded on, which is what
+        pinning a version means.
       requestBody:
         required: true
         content:
@@ -7977,7 +8070,11 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '409':
-          description: The owning template has ever been published.
+          description: |
+            The owning template is a **retired** version — published, and no
+            longer the one the service offers. It is read-only for good: it
+            is what the clients boarded on it are still running. A draft and
+            the active version both accept the item (B-131).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -8195,6 +8292,261 @@ paths:
 
   # ════════════════════════════════════════════════ onboarding · clients ══════
 
+  # ── The Projects grid ──────────────────────────────────────────────────────
+  # A project is one client and one product, which is the pair this module has
+  # always run on — `uq_ob_client_applications` has held it unique since the
+  # first migration, and `/onboarding/clients/{id}/products/{productId}` has
+  # rendered exactly that pair's ribbons since OB-05. What the pair never had
+  # was a row, so it could carry no name, no start date, no implementor and no
+  # status. `V20260911_1800` gives it one; these two operations are its surface.
+
+  /onboarding/projects:
+    get:
+      tags: [onboarding]
+      operationId: listObProjects
+      summary: Running projects, with their analytics
+      description: |
+        One row per engagement, with the figures the grid is read for: the
+        current stage, stages completed of total, days delayed and the
+        tentative completion date.
+
+        **Scoped by the project's client, never by the project.** Plan §3's
+        rule is about clients — Sales sees the ones they created, a step owner
+        sees the ones whose journeys hold a step of theirs — and a project is
+        visible exactly when its client is. A caller with no standing in the
+        module gets an empty page rather than a `403`.
+
+        **`delayedByDays` is null, not zero, when the project is not late**,
+        and null for every project whose status is not `RUNNING`. A completed
+        project that overran by a fortnight must not keep counting, and a
+        dropped one has a clock somebody stopped on purpose. Zero would be a
+        claim that the project is on time today; null says the question does
+        not apply.
+
+        Ordered newest-created first. The keyset cursor is the project id
+        alone — `startDate` is what the grid *shows*, and several projects
+        starting on one day would make a cursor over it skip rows at the page
+        boundary.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: |
+            Matches the project name or the client name — the two things
+            somebody types into the box above this grid. Not the client code:
+            it is short and exact, and a substring match over it would make
+            "ERP" match a code rather than a product.
+        - { name: clientId, in: query, schema: { type: integer, format: int64 } }
+        - { name: productId, in: query, schema: { type: integer, format: int64 } }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ObProjectStatus' }
+        - { name: implementorId, in: query, schema: { type: integer, format: int64 } }
+        - { name: salesPersonId, in: query, schema: { type: integer, format: int64 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProjectListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    post:
+      tags: [onboarding]
+      operationId: createObProject
+      summary: Create a project
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        The New Project form, committing four writes in one transaction and in
+        this order: the **purchase row** (because journey instantiation refuses
+        a product the client has not bought), the **project**, the client's
+        **prerequisite checklist** if they have none yet, and one **journey per
+        checked module service**.
+
+        One transaction, so the states nobody can act on — a project with no
+        journeys, journeys with no purchase, a locked gate with no checklist
+        behind it — are unreachable rather than merely unlikely.
+
+        **The checklist stays per client.** One per client, and clearing it
+        opens every project's journeys, so a client's second project finds one
+        already there and adds nothing.
+
+        `422 ob-client-no-prereq-master` when no prerequisite master is
+        published *and* this client has no checklist yet. Journeys instantiate
+        `LOCKED` and the only thing that opens the gate is the checklist
+        clearing (plan §5.3: there is no "open gate anyway" override), so a
+        project created in that state would hold journeys nothing can ever
+        start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObProjectCreateRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProjectResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            `ob-project-duplicate` — this client already has a project for this
+            product; the problem carries `existingProjectId` so the form can
+            offer to open it.
+
+            `ob-project-unknown-module-service` — a checked service is no
+            longer an active service of the product, which is a form built
+            against a catalogue that has since moved. `templateId` names the
+            row. Refused rather than silently skipped: dropping a checked
+            service would create a project missing something somebody asked
+            for and say nothing about it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: '`ob-client-no-prereq-master` — see the description.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/projects/{obProjectId}:
+    parameters: [{ $ref: '#/components/parameters/ObProjectId' }]
+    get:
+      tags: [onboarding]
+      operationId: getObProject
+      summary: Project header
+      description: |
+        The header the ribbon page prints above its journeys: the same figures
+        as the grid row, plus the stage roll-up as rows and the module services
+        this project was boarded through.
+
+        The journeys themselves are not here — they are `getObJourney`'s, one
+        ribbon at a time, exactly as the client product page already reads
+        them.
+
+        The only source of the `ETag` the `PATCH` requires. It covers the stage
+        roll-up too, so a step completed by an owner while somebody had this
+        header open costs the editor a reload rather than a lost update.
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProjectResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+    patch:
+      tags: [onboarding]
+      operationId: updateObProject
+      summary: Edit the project header
+      parameters: [{ $ref: '#/components/parameters/IfMatch' }]
+      description: |
+        Name, start date, the two people, and the status.
+
+        **`clientId` and `productId` are absent deliberately.** The pair is the
+        project's identity — `uq_ob_projects_client_product` is over it and
+        every journey pins a template belonging to that product — so moving a
+        project to another one is not an edit, it is a different project.
+
+        `COMPLETED` is refused with `422`: it is stamped when the project's
+        last journey completes, on the same reasoning that makes a client's
+        `LIVE` unsettable. `ON_HOLD` and `DROPPED` each require a
+        `statusReason`.
+
+        **There is no `DELETE`.** A project owns journeys, and those journeys
+        own hash-chained `ob_step_history` rows; removing one is not a tidy-up.
+        A project that should not have been created is `DROPPED` with a reason,
+        which keeps the record, stops the delay clock and leaves the ribbon
+        readable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObProjectUpdateRequest' }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProjectResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: An OB Viewer or Step Owner on a project they can read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422':
+          description: '`ob-project-status-not-earned` — `COMPLETED` is derived, never set.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      tags: [onboarding]
+      operationId: deleteObProject
+      summary: Delete a project that never ran
+      description: |
+        **This is for a project created against the wrong client, or on the
+        wrong product.** That is noise on a grid people read every morning, and
+        `DROPPED` would keep it there forever wearing a reason that says "this
+        was a typo".
+
+        Everything else is refused. A project owns journeys, journeys own steps,
+        and **nine tables hold a foreign key to those steps with no cascade** —
+        `ob_step_history`, `ob_step_clock_events`, `ob_step_communications`,
+        `ob_signoffs`, `ob_escalations`, `ob_client_escalations`,
+        `ob_attachments`, `ob_notifications` and `ob_notification_outbox`. Two
+        of them are hash-chained and append-only. All nine are asked before
+        anything is removed, and the refusal names what is in the way.
+
+        The question is deliberately "does anything point at this?" rather than
+        "has it started?" — the first can be answered exactly, and a project
+        nothing points at is a project nothing happened to.
+
+        `ob_journey_step_items` is not among them: it is the task-list template
+        copied at instantiation, it cascades, and a checklist nobody has ticked
+        records nothing.
+
+        **The client's purchase row is left alone.** It is a commercial fact
+        about the client rather than part of the project, and a client who
+        bought a product still bought it after somebody deleted a project
+        mis-created against it.
+
+        **No `If-Match`.** A precondition protects a lost update; a delete has
+        no such failure, and the guard re-asks inside the transaction — so a
+        sign-off recorded a second ago refuses the delete whatever tag the
+        caller holds.
+      responses:
+        '204': { description: 'Deleted, with its journeys and their steps.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: An OB Viewer or Step Owner on a project they can read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            `ob-project-in-use` — something records that this project ran. The
+            problem carries `blockers`, an array naming which, so the screen can
+            offer `DROPPED` instead rather than reprinting one sentence.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /onboarding/clients:
     get:
       tags: [onboarding]
@@ -8280,36 +8632,37 @@ paths:
       summary: Board a client (OB-04)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       description: |
-        The OB-04 wizard, committing all four steps in **one** request. OB
-        Admin, Onboarding Manager and Sales.
+        The Clients master's add dialog. OB Admin, Onboarding Manager and
+        Sales.
 
         ## What one call creates
 
-        This is the module's widest side effect and it is deliberately atomic —
-        a client boarded with no journeys, or journeys with no prerequisites,
-        is a half-state somebody has to notice and repair by hand:
+        A company, and nothing else — unless a portal login is asked for.
 
-        1. the `ob_clients` row, its SPOCs and its requirements;
-        2. **one journey per purchased product**, each instantiated from that
-           product's active template *at its current version*, and each created
-           `gateStatus: LOCKED` — steps visible, owners resolved, TATs shown,
-           **clocks dead and the scanner ignoring them**. Everyone sees the
-           plan from day one and no TAT can breach before the client has been
-           asked for anything (plan §5.2);
-        3. the prerequisites instance, snapshotted from the active
-           `ob_prereq_template_tasks` version;
-        4. a portal login, **only if `createPortalLogin` is true.** Never
-           silently — plan §2.3. The one-time password goes to the primary
-           SPOC and the account is `mustChangePassword`.
+        This once committed a four-step wizard: PAN, SPOC contacts,
+        commercials, requirements, a journey per purchased product and the
+        prerequisites snapshot. Every one of those describes an *engagement*
+        rather than a company, and engagements are `ob_projects` now, created
+        from `createObProject`.
 
-        Nothing starts running here. Journeys open when the prerequisite gate
-        clears, which is its own transition and its own notification.
+        1. the `ob_clients` row;
+        2. **only if `createPortalLogin` is true**, the primary SPOC from
+           `contactName` and `contactEmail`, and then the portal login itself.
+
+        Both, or neither. The login is the module's widest remaining side
+        effect and it is deliberately atomic — B-102 refused this flag outright
+        rather than ignore it, on the grounds that "a boarder ticks the box,
+        sees a 201, tells the client their credentials are coming, and nothing
+        was ever sent". A company left behind by a login that failed is that
+        same failure, so it rolls back too.
+
+        The credentials come back in `meta.portalLogin`, which is the only
+        response that ever carries them.
 
         ## The duplicate guard
 
-        `pan` is unique. A second client with the same PAN is `409`
-        `ob-client-pan-duplicate` and cannot be forced — two rows for one legal
-        entity is the state the guard exists to prevent.
+        `clientCode` is unique. A second client reusing one is `409`
+        `ob-client-code-duplicate` and cannot be forced.
 
         A *similar name* is a different matter and is **a warning, not a
         refusal**: "Acme Pvt Ltd" and "Acme Private Limited" are frequently two
@@ -8319,6 +8672,10 @@ paths:
         forceable conflict rather than a silent create keeps the decision with
         the person who can tell the two apart, and keeps it out of a query
         parameter nobody reads twice.
+
+        The guard survived the wizard deliberately. A four-field add dialog is
+        precisely the screen on which somebody boards the same trust twice, and
+        `clientCode` catches only the duplicates that also reuse the code.
       requestBody:
         required: true
         content:
@@ -8327,29 +8684,33 @@ paths:
       responses:
         '201':
           description: |
-            Boarded. `data.journeys` carries the locked journeys that were
-            created, so the wizard's confirmation step can name them without a
-            second read.
+            Boarded. `meta.portalLogin` carries the username and, on a
+            development build, the password — present only when
+            `createPortalLogin` was true.
           headers:
             ETag:
               schema: { type: string }
               description: Send back as `If-Match` on the `PATCH`.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ObClientDetailResponse' }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
+              schema: { $ref: '#/components/schemas/ObClientCreateResponse' }
+        '400':
+          description: |
+            `ob-client-invalid`, field-keyed. Includes `contactName` and
+            `contactEmail` when `createPortalLogin` is true and either is
+            missing — collected together, so a form with both wrong is
+            returned once.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ValidationProblem' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
         '409':
           description: |
-            `ob-client-pan-duplicate` — final. `ob-client-name-similar` —
-            forceable with `acknowledgeSimilarNames`. `ob-product-no-template`
-            — a purchased product has no active journey template, so there is
-            nothing to instantiate. `ob-client-no-prereq-master` — nothing is
-            published on OB-14 to snapshot a checklist from; the wizard's
-            confirmation step has nothing to name. `ob-client-portal-login-unavailable`
-            — `createPortalLogin: true` arrived ahead of B-126; none of the
-            four things this call creates land, same as every other guard on
-            this list.
+            `ob-client-code-duplicate` — final. `ob-client-name-similar` —
+            forceable with `acknowledgeSimilarNames`. `ob-client-account-exists`
+            — the client already has a portal login; not reachable on a create,
+            which has just made the client, and listed because the login path
+            is shared with `createObClientAccount`. Nothing lands in any case.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -8445,6 +8806,54 @@ paths:
           description: |
             `ob-client-live-not-earned` — `LIVE` is derived from the journeys,
             never set.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+    delete:
+      tags: [onboarding]
+      operationId: deleteObClient
+      summary: Delete a client nothing depends on
+      description: |
+        **This exists for one case: a row typed in wrong, minutes ago.**
+
+        Sixteen tables carry `ob_client_id` and several cascade — two of them,
+        `ob_step_history` and `ob_prereq_history`, are hash-chained and
+        append-only. A delete that reached those would destroy an audit trail
+        the module is built to keep, and would do it silently, because a
+        cascade reports nothing. So four questions are asked first: does the
+        client have **projects**, a **prerequisite checklist**, **uploaded
+        documents** or a **client portal login**. Any one of them is a `409`
+        naming what is in the way.
+
+        Contacts, requirements and purchase rows are deliberately *not*
+        checked. All three cascade, all three are the client's own descriptive
+        data with nothing pointing at them, and all three are exactly what a
+        row typed in wrong five minutes ago might already have — blocking on
+        them would make this unreachable in the only case it is for.
+
+        For everything else the answer is `status: DROPPED` with a reason,
+        which keeps the record and hides the client from nothing.
+
+        **No `If-Match`.** A precondition protects a lost update — two people
+        editing one record — and a delete has no such failure: the guard
+        re-asks inside the transaction, so a project created a second ago
+        refuses the delete whatever tag the caller holds.
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: An OB Viewer or Step Owner on a client they can read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: |
+            `ob-client-in-use` — something depends on this client. The problem
+            carries `blockers`, an array naming which of the four it is, so the
+            screen can offer the alternative that fits rather than reprinting
+            one sentence.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -12282,6 +12691,195 @@ paths:
               schema: { $ref: '#/components/schemas/PortalSignoffListResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # Deciding a sign-off without the emailed link or the OTP. The public
+  # /public/onboarding/signoff/** tree is untouched and still works — plan §8:
+  # "the link+OTP path still works without a portal login and remains the legal
+  # record", and a client with no portal account (the login is an explicit
+  # per-client option, plan §2) has no other way through. These routes are the
+  # second door, for a caller who has already authenticated.
+  /portal/onboarding/signoffs/{signoffId}:
+    parameters:
+      - { name: signoffId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [portal]
+      operationId: getPortalSignoff
+      summary: One sign-off, ready to decide (CP-05)
+      description: |
+        The portal's own OB-09 — what is being signed, read on the
+        authenticated surface.
+
+        **No token and no OTP, and that is not a weakening.** OB-09 proves two
+        things in two steps because it has no principal: the mailed link
+        proves possession of a mailbox, the code proves who is holding it
+        (A-121: "a link on its own proves possession of an email; it does not
+        prove identity"). A portal caller has already proved both, more
+        strongly, by signing in against `client_accounts`; `obClientId` comes
+        off their own verified token and the row is checked against it. This
+        is the same substitution `submitPortalPrereqTask` already makes.
+
+        **Served for any status this client owns**, not `PENDING` only, with
+        `canDecide` carrying the difference — a sign-off staff withdrew while
+        the page was loading should read as withdrawn rather than 404 on a row
+        the client was looking at a moment ago. The decision routes do the
+        strict check; a disabled form in one browser is not an authorization
+        check.
+
+        A sign-off on another client's onboarding answers `404`, never `403`.
+      parameters:
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSignoffReviewResponse' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /portal/onboarding/signoffs/{signoffId}/accept:
+    parameters:
+      - { name: signoffId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: acceptPortalSignoff
+      summary: Accept a sign-off from the portal (CP-05)
+      description: |
+        Records the acceptance and puts the step through the completion gate —
+        the same gate, reached through the same `ObSignoffAcceptService.accept`
+        the public page calls. Nothing on this path writes `SIGNED` itself:
+        PHASE-2-BUILD-PLAN §3 #4 ruled that there is *one* completion gate
+        after finding the prototype enforcing different rules on two paths, and
+        a second accept written for the portal would be that bug reintroduced.
+
+        **`stepCompleted: false` is a successful outcome.** The acceptance
+        stands and the row is `SIGNED` either way; `gateFailures` names what
+        *our* side still owes — an unanswered mandatory item, a required
+        document nobody attached. `acceptObSignoff`'s own contract, carried
+        across unchanged: "the client did accept, they are not the ones who
+        left a document unattached".
+
+        **`200`, not `201`, and no `Idempotency-Key`.** This decides a row
+        staff already created rather than creating one, and the row's own
+        `PENDING` status is the idempotency key — a second accept answers
+        `422 portal-signoff-not-pending` rather than signing twice.
+
+        `acceptedName` is mandatory and is never defaulted from the contact
+        row, on `ObSignoffAcceptRequest`'s own reasoning: "a name the person
+        entered themselves is what distinguishes acceptance from a click".
+        Being authenticated establishes which account acted, not that a human
+        put their name to it.
+
+        The acceptance is attributed to `sent_to_contact_id`, unchanged and
+        not taken from the caller. IP and user agent are recorded from this
+        request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalSignoffAcceptRequest' }
+      responses:
+        '200':
+          description: |
+            Accepted and recorded. Read `stepCompleted` and `gateFailures` for
+            whether our own side could finish the step on the back of it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSignoffDecisionResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            This sign-off is no longer open — already accepted, already
+            objected, or withdrawn by staff. `signoffStatus` on the problem
+            document says which. (Not `status`: RFC 9457 already defines that
+            as the HTTP code, and a problem document carrying it twice is one
+            whose reader picks.)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/onboarding/signoffs/{signoffId}/object:
+    parameters:
+      - { name: signoffId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: objectPortalSignoff
+      summary: Raise an objection instead of accepting (CP-05)
+      description: |
+        The other branch of the same decision, through the same
+        `ObSignoffObjectService.object` the public page calls — the step
+        reverts, and the owner is notified in the transaction the objection is
+        recorded in.
+
+        **The note is mandatory** where the acceptance note is optional: "an
+        objection with no reason guarantees a second round trip".
+
+        **Terminal.** There is no un-object here either — "a client who
+        changes their mind is a new sign-off request, which is a staff action
+        with its own record". The portal offers no path back, and the server's
+        `PENDING` check is what enforces that rather than the screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalSignoffObjectRequest' }
+      responses:
+        '200':
+          description: Objection recorded; the step has been reverted if it was in a state that allows it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSignoffDecisionResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: This sign-off is no longer open. `signoffStatus` on the problem document says which way it went.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/onboarding/signoffs/{signoffId}/csat:
+    parameters:
+      - { name: signoffId, in: path, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [portal]
+      operationId: submitPortalCsat
+      summary: Answer the go-live survey (CP-05)
+      description: |
+        B-119's one-question survey, answered in the portal instead of on the
+        acceptance session.
+
+        OB-09 rides the accept session because the alternative there is mailing
+        a second link — "a second link emailed afterwards is a second thing to
+        ignore". The portal has no such problem: the client is still signed in.
+
+        **Additive, never gating.** The acceptance is already final before this
+        is offered; skipping the survey is simply never calling this, and a
+        client who closes the tab has still gone live.
+
+        `204` because there is nothing to hand back. Eligibility — a `GO_LIVE`
+        sign-off, actually `SIGNED`, not already answered for this client — is
+        `ObSignoffCsatService`'s and answers `422`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalCsatRequest' }
+      responses:
+        '204': { description: Recorded. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: This sign-off is not offering a survey — not a completed go-live, or already answered.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /portal/onboarding/prereq-tasks/{prereqTaskId}:
     parameters:
       - { name: prereqTaskId, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -12623,6 +13221,14 @@ components:
         this is worth saying: `sequence` is renumbered by every reorder, and a
         route keyed on it would address a different row after somebody else's
         save.
+    ObProjectId:
+      name: obProjectId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        An `ob_projects` id — one engagement: one client, one product, and the
+        module services it was boarded through.
     ObJourneyTemplateId:
       name: templateId
       in: path
@@ -12632,6 +13238,15 @@ components:
         C-102 · an `ob_journey_templates` id — **one version**, not one
         product. See `ObJourneyTemplate.version` for what that means for a
         product's history.
+    ObJourneyTemplateStageId:
+      name: stageId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+      description: |
+        An `ob_journey_template_stages` id — one stage group of one
+        template version, not an `ob_implementation_stages` id. The master's
+        id is reachable as `ObJourneyTemplateStage.implementationStageId`.
     ObJourneyTemplateStepId:
       name: stepId
       in: path
@@ -18411,9 +19026,12 @@ components:
         totalTatDays:
           type: [integer, 'null']
           description: |
-            Σ of the active template's service TATs, in working days — what a
-            journey for this product *costs*, shown on the OB-07 card. Null
-            when there is no active template.
+            Σ of the active templates' own `totalTatDays`, in working days —
+            shown on the OB-07 card. Null when there is no active template.
+
+            Each service's figure is its critical path (see
+            `ObJourneyTemplateSummary`); the services themselves are summed,
+            because a product's services are boarded one after another.
         journeyCount:
           type: integer
           description: |
@@ -18595,10 +19213,31 @@ components:
         totalTatDays:
           type: integer
           description: |
-            Σ of the step TATs in working days — what a journey for this
-            service costs. On the row because the card shows it and it is not
-            derivable from the other fields; the alternative is the page
-            fetching every service's full detail to render one chip.
+            How long a journey for this service **takes**, in working days —
+            the critical path through its tasks, not the sum of them.
+
+            Tasks that wait for nothing start together, so two of 1 and 2 days
+            side by side is 2 days, while the same two chained by
+            `dependsOnStepId` is 3. It was a plain Σ until the two readings
+            were noticed to disagree wherever a service has parallel work,
+            which is most of them.
+
+            On the row because the card shows it and it is not derivable from
+            the other fields; the alternative is the page fetching every
+            service's full detail to render one chip.
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyTemplateStage' }
+          description: |
+            This service's stage groups, in display order — OB-07's "Category"
+            column and the New Project form's service picker both print them.
+
+            On the **summary** rather than only on the detail because both of
+            those screens draw every service of a product at once, and reading
+            them per row would be a request per card. The same
+            `ObJourneyTemplateStage` the detail nests, not a thinner twin: a
+            summary-only shape would be a second thing to keep in step for the
+            sake of omitting one nullable id, and the picker groups by that id.
         serviceJourneyCount:
           type: integer
           format: int64
@@ -18652,8 +19291,20 @@ components:
         mandatory: { type: boolean, default: true }
     ObJourneyTemplateStepItemResponse:
       type: object
-      required: [data]
-      properties: { data: { $ref: '#/components/schemas/ObJourneyTemplateStepItem' } }
+      required: [data, backfilledJourneyCount]
+      properties:
+        data: { $ref: '#/components/schemas/ObJourneyTemplateStepItem' }
+        backfilledJourneyCount:
+          type: integer
+          description: |
+            B-131. How many running journeys the new item was back-filled
+            onto as well as the catalogue. `0` on a draft, and on an active
+            version nobody is currently onboarding with.
+
+            Returned because an admin adding an item to a service already in
+            use has no other way to tell whether the edit reached the clients
+            it was added for: a running step is a snapshot, so before this
+            task the edit reached only the clients boarded afterwards.
 
     ObJourneyTemplateStepDoc:
       type: object
@@ -18677,24 +19328,78 @@ components:
       required: [data]
       properties: { data: { $ref: '#/components/schemas/ObJourneyTemplateStepDoc' } }
 
+    ObJourneyTemplateStage:
+      type: object
+      required: [id, name, sequence]
+      description: |
+        `ob_journey_template_stages` — a **stage group**, the second of
+        OB-07's four levels (Module Service, stage, task, task list).
+
+        It carries no TAT, owner or sign-off: those are facts about a task,
+        and a group that also held them would be a second place to answer
+        "who is on the hook and when is it due". Its TAT on the designer is
+        derived by summing its tasks, never stored.
+      properties:
+        id: { type: integer, format: int64 }
+        name:
+          type: string
+          maxLength: 120
+          description: |
+            The stage's name, copied at creation rather than joined at read
+            time — a stage renamed on OB-15 next year must not re-label a
+            template published this year.
+        sequence:
+          type: integer
+          description: Position within the template, pinned at creation from the master.
+        implementationStageId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            `ob_implementation_stages.id`. Null on the "Ungrouped" group,
+            which holds tasks written before `V20260911_1600` and belonging
+            to no stage — those were deliberately not backfilled by
+            name-matching.
     ObJourneyTemplateStep:
       type: object
-      required: [id, sequence, name, tatDays, requiresSignoff, items, docs]
+      required: [id, sequence, name, templateStageId, tatDays, requiresSignoff, items, docs]
       properties:
         id: { type: integer, format: int64 }
         sequence: { type: integer }
-        name: { type: string, maxLength: 200 }
+        name:
+          type: string
+          maxLength: 200
+          description: The task's name, written by whoever added it.
+        templateStageId:
+          type: integer
+          format: int64
+          description: |
+            `ob_journey_template_stages.id` — the stage group this task sits
+            inside, and how the designer groups the four levels. Never null:
+            a task outside a stage is not a state this model has.
         description: { type: [string, 'null'] }
         tatDays:
           type: integer
           minimum: 1
           description: Working days, not hours — the v1.2 unit change. All duration maths goes through the working calendar.
-        ownerUserId: { type: [integer, 'null'], format: int64 }
-        ownerRole:
-          type: [string, 'null']
-          maxLength: 40
-          description: The role that owns this step when no specific person is named — the ribbon reads both.
-        backupOwnerUserId: { type: [integer, 'null'], format: int64, description: Leave-coverage owner. }
+        ownerUserId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The implementor: who this task is put on when a client's journey
+            is created from this service.
+
+            **Null is the ordinary case and not a gap.** A task nobody is
+            named on falls back at instantiation to the project's own
+            implementor (`ob_projects.implementor_user_id`, and its creator
+            after that), so a service can be authored once and still land on
+            the right person for every project boarded from it. Only a task
+            that must always go to one particular person names one here.
+
+            There is no owning *role* beside it any more, and no backup
+            owner. A Module Service is a plan for work, and one column
+            answering "who does this" is the whole of what it needs to say;
+            leave coverage is a fact about a live journey, so it stayed on
+            `ObJourneyStep` where it can be set per client.
         requiresSignoff: { type: boolean, description: Client sign-off required before this step may complete. }
         dependsOnStepId:
           type: [integer, 'null']
@@ -18710,32 +19415,90 @@ components:
         docs:
           type: array
           items: { $ref: '#/components/schemas/ObJourneyTemplateStepDoc' }
-      description: '`ob_journey_template_steps` — a Service within a Module Service.'
-    ObJourneyTemplateStepWriteRequest:
+      description: '`ob_journey_template_steps` — a **task** inside a stage of a Module Service.'
+    ObJourneyTemplateTaskWriteRequest:
       type: object
       required: [name, tatDays]
+      description: |
+        A task is written by a person, so it carries a `name` again — the
+        step it replaces *was* an OB-15 stage and took the stage's name.
+        What stays closed is the level above: no route creates a stage,
+        because which stages exist is decided on OB-15 and nowhere else.
+
+        The stage group is in the path, not here: a task is created inside a
+        stage, never floating with a stage id attached.
       properties:
-        name: { type: string, maxLength: 200 }
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
         description: { type: [string, 'null'] }
         tatDays: { type: integer, minimum: 1 }
-        ownerUserId: { type: [integer, 'null'], format: int64 }
-        ownerRole: { type: [string, 'null'], maxLength: 40 }
-        backupOwnerUserId: { type: [integer, 'null'], format: int64 }
+        ownerUserId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The implementor. Null — the default — leaves the task to fall
+            back to the project's implementor at instantiation.
         requiresSignoff: { type: boolean, default: false }
         dependsOnStepId: { type: [integer, 'null'], format: int64 }
+    ObJourneyTemplateStepUpdateRequest:
+      type: object
+      description: |
+        Every field optional; omitting one says nothing about it. The
+        `name` can be sent; which stage the task is in cannot — see the
+        operation's own description.
+      properties:
+        name: { type: string, maxLength: 200, minLength: 1 }
+        description: { type: [string, 'null'] }
+        tatDays: { type: integer, minimum: 1 }
+        ownerUserId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The implementor — the named person on the hook for this task, and
+            what the journey instance carries into the ribbon.
+
+            Null is indistinguishable from an omitted field, so use
+            `clearOwnerUserId` to take the person off. Cleared, the task falls
+            back to the project's implementor at instantiation rather than
+            arriving unassigned.
+        requiresSignoff: { type: [boolean, 'null'] }
+        dependsOnStepId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            A step of this same template. Null is indistinguishable from an
+            omitted field, so use `clearDependsOn` to make a step unheld.
+        clearDependsOn:
+          type: boolean
+          default: false
+          description: |
+            True clears the dependency, making the step run in parallel from
+            journey start. Takes precedence over `dependsOnStepId`.
+        clearOwnerUserId:
+          type: boolean
+          default: false
+          description: |
+            True takes the named person off the task, leaving the project's
+            own implementor to answer "who does this" when a journey is
+            created. Takes precedence over `ownerUserId`.
     ObJourneyTemplateStepResponse:
       type: object
       required: [data]
       properties: { data: { $ref: '#/components/schemas/ObJourneyTemplateStep' } }
-    ObJourneyTemplateStepOrderRequest:
+    ObJourneyTemplateTaskOrderRequest:
       type: object
-      required: [stepIds]
+      required: [taskIds]
       properties:
-        stepIds:
+        taskIds:
           type: array
           items: { type: integer, format: int64 }
           minItems: 1
-          description: The template's full step set, in the caller's desired order — not a delta.
+          description: |
+            One stage's full task set, in the caller's desired order — not a
+            delta, and not the template's whole task set. Tasks in every
+            other stage keep the positions they had.
     ObJourneyTemplateCatalogueOrderRequest:
       type: object
       required: [templateIds]
@@ -18783,11 +19546,25 @@ components:
       allOf:
         - { $ref: '#/components/schemas/ObJourneyTemplate' }
         - type: object
-          required: [steps, parallelGroups]
+          required: [stages, steps, parallelGroups]
           properties:
+            stages:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyTemplateStage' }
+              description: |
+                Every stage group, in display order, **including the empty
+                ones** — which is the usual state of a service somebody has
+                just created. A read that dropped them would leave the
+                designer nowhere to hang "+ Add a task".
             steps:
               type: array
               items: { $ref: '#/components/schemas/ObJourneyTemplateStep' }
+              description: |
+                Every task, flat and in `sequence` order. Flat rather than
+                nested inside `stages` so that `parallelGroups` below stays
+                a list of ids into one array, and so the designer's existing
+                tree and TAT arithmetic keep reading one list. Group by
+                `templateStageId` to draw the four levels.
             parallelGroups:
               type: array
               items: { type: array, items: { type: integer, format: int64 } }
@@ -18897,11 +19674,31 @@ components:
           type: string
           maxLength: 50
           description: |
-            Generated, never chosen — `CLIENTCODE.givenname`, with a counter
-            when that is taken. A-125's generator makes the namespace ours and
-            removes the impersonation question a client-chosen handle would
+            Generated, never chosen. A-125's generator makes the namespace ours
+            and removes the impersonation question a client-chosen handle would
             open. Enumerable by design: guessing the name is expected, getting
             past the password is the part that has to be hard.
+
+            **For an onboarding client it is the client's own `clientCode`**,
+            unchanged, hyphens and all — `HRZ-001`. A portal login is one per
+            client (`uq_client_accounts_ob_client`), so there is never a second
+            to tell apart, and the code is the value operations already file
+            that client under and already quote on the phone.
+
+            A counter is appended on the rare collision (`HRZ-0012`):
+            `client_accounts` is one table and the ticketing master mints into
+            it from a separate code column of its own, so two organisations
+            filed as `ACME` in the two masters are not a contradiction anybody
+            has to resolve.
+
+            Clients boarded before `client_code` existed (V20260911_1800, where
+            the column is nullable) have no code, and fall back to the older
+            `NAMEPREFIX.givenname` — refusing them a login over a field nobody
+            ever asked them for would be the wrong answer.
+
+            The ticketing master's own client logins are unchanged:
+            `CLIENTCODE.givenname`, where several people at one client may each
+            hold a login and the given name is what tells them apart.
         displayName:
           type: string
           maxLength: 160
@@ -19482,11 +20279,40 @@ components:
             ribbon marks these `↳ N` and `∥` respectively. Constrained to an
             earlier step in the same template, so the graph is cycle-free by
             construction rather than by a check that can be forgotten.
+        stageKey:
+          type: integer
+          format: int64
+          description: |
+            The implementation stage this task sits in — the third level of
+            Module Service → **Stage** → Task → Task list.
+
+            **The same key `ObProjectStage.stageKey` carries**, folded the
+            identical way: the stage's `implementation_stage_id`, else the
+            negated template stage-group id for a group belonging to no stage
+            (the "Ungrouped" bucket), else `0` where the task's template row has
+            gone. Matching keys is the point — the project header's stage ribbon
+            is built from the roll-up, and a task can only be filed under the
+            stop a reader clicked if both sides fold the same way. Both come
+            from the same expression in SQL rather than from two opinions.
+        stageName:
+          type: string
+          maxLength: 120
+          description: |
+            The stage's name as the template published it, not as the master
+            reads today — `ob_journey_template_stages.name` is already a
+            snapshot, so a stage renamed on OB-15 leaves running journeys
+            reading exactly as they were published.
       description: |
         A single dot on the collapsed strip. Owner, comments, block reasons and
         TAT internals are **absent by construction, not hidden client-side** —
         the client portal renders this same strip, and a field the portal must
         never show is a field that must not be in the schema it receives.
+
+        `stageKey` and `stageName` are added under that same test rather than
+        despite it: which phase of their own rollout a client is in is a fact
+        the portal may legitimately show, and neither field names a person, a
+        clock or an internal reason. Anything that did would belong on the
+        staff-only step read instead.
     ObClientCurrentStep:
       type: object
       required: [name, stepIndex, stepTotal]
@@ -19529,6 +20355,30 @@ components:
       properties:
         id: { type: integer, format: int64 }
         name: { type: string, maxLength: 200 }
+        clientCode:
+          type: [string, 'null']
+          maxLength: 32
+          description: |
+            The operations team's own filing key, typed rather than generated,
+            and unique across `ob_clients`.
+
+            **Nullable, and required of every new client** — not a
+            contradiction. Every client boarded through the retired OB-04
+            wizard has none, and there is no value to backfill that would not
+            be invented; the service requires one of anything created from
+            here on, which is a rule about new rows that no column can express.
+        city:
+          type: [string, 'null']
+          maxLength: 120
+          description: |
+            Free text. The module has no city master, and inventing one to hold
+            a label would be a screen nobody asked for.
+        address:
+          type: [string, 'null']
+          description: |
+            On the list row as well as the detail, unlike `pan`. It is not
+            identity data — it is how two similarly named trusts are told apart
+            on the Clients master, which is the screen this row is drawn for.
         onboardingDate: { type: string, format: date }
         status: { $ref: '#/components/schemas/ObClientStatus' }
         rag:
@@ -19590,7 +20440,6 @@ components:
         - type: object
           properties:
             description: { type: [string, 'null'] }
-            address: { type: [string, 'null'] }
             licenseType: { type: [string, 'null'], maxLength: 64 }
             pan:
               type: [string, 'null']
@@ -19661,72 +20510,159 @@ components:
       description: 'The OB-05 page in one document.'
     ObClientCreateRequest:
       type: object
-      required: [name, onboardingDate, contacts, applications]
+      required: [name, clientCode]
+      description: |
+        The Clients master's add dialog — a company, and nothing else.
+
+        **This used to commit a four-step wizard**: PAN, SPOC contacts,
+        commercials, requirements and an optional portal login, in one request.
+        Every one of those describes an *engagement* rather than a company, and
+        engagements are `ob_projects` now — created from the New Project form,
+        which is where the product, the start date, the implementor and the
+        module services are chosen.
+
+        **Nothing was removed from the system, only from this request.**
+        `ob_client_contacts`, `ob_client_requirements`,
+        `ob_client_applications` and the portal account all still exist with
+        their own operations.
+
+        A client added without `createPortalLogin` has **no primary SPOC**, so
+        the kickoff mail, every prerequisite reminder and every sign-off
+        request have no addressee until one is added through
+        `addObClientContact` — and for the same reason no portal login can be
+        issued until then either.
+
+        `createPortalLogin` is the one exception, and it brings `contactName`
+        and `contactEmail` back with it because a login is not issuable on a
+        company alone: the account row stores the contact's name and email and
+        the credential mail is addressed at them. The two fields are required
+        exactly when the flag is true, and the SPOC is created primary and
+        active before the account is. All three rows land in one transaction —
+        a login that cannot be issued takes the client with it, rather than
+        leaving a company whose operator was told credentials were coming.
+
+        There is no `onboardingDate`. The column is still `NOT NULL` and the
+        server stamps the current date — a company is boarded the day somebody
+        records it, and asking separately invited a value that disagreed with
+        `createdAt` by a month.
       properties:
         name: { type: string, maxLength: 200 }
-        description: { type: [string, 'null'] }
-        onboardingDate: { type: string, format: date }
-        pan:
-          type: [string, 'null']
-          pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$'
+        clientCode:
+          type: string
+          maxLength: 32
           description: |
-            Unique across `ob_clients`. Retained as **identity**, never as a
-            financial field — the duplicate guard's key and nothing else.
-        address: { type: [string, 'null'] }
-        salesPersonId: { type: [integer, 'null'], format: int64 }
-        licenseType: { type: [string, 'null'], maxLength: 64 }
-        contacts:
-          type: array
-          minItems: 1
-          items: { $ref: '#/components/schemas/ObContactWriteRequest' }
-          description: |
-            At least one, and **exactly one `isPrimary`**. The primary SPOC is
-            where the kickoff mail, the portal password and every sign-off
-            request go; a client without one cannot be onboarded, only stored.
-        applications:
-          type: array
-          minItems: 1
-          items: { $ref: '#/components/schemas/ObApplicationWriteRequest' }
-          description: |
-            The wizard's product multi-select. **Each one instantiates a locked
-            journey** from that product's active template, so an empty list
-            would board a client with nothing to onboard them through.
-        requirements:
-          type: array
-          items: { $ref: '#/components/schemas/ObRequirementWriteRequest' }
-          description: |
-            B-106 · the wizard's requirements step, now rich text rather than
-            bare strings. Each entry is sanitised against PLAN.md §3.9's
-            allow-list before it is stored, exactly as one added later through
-            `addObClientRequirement` is — one write path and one sanitiser, so a
-            requirement typed at boarding and one typed in month three are the
-            same row.
-
-            Optional and may be empty: a client with nothing recorded yet is
-            ordinary, unlike one with no SPOC or no purchase.
-        createPortalLogin:
-          type: boolean
-          default: false
-          description: |
-            The wizard's "Create client portal login now" checkbox. Creates a
-            `client_accounts` row with a generated username and a one-time
-            password emailed to the primary SPOC.
-
-            **Defaults to false and is never implied.** Every other field here
-            describes a client; this one hands somebody outside the
-            organisation a credential, and the plan is explicit that it happens
-            only when staff ask for it (§2.3). It is also not a one-way door —
-            the OB-05 portal access panel creates one later just as well.
+            Unique across `ob_clients`; `409` on a duplicate, keyed to this
+            field. The client already holding it is **not named back** — unlike
+            the PAN guard this replaces, which could name its match: the code
+            is a value the caller just typed, so confirming it is taken
+            discloses nothing, while naming the holder would disclose a row
+            outside their scope.
+        address: { type: [string, 'null'], maxLength: 2000 }
+        city: { type: [string, 'null'], maxLength: 120 }
         acknowledgeSimilarNames:
           type: boolean
           default: false
           description: |
-            Set after a `409 ob-client-name-similar` to proceed anyway. Only
-            the name check is forceable; a duplicate PAN never is.
+            Set after a `409 ob-client-name-similar` to proceed anyway.
+
+            The guard survived the wizard deliberately. A four-field add dialog
+            is precisely the screen on which somebody boards "Horizon Schools
+            Trust" for the second time, and `clientCode` catches only the
+            duplicates that also reuse the code.
+        createPortalLogin:
+          type: boolean
+          default: false
+          description: |
+            Issue the client's portal login as part of this request.
+
+            Requires `contactName` and `contactEmail`; both are refused as
+            `400 ob-client-invalid` when absent, keyed to their own fields. The
+            username is the client's own `clientCode` — see
+            `ObClientAccount.username`.
+
+            Absent is false, which is the behaviour every existing caller has:
+            the Excel import and the fixtures create companies and no accounts.
+        contactName:
+          type: [string, 'null']
+          maxLength: 160
+          description: |
+            The client's main contact, created as their primary, active SPOC.
+            Required when `createPortalLogin` is true and ignored otherwise.
+
+            WhatsApp consent is not asked for here and is recorded as withheld
+            — the recoverable direction, and the same default a contact added
+            from the SPOC panel gets. Consent is a question for the panel,
+            where there is somewhere to record who was asked and when.
+        contactEmail:
+          type: [string, 'null']
+          format: email
+          maxLength: 200
+          description: |
+            Where the login's one-time credential link is sent. Required when
+            `createPortalLogin` is true and ignored otherwise.
+    ObPortalLoginIssued:
+      type: object
+      required: [username]
+      description: |
+        The login `createObClient` just issued, returned in the create's `meta`
+        and nowhere else.
+
+        **Deliberately not a field on `ObClientDetail`.** That shape is what
+        every read of a client returns, forever; a password on it would be a
+        live credential served on every `GET` to everyone in scope for the life
+        of the account. This is the answer to one request — the single moment
+        the operator who ticked the box is entitled to read it — and it is
+        never stored and never read back.
+      properties:
+        username:
+          type: string
+          description: The client's `clientCode`, which is what they sign in with.
+        password:
+          type: [string, 'null']
+          description: |
+            **Development builds only**, and null in the product, where the
+            client is mailed a one-time link instead. Set by
+            `edutrack.portal.dev-credentials`, which `PortalDevCredentialConfig`
+            refuses to start with outside the `local`, `dev-noauth` and
+            `fixtures` profiles.
+
+            A screen showing this must read null as "a link was mailed", not as
+            a missing value.
+    ObClientCreateMeta:
+      type: object
+      properties:
+        portalLogin:
+          $ref: '#/components/schemas/ObPortalLoginIssued'
+      description: |
+        Absent entirely when no login was asked for. A `portalLogin` key
+        present and null on every create would read as "a login was attempted
+        and produced nothing", which is a different statement.
+    ObClientCreateResponse:
+      type: object
+      required: [data]
+      description: |
+        `createObClient`'s envelope. A shape of its own rather than
+        `ObClientDetailResponse`, because the create is the only client
+        response with anything to put in `meta`.
+      properties:
+        data: { $ref: '#/components/schemas/ObClientDetail' }
+        meta: { $ref: '#/components/schemas/ObClientCreateMeta' }
     ObClientUpdateRequest:
       type: object
       properties:
         name: { type: string, maxLength: 200 }
+        clientCode:
+          type: string
+          maxLength: 32
+          description: |
+            Editable, unlike the PAN it replaced, and **not clearable** — a
+            `null` or blank is a `400`. A code is a filing label somebody
+            chooses and routinely mistypes on the add dialog, not an identity
+            fact, so correcting it is ordinary; but a client that has one must
+            not be able to lose it by clearing a field. Uniqueness is checked
+            against every other client, ignoring this one, so re-saving an
+            unchanged form is not a conflict with itself.
+        city: { type: [string, 'null'], maxLength: 120 }
         description: { type: [string, 'null'] }
         address: { type: [string, 'null'] }
         salesPersonId: { type: [integer, 'null'], format: int64 }
@@ -19759,6 +20695,264 @@ components:
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/ObImplementationStage' } }
+    # ── The project: one client, one product, its module services ────────────
+
+    ObProjectStatus:
+      type: string
+      enum: [RUNNING, COMPLETED, ON_HOLD, DROPPED]
+      description: |
+        Deliberately close to `ObClientStatus` without being it, and the
+        difference is the point of having a project table at all: a client is
+        `LIVE` when *every* engagement it has is finished, while a project is
+        `COMPLETED` when its own journeys are. A client running two products
+        can have one completed project and one still in configuration, which
+        the old single-status client could not express.
+
+        `COMPLETED` is **earned, never set** — stamped when the last of the
+        project's journeys completes, and `422` if a request asks for it.
+        `ON_HOLD` and `DROPPED` each require a reason: a project that stopped
+        moving is a fact somebody has to explain months later, and the
+        explanation is worth nothing if it was optional at the moment it was
+        known.
+
+        Only `RUNNING` accrues delay. A completed project that overran must not
+        keep counting, and a held or dropped one has a clock somebody stopped
+        on purpose.
+    ObProjectClientRef:
+      type: object
+      required: [id, name]
+      description: |
+        The whole client, which is the point of having shrunk it: the grid
+        needs the name, and a reader looking at two projects for similarly
+        named trusts needs the code and the city to tell them apart.
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, maxLength: 200 }
+        clientCode: { type: [string, 'null'], maxLength: 32 }
+        city: { type: [string, 'null'], maxLength: 120 }
+    ObProjectStage:
+      type: object
+      required: [stageKey, name, sequence, taskCount, tasksOutstanding, isComplete, isCurrent]
+      description: |
+        One implementation stage of this project, as "stages completed out of
+        total" counts it.
+
+        **Keyed by the implementation stage, not by the stage group.** A
+        project boarded through two Module Services has two "Configuration"
+        groups, one per service; counted separately, a six-stage master would
+        report twelve stages and "3 of 12" where a person sees three of six. So
+        the roll-up folds them onto
+        `ob_journey_template_stages.implementationStageId`, and Configuration
+        is one stage that is complete when both services' Configuration tasks
+        are.
+      properties:
+        stageKey:
+          type: integer
+          format: int64
+          description: |
+            The implementation stage id where there is one. Negative for a
+            stage group that belongs to no stage — the "Ungrouped" bucket — and
+            `0` for tasks whose template row has gone, which are counted rather
+            than silently dropped out of both numerator and denominator.
+        name: { type: string, maxLength: 120 }
+        sequence: { type: integer }
+        taskCount: { type: integer }
+        tasksOutstanding:
+          type: integer
+          description: |
+            Tasks that are neither `DONE` nor `SKIPPED`. A waived task counts
+            as settled, which is how the ribbon reads it too.
+        isComplete: { type: boolean }
+        isCurrent:
+          type: boolean
+          description: |
+            This stage holds the lowest-sequence task that is actually running.
+            At most one stage per project, and none at all while the gate is
+            locked or every task is blocked.
+    ObProjectModuleService:
+      type: object
+      required: [journeyId, templateId, serviceName, gateStatus, isComplete]
+      description: One Module Service this project was boarded through — the journey, named.
+      properties:
+        journeyId: { type: integer, format: int64 }
+        templateId: { type: integer, format: int64 }
+        serviceName:
+          type: string
+          maxLength: 160
+          description: The **pinned** name, from the journey's own column rather than a join to whatever the catalogue is called today.
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        isComplete: { type: boolean }
+    ObProject:
+      type: object
+      required: [id, name, client, product, startDate, status, gateStatus, stagesComplete, stagesTotal, journeyCount, totalTatDays]
+      properties:
+        id: { type: integer, format: int64 }
+        name:
+          type: string
+          maxLength: 200
+          description: |
+            A label people choose — "Horizon ERP Rollout 2026". Not unique, and
+            nothing resolves a project through it: the identity is the
+            (client, product) pair.
+        client: { $ref: '#/components/schemas/ObProjectClientRef' }
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        startDate:
+          type: string
+          format: date
+          description: |
+            The engagement's own start, and what the tentative completion date
+            is measured from. Not derived from the first task's activation,
+            which is a later event: a project starting on the 15th whose
+            prerequisites clear on the 30th has been running a fortnight, and
+            reporting it as starting on the 30th would hide exactly the delay
+            this column exists to make visible.
+        salesPerson:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        implementor:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: Null until somebody is assigned — a project is routinely created before one is.
+        status: { $ref: '#/components/schemas/ObProjectStatus' }
+        gateStatus:
+          $ref: '#/components/schemas/ObGateStatus'
+          description: |
+            Read off this project's own journeys, so a project whose journeys
+            are all still locked reads `LOCKED` even where a sibling project of
+            the same client is running.
+        currentStage:
+          type: [string, 'null']
+          description: |
+            The stage holding the lowest-sequence task that is actually
+            running. **Not "the first incomplete stage"**, which would name a
+            stage whose tasks are all still pending behind a dependency and
+            report a project as being at a stage nobody has started.
+
+            Null is ordinary rather than exceptional — a locked gate, a project
+            held behind a sibling service, every task blocked — and
+            `gateStatus` is beside it so the grid can say which.
+        stagesComplete: { type: integer }
+        stagesTotal:
+          type: integer
+          description: |
+            Both zero for a project whose journeys have no tasks, which is a
+            misconfigured Module Service rather than a finished project — the
+            grid renders 0/0 rather than 100%.
+        journeyCount: { type: integer, description: 'One per module service it was boarded through.' }
+        delayedByDays:
+          type: [integer, 'null']
+          description: |
+            Ceiling working days between the earliest overdue task's due date
+            and now, through the working calendar — weekends, org holidays and
+            resource leave. Ceiling rather than floor: a task due Friday and
+            still open a minute into Monday has accrued a fraction of a working
+            day, and reporting zero until a whole one elapses would agree with
+            a naive calendar subtraction for the exact case that subtraction
+            gets wrong.
+
+            **Null, not zero, when the project is not late**, and null whenever
+            the status does not accrue delay. See `ObProjectStatus`.
+        tentativeCompletion:
+          type: [string, 'null']
+          format: date
+          description: |
+            `startDate` walked forward by the project's total TAT through the
+            working calendar. Null for a project with no instantiated task,
+            where there is no budget and a date would be a guess presented as a
+            commitment.
+        totalTatDays:
+          type: integer
+          description: |
+            Σ of the pinned per-task TATs across this project's journeys — the
+            **pinned** figure, so republishing a Module Service does not move a
+            running project's date.
+
+            It is a sum including across tasks that run in parallel, which
+            overstates elapsed time wherever the dependency graph lets two run
+            at once. That is plan §5.10's own convention for a journey total,
+            followed here rather than quietly improved on; a critical-path
+            figure would be a different number on every screen that prints this
+            one and is a decision for the plan.
+    ObProjectDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ObProject' }
+        - type: object
+          properties:
+            statusReason: { type: [string, 'null'], maxLength: 500 }
+            stages:
+              type: array
+              items: { $ref: '#/components/schemas/ObProjectStage' }
+              description: The roll-up as rows, because the header is where somebody asks *which* stage is outstanding.
+            moduleServices:
+              type: array
+              items: { $ref: '#/components/schemas/ObProjectModuleService' }
+            createdBy:
+              oneOf:
+                - { $ref: '#/components/schemas/UserRef' }
+                - { type: 'null' }
+            createdAt: { type: string, format: date-time }
+    ObProjectResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObProjectDetail' } }
+    ObProjectListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObProject' } }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ObProjectCreateRequest:
+      type: object
+      required: [name, clientId, productId, startDate, moduleServiceIds]
+      properties:
+        name: { type: string, maxLength: 200 }
+        clientId: { type: integer, format: int64 }
+        productId: { type: integer, format: int64 }
+        startDate: { type: string, format: date }
+        salesPersonId: { type: [integer, 'null'], format: int64 }
+        implementorUserId: { type: [integer, 'null'], format: int64 }
+        moduleServiceIds:
+          type: array
+          minItems: 1
+          items: { type: integer, format: int64 }
+          description: |
+            The active Module Services of `productId` left checked on the form,
+            each of which instantiates one journey. Order is ignored — catalogue
+            sequence is re-imposed server-side, so a dependency journey always
+            exists before the one held behind it.
+
+            **`minItems: 1` is a product decision, not a technical one.** The
+            form arrives with every service checked and lets somebody unpick
+            the ones this client did not buy; unpicking all of them would
+            create a project with no journey, no ribbon and nothing to report —
+            which is a purchase record, and this module already has a table for
+            those.
+
+            There is no `status` field. A project is born `RUNNING`, and the
+            other values are recorded later through the `PATCH`, where the
+            mandatory reason can be insisted on.
+    ObProjectUpdateRequest:
+      type: object
+      required: [name, startDate]
+      description: |
+        **The whole representation, not a sparse patch.** The form always sends
+        both people, so an absent `implementorUserId` means *cleared* —
+        unassigning somebody is possible rather than a gap worked around by
+        assigning a placeholder user.
+      properties:
+        name: { type: string, maxLength: 200 }
+        startDate: { type: string, format: date }
+        salesPersonId: { type: [integer, 'null'], format: int64 }
+        implementorUserId: { type: [integer, 'null'], format: int64 }
+        status:
+          $ref: '#/components/schemas/ObProjectStatus'
+          description: '`COMPLETED` is refused with `422` — it is earned, not set.'
+        statusReason:
+          type: [string, 'null']
+          maxLength: 500
+          description: Required when `status` moves to `ON_HOLD` or `DROPPED`.
     ObClientDetailResponse:
       type: object
       required: [data]
@@ -19916,6 +21110,73 @@ components:
               format: int64
             skipReason: { type: [string, 'null'] }
             skippedByUserId: { type: [integer, 'null'], format: int64 }
+            stageKey:
+              type: integer
+              format: int64
+              description: |
+                The implementation stage this task sits in, folded exactly as
+                `ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the
+                stage's `implementation_stage_id`, else the negated template
+                stage-group id, else `0` where the template row has gone.
+
+                Three schemas now carry this key and all three must fold the
+                same way, because the project page files a task under the
+                ribbon stop a reader clicked by matching them. Divergence would
+                show as a stage that looks populated and opens empty, which is
+                a bug nobody would read as a key mismatch.
+            stageName:
+              type: string
+              maxLength: 120
+              description: |
+                The stage's name as the template published it. A snapshot, like
+                `ObStepDot.stageName` — renaming a stage on OB-15 must not
+                re-label a journey that is already running.
+            tatUsedPercent:
+              type: [number, 'null']
+              format: double
+              description: |
+                Working hours consumed over this task's budget, as a percentage
+                — the figure OB-06 prints as **TAT used**, and the one that goes
+                over 100 on a breach.
+
+                Computed server-side from `ObJourneyStepRagService.hoursConsumed`
+                against `ObStepTatBudget`, so numerator and denominator agree
+                about how long a working day is and client waits are excluded
+                from both. A browser deriving it from `dueAt` would be counting
+                weekends, holidays and resource leave as working time.
+
+                Null where nothing has been consumed to measure — a task that
+                has never started, or one whose budget is zero.
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStepItem' }
+              description: |
+                This task's sub-tasks — the third and fourth levels of Module
+                Service → Stage → Task → **Task list**.
+
+                **Filled by the journey read**, which fetches every task's
+                checklist for the whole journey in one query, because the
+                project page's stage body draws each task with its sub-tasks
+                open underneath and per-task fetching would be a request per
+                row on first paint.
+
+                Optional here and **required** on `ObJourneyStepDetail`, which
+                is the difference between the two shapes: a caller holding a
+                detail always has the checklist, a caller holding a view should
+                check.
+            docs:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyStepDoc' }
+              description: |
+                Required documents. **Empty on the journey read** — deciding
+                satisfaction counts clean attachments per task and walks the
+                template's document list, two further reads per row, and the
+                stage body shows no documents.
+
+                So an empty array here means "not loaded on this read", not
+                "this task requires nothing". The place that answers that
+                honestly is `GET /onboarding/journey-steps/{stepId}`, where
+                `ObJourneyStepDetail` requires the field.
       description: |
         A-118 · what the ribbon and the OB-06 panel need on top of C-104's
         lifecycle shape.
@@ -19992,7 +21253,31 @@ components:
         isMandatory:
           type: boolean
           description: A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.
-        isDone: { type: boolean }
+        isDone:
+          type: boolean
+          description: |
+            **Answered, not answered yes.** True whenever `answer` is set
+            either way — an item answered *False, and here is why* satisfies
+            the completion gate exactly as a True does. The server computes it
+            as `answer IS NOT NULL`; anything that "fixes" it to mean "answered
+            True" makes the screen refuse completions the server allows.
+        answer:
+          type: [boolean, 'null']
+          description: |
+            The three states `ob_journey_step_items.answer` actually has: `true`,
+            `false`, and `null` for not yet answered.
+
+            `isDone` cannot express the middle one, which is why this field
+            exists. A task list entry is a question — *was the source data
+            received?* — and "no, because the client has not sent it" is an
+            answer, not an absence of one.
+        remark:
+          type: [string, 'null']
+          maxLength: 500
+          description: |
+            Why. **Required when `answer` is false** and optional otherwise:
+            an exception nobody explained is an exception the next reader has
+            to go and ask about.
         doneAt: { type: [string, 'null'], format: date-time }
         doneBy:
           oneOf:
@@ -20005,9 +21290,26 @@ components:
         data: { $ref: '#/components/schemas/ObJourneyStepItem' }
     ObJourneyStepItemUpdateRequest:
       type: object
-      required: [isDone]
+      required: [answer]
       properties:
-        isDone: { type: boolean }
+        answer:
+          type: [boolean, 'null']
+          description: |
+            `true`, `false`, or `null` to clear the answer back to unanswered.
+
+            **This replaced `isDone: boolean`**, which could say neither
+            "false, and here is why" nor "I answered this by mistake". The
+            column has been a nullable `tinyint` beside a `remark` since it was
+            written; only the request was binary, and `StepTaskList` carried a
+            standing note that False-with-a-remark was unreachable.
+        remark:
+          type: [string, 'null']
+          maxLength: 500
+          description: |
+            Mandatory when `answer` is `false` — the server answers
+            `ob-step-item-remark-required` without one. Cleared by sending
+            `null`, and ignored on an item being cleared to unanswered, since a
+            reason for an answer nobody gave is not a thing.
     ObJourneyStepDoc:
       type: object
       required: [id, stepId, label, isRequired, isSatisfied]
@@ -22096,7 +23398,10 @@ components:
           type: string
           minLength: 1
           maxLength: 150
-          description: The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.
+          description: |
+            The username from the credential mail. An onboarding client's is
+            their client code (`HRZ-001`); a ticketing client's is
+            `ACME.ravi`. Matched case-insensitively.
         password:
           type: string
           minLength: 1
@@ -22332,6 +23637,144 @@ components:
           type: array
           items: { $ref: '#/components/schemas/PortalSignoff' }
 
+    PortalSignoffChecklistItem:
+      type: object
+      required: [id, sequence, label, isMandatory, isDone]
+      description: |
+        One Task List row on the portal's review screen.
+
+        `isDone` means **answered**, not answered True — C-111's distinction,
+        the same one `ObSignoffChecklistItem` carries on the public page. A
+        renderer that draws it as a tick is saying something the field does
+        not.
+      properties:
+        id: { type: integer, format: int64 }
+        sequence: { type: integer }
+        label: { type: string }
+        isMandatory: { type: boolean }
+        isDone: { type: boolean }
+    PortalSignoffReview:
+      type: object
+      required: [id, kind, status, requestedAt, canDecide, csatOffered, checklist]
+      description: |
+        What the client reads before deciding.
+
+        Narrower than the public page's `ObSignoffSession` in two deliberate
+        ways: no session token — the portal mints one internally and spends it
+        in the same call, so it is never on the wire — and no `sentToContact`
+        card, which would tell a contact their own details back.
+
+        `checklist` is empty for a `GO_LIVE` sign-off, which is about the
+        journey rather than one service; `stepTitle` and `productName` are
+        `null` in exactly that case.
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: '#/components/schemas/ObSignoffKind' }
+        status: { $ref: '#/components/schemas/ObSignoffStatus' }
+        clientName: { type: [string, 'null'] }
+        productName: { type: [string, 'null'] }
+        stepTitle: { type: [string, 'null'] }
+        requestedAt: { type: string, format: date-time }
+        canDecide:
+          type: boolean
+          description: |
+            `true` only while the row is `PENDING`. The accept and object
+            routes check this server-side regardless — this field decides
+            whether the forms render, never whether the server accepts.
+        csatOffered:
+          type: boolean
+          description: |
+            Whether a go-live survey follows the acceptance. False for every
+            `STEP` sign-off and for a client who has already answered one.
+        checklist:
+          type: array
+          items: { $ref: '#/components/schemas/PortalSignoffChecklistItem' }
+    PortalSignoffReviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalSignoffReview' }
+    PortalSignoffAcceptRequest:
+      type: object
+      required: [acceptedName]
+      properties:
+        acceptedName:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: |
+            Typed by the signatory and never defaulted from the contact row —
+            `ObSignoffAcceptRequest`'s own rule, which authentication does not
+            relax: it establishes which account acted, not that a human put
+            their name to it.
+        note:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional remark, stored on `acceptance_note`.
+    PortalSignoffObjectRequest:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: |
+            Mandatory, where the acceptance note is optional — "an objection
+            with no reason guarantees a second round trip".
+    PortalSignoffDecision:
+      type: object
+      required: [id, status, stepCompleted, gateFailures, clientWentLive, hasCertificate, csatOffered]
+      description: |
+        How the sign-off was decided, and what our own side still owes.
+
+        `stepCompleted: false` with a non-empty `gateFailures` is a **normal
+        outcome** of a successful acceptance, not an error — see
+        `acceptPortalSignoff`. Both are empty on an objection: nothing
+        completes, and the step reverting is staff's business rather than a
+        gate the client failed.
+      properties:
+        id: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/ObSignoffStatus' }
+        signedAt: { type: [string, 'null'], format: date-time }
+        signedName: { type: [string, 'null'] }
+        acceptanceNote: { type: [string, 'null'] }
+        objectedAt: { type: [string, 'null'], format: date-time }
+        objectionNote: { type: [string, 'null'] }
+        stepCompleted: { type: boolean }
+        gateFailures:
+          type: array
+          description: Stable reason codes for what the gate refused. Empty when `stepCompleted` is true.
+          items: { type: string }
+        clientWentLive:
+          type: boolean
+          description: |
+            This acceptance was the last one, every journey is complete, and
+            the client is Live-Green.
+        hasCertificate:
+          type: boolean
+          description: Whether `getObSignoffCertificate` will return a PDF for this sign-off.
+        csatOffered:
+          type: boolean
+          description: Whether to draw the go-live survey after this acceptance.
+    PortalSignoffDecisionResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/PortalSignoffDecision' }
+    PortalCsatRequest:
+      type: object
+      required: [score]
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: One to five. The whole survey.
+        comment:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional — the survey's design is that it costs one tap.
     PortalPrereqSubmitRequest:
       type: object
       description: |

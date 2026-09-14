@@ -76,7 +76,6 @@ export function moveTemplate(orderedIds: number[], from: number, to: number): nu
 export interface StepOwnership {
   sequence: number
   ownerUserId?: number | null
-  ownerRole?: string | null
   items?: readonly unknown[]
 }
 
@@ -98,17 +97,26 @@ export function checklistCount(steps: readonly StepOwnership[]): number {
  * ## A Module Service has no implementor of its own
  *
  * Ownership is a fact about a *step*: `ObJourneyTemplateStep` carries
- * `ownerUserId`, and `ownerRole` where no particular person is pinned. So this
- * column is derived, and the reading it takes is **the first step's owner** —
- * who the service actually lands on when a client is boarded. The alternative
- * reading, whoever owns the most steps, answers "who mostly runs this", which
- * is a different question and not the one a catalogue is scanned for.
+ * `ownerUserId` and nothing else. So this column is derived, and the reading it
+ * takes is **the first step's owner** — who the service actually lands on when
+ * a client is boarded. The alternative reading, whoever owns the most steps,
+ * answers "who mostly runs this", which is a different question and not the one
+ * a catalogue is scanned for.
  *
- * The fallback chain is the same one the ribbon reads: a named person, else
- * the role that covers the step, else nobody yet. `extra` counts the *other*
- * distinct owners further down the service, so a journey run by four people
- * does not read as one person's — a column that named only the first would
- * quietly under-report every shared service.
+ * ## "Nobody pinned" is the usual answer, and it is not "unassigned"
+ *
+ * A service is authored once and boarded for every client that buys the
+ * product, so pinning a person on its first step says "this one person starts
+ * it for everyone, for ever" — true of almost no service. A task with nobody
+ * pinned goes to the *project's* implementor when a journey is created, which
+ * is what this column then says. It used to say "Role · PM", from an
+ * `ownerRole` nothing ever resolved to a person, and "Unassigned" when there
+ * was not even that; both were the same misreading of a deliberately empty
+ * field.
+ *
+ * `extra` counts the *other* distinct owners further down the service, so a
+ * journey run by four people does not read as one person's — a column that
+ * named only the first would quietly under-report every shared service.
  */
 export function defaultImplementor(
   steps: readonly StepOwnership[],
@@ -142,18 +150,10 @@ export function defaultImplementor(
       named: true,
     }
   }
-  if (first.ownerRole) {
-    return {
-      label: `Role · ${first.ownerRole}`,
-      extra,
-      hint: `The first step names no person, only the role that covers it — whoever holds ${first.ownerRole} picks this service up.${spread}`,
-      named: false,
-    }
-  }
   return {
-    label: 'Unassigned',
+    label: 'Project implementor',
     extra,
-    hint: `The first step names neither an owner nor a role, so nobody is lined up to start this service.${spread}`,
+    hint: `This service's first step pins nobody, which is the ordinary case — it goes to whoever is running the project it is boarded for, set on the project rather than here.${spread}`,
     named: false,
   }
 }

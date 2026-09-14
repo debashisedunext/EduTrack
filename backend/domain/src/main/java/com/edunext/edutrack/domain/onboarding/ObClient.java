@@ -96,6 +96,27 @@ public class ObClient {
     @Column(name = "address", columnDefinition = "text")
     private String address;
 
+    /**
+     * OB-CL. Free text — the module has no city master, and inventing one to
+     * hold a label would be a screen nobody asked for.
+     */
+    @Column(name = "city", length = 120)
+    private String city;
+
+    /**
+     * The operations team's own filing key, typed rather than generated.
+     *
+     * <p>{@code uq_ob_clients_client_code} is on it and the column is nullable,
+     * which is not a contradiction: MySQL treats NULLs as distinct in a unique
+     * index, so every client boarded through the retired wizard keeps a NULL
+     * and coexists, while two clients may never share a code.
+     * {@code ObClientWriteService} is what makes it <em>required</em> of a
+     * client created from here on — a rule about new rows, which no column
+     * definition can express.
+     */
+    @Column(name = "client_code", length = 32)
+    private String clientCode;
+
     @Column(name = "sales_person_id")
     private Long salesPersonId;
 
@@ -233,6 +254,22 @@ public class ObClient {
 
     public void setAddress(String address) {
         this.address = address;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public void setCity(String city) {
+        this.city = city;
+    }
+
+    public String getClientCode() {
+        return clientCode;
+    }
+
+    public void setClientCode(String clientCode) {
+        this.clientCode = clientCode;
     }
 
     public Long getSalesPersonId() {

@@ -41,13 +41,19 @@ class ObJourneyTemplateStepControllerTest {
         item.setSequence(1);
         item.setLabel("Signed requirement sheet received");
         item.setMandatory(false);
-        when(service.addStepItem(10L, "Signed requirement sheet received", false)).thenReturn(item);
+        when(service.addStepItem(10L, "Signed requirement sheet received", false))
+                .thenReturn(new ObJourneyTemplateService.StepItemAdded(item, 7));
 
         ObJourneyTemplateDtos.StepItemResponse response = controller.addItem(10L,
                 new ObJourneyTemplateDtos.AddStepItemRequest("Signed requirement sheet received", false));
 
         assertThat(response.data().id()).isEqualTo(30L);
         assertThat(response.data().mandatory()).isFalse();
+        // B-131 · the count the service reports reaches the response unaltered.
+        // The screen says "added to 7 client journeys already in flight" off
+        // this number, so a controller quietly dropping it would be a lie the
+        // admin has no other way to check.
+        assertThat(response.backfilledJourneyCount()).isEqualTo(7);
         verify(service).addStepItem(10L, "Signed requirement sheet received", false);
     }
 

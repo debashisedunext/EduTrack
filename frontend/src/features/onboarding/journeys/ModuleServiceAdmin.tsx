@@ -247,12 +247,6 @@ export function ModuleServiceAdmin({
       <h2 id="module-service-admin-heading" className="m-0 text-h3 text-content">
         Service details
       </h2>
-      <p className="m-0 text-sm text-content-muted">
-        Name, product and deletion apply to <b>every version</b> of this service — v1 to v{version} —
-        and a rename follows through to the client journeys already boarded on it. Its steps are
-        versioned instead, in the table above.
-      </p>
-
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -286,8 +280,8 @@ export function ModuleServiceAdmin({
       */}
       {inUse && (
         <p className="m-0 text-caption text-content-muted">
-          🔒 {boarded} — it can no longer be deleted. Editing it is still fine: a rename updates
-          every one of those journeys too.
+          🔒 In use by {serviceJourneyCount} client journey{serviceJourneyCount === 1 ? '' : 's'} —
+          delete is off, editing still works.
         </p>
       )}
 

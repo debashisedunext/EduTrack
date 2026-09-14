@@ -46,7 +46,26 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObJourneyStepItemUpdateRequestAnswer } from './obJourneyStepItemUpdateRequestAnswer';
+import type { ObJourneyStepItemUpdateRequestRemark } from './obJourneyStepItemUpdateRequestRemark';
 
 export interface ObJourneyStepItemUpdateRequest {
-  isDone: boolean;
+  /** `true`, `false`, or `null` to clear the answer back to unanswered.
+
+**This replaced `isDone: boolean`**, which could say neither
+"false, and here is why" nor "I answered this by mistake". The
+column has been a nullable `tinyint` beside a `remark` since it was
+written; only the request was binary, and `StepTaskList` carried a
+standing note that False-with-a-remark was unreachable.
+ */
+  answer: ObJourneyStepItemUpdateRequestAnswer;
+  /**
+   * Mandatory when `answer` is `false` — the server answers
+`ob-step-item-remark-required` without one. Cleared by sending
+`null`, and ignored on an item being cleared to unanswered, since a
+reason for an answer nobody gave is not a thing.
+
+   * @maxLength 500
+   */
+  remark?: ObJourneyStepItemUpdateRequestRemark;
 }

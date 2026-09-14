@@ -92,16 +92,19 @@ class ObApplicationService {
     private final ObClientChildWriteRepository products;
     private final ObApplicationWriteRepository applications;
     private final ObJourneyInstantiationService journeys;
+    private final com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning projects;
 
     ObApplicationService(ObClientService details, ObClientReadRepository reads,
                          ObClientChildWriteRepository products,
                          ObApplicationWriteRepository applications,
-                         ObJourneyInstantiationService journeys) {
+                         ObJourneyInstantiationService journeys,
+                         com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning projects) {
         this.details = details;
         this.reads = reads;
         this.products = products;
         this.applications = applications;
         this.journeys = journeys;
+        this.projects = projects;
     }
 
     // ------------------------------------------------------------------
@@ -128,6 +131,13 @@ class ObApplicationService {
         requireSellableWithPublishedTemplate(request.productId());
 
         applications.insert(obClientId, request);
+        // Since V20260911_1800 a journey belongs to a project, and
+        // ObJourneyInstantiationService resolves one rather than inventing one.
+        // This panel has no name or start date to give a project — it records a
+        // purchase, not an engagement — so it takes the derived one, which is
+        // indistinguishable from what the migration backfilled. Somebody renames
+        // it on the project page when they care.
+        projects.ensureFor(obClientId, request.productId(), scope.userId());
         journeys.instantiate(obClientId, request.productId());
 
         return detail(scope, obClientId);

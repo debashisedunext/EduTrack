@@ -217,12 +217,22 @@ class ObJourneyStepLifecycleServiceTest {
                 .isInstanceOf(InvalidStepTransitionException.class);
     }
 
+    /**
+     * The prerequisite checklist is advisory: a {@code LOCKED} gate is
+     * reported by every screen that draws it and refuses nothing. One
+     * unverified document used to stop all implementation work for the
+     * client.
+     */
     @Test
-    void startRefusesWhileTheJourneyGateIsStillLocked() {
+    void startIsAllowedWhileTheJourneyGateIsStillLocked() {
         journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
 
-        assertThatThrownBy(() -> service.start(STEP, OWNER))
-                .isInstanceOf(JourneyNotOpenException.class);
+        ObJourneyStep started = service.start(STEP, OWNER);
+
+        assertThat(started.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+        assertThat(started.getStartedAt()).isNotNull();
+        // The clock runs from the start, not from whenever the gate opens.
+        assertThat(started.getDueAt()).isNotNull();
     }
 
     @Test
@@ -1051,8 +1061,15 @@ class ObJourneyStepLifecycleServiceTest {
         assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
     }
 
+    /**
+     * The other half of the advisory gate. {@code start} admits a
+     * {@code LOCKED} journey, so a step in one can be running — and the step
+     * that depends on it has to follow when it completes. A chain that
+     * activated its second step only once the checklist cleared would be a
+     * worse answer than refusing the first one outright.
+     */
     @Test
-    void activateEligibleStepsIsANoOpWhileTheJourneyIsLocked() {
+    void activateEligibleStepsRunsWhileTheJourneyGateIsStillLocked() {
         journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
         ObJourneyStep parallelA = pendingStep();
         parallelA.setId(704L);
@@ -1061,7 +1078,7 @@ class ObJourneyStepLifecycleServiceTest {
 
         service.activateEligibleSteps(JOURNEY);
 
-        assertThat(stepRows.get(704L).getStatus()).isEqualTo(ObJourneyStepStatus.PENDING);
+        assertThat(stepRows.get(704L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
     }
 
     @Test
@@ -1105,12 +1122,32 @@ class ObJourneyStepLifecycleServiceTest {
     }
 
     @Test
-    void skipTriggersNoActivationWhileTheJourneyIsLocked() {
-        // skip() itself does not require the journey be open (see
-        // skipDoesNotRequireTheJourneyGateToBeOpen above) — activation must
-        // still refuse while LOCKED, exactly as it would for any other
-        // trigger, rather than trusting skip()'s own relaxed gate.
+    void skipTriggersActivationEvenWhileTheJourneyGateIsLocked() {
+        // skip() never required the journey be open (see
+        // skipDoesNotRequireTheJourneyGateToBeOpen above), and activation no
+        // longer re-asserts the gate behind it — the checklist is advisory,
+        // so a skipped step hands the next one on exactly as it would if the
+        // client had cleared every prerequisite.
         journeyRows.get(JOURNEY).setGateStatus(ObGateStatus.LOCKED);
+        ObJourneyStep dependent = pendingStep();
+        dependent.setId(702L);
+        dependent.setSequence(2);
+        dependent.setDependsOnStepId(STEP);
+        stepRows.put(702L, dependent);
+
+        service.skip(STEP, OWNER, MANAGER_ROLE, "no longer needed");
+
+        assertThat(stepRows.get(702L).getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    /**
+     * The hold is untouched by any of this: it waits on work nobody on this
+     * journey can do, so it still refuses both the manual start and the
+     * automatic activation.
+     */
+    @Test
+    void skipTriggersNoActivationWhileTheJourneyIsHeldByAnother() {
+        journeyRows.get(JOURNEY).setHeldByJourneyId(999L);
         ObJourneyStep dependent = pendingStep();
         dependent.setId(702L);
         dependent.setSequence(2);

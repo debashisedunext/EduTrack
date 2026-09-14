@@ -39,6 +39,21 @@ public class ObJourney {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * The engagement this journey belongs to — {@code ob_projects.id}.
+     *
+     * <p>{@link #obClientId} and {@link #productId} below are derivable from it
+     * and stay anyway. That is a deliberate denormalisation with one rule
+     * attached: <b>the three are written together by
+     * {@code ObJourneyInstantiationService} and by nothing else</b>, so they
+     * cannot diverge. The alternative was dropping two columns that 155 files
+     * across the backend read — the scope resolvers, the dashboard's four
+     * repositories, the outbox, the scanner — in the migration that introduced
+     * the project. {@code V20260911_1800}'s header has the full argument.
+     */
+    @Column(name = "project_id", nullable = false)
+    private Long projectId;
+
     @Column(name = "ob_client_id", nullable = false)
     private Long obClientId;
 
@@ -122,6 +137,14 @@ public class ObJourney {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(Long projectId) {
+        this.projectId = projectId;
     }
 
     public Long getObClientId() {

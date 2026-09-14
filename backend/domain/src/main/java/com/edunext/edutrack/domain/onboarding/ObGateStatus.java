@@ -10,7 +10,20 @@ package com.edunext.edutrack.domain.onboarding;
  */
 public enum ObGateStatus {
 
-    /** Steps visible — dots, owners, TATs — but no step activates and no clock runs. */
+    /**
+     * Steps visible — dots, owners, TATs — and nothing activating itself: no
+     * step moves to {@code IN_PROGRESS} and no clock starts <em>on its own</em>
+     * while the gate is here.
+     *
+     * <p><b>It no longer refuses an owner who starts a step deliberately.</b>
+     * Plan §5.2's "clocks dead" was enforced on every path into
+     * {@code IN_PROGRESS}, which meant one unverified document stopped all
+     * implementation work for the client; the checklist is advisory now and
+     * {@code ObJourneyStepLifecycleService#start} does not consult this field.
+     * What remains is the automatic half, which is the half that was ever
+     * about false breaches: a journey sitting here accrues no TAT that nobody
+     * chose to start.
+     */
     LOCKED,
 
     /** The prerequisite gate has cleared for this client. */

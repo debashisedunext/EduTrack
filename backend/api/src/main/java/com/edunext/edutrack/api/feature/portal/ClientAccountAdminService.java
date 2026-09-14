@@ -135,8 +135,7 @@ public class ClientAccountAdminService {
             throw new ClientAccountAlreadyExistsException(obClientId);
         }
 
-        String username = PortalUsernames.generate(
-                usernamePrefix(client.clientName()), client.contactName(), accounts::usernameExists);
+        String username = usernameFor(client);
 
         long accountId = accounts.insert(
                 username,
@@ -261,13 +260,39 @@ public class ClientAccountAdminService {
     }
 
     /**
+     * The login name: the client's own code where there is one.
+     *
+     * <p>A portal login is one per client ({@code uq_client_accounts_ob_client})
+     * and the code is the value operations already file that client under, so
+     * the two should be the same string — an operator reading a login name off
+     * a support call should not have to translate it into anything. See
+     * {@link PortalUsernames#fromClientCode} for the counter that stays despite
+     * the code already being unique, and why.
+     *
+     * <p><b>The fallback is for clients boarded before the column existed.</b>
+     * {@code client_code} arrived in V20260911_1800 and is nullable precisely
+     * so that the rows already in the table did not have to be invented one.
+     * Those clients still get a login on the old scheme — a prefix reduced from
+     * their name, then the primary SPOC's given name — because the alternative
+     * is refusing to issue a login to an existing client over a field nobody
+     * asked them for. New clients all carry a code: the add dialog requires it.
+     */
+    private String usernameFor(ObPrimaryContactReader.ClientAndPrimary client) {
+        return client.hasClientCode()
+                ? PortalUsernames.fromClientCode(client.clientCode(), accounts::usernameExists)
+                : PortalUsernames.generate(
+                        usernamePrefix(client.clientName()), client.contactName(),
+                        accounts::usernameExists);
+    }
+
+    /**
      * The username prefix, derived from the client's name.
      *
-     * <p><b>{@code ob_clients} has no code column</b> — it carries a name and
-     * nothing shorter — whereas {@code PortalUsernames} was written against the
-     * ticketing master's {@code code} and says the prefix "is already unique and
-     * already upper-case". Neither holds here, and both are worth being explicit
-     * about rather than papering over.
+     * <p>The fallback path only — see {@link #usernameFor}. {@code
+     * PortalUsernames} was written against the ticketing master's {@code code}
+     * and says the prefix "is already unique and already upper-case"; for a
+     * client with no code of its own neither holds, and both are worth being
+     * explicit about rather than papering over.
      *
      * <p>Uniqueness is not lost, because it was never carried by the prefix
      * alone: {@code PortalUsernames} disambiguates with a counter against

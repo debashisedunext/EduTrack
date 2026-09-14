@@ -175,6 +175,9 @@ function stepItemDto(item: ObStepItem, stepId: number, db: Db) {
     label: item.label,
     isMandatory: item.isMandatory,
     isDone: item.isDone,
+    // The three-state answer beside the two-state `isDone` it is derived from.
+    answer: item.answer ?? (item.isDone ? true : null),
+    remark: item.remark ?? null,
     doneAt: item.doneAt ?? null,
     doneBy: userRef(item.doneById ?? null, db),
   };
@@ -432,13 +435,27 @@ export const obJourneyHandlers = [
             return problem(422, 'ob-step-terminal',
               'The service is closed; its checklist is the record of what was done');
           }
-          const body = (await request.json()) as { isDone?: boolean };
-          if (typeof body.isDone !== 'boolean') {
-            return validationFailed({ isDone: ['Required'] });
+          /*
+            Three states, mirroring the server: `answer` is true, false or null
+            (cleared). `isDone` means *answered* — either way — because that is
+            what the completion gate reads, so a False satisfies it exactly as a
+            True does.
+          */
+          const body = (await request.json()) as { answer?: boolean | null; remark?: string | null };
+          if (body.answer === undefined) {
+            return validationFailed({ answer: ['Required'] });
           }
-          item.isDone = body.isDone;
-          item.doneAt = body.isDone ? new Date().toISOString() : null;
-          item.doneById = body.isDone ? db.currentUserId : null;
+          const remark = body.remark?.trim() || null;
+          if (body.answer === false && !remark) {
+            // `ck_ob_journey_step_items_remark` — an exception nobody explained
+            // is one the next reader has to go and ask about.
+            return problem(422, 'ob-step-item-remark-required', 'A False answer needs a reason');
+          }
+          item.answer = body.answer;
+          item.isDone = body.answer !== null;
+          item.remark = body.answer === null ? null : remark;
+          item.doneAt = body.answer === null ? null : new Date().toISOString();
+          item.doneById = body.answer === null ? null : db.currentUserId;
           return ok(stepItemDto(item, step.id, db));
         }
       }

@@ -6,6 +6,7 @@ import {
   completionGate,
   completionGateSummary,
   mayActOnStep,
+  startCaution,
   startRefusal,
 } from './stepActions'
 
@@ -86,18 +87,42 @@ describe('mayActOnStep', () => {
 
 describe('startRefusal', () => {
   /**
-   * The server answers both holds with one code, `journey-not-open`. They are
-   * not one fact: clearing prerequisites is work somebody can do today,
-   * waiting for a sibling journey is not, and a reader told the wrong one goes
-   * and does the wrong thing.
+   * The two holds were never one fact, and now they are not even the same
+   * kind of answer: clearing prerequisites is work somebody can do today and
+   * no longer stops the owner in the meantime, whereas waiting for a sibling
+   * journey is a wait nobody here can shorten.
    */
-  it('distinguishes a locked gate from a sibling hold', () => {
-    expect(startRefusal('GATE_LOCKED')).toMatch(/prerequisites/i)
+  it('refuses a sibling hold, which nobody on this journey can clear', () => {
     expect(startRefusal('HELD_BY_SIBLING')).toMatch(/another of the client’s services/i)
+  })
+
+  it('does not refuse a locked prerequisite gate — the checklist is advisory', () => {
+    expect(startRefusal('GATE_LOCKED')).toBeNull()
   })
 
   it('does not refuse a start on an open, unheld journey', () => {
     expect(startRefusal(null)).toBeNull()
+  })
+})
+
+describe('startCaution', () => {
+  /**
+   * The gate still means something — it is work the client owes — so it is
+   * said beside a live button rather than dropped. A screen that simply went
+   * quiet about it would be the other half of the old mistake.
+   */
+  it('notes an uncleared gate without blocking it', () => {
+    const caution = startCaution('GATE_LOCKED')
+    expect(caution).toMatch(/prerequisites/i)
+    expect(caution).toMatch(/start anyway/i)
+  })
+
+  it('says nothing about a sibling hold, which startRefusal already refuses', () => {
+    expect(startCaution('HELD_BY_SIBLING')).toBeNull()
+  })
+
+  it('says nothing on an open, unheld journey', () => {
+    expect(startCaution(null)).toBeNull()
   })
 })
 
@@ -189,8 +214,14 @@ describe('actionRefusal', () => {
     expect(actionRefusal('complete', { hold: null, gate: clear })).toBeNull()
   })
 
-  it('refuses start on a locked journey', () => {
-    expect(actionRefusal('start', { hold: 'GATE_LOCKED', gate: clear })).toMatch(/prerequisites/i)
+  it('refuses start on a held journey', () => {
+    expect(actionRefusal('start', { hold: 'HELD_BY_SIBLING', gate: clear })).toMatch(
+      /another of the client’s services/i,
+    )
+  })
+
+  it('allows start on a journey whose prerequisite gate is still locked', () => {
+    expect(actionRefusal('start', { hold: 'GATE_LOCKED', gate: clear })).toBeNull()
   })
 
   /**

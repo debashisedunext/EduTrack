@@ -82,6 +82,18 @@ class ObDashboardSummaryIT {
     void seed() {
         jdbc.update("DELETE FROM ob_scope_dashboard_summary");
         jdbc.update("DELETE FROM ob_dashboard_summary");
+        // Before the clients they point at, and before the products those
+        // clients' journeys point at — both carry a foreign key here, and a
+        // table added to this module without joining these deletes fails every
+        // case in seed rather than in the case that added it.
+        jdbc.update("DELETE FROM ob_client_daily_stats WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT_OBDASH_%')");
+        jdbc.update("DELETE FROM ob_journeys WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT_OBDASH_%')");
+        jdbc.update("DELETE FROM ob_client_applications WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT_OBDASH_%')");
+        jdbc.update("DELETE FROM ob_journey_templates WHERE name LIKE 'IT_OBDASH_%'");
+        jdbc.update("DELETE FROM ob_clients WHERE name LIKE 'IT_OBDASH_%'");
         jdbc.update("DELETE FROM ob_products WHERE code LIKE 'IT_OBDASH_%'");
 
         erp = insertProduct("IT_OBDASH_ERP", "ERP");
@@ -168,6 +180,107 @@ class ObDashboardSummaryIT {
 
         assertThat(count(dashboard.summary(manager(), null).summary().cards(),
                 ObDashboardCardKey.ONGOING_PROJECTS)).isEqualTo(2);
+    }
+
+    // ── the prerequisite half of the two deadline cards ───────────────────
+
+    /**
+     * 🔴 The board read 0 on This Week's Deadlines while its own drill-over
+     * listed seventeen rows. Both were right about what they counted: the
+     * drill-over unions services with {@code ob_client_prereq_tasks}, per §9's
+     * "all client tasks", and {@code ob_dashboard_summary} counts services
+     * alone — a prerequisite checklist has no product to be keyed by. The
+     * missing half now comes from {@code ob_client_daily_stats}, and this is
+     * the case that fails if it stops.
+     */
+    @Test
+    @DisplayName("🔴 prerequisite tasks reach the deadline cards, not only the drill-over")
+    void prerequisiteTasksAreOnTheCards() {
+        insertRow(WEDNESDAY, erp, row -> {
+            row.put("steps_due_today", 1);
+            row.put("steps_due_this_week", 4);
+        });
+        long client = insertClient("IT_OBDASH_Sunbeam");
+        insertClientStats(WEDNESDAY, client, 3, 1);
+
+        var cards = dashboard.summary(manager(), null).summary().cards();
+
+        assertThat(count(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(7);
+        assertThat(count(cards, ObDashboardCardKey.TODAYS_DELIVERY)).isEqualTo(2);
+        // Exact, not an upper bound: a task belongs to one client, so the
+        // client rows partition and the sum is the real number.
+        assertThat(cards).filteredOn(one -> !one.key().isClientCounted())
+                .noneMatch(ObDashboardCard::countIsUpperBound);
+    }
+
+    /**
+     * The state no product-keyed row can represent, and the reason this figure
+     * lives in a second table: intake is done, the checklist is open, and not
+     * one journey has been instantiated yet.
+     */
+    @Test
+    @DisplayName("a client with no journey still contributes to the deadline cards")
+    void aClientWithNoJourneyStillCounts() {
+        insertRow(WEDNESDAY, erp, row -> row.put("journeys_locked", 1));
+        long client = insertClient("IT_OBDASH_Heritage");
+        insertClientStats(WEDNESDAY, client, 3, 0);
+
+        var cards = dashboard.summary(manager(), null).summary().cards();
+
+        assertThat(count(cards, ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(3);
+    }
+
+    /**
+     * Selecting a product narrows the checklists to the clients who bought it
+     * — the same {@code EXISTS} over {@code ob_journeys} the drill-over applies
+     * to its PREREQUISITE branch, so the card and the list it opens agree under
+     * a filter as well as without one.
+     */
+    @Test
+    @DisplayName("a product filter narrows prerequisites to that product's clients")
+    void theProductFilterReachesPrerequisitesToo() {
+        insertRow(WEDNESDAY, erp, row -> row.put("steps_due_this_week", 1));
+        insertRow(WEDNESDAY, biometric, row -> row.put("steps_due_this_week", 1));
+
+        long erpClient = insertClient("IT_OBDASH_ErpOnly");
+        insertJourney(erpClient, erp);
+        insertClientStats(WEDNESDAY, erpClient, 3, 0);
+
+        long biometricClient = insertClient("IT_OBDASH_BioOnly");
+        insertJourney(biometricClient, biometric);
+        insertClientStats(WEDNESDAY, biometricClient, 5, 0);
+
+        var erpCards = dashboard.summary(manager(), erp).summary().cards();
+        var allCards = dashboard.summary(manager(), null).summary().cards();
+
+        assertThat(count(erpCards, ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(4);
+        // And each checklist is counted once org-wide, not once per product row.
+        assertThat(count(allCards, ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(10);
+    }
+
+    /**
+     * A client who bought two products is counted once on the all-products
+     * board and shown under both when one is selected — which is what a gate
+     * blocking both of them means. This is the case that would have
+     * over-counted had the figure been attributed to each product instead of
+     * stored at the client grain.
+     */
+    @Test
+    @DisplayName("a multi-product client's checklist is counted once, not once per product")
+    void aMultiProductClientIsNotDoubleCounted() {
+        insertRow(WEDNESDAY, erp, row -> row.put("journeys_open_running", 1));
+        insertRow(WEDNESDAY, biometric, row -> row.put("journeys_open_running", 1));
+        long client = insertClient("IT_OBDASH_Both");
+        insertJourney(client, erp);
+        insertJourney(client, biometric);
+        insertClientStats(WEDNESDAY, client, 6, 0);
+
+        assertThat(count(dashboard.summary(manager(), null).summary().cards(),
+                ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(6);
+        assertThat(count(dashboard.summary(manager(), erp).summary().cards(),
+                ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(6);
+        assertThat(count(dashboard.summary(manager(), biometric).summary().cards(),
+                ObDashboardCardKey.THIS_WEEKS_DEADLINES)).isEqualTo(6);
     }
 
     // ── the arithmetic that is not, and says so ─────────────────────────────
@@ -424,6 +537,37 @@ class ObDashboardSummaryIT {
      * what lets the assertions above be read against the fixture rather than
      * against twenty zeroes.
      */
+    private long insertClient(String name) {
+        jdbc.update("INSERT INTO ob_clients (name, onboarding_date, overall_status) "
+                + "VALUES (?, ?, 'ONBOARDING')", name, WEDNESDAY.minusMonths(1));
+        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    /**
+     * A journey, for the product filter to find. Nothing here reads its steps
+     * or its dates — what is under test is the {@code EXISTS} that decides
+     * whose checklist a selected product includes.
+     */
+    private void insertJourney(long clientId, long productId) {
+        jdbc.update("INSERT IGNORE INTO ob_client_applications (ob_client_id, product_id) VALUES (?, ?)",
+                clientId, productId);
+        jdbc.update("INSERT INTO ob_journey_templates (product_id, name) VALUES (?, ?)",
+                productId, "IT_OBDASH_T" + clientId + "_" + productId);
+        Long templateId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        jdbc.update("INSERT INTO ob_journeys (ob_client_id, product_id, template_id, gate_status) "
+                + "VALUES (?, ?, ?, 'LOCKED')", clientId, productId, templateId);
+    }
+
+    /** One client's checklist for one day. Open is at least what is due this week. */
+    private void insertClientStats(LocalDate day, long clientId, int dueThisWeek, int dueToday) {
+        jdbc.update("""
+                INSERT INTO ob_client_daily_stats
+                    (stat_date, ob_client_id, prereq_tasks_open, prereq_tasks_due_this_week,
+                     prereq_tasks_due_today, prereq_tasks_overdue, computed_at)
+                VALUES (?, ?, ?, ?, ?, 0, '2026-09-02 06:00:00.000000')
+                """, day, clientId, dueThisWeek, dueThisWeek, dueToday);
+    }
+
     private void insertRow(LocalDate day, long productId, java.util.function.Consumer<Map<String, Object>> overrides) {
         Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("computed_at", "2026-09-02 06:00:00.000000");

@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import http, { ApiError, BASE, getAccessToken, newIdempotencyKey } from '@/api/http'
-import { getListObProductsQueryKey } from '@/api/generated/onboarding-masters/onboarding-masters'
+import {
+  getListObProductsQueryKey,
+  listObProducts,
+} from '@/api/generated/onboarding-masters/onboarding-masters'
 import type { ObProduct } from '@/api/generated/model/obProduct'
+import type { ObProductListResponse } from '@/api/generated/model/obProductListResponse'
 import type { ObProductWriteRequest } from '@/api/generated/model/obProductWriteRequest'
 
 /**
@@ -37,18 +41,30 @@ export interface ProductWithEtag {
  * draws. The bare key is deliberate: the module-service create form and the
  * OB-04 picker ask for their own entries, so opening this screen can never
  * leak a retired product into a dropdown.
+ *
+ * <h2>The cached value is the envelope, and that is not a detail</h2>
+ *
+ * `getListObProductsQueryKey()` is the *generated* key, and the generated
+ * `useListObProducts()` is on it too — the Module Service catalogue, the
+ * journey designer and the report filter bar all call it. One key must hold
+ * one shape, so this query caches `ObProductListResponse` exactly as the
+ * generated hook does and unwraps to the array through `select`, which runs on
+ * the way out of the cache and never writes to it.
+ *
+ * <p>Storing the bare array here instead is what made both screens look
+ * broken. Whichever page was opened first won the cache entry, and the second
+ * read it back in the other's shape: arriving at the catalogue from this
+ * master, `query.data.data` was `undefined`; arriving here from the catalogue,
+ * `products` was the envelope and `products.map` was not a function. A reload
+ * emptied the cache and whichever page you landed on fetched its own shape and
+ * worked, which is why this read as "the data only comes after a refresh"
+ * rather than as two screens disagreeing about one cache entry.
  */
 export function useProducts() {
-  return useQuery<ObProduct[], ApiError>({
+  return useQuery<ObProductListResponse, ApiError, ObProduct[]>({
     queryKey: getListObProductsQueryKey(),
-    queryFn: async ({ signal }) => {
-      const body = await http<{ data: ObProduct[] }>({
-        url: '/onboarding/products',
-        method: 'GET',
-        signal,
-      })
-      return body.data
-    },
+    queryFn: ({ signal }) => listObProducts(undefined, signal),
+    select: (body) => body.data,
   })
 }
 

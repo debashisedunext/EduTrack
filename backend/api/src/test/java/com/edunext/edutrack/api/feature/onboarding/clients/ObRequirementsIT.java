@@ -112,31 +112,33 @@ class ObRequirementsIT {
         long product = insertProduct("ITREQ_A_" + run, "IT Req Product A " + run);
         insertTemplate(product, "IT Req Onboarding A " + run);
 
-        ObClientDtos.ObClientDetail client = clientWrites.create(admin, ayush,
-                new ObClientDtos.ObClientCreateRequest(
-                        "IT Req Client " + run, null, BOARDED, null, null, null, null,
-                        List.of(new ObClientDtos.ObContactWriteRequest(
-                                "Founding SPOC", "Principal", "reqfounder" + run + "@example.com",
-                                "+911111111111", false, null, true)),
-                        List.of(new ObClientDtos.ObApplicationWriteRequest(
-                                product, "ANNUAL", 10, BOARDED, BOARDED.plusYears(1))),
-                        List.of(new ObClientDtos.ObRequirementWriteRequest(
-                                        "SSO", "<p>Against their <strong>Azure AD</strong></p>", null),
-                                // Blank, and dropped rather than refused — B-102's
-                                // behaviour, kept: a wizard textarea produces these
-                                // by accident.
-                                new ObClientDtos.ObRequirementWriteRequest(null, "   ", null),
-                                new ObClientDtos.ObRequirementWriteRequest(
-                                        null, "<p>Tally import for FY25-26</p>", null)),
-                        // acknowledgeSimilarNames, on ObApplicationsIT's reason:
-                        // "IT Req Client 1", "2", "3" … are what B-102's fuzzy
-                        // name guard exists to stop, and that is its own subject.
-                        false, true));
+        /*
+          There is one requirement write path now, and this fixture uses it.
 
-        clientId = client.id();
+          The wizard used to be a second one — it took a `requirements[]` array
+          alongside the client — and two of the tests below existed precisely to
+          prove the two paths reduced a body identically. With the wizard
+          retired there is only `addObClientRequirement`, so those two tests
+          assert the one path rather than the agreement between two, which is a
+          weaker claim honestly stated rather than a stronger one about
+          something that no longer exists.
+
+          `acknowledgeSimilarNames`, on ObApplicationsIT's reason: "IT Req
+          Client 1", "2", "3" … are what the fuzzy name guard exists to stop,
+          and that is its own subject.
+        */
+        clientId = clientWrites.create(admin, ayush,
+                new ObClientDtos.ObClientCreateRequest(
+                        "IT Req Client " + run, "ITREQ-" + run, null, null, true))
+                .detail().id();
+
+        requirements.add(admin, clientId, new ObClientDtos.ObRequirementWriteRequest(
+                "SSO", "<p>Against their <strong>Azure AD</strong></p>", null));
+        requirements.add(admin, clientId, new ObClientDtos.ObRequirementWriteRequest(
+                null, "<p>Tally import for FY25-26</p>", null));
     }
 
-    // ── the wizard's path, which is the older half of the sanitiser boundary ──
+    // ── the sanitiser boundary ──────────────────────────────────────────────
 
     /**
      * The whole reason the insert moved out of
@@ -147,8 +149,8 @@ class ObRequirementsIT {
      * end to end rather than asserting through a mock.
      */
     @Test
-    @DisplayName("the wizard's requirements are sanitised, numbered, and blanks dropped")
-    void theWizardWritesSanitisedRows() {
+    @DisplayName("requirements are sanitised, numbered from zero, and carry no met stamp")
+    void requirementsAreSanitisedAndNumbered() {
         ObClientDtos.ObClientDetail client = detail();
 
         assertThat(client.requirements()).hasSize(2);
@@ -170,8 +172,8 @@ class ObRequirementsIT {
 
     /** Storing what arrived rather than what survived is the failure that renders as a working page. */
     @Test
-    @DisplayName("script markup submitted through the wizard is not what reaches the column")
-    void theWizardStoresTheSanitisedValue() {
+    @DisplayName("script markup is not what reaches the column")
+    void theStoredValueIsTheSanitisedOne() {
         ObClientDtos.ObClientDetail after = requirements.add(admin, clientId,
                 new ObClientDtos.ObRequirementWriteRequest(
                         null, "<p>Data migration<script>steal()</script></p>", null));

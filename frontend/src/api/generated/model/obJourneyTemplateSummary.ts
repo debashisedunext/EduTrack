@@ -47,6 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObJourneyTemplateSummaryPublishedAt } from './obJourneyTemplateSummaryPublishedAt';
+import type { ObJourneyTemplateStage } from './obJourneyTemplateStage';
 
 /**
  * One Module Service as the OB-07 catalogue lists it.
@@ -69,12 +70,31 @@ sit at v1 — `uq_ob_journey_templates_version` is keyed on
   publishedAt?: ObJourneyTemplateSummaryPublishedAt;
   /** How many services this journey has — the card's step list length. */
   stepCount: number;
-  /** Σ of the step TATs in working days — what a journey for this
-service costs. On the row because the card shows it and it is not
-derivable from the other fields; the alternative is the page
-fetching every service's full detail to render one chip.
+  /** How long a journey for this service **takes**, in working days —
+the critical path through its tasks, not the sum of them.
+
+Tasks that wait for nothing start together, so two of 1 and 2 days
+side by side is 2 days, while the same two chained by
+`dependsOnStepId` is 3. It was a plain Σ until the two readings
+were noticed to disagree wherever a service has parallel work,
+which is most of them.
+
+On the row because the card shows it and it is not derivable from
+the other fields; the alternative is the page fetching every
+service's full detail to render one chip.
  */
   totalTatDays: number;
+  /** This service's stage groups, in display order — OB-07's "Category"
+column and the New Project form's service picker both print them.
+
+On the **summary** rather than only on the detail because both of
+those screens draw every service of a product at once, and reading
+them per row would be a request per card. The same
+`ObJourneyTemplateStage` the detail nests, not a thinner twin: a
+summary-only shape would be a second thing to keep in step for the
+sake of omitting one nullable id, and the picker groups by that id.
+ */
+  stages?: ObJourneyTemplateStage[];
   /** C-124 · client journeys instantiated from **any version of this
 service**, archived ones included — the number `DELETE` refuses
 above zero. **`PATCH` does not consult it at all**, so a page that

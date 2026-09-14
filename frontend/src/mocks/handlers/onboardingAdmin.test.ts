@@ -502,3 +502,112 @@ describe('A-118 · the OB-02 board and OB-10 hub', () => {
     expect((await get('/onboarding/reports/csat-summary')).status).toBe(200);
   });
 });
+
+/**
+ * The demo sign-off simulator — `/dev/onboarding/journeys/:id/simulate-signoff`.
+ *
+ * Exercised here rather than only through the panel because the property worth
+ * protecting is a server-side one: the simulator must *satisfy* the completion
+ * gate, never skip it. A simulator that completed a step with an unanswered
+ * checklist item would make every demo look better than the product, which is
+ * the one failure mode that survives all the way to a customer call.
+ */
+describe('the demo sign-off simulator', () => {
+  /** A seeded step with an unticked checklist item — the gate's own material. */
+  function stepWithAnUntickedItem() {
+    for (const client of getDb().obClients) {
+      for (const journey of client.journeys) {
+        const step = journey.steps.find((s) => s.items?.some((i) => !i.isDone));
+        if (step) return { journeyId: journey.id, step };
+      }
+    }
+    throw new Error('the fixture no longer has a step with an unanswered item');
+  }
+
+  /** Any step with no checklist at all, so the gate has nothing to refuse on. */
+  function stepWithNoItems() {
+    for (const client of getDb().obClients) {
+      for (const journey of client.journeys) {
+        const step = journey.steps.find((s) => !s.items?.length && s.status !== 'DONE');
+        if (step) return { journeyId: journey.id, step };
+      }
+    }
+    throw new Error('the fixture no longer has a step without a checklist');
+  }
+
+  it('records a real acceptance, not a flag', async () => {
+    const { journeyId, step } = stepWithNoItems();
+    const { status, data } = await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'STEP', stepId: step.id,
+    });
+
+    expect(status).toBe(200);
+    // A row in ob_signoffs, SIGNED, against this step — the same thing a client
+    // following the emailed link would have left behind.
+    const row = getDb().obSignoffs.find((s) => s.stepId === step.id && s.status === 'SIGNED');
+    expect(row).toBeTruthy();
+    expect(row!.signedAt).toBeTruthy();
+    expect(row!.signedByContactId).toBe(row!.sentToContactId);
+    expect(data.data.stepCompleted).toBe(true);
+  });
+
+  it('still refuses a step the completion gate refuses', async () => {
+    const { journeyId, step } = stepWithAnUntickedItem();
+    const before = step.status;
+
+    const { status, data } = await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'STEP', stepId: step.id,
+    });
+
+    // 200, because the acceptance is not the thing that failed — our own side is.
+    expect(status).toBe(200);
+    expect(data.data.stepCompleted).toBe(false);
+    expect(data.data.gateFailures).toContain('ob-step-items-unanswered');
+    // The half that matters: the simulator did not move the step anyway.
+    expect(step.status).toBe(before);
+    // And the acceptance still stands, which is the other half.
+    expect(getDb().obSignoffs.some((s) => s.stepId === step.id && s.status === 'SIGNED')).toBe(true);
+  });
+
+  it('names no requester, because no staff member asked for it', async () => {
+    const { journeyId, step } = stepWithNoItems();
+    await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'STEP', stepId: step.id,
+    });
+
+    const row = getDb().obSignoffs.find((s) => s.stepId === step.id && s.status === 'SIGNED');
+    expect(row!.requestedById).toBeNull();
+  });
+
+  it('holds a GO_LIVE sign-off to naming no step', async () => {
+    const { journeyId, step } = stepWithNoItems();
+    const { status } = await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'GO_LIVE', stepId: step.id,
+    });
+
+    expect(status).toBe(200);
+    const row = getDb().obSignoffs.find((s) => s.journeyId === journeyId && s.kind === 'GO_LIVE');
+    // ck_ob_signoffs_step_matches_kind — the step id the caller sent is dropped.
+    expect(row!.stepId).toBeNull();
+  });
+
+  it('404s a journey that does not exist, and a step from another journey', async () => {
+    expect((await post('/dev/onboarding/journeys/999999/simulate-signoff', { kind: 'GO_LIVE' })).status)
+      .toBe(404);
+
+    const { journeyId } = stepWithNoItems();
+    // A step id that is not in this journey. 404 rather than 403: a caller who
+    // guessed must not learn from the status code that it exists.
+    expect((await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'STEP', stepId: 999999,
+    })).status).toBe(404);
+  });
+
+  it('refuses a STEP sign-off that names no step', async () => {
+    const { journeyId } = stepWithNoItems();
+    const { status } = await post(`/dev/onboarding/journeys/${journeyId}/simulate-signoff`, {
+      kind: 'STEP',
+    });
+    expect(status).toBe(422);
+  });
+});

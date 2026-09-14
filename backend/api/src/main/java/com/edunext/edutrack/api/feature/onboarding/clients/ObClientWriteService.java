@@ -1,8 +1,5 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
-import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
-import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
-import com.edunext.edutrack.api.security.pan.PanService;
 import com.edunext.edutrack.domain.onboarding.ObClient;
 import com.edunext.edutrack.domain.onboarding.ObClientRepository;
 import com.edunext.edutrack.domain.onboarding.ObClientStatus;
@@ -15,62 +12,46 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * B-102 · boarding a client (OB-04) and editing one (OB-05), plus the two
- * duplicate guards that make either safe.
+ * Adding a client, editing one, and removing one that nothing depends on.
  *
- * <h2>One request, one transaction, and the reason it has to be</h2>
+ * <h2>What this class used to be</h2>
  *
- * <p>The contract calls the create "the module's widest side effect" and
- * requires it to be atomic: <em>"a client boarded with no journeys, or journeys
- * with no prerequisites, is a half-state somebody has to notice and repair by
- * hand."</em> So the client row, its SPOCs, its purchases, its requirements and
- * one locked journey per purchased product are written under a single
- * {@code @Transactional}, and any failure among them leaves nothing behind.
+ * <p>It committed OB-04's four-step wizard: the client row, its SPOCs, its
+ * purchases, its requirements, one locked journey per purchased product, the
+ * prerequisite checklist and optionally a portal login — all under one
+ * {@code @Transactional}, because the contract called that create "the module's
+ * widest side effect" and required it to be atomic.
  *
- * <h2>What this create does not do yet, and why that is stated rather than
- * silent</h2>
+ * <p>Every one of those except the client row described an <b>engagement</b>
+ * rather than a company, and engagements have a table now. The atomicity
+ * argument did not disappear, it moved: {@code ObProjectWriteService} holds it,
+ * writing the purchase, the project, the checklist and the journeys together so
+ * that "a client boarded with no journeys, or journeys with no prerequisites"
+ * is still unreachable. What is left here is a company — four fields — which is
+ * atomic by being one row.
  *
- * <ul>
- *   <li><b>No prerequisites instance.</b> There is no {@code ob_prereq_*} table
- *       on {@code develop} — B-124 brings the master and B-125 the per-client
- *       instances. Every journey is still created {@code LOCKED}, which is the
- *       state the gate exists to hold; what is missing is the checklist that
- *       opens it, not the hold.</li>
- *   <li><b>Portal login: built.</b> {@code createPortalLogin: true} was refused
- *       rather than ignored until B-126; it is now honoured, through
- *       {@code ClientAccountAdminService} rather than a second implementation
- *       here. {@code PortalLoginUnavailableException} and its handler branch are
- *       deleted, as that exception's own javadoc said they would be.</li>
- *   <li><b>No portal login.</b> {@code createPortalLogin: true} is refused
- *       rather than ignored — see {@link PortalLoginUnavailableException} for
- *       why refusing is the safer of the two.</li>
- * </ul>
+ * <h2>The similar-name guard stayed, the PAN guard went with the PAN</h2>
  *
- * <h2>B-109 · the prerequisites instance</h2>
+ * <p>Plan §1.1 item 6 wants one row per legal entity, and the two guards
+ * answered that differently on purpose: the PAN was exact, unscoped and final;
+ * name similarity is fuzzy, unscoped and <b>forceable</b>. With the PAN no
+ * longer captured, {@code client_code} is the exact half —
+ * {@code uq_ob_clients_client_code}, refused outright — and the name guard is
+ * still the advisory half, because the many real pairs of clients that share a
+ * name stem must not be blocked.
  *
- * <p>{@link ObClientPrereqService#instantiate} snapshots the active OB-14
- * master onto the new client, inside this same transaction, right after the
- * locked journeys — a client boarded with journeys and no checklist behind
- * the gate is exactly the half-state the class javadoc above refuses. {@link
- * ObClientPrereqService#hasActivePrereqMaster()} is checked alongside {@link
- * #requirePublishedTemplates}, before the client row is written, on the same
- * reasoning: a boarder finds out nothing was published <em>before</em> typing
- * four steps, not after.</p>
- *
- * <h2>The two guards are deliberately unlike each other</h2>
- *
- * <p>PAN is exact, unscoped and final. Name similarity is fuzzy, unscoped and
- * <b>forceable</b>. Plan §1.1 item 6 wants one row per legal entity; the PAN is
- * what makes that decidable, and a name is only ever evidence. Making both
- * final would block the many real pairs of clients that share a name stem;
- * making both advisory would let a mistyped second row through on a PAN the
- * database could have refused outright.
+ * <p>Neither guard is scoped, and that is the point: "one client per legal
+ * entity" is a fact about the organisation, not about the caller. Scoping them
+ * would let one salesperson board a duplicate of a client another salesperson
+ * created, because the first is invisible to them.
  */
 @Service
 class ObClientWriteService {
@@ -88,27 +69,26 @@ class ObClientWriteService {
 
     private final ObClientRepository clients;
     private final ObClientReadRepository reads;
+    private final ObClientDeletionGuard deletionGuard;
     private final ObClientChildWriteRepository children;
-    private final ObRequirementWriteRepository requirements;
-    private final ObRequirementBody requirementBodies;
     private final ObClientService details;
-    private final ObJourneyInstantiationService journeys;
-    private final ObClientPrereqService prereqs;
-    private final PanService pan;
 
     /**
-     * B-126 · the client-account panel's service, called for the OB-04 wizard's
-     * "create client login" checkbox.
-     *
-     * <p>Reached across features rather than reimplemented here: username
-     * generation, the placeholder password, the single-use link and the
-     * credential mail are one path, and a second copy of it in the wizard is a
-     * second set of rules to keep in step. The class is {@code public} for
-     * exactly this call.
+     * The SPOC the portal login needs, created through B-103's own path rather
+     * than inserted here — so that the duplicate-email guard, the primary
+     * demotion and the consent default all behave exactly as they do on the
+     * panel.
      */
-    private final com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
+    private final ObContactService contacts;
 
-    /** B-103 · one instant per create, stamped onto every contact's consent. */
+    /**
+     * Supplied by {@code feature.portal}. See
+     * {@link ObClientPortalLoginIssuer} for why this is an interface owned by
+     * this package rather than a direct call into that one.
+     */
+    private final ObClientPortalLoginIssuer portalLogins;
+
+    /** One instant per write — the test seam that lets the stamped boarding date be pinned. */
     private final Clock clock;
 
     /**
@@ -119,160 +99,191 @@ class ObClientWriteService {
     @Autowired
     ObClientWriteService(ObClientRepository clients,
                          ObClientReadRepository reads,
+                         ObClientDeletionGuard deletionGuard,
                          ObClientChildWriteRepository children,
-                         ObRequirementWriteRepository requirements,
-                         ObRequirementBody requirementBodies,
                          ObClientService details,
-                         ObJourneyInstantiationService journeys,
-                         ObClientPrereqService prereqs,
-                         PanService pan,
-                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts) {
-        this(clients, reads, children, requirements, requirementBodies, details, journeys, prereqs, pan,
-                portalAccounts, Clock.systemUTC());
+                         ObContactService contacts,
+                         ObClientPortalLoginIssuer portalLogins) {
+        this(clients, reads, deletionGuard, children, details, contacts, portalLogins,
+                Clock.systemUTC());
     }
 
     ObClientWriteService(ObClientRepository clients,
                          ObClientReadRepository reads,
+                         ObClientDeletionGuard deletionGuard,
                          ObClientChildWriteRepository children,
-                         ObRequirementWriteRepository requirements,
-                         ObRequirementBody requirementBodies,
                          ObClientService details,
-                         ObJourneyInstantiationService journeys,
-                         ObClientPrereqService prereqs,
-                         PanService pan,
-                         com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts,
+                         ObContactService contacts,
+                         ObClientPortalLoginIssuer portalLogins,
                          Clock clock) { // test seam
         this.clients = clients;
         this.reads = reads;
+        this.deletionGuard = deletionGuard;
         this.children = children;
-        this.requirements = requirements;
-        this.requirementBodies = requirementBodies;
         this.details = details;
-        this.journeys = journeys;
-        this.prereqs = prereqs;
-        this.pan = pan;
-        this.portalAccounts = portalAccounts;
+        this.contacts = contacts;
+        this.portalLogins = portalLogins;
         this.clock = clock;
     }
 
     // ------------------------------------------------------------------
-    // Create — OB-04
+    // Create — the Clients master's add dialog
     // ------------------------------------------------------------------
 
+    /**
+     * A company, and nothing else.
+     *
+     * <p>This method used to commit the four-step wizard — PAN, SPOC contacts,
+     * purchases, requirements, journeys, the prerequisite checklist and
+     * optionally a portal login, in one transaction. All of that described an
+     * <em>engagement</em>, and engagements are {@code ob_projects} now, created
+     * from the New Project form. See {@code ObClientDtos.ObClientCreateRequest}
+     * for what is no longer captured and what the two knock-on effects are.
+     *
+     * <p><b>{@code onboardingDate} is stamped, not asked for.</b> The column is
+     * still {@code NOT NULL} and nothing reads it as anything other than "when
+     * this company was first recorded", which is today by construction. The
+     * wizard asked for it separately and routinely got a date a month away from
+     * {@code created_at}.
+     *
+     * <p>The similar-name guard stays, and is the one piece of the wizard worth
+     * keeping here. A four-field add dialog is precisely the screen on which
+     * somebody boards "Horizon Schools Trust" for the second time, and
+     * {@code uq_ob_clients_client_code} catches only the duplicates that also
+     * reuse the code.
+     *
+     * <h2>One optional extra: the portal login</h2>
+     *
+     * <p>{@code createPortalLogin} brings back the one wizard step that was
+     * about the company rather than an engagement — somebody has to be able to
+     * log in and look at it. When it is ticked, three rows are written in this
+     * one transaction: the client, the primary SPOC the login is named after
+     * and addressed at, and the account itself.
+     *
+     * <p><b>All three, or none.</b> The transaction is what makes that true,
+     * and it is the behaviour the flag has to have: a company left behind by a
+     * login that failed is a company whose operator was told credentials were
+     * on their way. B-102's refusal of the silently-ignored flag is the same
+     * argument, and this is where it is finally honoured rather than refused.
+     *
+     * <p>The order is not arbitrary. The SPOC is written before the login
+     * because {@code ClientAccountAdminService} reads the active primary to
+     * build the username and to address the mail, and refuses outright when
+     * there is none.
+     */
     @Transactional
-    ObClientDtos.ObClientDetail create(ObClientScope scope, long callerId,
-                                       ObClientDtos.ObClientCreateRequest request) {
+    Created create(ObClientScope scope, long callerId,
+                   ObClientDtos.ObClientCreateRequest request) {
         requireWriter(scope);
-
         validateForCreate(request);
-        // Sealed once. seal() produces the ciphertext and the blind index
-        // together because writing one without the other is always a bug, and
-        // the index it produces is the same value the guard below matches on —
-        // computing it twice would be two chances to normalise differently.
-        PanService.SealedPan sealed = hasText(request.pan()) ? pan.seal(request.pan()) : null;
-        if (sealed != null) {
-            guardAgainstDuplicatePan(scope, sealed.blindIndex());
-        }
         if (!request.acknowledgedSimilarNames()) {
             guardAgainstSimilarNames(scope, request.name());
         }
-        requirePublishedTemplates(request);
-        requirePublishedPrereqMaster();
 
-        ObClient client = new ObClient(request.name().trim(), request.onboardingDate(), callerId);
-        client.setDescription(trimmedOrNull(request.description()));
+        ObClient client = new ObClient(
+                request.name().trim(), LocalDate.now(clock.withZone(ZoneOffset.UTC)), callerId);
+        client.setClientCode(request.clientCode().trim());
         client.setAddress(trimmedOrNull(request.address()));
-        client.setSalesPersonId(request.salesPersonId());
-        client.setLicenseType(trimmedOrNull(request.licenseType()));
-        if (sealed != null) {
-            client.sealPan(sealed.ciphertext(), sealed.blindIndex());
-        }
+        client.setCity(trimmedOrNull(request.city()));
 
-        // Flushed, not merely saved: everything below reads and writes through
-        // JdbcClient, which issues SQL outside the EntityManager. Hibernate's
-        // AUTO flush only fires ahead of queries it can see overlap the dirty
-        // entities, and raw JDBC is not one — the insert would land after the
-        // child rows that reference it. ClientWriteService documents the same
-        // trap for the same reason.
         ObClient saved = clients.saveAndFlush(client);
-        long clientId = saved.getId();
 
-        Instant at = clock.instant();
-        children.insertContacts(clientId, request.contacts(), callerId, at);
-        children.insertApplications(clientId, request.applications());
-        insertRequirements(clientId, request.requirementsOrEmpty(), callerId, at);
-
-        // One locked journey per purchased product, from C-103's service. It
-        // reads ob_client_applications to check the product was bought, which
-        // is why the purchases are written first.
-        for (ObClientDtos.ObApplicationWriteRequest application : request.applications()) {
-            journeys.instantiate(clientId, application.productId());
+        ObClientPortalLoginIssuer.IssuedLogin login = null;
+        if (request.createsPortalLogin()) {
+            addPrimaryContactFor(scope, callerId, saved.getId(), request);
+            login = portalLogins.issueFor(scope, saved.getId(), callerId);
         }
 
-        // B-109 · the checklist behind the gate. See ObClientPrereqService's
-        // own javadoc: idempotent by refusal, so this must run exactly once,
-        // which "a client just created" already guarantees.
-        prereqs.instantiate(clientId);
-
-        // B-126 · the wizard's "create client login" checkbox, honoured rather
-        // than refused. Last, and deliberately so: the account is minted from
-        // the client's name and its primary SPOC, so both rows have to exist,
-        // and the credential mail is queued through B-110's outbox inside this
-        // same transaction — a login created against a client that then rolls
-        // back would be a credential for nothing. After the prerequisites for
-        // the same reason: a client who receives credentials before their
-        // checklist exists can log in to a portal with nothing on it.
-        if (request.wantsPortalLogin()) {
-            portalAccounts.create(scope, clientId, callerId);
-        }
-
-        return details.findDetail(scope, clientId)
+        ObClientDtos.ObClientDetail detail = details.findDetail(scope, saved.getId())
                 .orElseThrow(() -> new IllegalStateException(
-                        "client " + clientId + " was created and is not readable by its own creator — "
+                        "client " + saved.getId() + " was created and is not readable by its own creator — "
                                 + "the scope rule and the created_by stamp disagree"));
+
+        return new Created(detail, login);
     }
 
     /**
-     * B-106 · the wizard's requirements step, written through the same
-     * repository and the same sanitiser OB-05's panel uses.
+     * What the create produced: the client as it now reads, and the login if
+     * one was asked for.
      *
-     * <p>Not {@code ObClientChildWriteRepository} any more, and not a private
-     * copy of the statement. A requirement body goes through PLAN.md §3.9's
-     * allow-list before it is stored, and a wizard path that wrote the raw
-     * string while the panel sanitised would be a security boundary with a hole
-     * in the older half of it — the hole that is hardest to notice, because the
-     * screen renders both rows the same way.
-     *
-     * <p><b>Blank entries are dropped rather than refused</b>, which is B-102's
-     * behaviour kept deliberately. A wizard textarea produces them by accident
-     * and an empty requirement is a line on a checklist that says nothing; a
-     * boarder should not have to hunt an invisible row to submit their form. A
-     * body that is <em>not</em> blank and reduces to nothing under the allow-list
-     * is a different matter — that one is a 400, keyed to its own index, because
-     * something was typed and nothing survived, and silently dropping it would
-     * lose a requirement somebody believed they had recorded.
-     *
-     * <p>The index in the key is what lets a four-step wizard reopen the right
-     * row: {@code requirements[2].bodyHtml} on a list of six is a message about
-     * one of them, where {@code requirements} alone is a message about none.
+     * <p>A pair rather than a field on {@code ObClientDetail} — see
+     * {@code ObClientDtos.PortalLoginIssued} for why a credential must not
+     * travel on the shape every read returns. {@code login} is null whenever
+     * the box was not ticked.
      */
-    private void insertRequirements(long clientId,
-                                    List<ObClientDtos.ObRequirementWriteRequest> rows,
-                                    Long createdBy, Instant at) {
-        int sequence = 0;
-        for (int index = 0; index < rows.size(); index++) {
-            ObClientDtos.ObRequirementWriteRequest row = rows.get(index);
-            if (row == null || row.bodyHtml() == null || row.bodyHtml().isBlank()) {
-                continue;
-            }
-            ObRequirementBody.Stored body =
-                    requirementBodies.of(row.bodyHtml(), "requirements[" + index + "].bodyHtml");
-            boolean met = row.met();
-            requirements.insert(clientId, sequence++, trimmedOrNull(row.title()),
-                    body.html(), body.text(),
-                    met, met ? at : null, met ? createdBy : null, createdBy);
-        }
+    record Created(ObClientDtos.ObClientDetail detail,
+                   ObClientPortalLoginIssuer.IssuedLogin login) {
     }
+
+    /**
+     * The SPOC the login is named after, created through B-103's own add.
+     *
+     * <p>Routed through {@link ObContactService} rather than inserted directly,
+     * so that the duplicate-email guard, the primary-demotion step and the
+     * consent default are the ones the SPOC panel applies. A contact inserted
+     * here by hand would be the second implementation of those rules and the
+     * one that stopped matching first.
+     *
+     * <p>Primary and active are not the caller's to choose. The whole reason
+     * this contact is being captured is that a portal login needs an active
+     * primary; a dialog that let you create the SPOC non-primary would be
+     * offering a combination that fails one line later.
+     */
+    private void addPrimaryContactFor(ObClientScope scope, long callerId, long obClientId,
+                                      ObClientDtos.ObClientCreateRequest request) {
+        contacts.add(scope, callerId, obClientId, new ObContactDtos.ObContactUpsertRequest(
+                request.contactName().trim(),
+                null,
+                request.contactEmail().trim(),
+                null,
+                null,
+                null,
+                true,
+                true));
+    }
+
+    // ------------------------------------------------------------------
+    // Delete — and the reason it is nearly always refused
+    // ------------------------------------------------------------------
+
+    /**
+     * Remove a client that nothing depends on.
+     *
+     * <p><b>This exists for one case: a row typed in wrong, minutes ago.</b>
+     * Sixteen tables carry {@code ob_client_id} and several cascade — two of
+     * them, {@code ob_step_history} and {@code ob_prereq_history}, are
+     * hash-chained and append-only. A delete that reached those would destroy an
+     * audit trail the whole module is built to keep, and it would do it
+     * silently, because a cascade reports nothing.
+     *
+     * <p>So {@link ObClientDeletionGuard} asks four questions first and the
+     * answer is a sentence naming what is in the way rather than a constraint
+     * violation naming an index. {@code fk_ob_projects_client} is
+     * {@code RESTRICT} underneath as a second layer, for the hand at a SQL
+     * prompt that never passes through this method.
+     *
+     * <p>The alternative for everything else is already there and is what the
+     * screen offers instead: {@code DROPPED} with a reason, which keeps the
+     * record and hides the client from nothing.
+     *
+     * <p>404 before 403, and both before the guard: a caller who cannot see
+     * this client must not learn from the refusal that it exists and has
+     * projects.
+     */
+    @Transactional
+    void delete(ObClientScope scope, long obClientId) {
+        ObClientDtos.ObClientDetail current = details.findDetail(scope, obClientId)
+                .orElseThrow(() -> new ObClientNotFoundException(obClientId));
+        if (!scope.mayWrite()) {
+            throw new ObClientReadOnlyException(current.name());
+        }
+        List<String> blockers = deletionGuard.blockersFor(obClientId);
+        if (!blockers.isEmpty()) {
+            throw new ObClientInUseException(obClientId, blockers);
+        }
+        clients.deleteById(obClientId);
+    }
+
 
     // ------------------------------------------------------------------
     // Update — OB-05's Client info card
@@ -318,6 +329,27 @@ class ObClientWriteService {
         }
         if (request.hasLicenseType()) {
             client.setLicenseType(trimmedOrNull(request.getLicenseType()));
+        }
+        if (request.hasCity()) {
+            client.setCity(trimmedOrNull(request.getCity()));
+        }
+        if (request.hasClientCode()) {
+            String code = trimmedOrNull(request.getClientCode());
+            if (code == null) {
+                // Not clearable. A client boarded through the retired wizard has
+                // no code and that is a gap this screen exists to fill; letting
+                // an edit put one back would be a regression somebody performs
+                // by clearing a field.
+                errors.put("clientCode", "Give the client a code — it is how operations file them.");
+            } else if (clients.findByClientCode(code)
+                    .filter(holder -> !holder.getId().equals(client.getId())).isPresent()) {
+                // Filtered on identity so re-saving the form unchanged is not a
+                // conflict with the client's own row. The holder is not named —
+                // see ObClientRepository#findByClientCode.
+                errors.put("clientCode", "The code " + code + " already belongs to another client.");
+            } else {
+                client.setClientCode(code);
+            }
         }
         if (request.hasSalesPersonId()) {
             Long salesPersonId = request.getSalesPersonId();
@@ -375,28 +407,6 @@ class ObClientWriteService {
     // The guards
     // ------------------------------------------------------------------
 
-    /**
-     * The exact guard: one PAN, one client, and no way to force a second.
-     *
-     * <p>The lookup is by blind index, so <b>no PAN is decrypted to answer
-     * it</b> — which is what keeps the guard out of §11's audit log. Routing it
-     * through decryption would produce either an audit row per wizard
-     * submission or an exemption that hollows out the rule; {@code
-     * PanBlindIndex}'s own javadoc makes that argument at length.
-     *
-     * @param blindIndex the 32 bytes {@code seal} already produced for this PAN
-     */
-    private void guardAgainstDuplicatePan(ObClientScope scope, byte[] blindIndex) {
-        clients.findByPanBlindIndex(blindIndex).ifPresent(existing -> {
-            // Named only where this caller could have found it themselves. A
-            // 409 that names a client outside the caller's scope would make the
-            // duplicate guard a way to read somebody else's client list, one
-            // PAN at a time — and whoever holds a PAN to try usually holds the
-            // name already, so nothing useful is withheld.
-            throw new DuplicateClientPanException(
-                    scope.seesClientAuthoredBy(existing.getCreatedBy()) ? existing.getName() : null);
-        });
-    }
 
     /** The fuzzy guard: a warning the boarder can overrule, never a refusal they cannot. */
     private void guardAgainstSimilarNames(ObClientScope scope, String name) {
@@ -421,117 +431,49 @@ class ObClientWriteService {
         }
     }
 
-    /**
-     * Every purchased product must have a template to instantiate from, and
-     * every one that does not is named at once.
-     */
-    private void requirePublishedTemplates(ObClientDtos.ObClientCreateRequest request) {
-        Set<Long> productIds = productIdsOf(request);
-        Set<Long> withTemplate = children.productIdsWithActiveTemplate(productIds);
-        List<Long> without = productIds.stream().filter(id -> !withTemplate.contains(id)).toList();
-        if (!without.isEmpty()) {
-            throw new ProductWithoutTemplateException(without);
-        }
-    }
 
-    /**
-     * The prerequisites master mirror of {@link #requirePublishedTemplates}.
-     * One master, org-wide — see {@link ObClientPrereqService} for why it
-     * carries no product id to check per selection.
-     */
-    private void requirePublishedPrereqMaster() {
-        if (!prereqs.hasActivePrereqMaster()) {
-            throw new NoPublishedPrerequisitesException();
-        }
-    }
 
     // ------------------------------------------------------------------
     // Validation
     // ------------------------------------------------------------------
 
     /**
-     * Everything Bean Validation cannot say, collected rather than thrown at
-     * the first — see {@link ObClientValidationException} for why.
+     * The two things Bean Validation cannot say, collected rather than thrown
+     * at the first — see {@link ObClientValidationException} for why.
      */
     private void validateForCreate(ObClientDtos.ObClientCreateRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
 
-        long primaries = request.contacts().stream()
-                .filter(ObClientDtos.ObContactWriteRequest::primary).count();
-        if (primaries == 0) {
-            errors.put("contacts", "Mark one contact as the primary SPOC. They receive the kickoff "
-                    + "mail, the portal password and every sign-off request.");
-        } else if (primaries > 1) {
-            errors.put("contacts", "Only one contact can be the primary SPOC — "
-                    + primaries + " are marked.");
+        String code = request.clientCode() == null ? "" : request.clientCode().trim();
+        if (code.isEmpty()) {
+            errors.put("clientCode", "Give the client a code — it is how operations file them.");
+        } else if (clients.findByClientCode(code).isPresent()) {
+            // uq_ob_clients_client_code says the same thing and would say it as
+            // an index name. The existing holder is deliberately NOT named: the
+            // guard runs unscoped, so the client wearing this code may be one
+            // this caller has no business knowing exists. The code itself is
+            // safe to repeat — they just typed it.
+            errors.put("clientCode", "The code " + code + " already belongs to another client.");
         }
 
-        // B-103 · consent needs a basis, and the wizard is where the
-        // conversation that produced it happened. Storing a bare `true` here
-        // would create exactly the row PHASE-2-BUILD-PLAN.md §6.1 calls "the
-        // one item that is genuinely irreversible" — a SPOC who has to be
-        // re-approached before a single message can go out, and no way to tell
-        // from the data that they do. Keyed to `contacts` so the wizard reopens
-        // its SPOC step.
-        for (ObClientDtos.ObContactWriteRequest contact : request.contacts()) {
-            String basis = contact.whatsappOptInSource();
-            if (contact.optedIn() && ObConsentSource.parse(basis).isEmpty()) {
-                errors.put("contacts", basis == null || basis.isBlank()
-                        ? "Say how " + contact.email().trim() + " gave WhatsApp consent — one of "
-                                + ObConsentSource.settableNames() + ". It cannot be established later."
-                        : "Not a consent basis for " + contact.email().trim() + ". One of "
-                                + ObConsentSource.settableNames());
-                break;
-            }
-            if (!contact.optedIn() && basis != null && !basis.isBlank()) {
-                errors.put("contacts", "There is no consent to attribute for "
-                        + contact.email().trim() + " — whatsappOptIn is false.");
-                break;
-            }
+        if (request.name() != null && request.name().trim().isEmpty()) {
+            errors.put("name", "Give the client a name.");
         }
 
-        Set<String> emails = new LinkedHashSet<>();
-        for (ObClientDtos.ObContactWriteRequest contact : request.contacts()) {
-            if (!emails.add(contact.email().trim().toLowerCase(Locale.ROOT))) {
-                // uq_ob_client_contacts_email says the same thing, and would say
-                // it as a constraint name. The same email at two clients is
-                // fine: one consultant can be the SPOC at both.
-                errors.put("contacts", "Two contacts share the email " + contact.email().trim()
-                        + ". One person, one row.");
-                break;
+        // Conditionally required, which is exactly the shape Bean Validation
+        // cannot express on a record without a class-level constraint that
+        // reports against the whole object rather than the field the operator
+        // has to go and fill in. Collected here with the other two so a form
+        // with three things wrong is returned once.
+        if (request.createsPortalLogin()) {
+            if (!hasText(request.contactName())) {
+                errors.put("contactName",
+                        "A portal login is issued to a person — give the client's main contact.");
             }
-        }
-
-        Set<Long> productIds = new LinkedHashSet<>();
-        for (ObClientDtos.ObApplicationWriteRequest application : request.applications()) {
-            if (application.productId() != null && !productIds.add(application.productId())) {
-                errors.put("applications", "Product " + application.productId()
-                        + " is selected twice. Buying more seats of something already bought is an "
-                        + "edit to one purchase, not a second one — a second row would mean a "
-                        + "second journey for one product.");
-                break;
+            if (!hasText(request.contactEmail())) {
+                errors.put("contactEmail",
+                        "The login's one-time link is mailed to this address.");
             }
-        }
-        for (ObClientDtos.ObApplicationWriteRequest application : request.applications()) {
-            if (application.licenseStart() != null && application.licenseEnd() != null
-                    && application.licenseEnd().isBefore(application.licenseStart())) {
-                errors.put("applications", "A licence cannot end before it starts.");
-                break;
-            }
-        }
-        Set<Long> sellable = children.sellableProductIds(productIds);
-        List<Long> unsellable = productIds.stream().filter(id -> !sellable.contains(id)).toList();
-        if (!unsellable.isEmpty()) {
-            errors.put("applications", "No product on sale with id "
-                    + unsellable.stream().map(String::valueOf).reduce((a, b) -> a + ", " + b).orElse("")
-                    + ". A retired product is out of the picker by definition.");
-        }
-
-        if (request.salesPersonId() != null && !children.isActiveUser(request.salesPersonId())) {
-            // The role is deliberately not checked — B-015 removed exactly this
-            // kind of hardcoded role set from the resource form, and B-016 made
-            // the same call for a project manager.
-            errors.put("salesPersonId", "That sales person is not an active user.");
         }
 
         if (!errors.isEmpty()) {
@@ -539,11 +481,6 @@ class ObClientWriteService {
         }
     }
 
-    private static Set<Long> productIdsOf(ObClientDtos.ObClientCreateRequest request) {
-        Set<Long> ids = new LinkedHashSet<>();
-        request.applications().forEach(application -> ids.add(application.productId()));
-        return ids;
-    }
 
     /**
      * Boarding a client is OB Admin, Onboarding Manager or Sales.

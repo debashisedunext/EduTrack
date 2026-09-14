@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ListChecks, Inbox, Ticket, FolderKanban, MessageSquare,
   BarChart3, CalendarClock, Database, ScrollText, Settings, ChevronsLeft, ChevronsRight,
-  Building2, PlusCircle, Timer, Mail, ShieldCheck, Layers, ClipboardList, Milestone, Package,
+  Building2, Timer, Mail, ShieldCheck, Layers, ClipboardList, Milestone, Package,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { useSidebarStore } from './sidebarStore'
@@ -126,18 +126,40 @@ const TICKETING_NAV: NavEntry[] = [
 */
 const ONBOARDING_NAV: NavEntry[] = [
   { to: '/onboarding/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  /*
+    Projects leads, and Clients follows it.
+
+    The order is the reverse of what the alphabet or the data model would
+    suggest, and it is the order people work in: a project is what somebody
+    opens this module to look at, and a client is a record they visit twice —
+    once to add it, once to correct it. `Clients` used to be this row and
+    carried the engagement facts itself; those live on the project now, which
+    is what made the rename more than a relabel.
+
+    Stays lit on a project's own page, which is where following a row goes, and
+    on the New project form.
+  */
+  {
+    to: '/onboarding/projects',
+    label: 'Projects',
+    icon: FolderKanban,
+    isActive: (p) => p.startsWith('/onboarding/projects'),
+  },
+  /*
+    The Clients master — four fields, with add, edit and delete on the list
+    itself. This row used to read "New client" and led to the four-step OB-04
+    wizard; there is no separate page to point at now, because adding a client
+    is a dialog on the list.
+
+    `isActive` excludes `/onboarding/clients/:id/products/...` deliberately:
+    that path is a project surface reached from mail links, and lighting the
+    Clients row while somebody reads a ribbon would name the wrong section.
+  */
   {
     to: '/onboarding/clients',
     label: 'Clients',
     icon: Building2,
-    // Stays lit on a client's detail page, which is where following a row goes.
-    isActive: (p) => p.startsWith('/onboarding/clients') && p !== '/onboarding/clients/new',
-  },
-  {
-    to: '/onboarding/clients/new',
-    label: 'New client',
-    icon: PlusCircle,
-    isActive: (p) => p === '/onboarding/clients/new',
+    isActive: (p) => p.startsWith('/onboarding/clients') && !p.includes('/products/'),
   },
   { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
   { section: 'Administration' },

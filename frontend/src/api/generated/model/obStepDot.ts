@@ -56,6 +56,12 @@ TAT internals are **absent by construction, not hidden client-side** —
 the client portal renders this same strip, and a field the portal must
 never show is a field that must not be in the schema it receives.
 
+`stageKey` and `stageName` are added under that same test rather than
+despite it: which phase of their own rollout a client is in is a fact
+the portal may legitimately show, and neither field names a person, a
+clock or an internal reason. Anything that did would belong on the
+staff-only step read instead.
+
  */
 export interface ObStepDot {
   id: number;
@@ -69,4 +75,26 @@ earlier step in the same template, so the graph is cycle-free by
 construction rather than by a check that can be forgotten.
  */
   dependsOnStepId?: ObStepDotDependsOnStepId;
+  /** The implementation stage this task sits in — the third level of
+Module Service → **Stage** → Task → Task list.
+
+**The same key `ObProjectStage.stageKey` carries**, folded the
+identical way: the stage's `implementation_stage_id`, else the
+negated template stage-group id for a group belonging to no stage
+(the "Ungrouped" bucket), else `0` where the task's template row has
+gone. Matching keys is the point — the project header's stage ribbon
+is built from the roll-up, and a task can only be filed under the
+stop a reader clicked if both sides fold the same way. Both come
+from the same expression in SQL rather than from two opinions.
+ */
+  stageKey?: number;
+  /**
+   * The stage's name as the template published it, not as the master
+reads today — `ob_journey_template_stages.name` is already a
+snapshot, so a stage renamed on OB-15 leaves running journeys
+reading exactly as they were published.
+
+   * @maxLength 120
+   */
+  stageName?: string;
 }

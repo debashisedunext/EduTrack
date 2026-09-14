@@ -48,9 +48,12 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Σ of the active template's service TATs, in working days — what a
-journey for this product *costs*, shown on the OB-07 card. Null
-when there is no active template.
+ * Σ of the active templates' own `totalTatDays`, in working days —
+shown on the OB-07 card. Null when there is no active template.
+
+Each service's figure is its critical path (see
+`ObJourneyTemplateSummary`); the services themselves are summed,
+because a product's services are boarded one after another.
 
  */
 export type ObProductTotalTatDays = number | null;

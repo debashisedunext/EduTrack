@@ -60,16 +60,56 @@ function docDto(d: ObJourneyTemplateStepDocRow) {
   return { id: d.id, sequence: d.sequence, label: d.label, required: d.required };
 }
 
+/**
+ * `JourneyTatCalculator#criticalPathDays` — how long a service **takes**, in
+ * working days.
+ *
+ * <p>Not the sum of the task TATs, which is the different question the row
+ * used to answer: tasks that wait for nothing run alongside each other, so 1
+ * day beside 2 days is 2, and 1 day followed by 2 days is 3. Kept in step with
+ * the Java and with `journeyTemplateTree.ts`, which walks the same shape to
+ * draw the designer's Schedule column.
+ */
+function criticalPathDays(tasks: readonly ObJourneyTemplateStepRow[]): number {
+  const byId = new Map(tasks.map((t) => [t.id, t] as const));
+  const endDays = new Map<number, number>();
+
+  const endDay = (id: number, resolving: Set<number>): number => {
+    const cached = endDays.get(id);
+    if (cached != null) return cached;
+    const task = byId.get(id);
+    if (!task) return 0;
+
+    let startDay = 1;
+    const parentId = task.dependsOnStepId;
+    // A dependency leading back into the chain being walked starts on day 1
+    // rather than recursing for ever. The service refuses a cycle, which is
+    // exactly why the guard is cheap to keep.
+    resolving.add(id);
+    if (parentId != null && byId.has(parentId) && !resolving.has(parentId)) {
+      startDay = endDay(parentId, resolving) + 1;
+    }
+    resolving.delete(id);
+
+    const end = startDay + Math.max(1, task.tatDays ?? 1) - 1;
+    endDays.set(id, end);
+    return end;
+  };
+
+  let span = 0;
+  for (const task of tasks) span = Math.max(span, endDay(task.id, new Set()));
+  return span;
+}
+
 function stepDetailDto(s: ObJourneyTemplateStepRow, db: Db) {
   return {
     id: s.id,
     sequence: s.sequence,
     name: s.name,
+    templateStageId: s.templateStageId,
     description: s.description,
     tatDays: s.tatDays,
     ownerUserId: s.ownerUserId,
-    ownerRole: s.ownerRole,
-    backupOwnerUserId: s.backupOwnerUserId,
     requiresSignoff: s.requiresSignoff,
     dependsOnStepId: s.dependsOnStepId,
     items: db.obJourneyTemplateStepItems
@@ -119,14 +159,50 @@ function parallelGroups(templateId: number, db: Db): number[][] {
   return groups;
 }
 
+/**
+ * `sequence` 1..N over a template so ascending order walks stage groups in
+ * order, then tasks within a group — `ObJourneyTemplateService#renumberByStage`.
+ *
+ * Mirrored here rather than approximated, because it is what makes a
+ * template-wide sort the right sort everywhere else: `parallelGroups`, the
+ * designer tree and the revision clone all read this one column.
+ */
+function renumberByStage(templateId: number, db: Db) {
+  const groupOrder = new Map<number, number>();
+  db.obJourneyTemplateStages
+    .filter((g) => g.templateId === templateId)
+    .sort((a, b) => a.sequence - b.sequence || a.id - b.id)
+    .forEach((g, index) => groupOrder.set(g.id, index));
+
+  db.obJourneyTemplateSteps
+    .filter((s) => s.templateId === templateId)
+    .sort((a, b) =>
+      (groupOrder.get(a.templateStageId) ?? Number.MAX_SAFE_INTEGER)
+        - (groupOrder.get(b.templateStageId) ?? Number.MAX_SAFE_INTEGER)
+      || a.sequence - b.sequence
+      || a.id - b.id)
+    .forEach((s, index) => { s.sequence = index + 1; });
+}
+
 function detailDto(templateId: number, db: Db) {
   const template = db.obJourneyTemplates.find((t) => t.id === templateId);
   if (!template) return null;
   const steps = db.obJourneyTemplateSteps
     .filter((s) => s.templateId === templateId)
     .sort((a, b) => a.sequence - b.sequence);
+  const stages = db.obJourneyTemplateStages
+    .filter((g) => g.templateId === templateId)
+    .sort((a, b) => a.sequence - b.sequence || a.id - b.id);
   return {
     ...templateDto(template),
+    // Empty groups included, deliberately — the usual state of a new service,
+    // and where the designer hangs "+ Add a task".
+    stages: stages.map((g) => ({
+      id: g.id,
+      name: g.name,
+      sequence: g.sequence,
+      implementationStageId: g.implementationStageId,
+    })),
     steps: steps.map((s) => stepDetailDto(s, db)),
     parallelGroups: parallelGroups(templateId, db),
   };
@@ -260,7 +336,7 @@ export const onboardingJourneyHandlers = [
           dependsOnTemplateIds: [...(t.dependsOnTemplateIds ?? [])].sort((a, b) => a - b),
           publishedAt: t.publishedAt ?? null,
           stepCount: steps.length,
-          totalTatDays: steps.reduce((sum, s) => sum + (s.tatDays ?? 0), 0),
+          totalTatDays: criticalPathDays(steps),
           /*
             C-124 · chain-wide, so every row of one service reports the same
             total. Measured over the whole `obJourneyTemplates` table rather
@@ -269,6 +345,21 @@ export const onboardingJourneyHandlers = [
             must not depend on which filter the admin happens to have selected.
           */
           serviceJourneyCount: journeysOnChain(serviceChain(t, db), db),
+          /*
+            The stage groups, on the summary rather than only on the detail:
+            OB-07's Category column and the New Project form's service picker
+            both draw every service of a product at once, and reading these per
+            row would be a request per card.
+          */
+          stages: db.obJourneyTemplateStages
+            .filter((g) => g.templateId === t.id)
+            .sort((a, b) => a.sequence - b.sequence || a.id - b.id)
+            .map((g) => ({
+              id: g.id,
+              name: g.name,
+              sequence: g.sequence,
+              implementationStageId: g.implementationStageId ?? null,
+            })),
         };
       });
     return ok(rows);
@@ -309,6 +400,27 @@ export const onboardingJourneyHandlers = [
       publishedAt: null,
     };
     db.obJourneyTemplates.push(created);
+
+    /*
+      The server seeds one empty stage GROUP per active implementation stage,
+      inside the same transaction as the create —
+      `ObJourneyTemplateService#seedStageGroups`. Groups, not tasks: a new
+      Module Service arrives holding six stages and no work, because
+      "Configuration" names a phase rather than something to do, and seeding a
+      task per stage would leave an admin clearing six out before writing the
+      real ones.
+    */
+    for (const stage of [...db.obImplementationStages]
+      .filter((st) => st.isActive)
+      .sort((a, b) => a.sequence - b.sequence || a.id - b.id)) {
+      db.obJourneyTemplateStages.push({
+        id: nextRowId(db.obJourneyTemplateStages),
+        templateId: created.id,
+        sequence: stage.sequence,
+        name: stage.name,
+        implementationStageId: stage.id,
+      });
+    }
     return ok(templateDto(created), undefined, { status: 201 });
   }),
 
@@ -349,6 +461,24 @@ export const onboardingJourneyHandlers = [
     // Clone steps, items and docs — `dependsOnStepId` re-pointed at the clones,
     // in the same two-pass shape `ObJourneyTemplateService#cloneSteps` uses:
     // every clone needs to exist before any of them can point at another.
+    // Groups first: a task clone points at the clone of its group, never at
+    // the source version's, or editing the draft would edit what the
+    // published version renders.
+    const sourceToClonedGroup = new Map<number, number>();
+    for (const sourceGroup of db.obJourneyTemplateStages
+      .filter((g) => g.templateId === active.id)
+      .sort((a, b) => a.sequence - b.sequence || a.id - b.id)) {
+      const groupClone = {
+        id: nextRowId(db.obJourneyTemplateStages) + sourceToClonedGroup.size,
+        templateId: draft.id,
+        sequence: sourceGroup.sequence,
+        name: sourceGroup.name,
+        implementationStageId: sourceGroup.implementationStageId,
+      };
+      db.obJourneyTemplateStages.push(groupClone);
+      sourceToClonedGroup.set(sourceGroup.id, groupClone.id);
+    }
+
     const sourceSteps = db.obJourneyTemplateSteps
       .filter((s) => s.templateId === active.id)
       .sort((a, b) => a.sequence - b.sequence);
@@ -359,11 +489,10 @@ export const onboardingJourneyHandlers = [
         templateId: draft.id,
         sequence: source.sequence,
         name: source.name,
+        templateStageId: sourceToClonedGroup.get(source.templateStageId)!,
         description: source.description,
         tatDays: source.tatDays,
         ownerUserId: source.ownerUserId,
-        ownerRole: source.ownerRole,
-        backupOwnerUserId: source.backupOwnerUserId,
         requiresSignoff: source.requiresSignoff,
         dependsOnStepId: null, // re-pointed below
       };
@@ -429,54 +558,55 @@ export const onboardingJourneyHandlers = [
     return ok(templateDto(draft));
   }),
 
-  http.post(url('/onboarding/journey-templates/:templateId/steps'), async ({ params, request }) => {
+  http.post(url('/onboarding/journey-template-stages/:stageId/tasks'), async ({ params, request }) => {
     const db = getDb();
-    const templateId = Number(params.templateId);
-    const template = db.obJourneyTemplates.find((t) => t.id === templateId);
+    const stageId = Number(params.stageId);
+    const group = db.obJourneyTemplateStages.find((g) => g.id === stageId);
+    if (!group) return notFound('Stage group');
+
+    const template = db.obJourneyTemplates.find((t) => t.id === group.templateId);
     const conflict = editabilityConflict(template);
     if (conflict) return conflict;
 
     const body = (await request.json()) as {
       name?: string; description?: string | null; tatDays?: number;
-      ownerUserId?: number | null; ownerRole?: string | null; backupOwnerUserId?: number | null;
+      ownerUserId?: number | null;
       requiresSignoff?: boolean; dependsOnStepId?: number | null;
     };
     const errors: Record<string, string[]> = {};
-    if (!body.name) errors.name = ['Name is required'];
+    if (!body.name || !body.name.trim()) errors.name = ['A task name is required'];
     if (body.tatDays == null || body.tatDays < 1) errors.tatDays = ['TAT must be at least 1 day'];
     if (Object.keys(errors).length) return validationFailed(errors);
 
-    const siblingSequences = db.obJourneyTemplateSteps
-      .filter((s) => s.templateId === templateId)
-      .map((s) => s.sequence);
     const created: ObJourneyTemplateStepRow = {
       id: nextRowId(db.obJourneyTemplateSteps),
-      templateId,
-      sequence: siblingSequences.length ? Math.max(...siblingSequences) + 1 : 1,
-      name: body.name!,
+      templateId: group.templateId,
+      templateStageId: group.id,
+      sequence: 0, // renumbered below
+      name: body.name!.trim(),
       description: body.description ?? null,
       tatDays: body.tatDays!,
       ownerUserId: body.ownerUserId ?? null,
-      ownerRole: body.ownerRole ?? null,
-      backupOwnerUserId: body.backupOwnerUserId ?? null,
       requiresSignoff: body.requiresSignoff ?? false,
       dependsOnStepId: body.dependsOnStepId ?? null,
     };
     db.obJourneyTemplateSteps.push(created);
+    renumberByStage(group.templateId, db);
     return ok(stepDetailDto(created, db), undefined, { status: 201 });
   }),
 
-  http.put(url('/onboarding/journey-templates/:templateId/steps/order'), async ({ params, request }) => {
+  http.put(url('/onboarding/journey-template-stages/:stageId/tasks/order'), async ({ params, request }) => {
     const db = getDb();
-    const templateId = Number(params.templateId);
-    const template = db.obJourneyTemplates.find((t) => t.id === templateId);
+    const stageId = Number(params.stageId);
+    const group = db.obJourneyTemplateStages.find((g) => g.id === stageId);
+    if (!group) return notFound('Stage group');
+
+    const template = db.obJourneyTemplates.find((t) => t.id === group.templateId);
     if (!template) return notFound('Journey template');
 
-    // The ETag is read off the template as it stands *before* this write, the
-    // same instant `GET .../{templateId}` would answer — `steps/order`'s own
-    // contract note: `If-Match` is required, not optional, so a missing one
-    // is `428` rather than treated as "no conflict".
-    const currentDetail = detailDto(templateId, db);
+    // The tag is the *template's*, read as it stands before this write: a
+    // stage group has no mutable state of its own to conflict over.
+    const currentDetail = detailDto(group.templateId, db);
     const ifMatch = request.headers.get('If-Match');
     if (!ifMatch || !ifMatch.trim()) {
       return problem(428, 'precondition-required',
@@ -490,25 +620,28 @@ export const onboardingJourneyHandlers = [
     const conflict = editabilityConflict(template);
     if (conflict) return conflict;
 
-    const body = (await request.json()) as { stepIds?: number[] };
-    const stepIds = body.stepIds ?? [];
-    const current = db.obJourneyTemplateSteps.filter((s) => s.templateId === templateId);
-    const currentIds = new Set(current.map((s) => s.id));
-    const requestedIds = new Set(stepIds);
-    if (requestedIds.size !== stepIds.length) {
-      return problem(400, 'validation', "Reorder list does not match the template's current steps", {
-        detail: 'The same step id appears more than once.',
+    const body = (await request.json()) as { taskIds?: number[] };
+    const taskIds = body.taskIds ?? [];
+    const inGroup = db.obJourneyTemplateSteps.filter((s) => s.templateStageId === group.id);
+    const currentIds = new Set(inGroup.map((s) => s.id));
+    const requestedIds = new Set(taskIds);
+    if (requestedIds.size !== taskIds.length) {
+      return problem(400, 'validation', "Reorder list does not match the stage's current tasks", {
+        detail: 'The same task id appears more than once.',
       });
     }
     if (requestedIds.size !== currentIds.size || [...requestedIds].some((id) => !currentIds.has(id))) {
-      return problem(400, 'validation', "Reorder list does not match the template's current steps", {
-        detail: "The given ids are not exactly this template's current step set.",
+      return problem(400, 'validation', "Reorder list does not match the stage's current tasks", {
+        detail: "The given ids are not exactly this stage's current task set.",
       });
     }
 
-    stepIds.forEach((id, index) => {
-      const step = current.find((s) => s.id === id);
-      if (step) step.sequence = index + 1;
+    // The group's own block of positions, permuted in place — every other
+    // stage's tasks keep the positions they had.
+    const slots = inGroup.map((s) => s.sequence).sort((a, b) => a - b);
+    taskIds.forEach((id, index) => {
+      const task = inGroup.find((s) => s.id === id);
+      if (task) task.sequence = slots[index];
     });
     return noContent();
   }),
@@ -706,6 +839,86 @@ export const onboardingJourneyHandlers = [
     return noContent();
   }),
 
+
+  /*
+    The edit the seeded stages made necessary. `If-Match` is required and the
+    tag is the TEMPLATE's — a step has no read of its own to draw one from,
+    and the template's tag covers every step on it, which is the tag that
+    notices somebody else's dependency change.
+  */
+  http.patch(url('/onboarding/journey-template-steps/:stepId'), async ({ params, request }) => {
+    const db = getDb();
+    const stepId = Number(params.stepId);
+    const step = db.obJourneyTemplateSteps.find((s) => s.id === stepId);
+    if (!step) return notFound('Journey template step');
+
+    const ifMatch = request.headers.get('If-Match');
+    if (!ifMatch || !ifMatch.trim()) {
+      return problem(428, 'precondition-required',
+        'If-Match is required. GET the template first and send back its ETag.');
+    }
+    const currentDetail = detailDto(step.templateId, db);
+    if (!ifMatchSatisfied(ifMatch, etagOf(currentDetail))) {
+      return problem(412, 'precondition-failed',
+        'This template changed since you read it. Reload and reapply the edit.');
+    }
+
+    const conflict = editabilityConflict(db.obJourneyTemplates.find((t) => t.id === step.templateId));
+    if (conflict) return conflict;
+
+    const body = (await request.json()) as {
+      description?: string | null; tatDays?: number | null;
+      ownerUserId?: number | null;
+      requiresSignoff?: boolean | null; dependsOnStepId?: number | null; clearDependsOn?: boolean;
+      clearOwnerUserId?: boolean;
+    };
+    if (body.tatDays != null && body.tatDays < 1) {
+      return validationFailed({ tatDays: ['TAT must be at least 1 day'] });
+    }
+
+    // Null means "say nothing about this", which is what makes a PATCH a
+    // PATCH — the exception is the dependency, cleared explicitly below.
+    if (body.description !== undefined) {
+      step.description = body.description && body.description.trim() ? body.description : null;
+    }
+    if (body.tatDays != null) step.tatDays = body.tatDays;
+    // Clear wins over set, matching the service: a caller that sent both
+    // asked for the removal. The implementor needs a flag because a number has
+    // no blank value to clear it with.
+    if (body.clearOwnerUserId) step.ownerUserId = null;
+    else if (body.ownerUserId != null) step.ownerUserId = body.ownerUserId;
+    if (body.requiresSignoff != null) step.requiresSignoff = body.requiresSignoff;
+
+    if (body.clearDependsOn) {
+      step.dependsOnStepId = null;
+    } else if (body.dependsOnStepId != null) {
+      const dependency = db.obJourneyTemplateSteps.find(
+        (s) => s.id === body.dependsOnStepId && s.templateId === step.templateId,
+      );
+      if (!dependency) return notFound('Journey template step');
+
+      // Walking up from the proposed dependency: arriving back at this step
+      // is a chain that waits on itself, which the real service refuses with
+      // 409 and the designer's tree walker could not survive.
+      const byId = new Map(
+        db.obJourneyTemplateSteps
+          .filter((s) => s.templateId === step.templateId)
+          .map((s) => [s.id, s] as const),
+      );
+      let cursor: ObJourneyTemplateStepRow | undefined = dependency;
+      for (let guard = 0; cursor && guard <= byId.size; guard += 1) {
+        if (cursor.id === step.id) {
+          return problem(409, 'conflict', 'Conflict', {
+            detail: `"${step.name}" cannot wait for "${dependency.name}" — that step already waits for this one.`,
+          });
+        }
+        cursor = cursor.dependsOnStepId == null ? undefined : byId.get(cursor.dependsOnStepId);
+      }
+      step.dependsOnStepId = dependency.id;
+    }
+
+    return ok(stepDetailDto(step, db));
+  }),
 
   http.delete(url('/onboarding/journey-template-steps/:stepId'), ({ params }) => {
     const db = getDb();

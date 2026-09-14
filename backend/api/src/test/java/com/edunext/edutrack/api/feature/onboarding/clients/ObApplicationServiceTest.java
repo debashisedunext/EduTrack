@@ -49,6 +49,7 @@ class ObApplicationServiceTest {
     private ObClientChildWriteRepository products;
     private ObApplicationWriteRepository applications;
     private ObJourneyInstantiationService journeys;
+    private com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning projects;
     private ObApplicationService service;
 
     @BeforeEach
@@ -58,7 +59,12 @@ class ObApplicationServiceTest {
         products = mock(ObClientChildWriteRepository.class);
         applications = mock(ObApplicationWriteRepository.class);
         journeys = mock(ObJourneyInstantiationService.class);
-        service = new ObApplicationService(details, reads, products, applications, journeys);
+        // A purchase provisions the project its journey belongs to. Mocked here
+        // for the same reason `journeys` is: what this class decides is whether
+        // the purchase is legal, and ObApplicationsIT is where the rows it
+        // produces are checked against a real schema.
+        projects = mock(com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning.class);
+        service = new ObApplicationService(details, reads, products, applications, journeys, projects);
 
         when(details.findDetail(any(), anyLong())).thenReturn(Optional.of(detailStub()));
         when(reads.applicationByProduct(anyLong(), anyLong())).thenReturn(Optional.empty());
@@ -334,9 +340,10 @@ class ObApplicationServiceTest {
 
     private static ObClientDtos.ObClientDetail detailStub() {
         return new ObClientDtos.ObClientDetail(
-                CLIENT, "Acme", LocalDate.of(2026, 9, 7), "ONBOARDING", null, "LOCKED", 1, 0,
+                CLIENT, "Acme", "ACM-001", "Pune", null, LocalDate.of(2026, 9, 7),
+                "ONBOARDING", null, "LOCKED", 1, 0,
                 null, List.of(), null, null, null, null, false,
-                null, null, null, null, null,
+                null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), null, null, null);
     }
 }

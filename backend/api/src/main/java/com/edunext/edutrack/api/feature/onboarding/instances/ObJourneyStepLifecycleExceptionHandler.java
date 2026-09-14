@@ -71,7 +71,8 @@ class ObJourneyStepLifecycleExceptionHandler {
         return ResponseEntity.unprocessableEntity().body(problem);
     }
 
-    /** 422 — the journey's gate is still locked, or it is held by another journey. */
+    /** 422 — the journey is held behind another of the client's journeys. A
+     *  locked prerequisite gate no longer reaches here; it is advisory. */
     @ExceptionHandler(JourneyNotOpenException.class)
     ResponseEntity<ProblemDetail> handleJourneyNotOpen(JourneyNotOpenException e) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
@@ -94,6 +95,26 @@ class ObJourneyStepLifecycleExceptionHandler {
         problem.setProperty("unansweredMandatoryItems", e.unansweredMandatoryItems());
         problem.setProperty("missingRequiredDocs", e.missingRequiredDocs());
         problem.setProperty("signoffMissing", e.signoffMissing());
+        return ResponseEntity.unprocessableEntity().body(problem);
+    }
+
+    /**
+     * 422 — a task list entry answered False with no reason.
+     *
+     * <p>422 rather than 400 on {@link #handleCompletionGateNotSatisfied}'s
+     * precedent: the request is well-formed and the caller is entitled to make
+     * it; what fails is a rule about the content. The item id travels as a
+     * property so the screen can put the message on the row that caused it
+     * rather than at the top of a checklist.
+     */
+    @ExceptionHandler(StepItemRemarkRequiredException.class)
+    ResponseEntity<ProblemDetail> handleRemarkRequired(StepItemRemarkRequiredException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(java.net.URI.create("https://edutrack/errors/ob-step-item-remark-required"));
+        problem.setTitle("A False answer needs a reason");
+        problem.setDetail("Say why this item could not be answered True — the remark is what the "
+                + "next person reads instead of asking you.");
+        problem.setProperty("itemId", e.itemId());
         return ResponseEntity.unprocessableEntity().body(problem);
     }
 

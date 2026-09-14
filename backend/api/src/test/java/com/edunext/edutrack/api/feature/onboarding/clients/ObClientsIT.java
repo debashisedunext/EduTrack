@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -86,6 +87,18 @@ class ObClientsIT {
     @Autowired
     ObClientService reads;
 
+    /**
+     * The purchases panel's own service, used by {@link #board} rather than
+     * `clientWrites` alone.
+     *
+     * <p>A client's products are no longer part of boarding — the Clients master
+     * takes four fields — so a fixture that needs journeys has to buy something,
+     * and this is the operation that records a purchase, provisions its project
+     * and instantiates the journeys.
+     */
+    @Autowired
+    ObApplicationService applications;
+
     @Autowired
     JdbcTemplate jdbc;
 
@@ -107,9 +120,26 @@ class ObClientsIT {
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %'))");
         jdbc.update("DELETE FROM ob_journeys WHERE ob_client_id IN "
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
+        // V20260911_1800 · the engagement a purchase now provisions.
+        // `ob_journeys.project_id` points at it and `fk_ob_projects_client` is
+        // RESTRICT, so this sits between the journeys above and the clients
+        // below — the same "children first" rule as the rest of this block.
+        jdbc.update("DELETE FROM ob_projects WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_client_requirements WHERE ob_client_id IN "
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_client_applications WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
+        // The credential mail the portal-login tests queue. `fk_ob_outbox_client`
+        // and `fk_ob_outbox_recipient_contact` are both RESTRICT, so this has to
+        // go before the contacts and the clients below it.
+        jdbc.update("DELETE FROM ob_notification_outbox WHERE ob_client_id IN "
+                + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
+        // The accounts those tests create. `fk_client_accounts_ob_client` is
+        // RESTRICT too — deliberately, per V20260905_1630 — so a login left
+        // behind by one test would refuse the next test's DELETE rather than
+        // cascade quietly. `client_credential_tokens` cascades from here.
+        jdbc.update("DELETE FROM client_accounts WHERE ob_client_id IN "
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_client_contacts WHERE ob_client_id IN "
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
@@ -123,6 +153,11 @@ class ObClientsIT {
                 + "(SELECT id FROM ob_clients WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_clients WHERE name LIKE 'IT %'");
         jdbc.update("DELETE FROM ob_journey_template_steps WHERE template_id IN "
+                + "(SELECT id FROM ob_journey_templates WHERE name LIKE 'IT %')");
+        // V20260911_1630's stage groups sit between the steps and the template,
+        // and `fk_ob_template_stages_template` is RESTRICT — so they go after
+        // the steps that reference them and before the template they reference.
+        jdbc.update("DELETE FROM ob_journey_template_stages WHERE template_id IN "
                 + "(SELECT id FROM ob_journey_templates WHERE name LIKE 'IT %')");
         jdbc.update("DELETE FROM ob_journey_templates WHERE name LIKE 'IT %'");
         jdbc.update("DELETE FROM ob_products WHERE code LIKE 'IT_%'");
@@ -156,8 +191,7 @@ class ObClientsIT {
     @Test
     @DisplayName("one request boards the client, its SPOCs, its purchases, its requirements and a locked journey per product")
     void oneRequestWritesEverything() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Horizon Academy", null, List.of(product, secondProduct)));
+        ObClientDtos.ObClientDetail created = board("IT Horizon Academy", List.of(product, secondProduct));
 
         assertThat(created.name()).isEqualTo("IT Horizon Academy");
         assertThat(created.contacts()).hasSize(1);
@@ -201,8 +235,7 @@ class ObClientsIT {
     void productWithoutTemplateRollsEverythingBack() {
         jdbc.update("UPDATE ob_journey_templates SET is_active = 0 WHERE product_id = ?", product);
 
-        assertThatThrownBy(() -> writes.create(admin, ayush,
-                request("IT Rollback Academy", null, List.of(product))))
+        assertThatThrownBy(() -> board("IT Rollback Academy", List.of(product)))
                 .isInstanceOf(ProductWithoutTemplateException.class);
 
         assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name = 'IT Rollback Academy'"))
@@ -220,8 +253,7 @@ class ObClientsIT {
     @Test
     @DisplayName("boarding a client snapshots the active master onto the client's own checklist")
     void createSnapshotsThePrereqMaster() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Checklist Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created = board("IT Checklist Academy", List.of(product));
 
         assertThat(count("SELECT COUNT(*) FROM ob_client_prereqs WHERE ob_client_id = "
                 + created.id())).isEqualTo(1);
@@ -244,8 +276,7 @@ class ObClientsIT {
     void noPrereqMasterRollsEverythingBack() {
         jdbc.update("UPDATE ob_prereq_template_versions SET is_active = 0");
 
-        assertThatThrownBy(() -> writes.create(admin, ayush,
-                request("IT No Checklist Academy", null, List.of(product))))
+        assertThatThrownBy(() -> board("IT No Checklist Academy", List.of(product)))
                 .isInstanceOf(NoPublishedPrerequisitesException.class);
 
         assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name = 'IT No Checklist Academy'"))
@@ -255,8 +286,8 @@ class ObClientsIT {
     @Test
     @DisplayName("a client is readable by the person who boarded it and by nobody else in Sales")
     void createdByIsTheSalesScope() {
-        ObClientDtos.ObClientDetail created = writes.create(salesAyush, ayush,
-                request("IT Bluebell Schools", null, List.of(product)));
+        ObClientDtos.ObClientDetail created =
+                writes.create(salesAyush, ayush, lean("IT Bluebell Schools", true)).detail();
 
         assertThat(reads.findDetail(salesAyush, created.id())).isPresent();
         // Not 403 and not an empty field — absent, which is what the 404 rule
@@ -268,67 +299,111 @@ class ObClientsIT {
 
     // ── the PAN guard ───────────────────────────────────────────────────────
 
-    @Test
-    @DisplayName("a second client with the same PAN is refused, whatever case it was typed in")
-    void panIsUniqueAcrossClients() {
-        writes.create(admin, ayush, request("IT Trinity College", "ABCDE1234F", List.of(product)));
+    /*
+      THE THREE PAN TESTS THAT STOOD HERE ARE GONE, AND THE COLUMN IS NOT.
 
-        assertThatThrownBy(() -> writes.create(admin, ayush,
-                request("IT Trinity Institute", "ABCDE1234F", List.of(product))))
-                .isInstanceOf(DuplicateClientPanException.class);
+      `pan_ciphertext`, `pan_blind_index` and `uq_ob_clients_pan_blind` are all
+      still on `ob_clients`, still populated for every client boarded through
+      the retired wizard, and still masked on every read. What no longer exists
+      is a way to *write* one: the create takes four fields and none of them is
+      a PAN, so "a second client with the same PAN is refused" has no operation
+      left to exercise.
 
-        assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name LIKE 'IT Trinity%'")).isEqualTo(1);
-    }
-
-    /**
-     * The constraint, not the service check.
-     *
-     * <p>The whole two-column design rests on this index firing, and the design
-     * it replaced — a UNIQUE over randomised ciphertext — would "apply cleanly,
-     * look exactly like a working constraint, and silently never fire". So the
-     * assertion is that a second row carrying the same blind index is refused
-     * by MySQL with the service out of the way entirely.
-     */
-    @Test
-    @DisplayName("the UNIQUE index behind the guard is real, not just the service check")
-    void theBlindIndexConstraintFires() {
-        ObClientDtos.ObClientDetail first = writes.create(admin, ayush,
-                request("IT Meridian School", "ZYXWV9876E", List.of(product)));
-
-        byte[] index = jdbc.queryForObject(
-                "SELECT pan_blind_index FROM ob_clients WHERE id = ?", byte[].class, first.id());
-        assertThat(index).hasSize(32);
-
-        assertThatThrownBy(() -> jdbc.update("""
-                INSERT INTO ob_clients (name, onboarding_date, pan_ciphertext, pan_blind_index)
-                VALUES ('IT Meridian Twin', '2026-09-07', ?, ?)
-                """, new byte[]{1, 2, 3}, index))
-                .hasMessageContaining("uq_ob_clients_pan_blind");
-    }
-
-    @Test
-    @DisplayName("the PAN on the detail read is masked to the last four, for every role")
-    void panIsMasked() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Masked Academy", "ABCDE1234F", List.of(product)));
-
-        assertThat(created.pan()).endsWith("234F").doesNotContain("ABCDE");
-    }
-
-    // ── the name guard ──────────────────────────────────────────────────────
+      They are deleted rather than disabled because a disabled test is a claim
+      nobody is checking. `clientCode` is the exact duplicate guard now and
+      `ObClientWriteServiceTest.CodeGuard` is where it is pinned; the index
+      behind it belongs in this file the day somebody adds a PAN write back.
+    */
 
     @Test
     @DisplayName("a near-duplicate name warns once and proceeds when acknowledged")
     void similarNamesWarnThenProceed() {
-        writes.create(admin, ayush, request("IT Acme Private Limited", null, List.of(product)));
+        writes.create(admin, ayush, lean("IT Acme Private Limited", false));
 
-        assertThatThrownBy(() -> writes.create(admin, ayush,
-                request("IT Acme Pvt Ltd", null, List.of(secondProduct))))
+        assertThatThrownBy(() -> writes.create(admin, ayush, lean("IT Acme Pvt Ltd", false)))
                 .isInstanceOf(SimilarClientNameException.class);
 
-        ObClientDtos.ObClientCreateRequest acknowledged = acknowledge(
-                request("IT Acme Pvt Ltd", null, List.of(secondProduct)));
-        assertThat(writes.create(admin, ayush, acknowledged).name()).isEqualTo("IT Acme Pvt Ltd");
+        assertThat(writes.create(admin, ayush, lean("IT Acme Pvt Ltd", true)).detail().name())
+                .isEqualTo("IT Acme Pvt Ltd");
+    }
+
+    // ── the portal login the add dialog can issue ───────────────────────────
+
+    /**
+     * Three tables in one transaction, against a real database — the client,
+     * its primary SPOC and the account. The unit tests pin the ordering and
+     * the refusals; this pins that the rows actually land and that the
+     * username is the code.
+     */
+    @Test
+    @DisplayName("ticking the box writes the client, its primary SPOC and an account named after the code")
+    void portalLoginIsIssuedAtBoarding() {
+        ObClientDtos.ObClientCreateRequest request = withLogin("IT Little Flower School");
+
+        ObClientWriteService.Created created = writes.create(admin, ayush, request);
+
+        assertThat(created.login().username()).isEqualTo(request.clientCode());
+        assertThat(created.detail().contacts())
+                .singleElement()
+                .satisfies(contact -> {
+                    assertThat(contact.name()).isEqualTo("Arjun Singh");
+                    assertThat(contact.isPrimary()).isTrue();
+                    assertThat(contact.isActive()).isTrue();
+                });
+
+        assertThat(count("SELECT COUNT(*) FROM client_accounts WHERE username = '"
+                + request.clientCode() + "' AND ob_client_id = " + created.detail().id()))
+                .isOne();
+    }
+
+    /**
+     * The atomicity the flag's whole design rests on, against a real
+     * transaction rather than a mocked one.
+     *
+     * <p>Provoked with an email longer than {@code ob_client_contacts.email}
+     * (VARCHAR(200)). That is deliberately a failure the <em>database</em>
+     * raises, and it raises it at the contact insert — after this client's own
+     * row is already written. Nothing short of a real rollback makes the
+     * company disappear again.
+     *
+     * <p>Not a duplicate email, which was the first choice and is wrong:
+     * {@code uq_ob_client_contacts_email} is {@code (ob_client_id, email)}, so
+     * two clients sharing a SPOC address is legal and nothing would have been
+     * refused. Not a stubbed issuer either — this class exists to exercise the
+     * wiring the unit tests mock out.
+     *
+     * <p>The over-long value cannot arrive through the controller, where
+     * {@code @Size(max = 200)} rejects it first. It is reachable here because
+     * the IT calls the service directly, which is the seam that makes the
+     * database's own guarantee observable.
+     */
+    @Test
+    @DisplayName("a login that cannot be issued leaves no client behind")
+    void aFailedLoginRollsBackTheClient() {
+        String tooLong = "a".repeat(195) + "@example.com";
+        ObClientDtos.ObClientCreateRequest doomed = new ObClientDtos.ObClientCreateRequest(
+                "IT Rollback Beta", "IT-RB-BETA", null, null, true,
+                true, "Arjun Singh", tooLong);
+
+        assertThatThrownBy(() -> writes.create(admin, ayush, doomed))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(count("SELECT COUNT(*) FROM ob_clients WHERE name = 'IT Rollback Beta'"))
+                .isZero();
+        assertThat(count("SELECT COUNT(*) FROM client_accounts WHERE username = 'IT-RB-BETA'"))
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("leaving the box unticked writes the company and nothing else")
+    void noLoginWithoutTheFlag() {
+        ObClientWriteService.Created created =
+                writes.create(admin, ayush, lean("IT No Login Trust", true));
+
+        assertThat(created.login()).isNull();
+        assertThat(created.detail().contacts()).isEmpty();
+        assertThat(count("SELECT COUNT(*) FROM client_accounts WHERE ob_client_id = "
+                + created.detail().id())).isZero();
     }
 
     // ── the edit ────────────────────────────────────────────────────────────
@@ -336,8 +411,7 @@ class ObClientsIT {
     @Test
     @DisplayName("LIVE is refused, and a hold is recorded with its reason")
     void statusRules() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Status Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created = board("IT Status Academy", List.of(product));
 
         ObClientUpdateRequest live = new ObClientUpdateRequest();
         live.setStatus("LIVE");
@@ -362,8 +436,8 @@ class ObClientsIT {
     @Test
     @DisplayName("a client out of scope cannot be edited, and is not admitted to exist")
     void editingIsScoped() {
-        ObClientDtos.ObClientDetail created = writes.create(salesAyush, ayush,
-                request("IT Scoped Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created =
+                writes.create(salesAyush, ayush, lean("IT Scoped Academy", true)).detail();
 
         ObClientUpdateRequest rename = new ObClientUpdateRequest();
         rename.setName("IT Renamed By Somebody Else");
@@ -377,8 +451,7 @@ class ObClientsIT {
     @Test
     @DisplayName("a client whose journeys are all locked has no colour — that is a gate state, not a colour")
     void lockedClientsHaveNoRag() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Locked Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created = board("IT Locked Academy", List.of(product));
 
         assertThat(created.rag()).isNull();
         assertThat(created.gateStatus()).isEqualTo("LOCKED");
@@ -395,8 +468,7 @@ class ObClientsIT {
     @Test
     @DisplayName("the SQL and Java RAG formulas answer the same for the same rows")
     void sqlAndJavaRagAgree() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Colour Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created = board("IT Colour Academy", List.of(product));
         long journeyId = created.journeys().getFirst().id();
         jdbc.update("UPDATE ob_journeys SET gate_status = 'OPEN', gate_opened_at = NOW(6) WHERE id = ?",
                 journeyId);
@@ -424,8 +496,7 @@ class ObClientsIT {
     @Test
     @DisplayName("the list's rag filter and the row's own colour are the same answer")
     void ragFilterAgreesWithTheColumn() {
-        ObClientDtos.ObClientDetail created = writes.create(admin, ayush,
-                request("IT Filtered Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail created = board("IT Filtered Academy", List.of(product));
         long journeyId = created.journeys().getFirst().id();
         jdbc.update("UPDATE ob_journeys SET gate_status = 'OPEN', gate_opened_at = NOW(6) WHERE id = ?",
                 journeyId);
@@ -458,12 +529,11 @@ class ObClientsIT {
     @Test
     @DisplayName("the owner filter narrows to the clients whose journeys hold that person's steps")
     void ownerFilterNarrowsToTheirClients() {
-        ObClientDtos.ObClientDetail mine = writes.create(admin, ayush,
-                request("IT Owned Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail mine = board("IT Owned Academy", List.of(product));
         // Named so it shares no stem with the subject: "IT Unowned Academy"
         // trips the near-duplicate name guard, which is a real refusal rather
         // than a test-harness quirk — SimilarClientNames is doing its job.
-        writes.create(admin, ayush, request("IT Bystander Academy", null, List.of(product)));
+        board("IT Bystander Academy", List.of(product));
 
         ownStep(mine.journeys().getFirst().id(), 1, divyansh, null);
 
@@ -483,8 +553,7 @@ class ObClientsIT {
     @Test
     @DisplayName("a backup owner is an owner for this filter")
     void backupOwnersMatchToo() {
-        ObClientDtos.ObClientDetail covered = writes.create(admin, ayush,
-                request("IT Covered Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail covered = board("IT Covered Academy", List.of(product));
 
         ownStep(covered.journeys().getFirst().id(), 1, ayush, divyansh);
 
@@ -503,7 +572,7 @@ class ObClientsIT {
     @Test
     @DisplayName("an unowned step gives nobody a claim on the client")
     void unownedStepsMatchNobody() {
-        writes.create(admin, ayush, request("IT Ownerless Academy", null, List.of(product)));
+        board("IT Ownerless Academy", List.of(product));
 
         assertThat(reads.list(admin, "IT Ownerless", null, null, null, null, null, ayush, null, 50).data())
                 .isEmpty();
@@ -518,8 +587,7 @@ class ObClientsIT {
     @Test
     @DisplayName("an archived journey does not keep the client on its owner's list")
     void archivedJourneysDropOutOfTheOwnerFilter() {
-        ObClientDtos.ObClientDetail archived = writes.create(admin, ayush,
-                request("IT Archived Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail archived = board("IT Archived Academy", List.of(product));
         long journeyId = archived.journeys().getFirst().id();
         ownStep(journeyId, 1, divyansh, null);
 
@@ -542,9 +610,8 @@ class ObClientsIT {
     @Test
     @DisplayName("the sales filter narrows to that person's clients and no others")
     void salesFilterNarrows() {
-        ObClientDtos.ObClientDetail theirs = writes.create(admin, ayush,
-                request("IT Sold Academy", null, List.of(product)));
-        writes.create(admin, ayush, request("IT Bystander Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail theirs = board("IT Sold Academy", List.of(product));
+        board("IT Bystander Academy", List.of(product));
         jdbc.update("UPDATE ob_clients SET sales_person_id = ? WHERE id = ?", divyansh, theirs.id());
 
         assertThat(reads.list(admin, "IT ", null, null, null, null, divyansh, null, null, 50).data())
@@ -561,8 +628,7 @@ class ObClientsIT {
     @Test
     @DisplayName("the gate filter is the only way to ask for a client with no colour")
     void gateFilterFindsTheLockedOnes() {
-        ObClientDtos.ObClientDetail locked = writes.create(admin, ayush,
-                request("IT Gated Academy", null, List.of(product)));
+        ObClientDtos.ObClientDetail locked = board("IT Gated Academy", List.of(product));
 
         assertThat(reads.list(admin, "IT Gated", null, null, "LOCKED", null, null, null, null, 50).data())
                 .extracting(ObClientDtos.ObClientSummary::name)
@@ -605,38 +671,50 @@ class ObClientsIT {
                 Timestamp.from(startedAt), Timestamp.from(dueAt), journeyId, sequence);
     }
 
-    private static ObClientDtos.ObClientCreateRequest request(String name, String pan,
-                                                              List<Long> productIds) {
-        return new ObClientDtos.ObClientCreateRequest(
-                name, "Boarded by an integration test", BOARDED, pan, "12 Test Road", null, "ANNUAL",
-                // B-103 · whatsappOptIn is false here, and it is not an
-                // oversight. A consented SPOC opens ob_contact_consent_events,
-                // which is insert-only by trigger and referenced without a
-                // cascade — so the DELETE in seed() above could never tear this
-                // client down again, and every test after the first would fail
-                // in its fixture rather than in its subject. Consent capture is
-                // ObContactsIT's subject; it builds a fresh client per test and
-                // removes nothing, which is the shape any fixture touching a
-                // consented contact has to take.
-                List.of(new ObClientDtos.ObContactWriteRequest(
-                        "IT SPOC", "Principal", "it.spoc@example.com", "+911234567890", false,
-                        null, true)),
-                productIds.stream()
-                        .map(id -> new ObClientDtos.ObApplicationWriteRequest(
-                                id, "ANNUAL", 100, BOARDED, BOARDED.plusYears(1)))
-                        .toList(),
-                List.of(new ObClientDtos.ObRequirementWriteRequest(null, "Single sign-on", null),
-                        new ObClientDtos.ObRequirementWriteRequest(null, "Data migration", null)),
-                false, false);
+    /**
+     * Board a client the way the product now does it: the company, then its
+     * purchases.
+     *
+     * <p>Two calls where the wizard did both at once. The purchase goes through
+     * the operation that owns it, which is also what provisions the project and
+     * the client's prerequisite checklist — so a fixture built this way exercises
+     * the same path a real boarding takes, rather than a shortcut that only this
+     * file knows about.
+     *
+     * <p><b>The name guard is acknowledged by default.</b> Every fixture here is
+     * called "IT Something Academy", and the fuzzy guard is quite right to think
+     * they are the same company. It has its own test below, which opts out.
+     */
+    private ObClientDtos.ObClientDetail board(String name, List<Long> productIds) {
+        ObClientDtos.ObClientDetail client = writes.create(admin, ayush, lean(name, true)).detail();
+        for (Long productId : productIds) {
+            client = applications.add(admin, client.id(),
+                    new ObClientDtos.ObApplicationWriteRequest(
+                            productId, "ANNUAL", 100, BOARDED, BOARDED.plusYears(1)));
+        }
+        return client;
     }
 
-    private static ObClientDtos.ObClientCreateRequest acknowledge(
-            ObClientDtos.ObClientCreateRequest request) {
+    /**
+     * The four fields, with a code derived from the name.
+     *
+     * <p>`uq_ob_clients_client_code` is org-wide and these fixtures share a
+     * schema across tests, so the code has to be unique per client rather than
+     * per test — hence the name hash rather than the run counter every other
+     * identifier here uses.
+     */
+    private static ObClientDtos.ObClientCreateRequest lean(String name, boolean acknowledge) {
         return new ObClientDtos.ObClientCreateRequest(
-                request.name(), request.description(), request.onboardingDate(), request.pan(),
-                request.address(), request.salesPersonId(), request.licenseType(),
-                request.contacts(), request.applications(), request.requirements(),
-                false, true);
+                name, "IT-" + Integer.toHexString(name.hashCode()),
+                "12 Test Road", "Pune", acknowledge);
+    }
+
+    /** {@link #lean} plus the tick box and the SPOC it requires. */
+    private static ObClientDtos.ObClientCreateRequest withLogin(String name) {
+        return new ObClientDtos.ObClientCreateRequest(
+                name, "IT-" + Integer.toHexString(name.hashCode()),
+                "12 Test Road", "Pune", true,
+                true, "Arjun Singh", "arjun@littleflower.example");
     }
 
     private long insertUser(String username) {
@@ -653,7 +731,22 @@ class ObClientsIT {
         return idOfLastInsert();
     }
 
-    /** Two steps, five TAT days between them — enough for a strip and a roll-up. */
+    /**
+     * Two steps, five TAT days between them — enough for a strip and a roll-up.
+     *
+     * <p><b>Both steps hang off a stage group.</b> V20260911_1630 made the
+     * Implementation Stage a group that owns its tasks and left
+     * {@code ob_journey_template_steps.template_stage_id} NOT NULL, so a step
+     * inserted without one is refused with "Field 'template_stage_id' doesn't
+     * have a default value" — in {@code @BeforeEach}, which fails every test in
+     * this class rather than the one that cares.
+     *
+     * <p>The group carries no {@code implementation_stage_id}. That column is
+     * nullable and the migration's own second backfill uses NULL for exactly
+     * this case — a group holding hand-named steps rather than one named from
+     * the stage master. These two steps are hand-named, and pointing them at a
+     * master row would mean seeding one to say nothing about them.
+     */
     private void insertTemplate(long productId, String name) {
         jdbc.update("""
                 INSERT INTO ob_journey_templates (product_id, name, version, is_active, sequence)
@@ -661,9 +754,16 @@ class ObClientsIT {
                 """, productId, name);
         long templateId = idOfLastInsert();
         jdbc.update("""
-                INSERT INTO ob_journey_template_steps (template_id, sequence, name, tat_days)
-                VALUES (?, 1, 'Kickoff', 2), (?, 2, 'Configuration', 3)
-                """, templateId, templateId);
+                INSERT INTO ob_journey_template_stages
+                    (template_id, implementation_stage_id, name, sequence)
+                VALUES (?, NULL, 'Ungrouped', 9999)
+                """, templateId);
+        long stageId = idOfLastInsert();
+        jdbc.update("""
+                INSERT INTO ob_journey_template_steps
+                    (template_id, template_stage_id, sequence, name, tat_days)
+                VALUES (?, ?, 1, 'Kickoff', 2), (?, ?, 2, 'Configuration', 3)
+                """, templateId, stageId, templateId, stageId);
     }
 
     /** B-109 · one published, active version, so every {@code writes.create} in this class has a checklist to snapshot. */

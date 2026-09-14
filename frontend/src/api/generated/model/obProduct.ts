@@ -71,9 +71,12 @@ product. **The OB-04 picker requires it**: a purchase with no
 template to instantiate would board a client into nothing.
  */
   hasActiveTemplate?: boolean;
-  /** Σ of the active template's service TATs, in working days — what a
-journey for this product *costs*, shown on the OB-07 card. Null
-when there is no active template.
+  /** Σ of the active templates' own `totalTatDays`, in working days —
+shown on the OB-07 card. Null when there is no active template.
+
+Each service's figure is its critical path (see
+`ObJourneyTemplateSummary`); the services themselves are summed,
+because a product's services are boarded one after another.
  */
   totalTatDays?: ObProductTotalTatDays;
   /** Journeys instantiated from this product, across all clients. Inside

@@ -118,6 +118,12 @@ public class ObStatsRefreshWorker {
 
         ObStatsDay currentDay = ObStatsDay.of(today, zone);
         stats.refreshSummaryStock(currentDay, now, computedAt, props.amberShare());
+        // The prerequisite half of OB-02's two deadline cards, at the client
+        // grain a checklist actually has — see refreshClientStock. Its own
+        // transaction and its own table, so the services half of those cards
+        // stands even if this pass fails, which is the same argument the scope
+        // pass below makes for itself.
+        stats.refreshClientStock(currentDay, now, computedAt);
         // The same board once per narrowed caller. Its own transaction, after
         // the org-wide one rather than inside it: the two answer different
         // callers, and a scope pass that fails should leave the board every

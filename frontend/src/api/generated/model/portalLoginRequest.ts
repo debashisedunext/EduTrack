@@ -49,7 +49,10 @@ the database rejects mutation independently via triggers and grants.
 
 export interface PortalLoginRequest {
   /**
-   * The username from the credential mail, e.g. ACME.ravi. Matched case-insensitively.
+   * The username from the credential mail. An onboarding client's is
+their client code (`HRZ-001`); a ticketing client's is
+`ACME.ravi`. Matched case-insensitively.
+
    * @minLength 1
    * @maxLength 150
    */

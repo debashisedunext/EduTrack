@@ -43,6 +43,7 @@ class ObPrimaryContactReader {
      */
     private static final String PRIMARY_OF = """
             SELECT c.name         AS client_name,
+                   c.client_code  AS client_code,
                    ct.id          AS contact_id,
                    ct.name        AS contact_name,
                    ct.email       AS contact_email
@@ -78,9 +79,15 @@ class ObPrimaryContactReader {
                 .param("obClientId", obClientId)
                 .param(ObClientScope.USER_PARAM, scope.userId())
                 .query((rs, row) -> {
+                    String clientName = rs.getString("client_name");
+                    String clientCode = rs.getString("client_code");
+                    // `wasNull` reports on the last column read, so the
+                    // contact id has to be read and tested together — reading
+                    // the code in between would have it answering for that.
                     long contactId = rs.getLong("contact_id");
                     return new ClientAndPrimary(
-                            rs.getString("client_name"),
+                            clientName,
+                            clientCode,
                             rs.wasNull() ? null : contactId,
                             rs.getString("contact_name"),
                             rs.getString("contact_email"));
@@ -88,12 +95,24 @@ class ObPrimaryContactReader {
                 .optional();
     }
 
-    /** @param contactId null when the client has no active primary SPOC. */
-    record ClientAndPrimary(String clientName, Long contactId,
+    /**
+     * @param clientCode the operator's own filing code for this client, and the
+     *                   portal username. Null on clients boarded before
+     *                   V20260911_1800 added the column — the column is
+     *                   nullable precisely so those rows did not have to be
+     *                   invented one. See {@code PortalUsernames} for what is
+     *                   generated in that case.
+     * @param contactId  null when the client has no active primary SPOC.
+     */
+    record ClientAndPrimary(String clientName, String clientCode, Long contactId,
                             String contactName, String contactEmail) {
 
         boolean hasPrimary() {
             return contactId != null;
+        }
+
+        boolean hasClientCode() {
+            return clientCode != null && !clientCode.isBlank();
         }
     }
 }

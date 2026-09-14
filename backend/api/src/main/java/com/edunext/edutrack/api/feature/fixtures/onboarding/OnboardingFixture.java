@@ -112,15 +112,18 @@ public class OnboardingFixture {
     private final WorkingCalendarRepository calendars;
     private final PasswordEncoder passwordEncoder;
     private final ObJourneyInstantiationService instantiation;
+    private final com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning projects;
 
     OnboardingFixture(JdbcTemplate jdbc, WorkingHoursService workingHours,
                       WorkingCalendarRepository calendars, PasswordEncoder passwordEncoder,
-                      ObJourneyInstantiationService instantiation) {
+                      ObJourneyInstantiationService instantiation,
+                      com.edunext.edutrack.api.feature.onboarding.projects.ObProjectProvisioning projects) {
         this.jdbc = jdbc;
         this.workingHours = workingHours;
         this.calendars = calendars;
         this.passwordEncoder = passwordEncoder;
         this.instantiation = instantiation;
+        this.projects = projects;
     }
 
     /**
@@ -253,9 +256,13 @@ public class OnboardingFixture {
                  ORDER BY a.ob_client_id, a.product_id
                 """);
         for (Map<String, Object> pair : pairs) {
-            instantiation.instantiate(
-                    ((Number) pair.get("clientId")).longValue(),
-                    ((Number) pair.get("productId")).longValue());
+            long clientId = ((Number) pair.get("clientId")).longValue();
+            long productId = ((Number) pair.get("productId")).longValue();
+            // Every journey needs a project (V20260911_1800). The fixtures have
+            // no caller to attribute one to, so `createdBy` is null rather than
+            // a fabricated user id on rows that person never touched.
+            projects.ensureFor(clientId, productId, null);
+            instantiation.instantiate(clientId, productId);
         }
     }
 

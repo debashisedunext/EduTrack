@@ -7,6 +7,8 @@ import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
+
 /** One page. Plan §9 draws this as a worklist, not an archive — {@link ObDashboardDrillPanel}'s own choice for the identical reason. */
 const PAGE_LIMIT = 50
 
@@ -35,7 +37,10 @@ const PAGE_LIMIT = 50
  */
 export function ObDelayedProjectsGrid() {
   const navigate = useNavigate()
-  const { data, isPending, isError } = useListObDelayedProjects({ limit: PAGE_LIMIT })
+  const { data, isPending, isError } = useListObDelayedProjects(
+    { limit: PAGE_LIMIT },
+    { query: OB_DASHBOARD_QUERY },
+  )
 
   const rows = data?.data ?? []
   const hasMore = data?.meta?.hasMore ?? false

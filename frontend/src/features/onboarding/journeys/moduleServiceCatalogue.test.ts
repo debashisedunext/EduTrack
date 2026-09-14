@@ -137,7 +137,8 @@ describe('defaultImplementor', () => {
       { sequence: 2, ownerUserId: 8 },
       // The same second owner twice — distinct people, not steps.
       { sequence: 3, ownerUserId: 8 },
-      { sequence: 4, ownerRole: 'PM' },
+      // Pinned to nobody, so it contributes no owner to the count.
+      { sequence: 4 },
     ]
     expect(defaultImplementor(steps, users).extra).toBe('+1 other')
   })
@@ -150,15 +151,28 @@ describe('defaultImplementor', () => {
     expect(defaultImplementor(steps, users).extra).toBe('')
   })
 
-  it('falls back to the role when the first step pins no person', () => {
-    const implementor = defaultImplementor([{ sequence: 1, ownerRole: 'PM' }], users)
-    expect(implementor.label).toBe('Role · PM')
-    // A role is not a person — the column must not style it as one.
+  /*
+    The usual case, and the reason the column no longer says "Unassigned": a
+    service is authored once and boarded for many projects, so pinning a person
+    on its first step is the exception. Nobody pinned means the project's own
+    implementor takes it, which is a real answer rather than a gap.
+  */
+  it('names the project implementor when the first step pins nobody', () => {
+    const implementor = defaultImplementor([{ sequence: 1 }], users)
+    expect(implementor.label).toBe('Project implementor')
+    // Not a person — the column must not style it as one.
     expect(implementor.named).toBe(false)
   })
 
-  it('says Unassigned when the first step names neither', () => {
-    expect(defaultImplementor([{ sequence: 1 }], users).label).toBe('Unassigned')
+  it('says the same when a later step pins somebody but the first does not', () => {
+    // The column is about who the service *starts* on, so a pinned step three
+    // rows down does not change the answer — it only adds to `extra`.
+    const implementor = defaultImplementor(
+      [{ sequence: 1 }, { sequence: 2, ownerUserId: 6 }],
+      users,
+    )
+    expect(implementor.label).toBe('Project implementor')
+    expect(implementor.extra).toBe('+1 other')
   })
 
   it('names a user the list does not carry by id rather than dropping them', () => {

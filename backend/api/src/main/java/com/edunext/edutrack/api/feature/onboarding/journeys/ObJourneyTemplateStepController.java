@@ -1,7 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.journeys;
 
+import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
-import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -9,12 +9,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * C-102 · {@code /onboarding/journey-template-steps} — a step's own
@@ -40,6 +43,52 @@ class ObJourneyTemplateStepController {
         this.service = service;
     }
 
+    /**
+     * The edit the seeded stages made necessary.
+     *
+     * <p>A Module Service is created holding one step per implementation
+     * stage, each with a one-day TAT and no owner, so the admin's work on this
+     * screen is <em>editing</em> steps rather than adding them — and until this
+     * route existed the only edit available was remove-and-re-add, which takes
+     * the step's task list and documents with it.
+     *
+     * <p><b>{@code If-Match} is required, and the tag is the template's.</b>
+     * A step has no read of its own to draw one from; {@code getObJourneyTemplate}
+     * is what the designer holds, and its tag covers every step on the
+     * template. That is the same bargain {@code PUT .../steps/order} already
+     * strikes one route over, and it is the right one here for a sharper
+     * reason than consistency: what this edit can silently destroy is a
+     * dependency somebody else just set, and the tag that notices is the one
+     * covering the whole step set.
+     */
+    @PatchMapping(value = "/{stepId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "updateObJourneyTemplateStep",
+            summary = "Edit a step of a draft template (OB-07)",
+            description = """
+                    TAT, owner, backup, sign-off, description and the step dependency. \
+                    Neither the implementation stage nor the name can be changed — a step \
+                    IS its stage, and swapping it is remove plus add, which is also what \
+                    makes it obvious that the task list goes with it. `409` if the \
+                    template has ever been published, or if the new dependency would \
+                    make the step wait on itself through a chain.""")
+    ObJourneyTemplateDtos.StepResponse update(
+            @PathVariable long stepId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ObJourneyTemplateDtos.UpdateStepRequest request) {
+
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "If-Match is required. GET the template first and send back its ETag.");
+        }
+        ObJourneyTemplateStep updated = service.updateStep(stepId, request.name(), request.description(),
+                request.tatDays(), request.ownerUserId(), request.requiresSignoff(),
+                request.dependsOnStepId(), request.clearDependsOn(), request.clearOwnerUserId());
+        return new ObJourneyTemplateDtos.StepResponse(ObJourneyTemplateDtos.StepDetail.of(updated,
+                service.getStepItems(stepId).stream().map(ObJourneyTemplateDtos.StepItem::of).toList(),
+                service.getStepDocs(stepId).stream().map(ObJourneyTemplateDtos.StepDoc::of).toList()));
+    }
+
     @DeleteMapping("/{stepId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(operationId = "removeObJourneyTemplateStep",
@@ -62,12 +111,20 @@ class ObJourneyTemplateStepController {
             description = """
                     `mandatory` (C-102) — `false` marks the item one the instance-side \
                     completion gate (C-106) will not require an answer to. Defaults to \
-                    `true` on the column, matching every item that predates this field.""")
+                    `true` on the column, matching every item that predates this field.
+
+                    B-131 — **accepted on a service already in use.** Unlike every other \
+                    edit to a journey template, adding a Task List entry is allowed on the \
+                    active version, and the item is back-filled onto every journey currently \
+                    running from it; `backfilledJourneyCount` reports how many. A *retired* \
+                    version still refuses with `409`.""")
     ObJourneyTemplateDtos.StepItemResponse addItem(
             @PathVariable long stepId,
             @Valid @RequestBody ObJourneyTemplateDtos.AddStepItemRequest request) {
-        ObJourneyTemplateStepItem item = service.addStepItem(stepId, request.label(), request.mandatory());
-        return new ObJourneyTemplateDtos.StepItemResponse(ObJourneyTemplateDtos.StepItem.of(item));
+        ObJourneyTemplateService.StepItemAdded added =
+                service.addStepItem(stepId, request.label(), request.mandatory());
+        return new ObJourneyTemplateDtos.StepItemResponse(
+                ObJourneyTemplateDtos.StepItem.of(added.item()), added.backfilledJourneyCount());
     }
 
     @PostMapping(value = "/{stepId}/docs",

@@ -36,6 +36,7 @@ class ObClientExceptionHandler {
     private static final URI FORBIDDEN = URI.create("https://edutrack/errors/forbidden");
     private static final URI VALIDATION_FAILED = URI.create("https://edutrack/errors/validation-failed");
     private static final URI PAN_DUPLICATE = URI.create("https://edutrack/errors/ob-client-pan-duplicate");
+    private static final URI CLIENT_IN_USE = URI.create("https://edutrack/errors/ob-client-in-use");
     private static final URI NAME_SIMILAR = URI.create("https://edutrack/errors/ob-client-name-similar");
     private static final URI NO_TEMPLATE = URI.create("https://edutrack/errors/ob-product-no-template");
     private static final URI NO_PREREQ_MASTER =
@@ -83,6 +84,25 @@ class ObClientExceptionHandler {
         problem.setTitle("Not found");
         problem.setDetail(e.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    /**
+     * 409 — something depends on this client, so it cannot be deleted.
+     *
+     * <p>{@code blockers} rides on the problem as an array so the screen can
+     * offer the alternative that fits — "it has projects" leads somewhere
+     * different from "it has a portal login" — rather than reprinting one
+     * sentence. 409 and not 403: the caller may delete clients, and this one is
+     * simply not deletable.
+     */
+    @ExceptionHandler(ObClientInUseException.class)
+    ResponseEntity<ProblemDetail> handleInUse(ObClientInUseException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        problem.setType(CLIENT_IN_USE);
+        problem.setTitle("The client is in use");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("blockers", e.blockers().toArray(String[]::new));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
     /** 403 — a client this caller can see and may not change. See the exception for why not 404. */

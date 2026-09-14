@@ -9,15 +9,24 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
  * B-121 · assembles the OB-02 card board — plan §9, screen OB-02.
  *
- * <p>Seven counters, one round trip, "the board's whole first paint". Every
- * number comes from {@link ObDashboardSummaryRepository}; nothing here counts
- * a journey or a step.
+ * <p>Seven counters, "the board's whole first paint". Every number comes from a
+ * pre-aggregate — {@link ObDashboardSummaryRepository} for the product-keyed
+ * figures and {@link ObClientPrereqStatsRepository} for the prerequisite half
+ * of the two deadline cards; nothing here counts a journey, a step or a task.
+ *
+ * <p><b>Two tables, because the two halves of "all client tasks" are at
+ * different grains.</b> §9's deadline cards count services and prerequisite
+ * tasks alike; a service belongs to a product and a prerequisite checklist
+ * belongs to a client, and no single key holds both. The cards are added here,
+ * on read, rather than pre-added by the refresh into a column that would have
+ * to pick one of the two grains to be wrong at.
  *
  * <h2>The three questions this class answers, in the order they bind</h2>
  *
@@ -74,10 +83,23 @@ class ObDashboardService {
     private final ObDashboardSummaryRepository summaries;
     private final ObScopeDashboardSummaryRepository scopedSummaries;
 
+    /**
+     * The prerequisite half of the two deadline cards.
+     *
+     * <p>A third repository rather than a column on either summary table,
+     * because a prerequisite checklist hangs off the client and both of those
+     * tables are keyed by product. See {@link ObClientPrereqStatsRepository};
+     * the short form is that the cards read 0 beside a drill-over listing
+     * seventeen rows until this was added.
+     */
+    private final ObClientPrereqStatsRepository prereqs;
+
     ObDashboardService(ObDashboardSummaryRepository summaries,
-                       ObScopeDashboardSummaryRepository scopedSummaries) {
+                       ObScopeDashboardSummaryRepository scopedSummaries,
+                       ObClientPrereqStatsRepository prereqs) {
         this.summaries = summaries;
         this.scopedSummaries = scopedSummaries;
+        this.prereqs = prereqs;
     }
 
     /**
@@ -150,19 +172,46 @@ class ObDashboardService {
                 : rollup(scope, narrowed, days.get(1), productId);
 
         ObDashboardSummaryRepository.Rollup today = latest.get();
+
+        // The prerequisite half of the two deadline cards, from the client-grained
+        // table — read for both days so the delta compares like with like. §9's
+        // cards count "all client tasks, services *and* prerequisites"; the
+        // summary table counts services, because a checklist has no product to be
+        // keyed by. See ObClientPrereqStatsRepository.
+        Map<ObDashboardCardKey, Long> todayPrereqs =
+                prereqs.contribution(today.statDate(), productId, scope);
+        Map<ObDashboardCardKey, Long> previousPrereqs = previous
+                .map(day -> prereqs.contribution(day.statDate(), productId, scope))
+                .orElseGet(ObClientPrereqStatsRepository::none);
+
         List<ObDashboardCard> cards = new ArrayList<>(ObDashboardCardKey.values().length);
         for (ObDashboardCardKey key : ObDashboardCardKey.values()) {
-            long count = today.counts().getOrDefault(key, 0L);
+            long count = countOf(today, todayPrereqs, key);
             cards.add(ObDashboardCard.of(
                     key,
                     count,
-                    previous.map(day -> count - day.counts().getOrDefault(key, 0L)).orElse(null),
+                    previous.map(day -> count - countOf(day, previousPrereqs, key)).orElse(null),
                     !ObDashboardSummaryRepository.isExact(productId, key)));
         }
 
         ObDashboardSummary summary =
                 new ObDashboardSummary(List.copyOf(cards), today.computedAt(), scope.appliedScope());
         return new Rendered(summary, etagOf(scope, productId, today.computedAt()));
+    }
+
+    /**
+     * One card's figure: the services half from the summary table, plus the
+     * prerequisite half for the two cards that have one.
+     *
+     * <p>Addition rather than a merged query because the two rows come from two
+     * grains and two tables; {@code getOrDefault} on both sides because five of
+     * the seven cards have no prerequisite arm at all, which is a structural
+     * absence rather than a missing row.
+     */
+    private static long countOf(ObDashboardSummaryRepository.Rollup day,
+                                Map<ObDashboardCardKey, Long> prereqCounts,
+                                ObDashboardCardKey key) {
+        return day.counts().getOrDefault(key, 0L) + prereqCounts.getOrDefault(key, 0L);
     }
 
     /**

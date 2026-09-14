@@ -72,7 +72,7 @@ class ObJourneyStepItemController {
             Authentication caller, @PathVariable long itemId,
             @Valid @RequestBody ObJourneyStepLifecycleDtos.ObJourneyStepItemUpdateRequest request) {
         ObJourneyStepItem item = service.answerItem(
-                itemId, CallerIdentityAccess.requireUserId(caller), request.isDone());
+                itemId, CallerIdentityAccess.requireUserId(caller), request.answer(), request.remark());
 
         // isMandatory is not re-derived for this response. The caller just
         // read the checklist to find this id and is about to re-read it — the
@@ -81,7 +81,8 @@ class ObJourneyStepItemController {
         return new ObJourneyStepLifecycleDtos.ObJourneyStepItemResponse(
                 new ObJourneyStepLifecycleDtos.ObJourneyStepItem(
                         item.getId(), item.getStepId(), item.getSequence(), item.getLabel(),
-                        true, item.getAnswer() != null, item.getAnsweredAt(),
+                        true, item.getAnswer() != null,
+                        item.getAnswer(), item.getRemark(), item.getAnsweredAt(),
                         item.getAnsweredBy() == null ? null
                                 : new ObJourneyStepLifecycleDtos.UserRef(item.getAnsweredBy(), null)));
     }

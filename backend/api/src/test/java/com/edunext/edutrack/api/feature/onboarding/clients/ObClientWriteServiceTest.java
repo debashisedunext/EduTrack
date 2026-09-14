@@ -1,9 +1,5 @@
 package com.edunext.edutrack.api.feature.onboarding.clients;
 
-import com.edunext.edutrack.api.feature.onboarding.instances.ObJourneyInstantiationService;
-import com.edunext.edutrack.api.feature.onboarding.prereqs.ObClientPrereqService;
-import com.edunext.edutrack.api.security.pan.PanService;
-import com.edunext.edutrack.api.text.RichTextSanitizer;
 import com.edunext.edutrack.domain.onboarding.ObClient;
 import com.edunext.edutrack.domain.onboarding.ObClientRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,10 +7,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,18 +27,28 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * B-102 · the rules that decide whether a client is boarded, without a
+ * The rules that decide whether a client is added, edited or removed, without a
  * database.
  *
  * <p>What is worth a container is in {@code ObClientsIT} — the UNIQUE index
- * behind the PAN guard, the scope predicate in SQL, and the agreement between
- * the SQL and Java RAG formulas. Everything below is a decision made in Java
- * before any of that is reached, and a decision is cheaper to pin here than to
- * seed a schema for.
+ * behind the code guard, the scope predicate in SQL, and the deletion guard's
+ * four queries. Everything below is a decision made in Java before any of that
+ * is reached, and a decision is cheaper to pin here than to seed a schema for.
+ *
+ * <h2>What left this file with the wizard</h2>
+ *
+ * <p>The SPOC, purchase and licence validations, the PAN guard, the
+ * published-template check, the journey instantiation and the prerequisite
+ * snapshot. Every one described an <em>engagement</em>, and engagements are
+ * projects now — {@code ObProjectWriteServiceTest} is where they are pinned.
+ * The name guard stayed, because a four-field add dialog is precisely the
+ * screen on which somebody adds "Horizon Schools Trust" for the second time.
  */
 class ObClientWriteServiceTest {
 
-    private static final LocalDate BOARDED = LocalDate.of(2026, 9, 7);
+    private static final LocalDate TODAY = LocalDate.of(2026, 9, 14);
+    private static final Clock FIXED = Clock.fixed(
+            TODAY.atStartOfDay(ZoneOffset.UTC).toInstant(), ZoneOffset.UTC);
     private static final long CALLER = 7L;
 
     private static final ObClientScope ADMIN = new ObClientScope(ObClientScope.OB_ADMIN, CALLER);
@@ -50,49 +58,37 @@ class ObClientWriteServiceTest {
 
     private ObClientRepository clients;
     private ObClientReadRepository reads;
+    private ObClientDeletionGuard deletionGuard;
     private ObClientChildWriteRepository children;
-    private ObRequirementWriteRepository requirements;
     private ObClientService details;
-    private ObJourneyInstantiationService journeys;
-    private ObClientPrereqService prereqs;
-    private PanService pan;
-    private com.edunext.edutrack.api.feature.portal.ClientAccountAdminService portalAccounts;
+    private ObContactService contacts;
+    private ObClientPortalLoginIssuer portalLogins;
     private ObClientWriteService service;
 
     @BeforeEach
     void setUp() {
         clients = mock(ObClientRepository.class);
         reads = mock(ObClientReadRepository.class);
+        deletionGuard = mock(ObClientDeletionGuard.class);
         children = mock(ObClientChildWriteRepository.class);
-        requirements = mock(ObRequirementWriteRepository.class);
         details = mock(ObClientService.class);
-        journeys = mock(ObJourneyInstantiationService.class);
-        prereqs = mock(ObClientPrereqService.class);
-        pan = mock(PanService.class);
-        // B-106 · ObRequirementBody is real rather than mocked. It is the
-        // §3.9 allow-list, and a mock of it would make every assertion in this
-        // class about what the wizard stores an assertion about a stub —
-        // including the one that says a body reducing to nothing is refused.
-        portalAccounts = mock(com.edunext.edutrack.api.feature.portal.ClientAccountAdminService.class);
-        service = new ObClientWriteService(clients, reads, children, requirements,
-                new ObRequirementBody(new RichTextSanitizer()), details, journeys, prereqs, pan,
-                portalAccounts);
+        contacts = mock(ObContactService.class);
+        portalLogins = mock(ObClientPortalLoginIssuer.class);
+        service = new ObClientWriteService(clients, reads, deletionGuard, children, details,
+                contacts, portalLogins, FIXED);
 
-        // The happy defaults: one product, on sale, with a published template,
-        // and a published prerequisites master (B-109).
-        when(children.sellableProductIds(any())).thenReturn(Set.of(1L));
-        when(children.productIdsWithActiveTemplate(any())).thenReturn(Set.of(1L));
         when(children.isActiveUser(anyLong())).thenReturn(true);
-        when(prereqs.hasActivePrereqMaster()).thenReturn(true);
         when(reads.namesContaining(anyString(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(List.of());
-        // The id is the database's, so a save has to hand one back — everything
-        // after it (the child rows, the journeys) is keyed by it.
-        when(clients.saveAndFlush(any())).thenAnswer(invocation -> saved(invocation.getArgument(0), 42L));
+        when(clients.findByClientCode(anyString())).thenReturn(Optional.empty());
+        when(deletionGuard.blockersFor(anyLong())).thenReturn(List.of());
+        // The id is the database's, so a save has to hand one back — the read
+        // that follows it is keyed by it.
+        when(clients.saveAndFlush(any())).thenAnswer(i -> saved(i.getArgument(0), 42L));
         when(details.findDetail(any(), anyLong())).thenReturn(Optional.of(detailStub()));
     }
 
-    // ── who may board a client ──────────────────────────────────────────────
+    // ── who may add a client ────────────────────────────────────────────────
 
     @Nested
     @DisplayName("standing")
@@ -105,7 +101,7 @@ class ObClientWriteServiceTest {
          * prevents.
          */
         @Test
-        @DisplayName("a caller with no onboarding standing cannot board a client, and is told nothing")
+        @DisplayName("a caller with no onboarding standing cannot add a client, and is told nothing")
         void noStanding() {
             assertThatThrownBy(() -> service.create(OUTSIDER, CALLER, request()))
                     .isInstanceOf(NotAnOnboardingClientWriterException.class);
@@ -113,194 +109,119 @@ class ObClientWriteServiceTest {
         }
 
         @Test
-        @DisplayName("a Viewer may read every client and board none")
-        void viewerCannotBoard() {
+        @DisplayName("a Viewer may read every client and add none")
+        void viewerCannotAdd() {
             assertThatThrownBy(() -> service.create(VIEWER, CALLER, request()))
                     .isInstanceOf(NotAnOnboardingClientWriterException.class);
         }
 
         @Test
-        void salesMayBoard() {
+        void salesMayAdd() {
             service.create(SALES, CALLER, request());
             verify(clients).saveAndFlush(any());
         }
     }
 
-    // ── the portal-login flag ───────────────────────────────────────────────
-
-    /**
-     * B-126 · the flag is honoured now. It was refused rather than ignored
-     * until this task existed, and B-102's argument for refusing is the same
-     * one that makes this assertion worth keeping: a boarder who ticks the box
-     * and is told 201 believes their client has credentials coming.
-     */
-    @Test
-    @DisplayName("asking for a portal login creates one")
-    void portalLoginIsCreated() {
-        ObClientDtos.ObClientCreateRequest wantsLogin = new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, null, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, true, false);
-
-        service.create(ADMIN, CALLER, wantsLogin);
-
-        verify(portalAccounts).create(eq(ADMIN), anyLong(), eq(CALLER));
-    }
-
-    @Test
-    @DisplayName("not asking for one creates nothing — the checkbox is the whole trigger")
-    void noPortalLoginWhenNotAsked() {
-        ObClientDtos.ObClientCreateRequest noLogin = new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, null, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, false, false);
-
-        service.create(ADMIN, CALLER, noLogin);
-
-        verify(portalAccounts, never()).create(any(), anyLong(), any());
-    }
-
-    // ── the create's own validation set ─────────────────────────────────────
+    // ── what the create stores, and what it no longer touches ───────────────
 
     @Nested
-    @DisplayName("validation, collected rather than thrown at the first failure")
-    class Validation {
+    @DisplayName("adding a client")
+    class Adding {
 
         @Test
-        @DisplayName("no primary SPOC — a client nothing can be sent to")
-        void noPrimary() {
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER,
-                    request(List.of(contact("a@example.com", false)))))
-                    .isInstanceOf(ObClientValidationException.class)
-                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
-                            .containsKey("contacts"));
+        @DisplayName("stores the four fields, trimmed")
+        void storesTheFourFields() {
+            service.create(ADMIN, CALLER, new ObClientDtos.ObClientCreateRequest(
+                    "  Acme Schools  ", " ACM-001 ", "  11 Ridge Rd  ", "  Pune  ", false));
+
+            org.mockito.ArgumentCaptor<ObClient> captor =
+                    org.mockito.ArgumentCaptor.forClass(ObClient.class);
+            verify(clients).saveAndFlush(captor.capture());
+
+            ObClient stored = captor.getValue();
+            assertThat(stored.getName()).isEqualTo("Acme Schools");
+            assertThat(stored.getClientCode()).isEqualTo("ACM-001");
+            assertThat(stored.getAddress()).isEqualTo("11 Ridge Rd");
+            assertThat(stored.getCity()).isEqualTo("Pune");
+        }
+
+        /**
+         * The wizard asked for this separately and routinely got a date a month
+         * away from {@code created_at}. A company is boarded the day somebody
+         * records it, which is what makes stamping it correct rather than merely
+         * convenient.
+         */
+        @Test
+        @DisplayName("stamps the boarding date rather than accepting one")
+        void stampsTheBoardingDate() {
+            service.create(ADMIN, CALLER, request());
+
+            org.mockito.ArgumentCaptor<ObClient> captor =
+                    org.mockito.ArgumentCaptor.forClass(ObClient.class);
+            verify(clients).saveAndFlush(captor.capture());
+            assertThat(captor.getValue().getOnboardingDate()).isEqualTo(TODAY);
         }
 
         @Test
-        @DisplayName("two primaries — the portal credential would go to both")
-        void twoPrimaries() {
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, request(List.of(
-                    contact("a@example.com", true), contact("b@example.com", true)))))
-                    .isInstanceOf(ObClientValidationException.class);
+        @DisplayName("a blank address or city is stored as null, not as an empty string")
+        void blankOptionalsBecomeNull() {
+            service.create(ADMIN, CALLER, new ObClientDtos.ObClientCreateRequest(
+                    "Acme", "ACM-001", "   ", "", false));
+
+            org.mockito.ArgumentCaptor<ObClient> captor =
+                    org.mockito.ArgumentCaptor.forClass(ObClient.class);
+            verify(clients).saveAndFlush(captor.capture());
+            assertThat(captor.getValue().getAddress()).isNull();
+            assertThat(captor.getValue().getCity()).isNull();
         }
+    }
+
+    // ── the two duplicate guards, and why they differ ───────────────────────
+
+    @Nested
+    @DisplayName("the code guard is exact and final")
+    class CodeGuard {
 
         @Test
-        @DisplayName("the same email twice at one client — one person, one row")
-        void duplicateEmail() {
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, request(List.of(
-                    contact("a@example.com", true), contact("A@Example.com", false)))))
-                    .isInstanceOf(ObClientValidationException.class)
-                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
-                            .containsKey("contacts"));
-        }
-
-        @Test
-        @DisplayName("one product selected twice would mean two journeys for one product")
-        void duplicateProduct() {
-            ObClientDtos.ObClientCreateRequest twice = new ObClientDtos.ObClientCreateRequest(
-                    "Acme", null, BOARDED, null, null, null, null,
-                    List.of(contact("spoc@example.com", true)),
-                    List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null),
-                            new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                    null, false, false);
-
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, twice))
-                    .isInstanceOf(ObClientValidationException.class)
-                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
-                            .containsKey("applications"));
-        }
-
-        @Test
-        @DisplayName("a licence that ends before it starts")
-        void backwardsLicence() {
-            ObClientDtos.ObClientCreateRequest backwards = new ObClientDtos.ObClientCreateRequest(
-                    "Acme", null, BOARDED, null, null, null, null,
-                    List.of(contact("spoc@example.com", true)),
-                    List.of(new ObClientDtos.ObApplicationWriteRequest(
-                            1L, null, null, BOARDED, BOARDED.minusDays(1))),
-                    null, false, false);
-
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, backwards))
-                    .isInstanceOf(ObClientValidationException.class);
-        }
-
-        @Test
-        @DisplayName("a retired product is out of the picker by definition")
-        void retiredProduct() {
-            when(children.sellableProductIds(any())).thenReturn(Set.of());
+        @DisplayName("a second client with the same code is refused, on the code's own field")
+        void refused() {
+            when(clients.findByClientCode("ACM-001"))
+                    .thenReturn(Optional.of(existing("Somebody Else", 999L)));
 
             assertThatThrownBy(() -> service.create(ADMIN, CALLER, request()))
                     .isInstanceOf(ObClientValidationException.class)
                     .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
-                            .containsKey("applications"));
-        }
-
-        @Test
-        @DisplayName("a departed sales person points every report at a mailbox nobody reads")
-        void inactiveSalesPerson() {
-            when(children.isActiveUser(99L)).thenReturn(false);
-            ObClientDtos.ObClientCreateRequest named = new ObClientDtos.ObClientCreateRequest(
-                    "Acme", null, BOARDED, null, null, 99L, null,
-                    List.of(contact("spoc@example.com", true)),
-                    List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                    null, false, false);
-
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, named))
-                    .isInstanceOf(ObClientValidationException.class)
-                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
-                            .containsKey("salesPersonId"));
-        }
-    }
-
-    // ── the two guards ──────────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("the PAN guard is exact and final")
-    class PanGuard {
-
-        @Test
-        @DisplayName("a second client with the same PAN is refused, and the existing one is named")
-        void refusedAndNamed() {
-            byte[] index = new byte[32];
-            when(pan.seal("ABCDE1234F")).thenReturn(new PanService.SealedPan(new byte[]{1}, index));
-            when(clients.findByPanBlindIndex(index)).thenReturn(Optional.of(existing("Horizon Academy", CALLER)));
-
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, requestWithPan("ABCDE1234F")))
-                    .isInstanceOf(DuplicateClientPanException.class)
-                    .satisfies(e -> assertThat(((DuplicateClientPanException) e).existingName())
-                            .isEqualTo("Horizon Academy"));
+                            .containsKey("clientCode"));
+            verify(clients, never()).saveAndFlush(any());
         }
 
         /**
-         * The guard must still fire on a client the caller cannot see —
-         * otherwise two Sales users each board the same company — and it must
-         * not name it, or the guard becomes a way to read somebody else's
-         * client list one PAN at a time.
+         * Unlike the PAN guard it replaced, which named its match when the
+         * caller's scope could already see it. The code is a value the caller
+         * has just typed, so confirming it is taken discloses nothing — while
+         * naming the holder would disclose a row outside their scope.
          */
         @Test
-        @DisplayName("a match outside the caller's scope still refuses, without naming the client")
-        void refusedWithoutNaming() {
-            byte[] index = new byte[32];
-            when(pan.seal("ABCDE1234F")).thenReturn(new PanService.SealedPan(new byte[]{1}, index));
-            when(clients.findByPanBlindIndex(index))
-                    .thenReturn(Optional.of(existing("Somebody Else's Client", 999L)));
+        @DisplayName("the client already holding the code is never named")
+        void doesNotNameTheHolder() {
+            when(clients.findByClientCode("ACM-001"))
+                    .thenReturn(Optional.of(existing("Confidential Trust", 999L)));
 
-            assertThatThrownBy(() -> service.create(SALES, CALLER, requestWithPan("ABCDE1234F")))
-                    .isInstanceOf(DuplicateClientPanException.class)
-                    .satisfies(e -> {
-                        assertThat(((DuplicateClientPanException) e).existingName()).isNull();
-                        assertThat(e).hasMessageNotContaining("Somebody Else");
-                    });
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER, request()))
+                    .isInstanceOf(ObClientValidationException.class)
+                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors()
+                            .get("clientCode")).doesNotContain("Confidential Trust"));
         }
 
-        /** No PAN, no guard, and above all no blind index computed over a blank. */
         @Test
-        @DisplayName("a client boarded without a PAN is boarded")
-        void noPanNoGuard() {
-            service.create(ADMIN, CALLER, request());
-            verify(clients, never()).findByPanBlindIndex(any());
+        @DisplayName("a missing code is refused before anything is written")
+        void codeIsRequired() {
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER,
+                    new ObClientDtos.ObClientCreateRequest("Acme", "   ", null, null, false)))
+                    .isInstanceOf(ObClientValidationException.class)
+                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
+                            .containsKey("clientCode"));
+            verify(clients, never()).saveAndFlush(any());
         }
     }
 
@@ -327,13 +248,9 @@ class ObClientWriteServiceTest {
             when(reads.namesContaining(anyString(), org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(List.of(new ObClientReadRepository.NameRow(4L, "Acme Private Limited", CALLER)));
 
-            ObClientDtos.ObClientCreateRequest acknowledged = new ObClientDtos.ObClientCreateRequest(
-                    "Acme Pvt Ltd", null, BOARDED, null, null, null, null,
-                    List.of(contact("spoc@example.com", true)),
-                    List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                    null, false, true);
+            service.create(ADMIN, CALLER, new ObClientDtos.ObClientCreateRequest(
+                    "Acme Pvt Ltd", "ACM-001", null, null, true));
 
-            service.create(ADMIN, CALLER, acknowledged);
             verify(clients).saveAndFlush(any());
         }
 
@@ -360,76 +277,27 @@ class ObClientWriteServiceTest {
             service.create(ADMIN, CALLER, named("Acme Pvt Ltd"));
             verify(clients).saveAndFlush(any());
         }
-    }
 
-    @Test
-    @DisplayName("every product without a published template is named at once, not one per submission")
-    void productsWithoutTemplates() {
-        when(children.sellableProductIds(any())).thenReturn(Set.of(1L, 2L));
-        when(children.productIdsWithActiveTemplate(any())).thenReturn(Set.of());
-
-        ObClientDtos.ObClientCreateRequest two = new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, null, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null),
-                        new ObClientDtos.ObApplicationWriteRequest(2L, null, null, null, null)),
-                null, false, false);
-
-        assertThatThrownBy(() -> service.create(ADMIN, CALLER, two))
-                .isInstanceOf(ProductWithoutTemplateException.class)
-                .satisfies(e -> assertThat(((ProductWithoutTemplateException) e).productIds())
-                        .containsExactly(1L, 2L));
-        verify(clients, never()).saveAndFlush(any());
-    }
-
-    /** One journey per purchased product, and the purchases written before them. */
-    @Test
-    @DisplayName("a locked journey is instantiated for every purchased product")
-    void oneJourneyPerProduct() {
-        when(children.sellableProductIds(any())).thenReturn(Set.of(1L, 2L));
-        when(children.productIdsWithActiveTemplate(any())).thenReturn(Set.of(1L, 2L));
-
-        ObClientDtos.ObClientCreateRequest two = new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, null, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null),
-                        new ObClientDtos.ObApplicationWriteRequest(2L, null, null, null, null)),
-                null, false, false);
-
-        service.create(ADMIN, CALLER, two);
-
-        verify(children).insertApplications(anyLong(), any());
-        verify(journeys).instantiate(42L, 1L);
-        verify(journeys).instantiate(42L, 2L);
-    }
-
-    // ── B-109 · the prerequisites instance ──────────────────────────────────
-
-    @Nested
-    @DisplayName("the prerequisites checklist")
-    class Prerequisites {
-
+        /**
+         * The code guard runs first, and that ordering is deliberate: a
+         * duplicate code is final, so warning about a similar name and then
+         * refusing the code anyway would cost the user two round trips to be
+         * told the one thing that was always going to stop them.
+         */
         @Test
-        @DisplayName("nothing published on OB-14 boards no client at all")
-        void noActiveMasterBoardsNothing() {
-            when(prereqs.hasActivePrereqMaster()).thenReturn(false);
+        @DisplayName("a duplicate code is reported even when the name is also similar")
+        void codeBeatsName() {
+            when(clients.findByClientCode("ACM-001"))
+                    .thenReturn(Optional.of(existing("Acme Private Limited", CALLER)));
+            when(reads.namesContaining(anyString(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of(new ObClientReadRepository.NameRow(4L, "Acme Private Limited", CALLER)));
 
-            assertThatThrownBy(() -> service.create(ADMIN, CALLER, request()))
-                    .isInstanceOf(NoPublishedPrerequisitesException.class);
-            verify(clients, never()).saveAndFlush(any());
-            verify(prereqs, never()).instantiate(anyLong());
-        }
-
-        @Test
-        @DisplayName("the new client is snapshotted onto the active master, inside the same create")
-        void snapshotsTheActiveMaster() {
-            service.create(ADMIN, CALLER, request());
-
-            verify(prereqs).instantiate(42L);
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER, named("Acme Pvt Ltd")))
+                    .isInstanceOf(ObClientValidationException.class);
         }
     }
 
-    // ── the edit ────────────────────────────────────────────────────────────
+    // ── editing ─────────────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("editing")
@@ -497,6 +365,7 @@ class ObClientWriteServiceTest {
         void absentFieldsAreNotCleared() {
             ObClient client = existing("Acme", CALLER);
             client.setAddress("12 Old Road");
+            client.setCity("Pune");
             when(clients.findById(5L)).thenReturn(Optional.of(client));
 
             ObClientUpdateRequest onlyName = new ObClientUpdateRequest();
@@ -504,6 +373,7 @@ class ObClientWriteServiceTest {
             service.update(ADMIN, 5L, onlyName);
 
             assertThat(client.getAddress()).isEqualTo("12 Old Road");
+            assertThat(client.getCity()).isEqualTo("Pune");
             assertThat(client.getName()).isEqualTo("Acme Renamed");
         }
 
@@ -520,44 +390,261 @@ class ObClientWriteServiceTest {
 
             assertThat(client.getAddress()).isNull();
         }
+
+        @Test
+        @DisplayName("the code is correctable, unlike the PAN it replaced")
+        void codeIsEditable() {
+            ObClient client = existing("Acme", CALLER);
+            client.setClientCode("ACM-001");
+            when(clients.findById(5L)).thenReturn(Optional.of(client));
+
+            ObClientUpdateRequest request = new ObClientUpdateRequest();
+            request.setClientCode("ACM-002");
+            service.update(ADMIN, 5L, request);
+
+            assertThat(client.getClientCode()).isEqualTo("ACM-002");
+        }
+
+        /**
+         * A client that has a code must not be able to lose it by clearing a
+         * field — the whole point of the column is that every client added from
+         * here on has one.
+         */
+        @Test
+        @DisplayName("the code cannot be cleared")
+        void codeIsNotClearable() {
+            when(clients.findById(5L)).thenReturn(Optional.of(existing("Acme", CALLER)));
+
+            ObClientUpdateRequest request = new ObClientUpdateRequest();
+            request.setClientCode(null);
+
+            assertThatThrownBy(() -> service.update(ADMIN, 5L, request))
+                    .isInstanceOf(ObClientValidationException.class)
+                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
+                            .containsKey("clientCode"));
+        }
+
+        /**
+         * Re-saving an unchanged form must not be a conflict with the client's
+         * own row, which is what the identity filter on the uniqueness check
+         * buys.
+         */
+        @Test
+        @DisplayName("re-saving the same code is not a conflict with itself")
+        void ownCodeIsNotADuplicate() {
+            ObClient client = saved(existing("Acme", CALLER), 5L);
+            client.setClientCode("ACM-001");
+            when(clients.findById(5L)).thenReturn(Optional.of(client));
+            when(clients.findByClientCode("ACM-001")).thenReturn(Optional.of(client));
+
+            ObClientUpdateRequest request = new ObClientUpdateRequest();
+            request.setClientCode("ACM-001");
+            service.update(ADMIN, 5L, request);
+
+            assertThat(client.getClientCode()).isEqualTo("ACM-001");
+        }
+
+        @Test
+        @DisplayName("another client's code is refused")
+        void othersCodeIsADuplicate() {
+            ObClient client = saved(existing("Acme", CALLER), 5L);
+            when(clients.findById(5L)).thenReturn(Optional.of(client));
+            when(clients.findByClientCode("OTH-001"))
+                    .thenReturn(Optional.of(saved(existing("Other", CALLER), 9L)));
+
+            ObClientUpdateRequest request = new ObClientUpdateRequest();
+            request.setClientCode("OTH-001");
+
+            assertThatThrownBy(() -> service.update(ADMIN, 5L, request))
+                    .isInstanceOf(ObClientValidationException.class)
+                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
+                            .containsKey("clientCode"));
+        }
+    }
+
+    // ── deleting ────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("deleting")
+    class Deleting {
+
+        @Test
+        @DisplayName("a client nothing depends on is deleted")
+        void deletesWhenNothingDependsOnIt() {
+            service.delete(ADMIN, 5L);
+            verify(clients).deleteById(5L);
+        }
+
+        /**
+         * The refusal is what this method mostly exists to produce. Sixteen
+         * tables carry {@code ob_client_id} and two of them are hash-chained,
+         * so a delete that got past the guard would destroy an audit trail and
+         * report nothing.
+         */
+        @Test
+        @DisplayName("a client with anything depending on it is refused, and told what")
+        void refusesWhenSomethingDependsOnIt() {
+            when(deletionGuard.blockersFor(5L)).thenReturn(List.of("projects", "a client portal login"));
+
+            assertThatThrownBy(() -> service.delete(ADMIN, 5L))
+                    .isInstanceOf(ObClientInUseException.class)
+                    .satisfies(e -> assertThat(((ObClientInUseException) e).blockers())
+                            .containsExactly("projects", "a client portal login"));
+            verify(clients, never()).deleteById(anyLong());
+        }
+
+        /**
+         * 404 first, and the guard is never consulted — a caller who cannot see
+         * this client must not learn from the refusal that it exists and has
+         * projects.
+         */
+        @Test
+        @DisplayName("a client out of scope is 404 before the guard is asked anything")
+        void outOfScopeIs404() {
+            when(details.findDetail(any(), anyLong())).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.delete(SALES, 5L))
+                    .isInstanceOf(ObClientNotFoundException.class);
+            verifyNoInteractions(deletionGuard);
+        }
+
+        @Test
+        @DisplayName("a Viewer who can see the client is refused with 403, not 404")
+        void viewerIsForbiddenNotHidden() {
+            assertThatThrownBy(() -> service.delete(VIEWER, 5L))
+                    .isInstanceOf(ObClientReadOnlyException.class);
+            verify(clients, never()).deleteById(anyLong());
+        }
+    }
+
+    // ── the portal login the add dialog can issue ───────────────────────────
+
+    @Nested
+    @DisplayName("creating the portal login")
+    class PortalLogin {
+
+        @Test
+        @DisplayName("the box unticked issues nothing, and asks for no contact")
+        void untickedIssuesNothing() {
+            service.create(ADMIN, CALLER, request());
+
+            verifyNoInteractions(portalLogins);
+            verifyNoInteractions(contacts);
+        }
+
+        /**
+         * The SPOC before the login, which is the ordering the whole feature
+         * rests on: {@code ClientAccountAdminService} reads the active primary
+         * to build the username and to address the credential mail, and refuses
+         * outright when there is none.
+         */
+        @Test
+        @DisplayName("the box ticked adds the primary SPOC first, then issues the login")
+        void tickedAddsTheSpocThenTheLogin() {
+            when(portalLogins.issueFor(any(), anyLong(), any()))
+                    .thenReturn(new ObClientPortalLoginIssuer.IssuedLogin("ACME.arjun", "Demo-Passw0rd!"));
+
+            ObClientWriteService.Created created = service.create(ADMIN, CALLER, withLogin());
+
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(contacts, portalLogins);
+            order.verify(contacts).add(eq(ADMIN), eq(CALLER), eq(42L), any());
+            order.verify(portalLogins).issueFor(ADMIN, 42L, CALLER);
+
+            assertThat(created.login().username()).isEqualTo("ACME.arjun");
+            assertThat(created.login().password()).isEqualTo("Demo-Passw0rd!");
+        }
+
+        /**
+         * Primary and active are the service's to decide — see
+         * {@code addPrimaryContactFor}. A SPOC created any other way is a
+         * combination that fails one line later.
+         */
+        @Test
+        @DisplayName("the SPOC is created primary and active, with consent withheld")
+        void theSpocIsPrimaryActiveAndUnconsented() {
+            service.create(ADMIN, CALLER, withLogin());
+
+            org.mockito.ArgumentCaptor<ObContactDtos.ObContactUpsertRequest> captor =
+                    org.mockito.ArgumentCaptor.forClass(ObContactDtos.ObContactUpsertRequest.class);
+            verify(contacts).add(any(), anyLong(), anyLong(), captor.capture());
+
+            ObContactDtos.ObContactUpsertRequest spoc = captor.getValue();
+            assertThat(spoc.name()).isEqualTo("Arjun Singh");
+            assertThat(spoc.email()).isEqualTo("arjun@acme.example");
+            assertThat(spoc.primary()).isTrue();
+            assertThat(spoc.activeOr(false)).isTrue();
+            assertThat(spoc.optedIn()).isFalse();
+        }
+
+        @Test
+        @DisplayName("the contact's name and email are trimmed on the way in")
+        void contactIsTrimmed() {
+            service.create(ADMIN, CALLER, new ObClientDtos.ObClientCreateRequest(
+                    "Acme", "ACM-001", null, null, false,
+                    true, "  Arjun Singh  ", "  arjun@acme.example  "));
+
+            org.mockito.ArgumentCaptor<ObContactDtos.ObContactUpsertRequest> captor =
+                    org.mockito.ArgumentCaptor.forClass(ObContactDtos.ObContactUpsertRequest.class);
+            verify(contacts).add(any(), anyLong(), anyLong(), captor.capture());
+
+            assertThat(captor.getValue().name()).isEqualTo("Arjun Singh");
+            assertThat(captor.getValue().email()).isEqualTo("arjun@acme.example");
+        }
+
+        /**
+         * Both fields at once, on {@link ObClientValidationException}'s own
+         * rule: a form with two things wrong is returned once, not twice.
+         */
+        @Test
+        @DisplayName("ticking the box without a contact names both missing fields, and writes nothing")
+        void aLoginWithoutAContactIsRefused() {
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER,
+                    new ObClientDtos.ObClientCreateRequest(
+                            "Acme", "ACM-001", null, null, false, true, null, null)))
+                    .isInstanceOf(ObClientValidationException.class)
+                    .satisfies(e -> assertThat(((ObClientValidationException) e).errors())
+                            .containsOnlyKeys("contactName", "contactEmail"));
+
+            verify(clients, never()).saveAndFlush(any());
+            verifyNoInteractions(portalLogins);
+        }
+
+        /**
+         * The refusal the whole transaction exists for. B-102 refused
+         * {@code createPortalLogin: true} outright rather than ignore it,
+         * because "a boarder ticks the box, sees a 201, tells the client their
+         * credentials are coming, and nothing was ever sent". Honouring the
+         * flag brings that failure back unless the client goes with it.
+         */
+        @Test
+        @DisplayName("a login that cannot be issued takes the client with it")
+        void aFailedLoginDoesNotLeaveAClientBehind() {
+            when(portalLogins.issueFor(any(), anyLong(), any()))
+                    .thenThrow(new IllegalStateException("no free portal username"));
+
+            assertThatThrownBy(() -> service.create(ADMIN, CALLER, withLogin()))
+                    .isInstanceOf(IllegalStateException.class);
+        }
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────
 
-    private static ObClientDtos.ObContactWriteRequest contact(String email, boolean primary) {
-        return new ObClientDtos.ObContactWriteRequest("SPOC", null, email, null, false, null, primary);
-    }
-
     private static ObClientDtos.ObClientCreateRequest request() {
-        return request(List.of(contact("spoc@example.com", true)));
+        return new ObClientDtos.ObClientCreateRequest("Acme", "ACM-001", null, null, false);
     }
 
-    private static ObClientDtos.ObClientCreateRequest request(
-            List<ObClientDtos.ObContactWriteRequest> contacts) {
+    private static ObClientDtos.ObClientCreateRequest withLogin() {
         return new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, null, null, null, null, contacts,
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, false, false);
+                "Acme", "ACM-001", null, null, false,
+                true, "Arjun Singh", "arjun@acme.example");
     }
 
     private static ObClientDtos.ObClientCreateRequest named(String name) {
-        return new ObClientDtos.ObClientCreateRequest(
-                name, null, BOARDED, null, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, false, false);
-    }
-
-    private static ObClientDtos.ObClientCreateRequest requestWithPan(String pan) {
-        return new ObClientDtos.ObClientCreateRequest(
-                "Acme", null, BOARDED, pan, null, null, null,
-                List.of(contact("spoc@example.com", true)),
-                List.of(new ObClientDtos.ObApplicationWriteRequest(1L, null, null, null, null)),
-                null, false, false);
+        return new ObClientDtos.ObClientCreateRequest(name, "ACM-001", null, null, false);
     }
 
     private static ObClient existing(String name, long createdBy) {
-        return new ObClient(name, BOARDED, createdBy);
+        return new ObClient(name, TODAY, createdBy);
     }
 
     /**
@@ -583,9 +670,9 @@ class ObClientWriteServiceTest {
 
     private static ObClientDtos.ObClientDetail detailStub() {
         return new ObClientDtos.ObClientDetail(
-                42L, "Acme", BOARDED, "ONBOARDING", null, "LOCKED", 1, 0,
+                42L, "Acme", "ACM-001", "Pune", null, TODAY, "ONBOARDING", null, "LOCKED", 0, 0,
                 null, List.of(), null, null, null, null, false,
-                null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), null, null, null);
+                null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), null, Instant.EPOCH, null);
     }
 }
