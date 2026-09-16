@@ -1260,7 +1260,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        ObJourneyStepItem answered = service.answerItem(1L, OWNER, true);
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, true, null);
 
         assertThat(answered.getAnswer()).isTrue();
         assertThat(answered.getAnsweredBy()).isEqualTo(OWNER);
@@ -1280,7 +1280,7 @@ class ObJourneyStepLifecycleServiceTest {
         item.setAnsweredBy(OWNER);
         when(stepItems.findById(1L)).thenReturn(Optional.of(item));
 
-        ObJourneyStepItem answered = service.answerItem(1L, OWNER, false);
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, null, null);
 
         assertThat(answered.getAnswer()).isNull();
         assertThat(answered.getAnsweredBy()).isNull();
@@ -1298,7 +1298,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        assertThatThrownBy(() -> service.answerItem(1L, STRANGER, true))
+        assertThatThrownBy(() -> service.answerItem(1L, STRANGER, true, null))
                 .isInstanceOf(NotStepOwnerException.class);
     }
 
@@ -1309,7 +1309,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        assertThat(service.answerItem(1L, BACKUP_OWNER, true).getAnswer()).isTrue();
+        assertThat(service.answerItem(1L, BACKUP_OWNER, true, null).getAnswer()).isTrue();
     }
 
     /**
@@ -1323,7 +1323,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, Boolean.TRUE, "Signed agreement received")));
 
-        assertThatThrownBy(() -> service.answerItem(1L, OWNER, false))
+        assertThatThrownBy(() -> service.answerItem(1L, OWNER, false, "Not received after all"))
                 .isInstanceOf(StepAlreadyTerminalException.class);
     }
 
@@ -1331,8 +1331,23 @@ class ObJourneyStepLifecycleServiceTest {
     void answeringAnItemThatDoesNotExistIsNotFound() {
         when(stepItems.findById(404L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.answerItem(404L, OWNER, true))
+        assertThatThrownBy(() -> service.answerItem(404L, OWNER, true, null))
                 .isInstanceOf(JourneyStepItemNotFoundException.class);
+    }
+
+    /**
+     * Answering No without saying why is refused here, before
+     * {@code ck_ob_journey_step_items_remark} could turn it into a 500 naming
+     * a database object. A blank remark is no remark.
+     */
+    @Test
+    void answeringNoWithoutARemarkIsRefused() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        assertThatThrownBy(() -> service.answerItem(1L, OWNER, false, "  "))
+                .isInstanceOf(StepItemRemarkRequiredException.class);
     }
 
     /**
