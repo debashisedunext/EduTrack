@@ -116,7 +116,7 @@ describe('Sidebar · onboarding module', () => {
   it('swaps to the onboarding navigation on an onboarding route', () => {
     renderSidebarAs(OB_ADMIN, '/onboarding/dashboard')
 
-    for (const label of ['Dashboard', 'Clients', 'New client', 'Reports', 'TAT & escalation']) {
+    for (const label of ['Dashboard', 'Projects', 'Clients', 'Reports', 'TAT & escalation']) {
       expect(within(obNav()).getByRole('link', { name: label })).toBeInTheDocument()
     }
     // The ticketing entries are gone, not merely pushed down.
@@ -173,13 +173,16 @@ describe('Sidebar · onboarding module', () => {
   })
 
   /**
-   * `NavLink` matches on prefix, so `/onboarding/clients` would light up on the
-   * wizard route too and the rail would show two current pages at once.
+   * `NavLink` matches on prefix, so a nested route under a list lights the list
+   * row and nothing else. The pair used to be `/onboarding/clients` and
+   * `/onboarding/clients/new`; that wizard is gone (adding a client is a dialog
+   * on the list now), so the New project form is the nested route the rail has
+   * to get right.
    */
-  it('marks exactly one row current when the wizard sits under the list', () => {
-    renderSidebarAs(OB_ADMIN, '/onboarding/clients/new')
+  it('marks exactly one row current when the New project form sits under the list', () => {
+    renderSidebarAs(OB_ADMIN, '/onboarding/projects/new')
 
-    expect(within(obNav()).getByRole('link', { name: 'New client' })).toHaveAttribute(
+    expect(within(obNav()).getByRole('link', { name: 'Projects' })).toHaveAttribute(
       'aria-current',
       'page',
     )
