@@ -116,7 +116,7 @@ function clockState(step: ObStep): 'RUNNING' | 'PAUSED' | 'STOPPED' {
   return 'RUNNING';
 }
 
-function stepRag(step: ObStep): 'GREEN' | 'AMBER' | 'RED' | null {
+export function stepRag(step: ObStep): 'GREEN' | 'AMBER' | 'RED' | null {
   if (step.status === 'PENDING' || TERMINAL.includes(step.status)) return null;
   const budget = step.tatDays * 8;
   if (budget <= 0) return 'GREEN';
@@ -125,14 +125,14 @@ function stepRag(step: ObStep): 'GREEN' | 'AMBER' | 'RED' | null {
 }
 
 /** Worst-wins upward (plan §5.9), and null when nothing is running to colour. */
-function journeyRag(journey: ObJourney): 'GREEN' | 'AMBER' | 'RED' | null {
+export function journeyRag(journey: ObJourney): 'GREEN' | 'AMBER' | 'RED' | null {
   if (journey.gateStatus === 'LOCKED') return null;
   const rags = journey.steps.map(stepRag).filter((r): r is 'GREEN' | 'AMBER' | 'RED' => r !== null);
   if (rags.length === 0) return null;
   return rags.includes('RED') ? 'RED' : rags.includes('AMBER') ? 'AMBER' : 'GREEN';
 }
 
-function percentComplete(journey: ObJourney): number {
+export function percentComplete(journey: ObJourney): number {
   if (journey.steps.length === 0) return 0;
   const closed = journey.steps.filter((s) => TERMINAL.includes(s.status)).length;
   return Math.round((closed / journey.steps.length) * 100);

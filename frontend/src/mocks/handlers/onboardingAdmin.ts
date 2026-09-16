@@ -271,7 +271,7 @@ const OB_REPORTS = [
 
 // ── sign-off ────────────────────────────────────────────────────────────────
 
-const contactOf = (db: Db, obClientId: number, contactId: number) =>
+export const contactOf = (db: Db, obClientId: number, contactId: number) =>
   db.obClients.find((c) => c.id === obClientId)?.contacts.find((x) => x.id === contactId) ?? null;
 
 function signoffDto(s: ObSignoffRow, db: Db) {
@@ -326,7 +326,7 @@ function resolveSession(db: Db, token: unknown) {
  * **first and unconditionally**, then the gate is attempted. Reversed, a gate
  * failure would roll back a signature the client already gave us.
  */
-function acceptSignoffRow(db: Db, signoff: ObSignoffRow, userAgent: string) {
+export function acceptSignoffRow(db: Db, signoff: ObSignoffRow, userAgent: string) {
   signoff.status = 'SIGNED';
   signoff.signedByContactId = signoff.sentToContactId;
   signoff.signedAt = new Date().toISOString();
