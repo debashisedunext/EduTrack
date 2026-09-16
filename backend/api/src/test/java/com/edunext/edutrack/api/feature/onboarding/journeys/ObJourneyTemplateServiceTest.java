@@ -1058,7 +1058,7 @@ class ObJourneyTemplateServiceTest {
             assertThatThrownBy(() -> service.removeStep(kickoff.getId()))
                     .isInstanceOf(TemplateNotEditableException.class);
             assertThatThrownBy(() ->
-                    service.updateStep(kickoff.getId(), "Renamed", null, 3, null, null, null, null))
+                    service.updateStep(kickoff.getId(), "Renamed", null, 3, null, null, null, false, false))
                     .isInstanceOf(TemplateNotEditableException.class);
         }
 
