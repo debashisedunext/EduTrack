@@ -4,6 +4,8 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
 import com.edunext.edutrack.domain.onboarding.ObRag;
+import com.edunext.edutrack.domain.onboarding.ObStepReviewState;
+import com.edunext.edutrack.domain.onboarding.ObStepRowState;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -98,7 +100,14 @@ final class ObJourneyStepLifecycleDtos {
 
         static ObStepClockState of(ObJourneyStepStatus status) {
             return switch (status) {
-                case WAITING_ON_CLIENT -> PAUSED;
+                /*
+                  Both pause the TAT clock, and PENDING_REVIEW pauses it with
+                  the same PAUSED event WAITING_ON_CLIENT writes — see
+                  ObJourneyStepStatus.PENDING_REVIEW. The two are one case here
+                  because a client and a manager are the same thing to a clock:
+                  somebody who is not the implementor, holding the work.
+                */
+                case WAITING_ON_CLIENT, PENDING_REVIEW -> PAUSED;
                 case DONE, SKIPPED -> STOPPED;
                 case PENDING, IN_PROGRESS, BLOCKED -> RUNNING;
             };
@@ -121,15 +130,98 @@ final class ObJourneyStepLifecycleDtos {
      * True" instead would show an item as outstanding that the server is
      * perfectly willing to complete over.
      *
+     * <p><b>{@code reviewState} is the second ledger on the row</b> —
+     * {@code V20260916_1700}'s manager review gate. {@code answer} is what
+     * the implementor claims, {@code reviewState} is whether an OB Manager
+     * accepted it, and they are separate fields for the same reason they are
+     * separate columns: one field would mean the verdict overwrites the claim
+     * it is judging.
+     *
      * @param isDone answered, either way — {@code answer != null}.
      * @param answer the three states the column actually holds: True, False,
      *               and null for not yet answered.
-     * @param remark why, on a False. Mandatory there, absent otherwise.
+     * @param remark why. The implementor's note while the row is theirs —
+     *               optional on either answer, PLAN.md §4 D-17 — and the
+     *               manager's reason once they have rejected it, where it is
+     *               mandatory. One field, two authors; see the migration
+     *               header for why there is no second column.
+     * @param reviewState {@code NOT_REVIEWED}, {@code VERIFIED} or {@code
+     *               REJECTED}. Never null, unlike {@code answer}: a row
+     *               always has a verdict position, even if it is "none yet".
+     * @param reviewedAt when the verdict was recorded, null while none is.
+     * @param reviewedBy who recorded it. Id only, like {@code doneBy} — no
+     *               route on this tree resolves display names.
+     * @param reviewLocked the row was verified by a review that has already
+     *               <b>closed</b>, and is shut to everybody: the implementor
+     *               may not revise an accepted answer, and the reviewer is not
+     *               shown it again.
+     *
+     *               <p>Computed here rather than derived by each client from
+     *               {@code reviewState}, because "verified" and "locked" are
+     *               not the same moment. A verdict recorded against the current
+     *               submission is still the reviewer's to change — that is what
+     *               makes the three-state control usable — and only a review
+     *               that has ended makes it permanent. A screen that read
+     *               {@code reviewState == VERIFIED} as "locked" would disable
+     *               the control on the press that set it.
      */
     record ObJourneyStepItem(
             Long id, Long stepId, int sequence, String label,
             boolean isMandatory, boolean isDone, Boolean answer, String remark,
-            Instant doneAt, UserRef doneBy) {
+            Instant doneAt, UserRef doneBy,
+            ObStepReviewState reviewState, Instant reviewedAt, UserRef reviewedBy,
+            boolean reviewLocked,
+            ObStepRowState rowState, Instant submittedAt, UserRef submittedBy,
+            Instant outcomeSeenAt, boolean unseenOutcome) {
+    }
+
+    /**
+     * Ask for one row to be looked at — the body-less
+     * {@code POST /onboarding/journey-step-items/{itemId}/submit}.
+     *
+     * <p>No request record, because there is nothing to say: the row already
+     * carries its answer and its remark, and this is the act of handing it
+     * over. A body would invite a client to change the answer in the same
+     * call, which is exactly the write the reviewer's verdict has to be able
+     * to trust did not happen after they read it.
+     */
+    record ObStepItemSendResponse(ObJourneyStepItem data) {
+    }
+
+    /**
+     * How many outcomes this press cleared —
+     * {@code POST /onboarding/journey-steps/{stepId}/outcomes-seen}.
+     *
+     * <p>A count rather than {@code 204}, so a client can tell "there were
+     * three and now there are none" from "there was nothing to clear" without
+     * re-reading the task.
+     */
+    record ObStepOutcomesSeenResponse(ObStepOutcomesSeen data) {
+    }
+
+    record ObStepOutcomesSeen(long stepId, int cleared) {
+    }
+
+    /**
+     * The manager's verdict on one row — the body of
+     * {@code PATCH /onboarding/journey-step-items/{itemId}/review}.
+     *
+     * <p>{@code state} is mandatory and {@code NOT_REVIEWED} is a legitimate
+     * value: it is how a manager takes back a mark pressed by mistake. A
+     * nullable field meaning the same thing would make "clear this verdict"
+     * indistinguishable from "leave it alone", which is the distinction
+     * {@code ObJourneyStepUpdateRequest} needs {@link JsonNullable} for — not
+     * needed here, because every call states a position.
+     *
+     * <p>{@code remark} is the reason, and the service refuses a {@code
+     * REJECTED} without one. It is ignored on the other two states rather
+     * than rejected as a bad request: a client that sends the box's contents
+     * along with every verdict is doing something reasonable, and silently
+     * not writing it is kinder than a 400 it cannot act on.
+     */
+    record ObStepItemReviewRequest(
+            @NotNull ObStepReviewState state,
+            @Size(max = 500) String remark) {
     }
 
     /**
@@ -178,6 +270,13 @@ final class ObJourneyStepLifecycleDtos {
      * <p>{@link #clockState}, similarly, is a pure function of {@code
      * status} (see {@link ObStepClockState#of}) computed inline, since it
      * needs no collaborator at all.
+     *
+     * <p><b>{@code ownerIsInherited} is false on every route but the journey
+     * read.</b> Only that read knows the project, and only it resolves an
+     * ownerless task onto the project's implementor — see
+     * {@link #withInheritedOwner}. A transition's response reports the owner
+     * the row actually carries, which is what a caller who just changed that
+     * row is asking about.
      */
     record ObJourneyStepDetail(
             Long id, Long journeyId, int sequence, String name, ObJourneyStepStatus status,
@@ -189,7 +288,8 @@ final class ObJourneyStepLifecycleDtos {
             String skipReason, Long skippedByUserId,
             List<ObJourneyStepItem> items, List<ObJourneyStepDoc> docs,
             Long effectiveOwnerUserId,
-            Long stageKey, String stageName, Double tatUsedPercent) {
+            Long stageKey, String stageName, Double tatUsedPercent,
+            boolean ownerIsInherited) {
 
         /**
          * The same step, told which implementation stage it belongs to.
@@ -223,7 +323,8 @@ final class ObJourneyStepLifecycleDtos {
                     tatDays, requiresSignoff, dependsOnStepId,
                     skipReason, skippedByUserId,
                     items, docs, effectiveOwnerUserId,
-                    stageKey, stageName, tatUsedPercent);
+                    stageKey, stageName, tatUsedPercent,
+                    ownerIsInherited);
         }
 
         /**
@@ -244,7 +345,8 @@ final class ObJourneyStepLifecycleDtos {
                     tatDays, requiresSignoff, dependsOnStepId,
                     skipReason, skippedByUserId,
                     items, docs, effectiveOwnerUserId,
-                    stageKey, stageName, percent);
+                    stageKey, stageName, percent,
+                    ownerIsInherited);
         }
 
         /**
@@ -279,7 +381,34 @@ final class ObJourneyStepLifecycleDtos {
                     s.getTatDays(), s.isRequiresSignoff(), s.getDependsOnStepId(),
                     s.getSkipReason(), s.getSkippedBy(),
                     items, docs, effectiveOwnerUserId,
-                    null, null, null);
+                    null, null, null,
+                    false);
+        }
+
+        /**
+         * The same task, told that its owner was inherited from the project.
+         *
+         * <p>A third copy method, on {@link #withStage}'s reasoning exactly:
+         * only the journey read knows the project, and the five transitions
+         * would each have to look one up to fill in an argument their callers
+         * never read. Their responses report the owner the row actually
+         * carries, which is the honest answer for a transition.
+         *
+         * @param ownerUserId the resolved owner — the project's implementor.
+         * @see ObJourneyReadService#detail
+         */
+        ObJourneyStepDetail withInheritedOwner(Long ownerUserId) {
+            return new ObJourneyStepDetail(
+                    id, journeyId, sequence, name, status,
+                    ownerUserId, backupOwnerUserId,
+                    blockedReasonCode, blockedNote,
+                    startedAt, finishedAt, dueAt,
+                    description, clockState, rag,
+                    tatDays, requiresSignoff, dependsOnStepId,
+                    skipReason, skippedByUserId,
+                    items, docs, ownerUserId,
+                    stageKey, stageName, tatUsedPercent,
+                    true);
         }
     }
 
@@ -313,8 +442,8 @@ final class ObJourneyStepLifecycleDtos {
      * @param answer {@code true}, {@code false}, or {@code null} to clear back
      *               to unanswered. Deliberately <b>not</b> {@code @NotNull}:
      *               null is a meaningful value here, not a missing one.
-     * @param remark required when {@code answer} is false — see
-     *               {@link StepItemRemarkRequiredException}.
+     * @param remark why, where there is a why. Optional on either answer
+     *               since PLAN.md §4, D-17 — it was compulsory on a false.
      */
     record ObJourneyStepItemUpdateRequest(Boolean answer, @Size(max = 500) String remark) {
     }

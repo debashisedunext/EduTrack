@@ -27,7 +27,7 @@ function renderPanel() {
   )
 }
 
-/** MSW adds latency and the suite is heavily parallel — `ObClientDetailPage.test.tsx`'s convention. */
+/** MSW adds latency and the suite is heavily parallel — `ObClientProductPage.test.tsx`'s convention. */
 const SLOW = { timeout: 5000 }
 
 /**

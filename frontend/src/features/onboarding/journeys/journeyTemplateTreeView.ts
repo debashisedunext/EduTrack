@@ -56,7 +56,7 @@ import type { ObJourneyTemplateStep } from '@/api/generated/model/obJourneyTempl
 export type TreeLevel = 'stage' | 'task' | 'subtask'
 
 export const TREE_LEVELS: readonly { value: TreeLevel; label: string; hint: string }[] = [
-  { value: 'stage', label: 'Stage', hint: 'Stages only' },
+  { value: 'stage', label: 'Step', hint: 'Steps only' },
   { value: 'task', label: 'Task', hint: 'Every task, at every depth' },
   /*
     The value stays `subtask` — it is the stored view state and the key half
@@ -147,14 +147,18 @@ export function stepAndTaskCounts(tasks: readonly ObJourneyTemplateStep[]): {
   return { steps, tasks: tasks.length - steps }
 }
 
-/** `1 step · 1 task`, or the empty-stage wording when there is nothing in it. */
+/**
+ * `3 tasks`, or the empty-step wording when there is nothing in it.
+ *
+ * <p>One count, not two. The container is captioned **Step** on the screen,
+ * so the chip can no longer say "1 step · 1 task" about the cards inside it
+ * without using the word for two different things. The parallel-vs-held
+ * split {@link stepAndTaskCounts} still makes is drawn on the cards
+ * themselves — filled disc and the Parallel chip — rather than counted here.
+ */
 export function countsLabel(tasks: readonly ObJourneyTemplateStep[]): string {
-  const { steps, tasks: dependent } = stepAndTaskCounts(tasks)
-  if (steps === 0 && dependent === 0) return 'No tasks yet'
-  const parts: string[] = []
-  if (steps > 0) parts.push(`${steps} step${steps === 1 ? '' : 's'}`)
-  if (dependent > 0) parts.push(`${dependent} task${dependent === 1 ? '' : 's'}`)
-  return parts.join(' · ')
+  if (tasks.length === 0) return 'No tasks yet'
+  return `${tasks.length} task${tasks.length === 1 ? '' : 's'}`
 }
 
 /**

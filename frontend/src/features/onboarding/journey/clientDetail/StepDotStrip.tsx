@@ -48,7 +48,7 @@ export interface StepDotStripProps {
    * component (see the class docstring) and already renders its own
    * escalation state inline per row, so it never passes this prop. OB-05
    * passes it from its own `GET /onboarding/client-escalations` read — see
-   * `ObClientDetailPage`'s own note on why that is a second call rather than
+   * `ObClientProductPage`'s own note on why that is a second call rather than
    * a field on `ObStepDot` itself.
    */
   openEscalationStepIds?: ReadonlySet<number>

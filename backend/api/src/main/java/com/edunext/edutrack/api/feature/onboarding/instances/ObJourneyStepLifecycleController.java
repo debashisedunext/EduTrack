@@ -3,6 +3,9 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStep;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepItem;
 import com.edunext.edutrack.domain.onboarding.ObRag;
+import com.edunext.edutrack.domain.onboarding.ObJourneyStepStatus;
+import com.edunext.edutrack.domain.onboarding.ObStepReviewState;
+import com.edunext.edutrack.domain.onboarding.ObStepRowState;
 import com.edunext.edutrack.domain.onboarding.ObJourneyStepRagService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -141,6 +144,52 @@ class ObJourneyStepLifecycleController {
         return ObJourneyStepLifecycleDtos.ObJourneyStepResponse.of(step);
     }
 
+    @PostMapping(value = "/{stepId}/review/complete", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "closeObJourneyStepReview",
+            summary = "Close a review as accepted (manager review gate)",
+            description = """
+                    `PENDING_REVIEW` → `DONE`, once every check-list row is `VERIFIED`.
+
+                    **The reviewer's deliberate press, and the only way an accepted review \
+                    closes.** A rejection needs no equivalent — pressing Rejected and typing \
+                    a reason is already explicit, and the task returns on its own. Accepting \
+                    is one press of a button whose next position is also one press away, so \
+                    closing on the verdict itself would lock the row and release this task's \
+                    dependants before the reviewer could change their mind.
+
+                    **OB Manager named on the project, or OB Admin.** Anybody else answers \
+                    `403` `step-moderator-required`; a caller with no onboarding role answers \
+                    `404`. `422` (`ObCompletionGateProblem`) while any row is still \
+                    unreviewed or one has been rejected — a rejected task is already on its \
+                    way back and has nothing to close.""")
+    ObJourneyStepLifecycleDtos.ObJourneyStepResponse closeReview(
+            Authentication caller, @PathVariable long stepId) {
+        ObJourneyStep step = service.closeReview(stepId, CallerIdentityAccess.requireUserId(caller),
+                CallerIdentityAccess.onboardingModuleRole(caller));
+        return ObJourneyStepLifecycleDtos.ObJourneyStepResponse.of(step);
+    }
+
+    /**
+     * "I have seen what came back" — the read receipt behind the signal.
+     *
+     * <p>Not a transition and not idempotency-sensitive: the client calls it
+     * whenever the owner opens the task, and a task with nothing new answers
+     * zero having written nothing.
+     */
+    @PostMapping(value = "/{stepId}/outcomes-seen", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "markObJourneyStepOutcomesSeen",
+            summary = "Mark this task's review outcomes as read",
+            description = """
+                    Stamps every approved or returned row of this task that its owner has                     not yet looked at. **The task's owner only** — seen-ness is about the                     person the outcome is addressed to, so a manager or an admin opening                     the task does not mark it read on their behalf.
+
+                    This is what stops "2 rows came back" either shouting for ever or                     forgetting on refresh. Answers how many rows the press cleared; a task                     with nothing new answers `0` and writes nothing.""")
+    ObJourneyStepLifecycleDtos.ObStepOutcomesSeenResponse outcomesSeen(
+            Authentication caller, @PathVariable long stepId) {
+        int cleared = service.markOutcomesSeen(stepId, CallerIdentityAccess.requireUserId(caller));
+        return new ObJourneyStepLifecycleDtos.ObStepOutcomesSeenResponse(
+                new ObJourneyStepLifecycleDtos.ObStepOutcomesSeen(stepId, cleared));
+    }
+
     @PostMapping(value = "/{stepId}/block",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "blockObJourneyStep",
@@ -259,12 +308,12 @@ class ObJourneyStepLifecycleController {
                 // the ETag basis excludes it. See `etagBasis` below.
                 .eTag(etagOf(ObJourneyStepLifecycleDtos.ObJourneyStepDetail.of(step, stepRag, null)))
                 .body(ObJourneyStepLifecycleDtos.ObJourneyStepDetailResponse.of(
-                        step, stepRag, items(checklist), docs(checklist),
+                        step, stepRag, items(step, checklist), docs(checklist),
                         backupOwnerResolver.effectiveOwnerUserId(step)));
     }
 
     private static List<ObJourneyStepLifecycleDtos.ObJourneyStepItem> items(
-            ObJourneyStepLifecycleService.ObStepChecklist checklist) {
+            ObJourneyStep step, ObJourneyStepLifecycleService.ObStepChecklist checklist) {
         return checklist.items().stream().map(entry -> {
             ObJourneyStepItem row = entry.row();
             return new ObJourneyStepLifecycleDtos.ObJourneyStepItem(
@@ -275,7 +324,21 @@ class ObJourneyStepLifecycleController {
                     // controller has never carried; the id is what the schema
                     // asks for elsewhere on this route tree too.
                     row.getAnsweredBy() == null ? null
-                            : new ObJourneyStepLifecycleDtos.UserRef(row.getAnsweredBy(), null));
+                            : new ObJourneyStepLifecycleDtos.UserRef(row.getAnsweredBy(), null),
+                    row.getReviewState(), row.getReviewedAt(),
+                    row.getReviewedBy() == null ? null
+                            : new ObJourneyStepLifecycleDtos.UserRef(row.getReviewedBy(), null),
+                    // Verified by a review that has since closed. Not
+                    // `reviewState == VERIFIED` alone: a verdict recorded on a row
+                    // still out for review is the reviewer's own work and stays
+                    // theirs to cycle. `rowState` is exactly that distinction,
+                    // and it replaced the submittedAt/reviewedAt comparison this
+                    // used to need to make it.
+                    row.getRowState() == ObStepRowState.VERIFIED,
+                    row.getRowState(), row.getSubmittedAt(),
+                    row.getSubmittedBy() == null ? null
+                            : new ObJourneyStepLifecycleDtos.UserRef(row.getSubmittedBy(), null),
+                    row.getOutcomeSeenAt(), row.isUnseenOutcome());
         }).toList();
     }
 

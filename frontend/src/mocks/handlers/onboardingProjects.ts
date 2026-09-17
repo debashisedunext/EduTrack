@@ -1,7 +1,11 @@
 import { http } from 'msw';
 import type { Db, ObClient, ObJourney, ObProjectRow } from '../db';
 import { getDb } from '../db';
-import { noContent, notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
+import {
+  currentUser, noContent, notFound, ok, paginate, problem, url, userRef, validationFailed,
+} from './util';
+import { criticalPathDays } from './onboardingJourneys';
+import { publishedStages, stageOfStep } from './obStageFold';
 
 /**
  * `/onboarding/projects` — the grid, the create, the header and the edit.
@@ -53,34 +57,45 @@ interface StageRollup {
   minActiveSequence: number | null;
 }
 
-function stagesOf(db: Db, project: ObProjectRow): StageRollup[] {
+/**
+ * The stage roll-up over a given set of journeys.
+ *
+ * Called twice: once with every journey of the project, which is the folded
+ * roll-up the header reads, and once per journey for the tree's own branch.
+ * The server does the same thing from one query grouped by journey — see
+ * `STAGE_ROLLUP` — and this mirrors the *result* rather than the SQL, which is
+ * all a caller can tell apart.
+ */
+function stagesOfJourneys(db: Db, journeys: ObJourney[]): StageRollup[] {
   const byKey = new Map<number, StageRollup>();
 
-  for (const journey of journeysOf(db, project)) {
-    const templateSteps = db.obJourneyTemplateSteps.filter((t) => t.templateId === journey.templateId);
+  for (const journey of journeys) {
+    /*
+      Seeded from the template's published stages, so a stage that holds no
+      task still answers with `taskCount: 0`. Driving from the tasks — which
+      this used to do — made a published-but-unscheduled stage indistinguishable
+      from one that does not exist, and the ribbon a different length for every
+      module service.
+    */
+    for (const stage of publishedStages(db, journey)) {
+      if (!byKey.has(stage.key)) {
+        byKey.set(stage.key, {
+          stageKey: stage.key,
+          name: stage.name,
+          sequence: stage.sequence,
+          taskCount: 0,
+          tasksOutstanding: 0,
+          minActiveSequence: null,
+        });
+      }
+    }
+
     for (const step of journey.steps) {
-      /*
-        By id where the fixture carries one, by name otherwise. The clone copies
-        the name, so the fallback is exact for every seeded journey — and a step
-        that matches neither still lands in the `0` bucket below rather than
-        vanishing out of both the numerator and the denominator.
-      */
-      const templateStep =
-        templateSteps.find((t) => t.id === step.templateStepId) ??
-        templateSteps.find((t) => t.name === step.name);
-      const group = db.obJourneyTemplateStages.find((g) => g.id === templateStep?.templateStageId);
-      /*
-        Three fallbacks, and each is a real case the server's COALESCE covers:
-        the implementation stage where there is one, the negated group id for
-        the "Ungrouped" bucket, and 0 for a step whose template row has gone.
-        A step in that last state must still be counted — dropping it would
-        leave a plausible-looking percentage computed over the wrong total.
-      */
-      const stageKey = group?.implementationStageId ?? (group ? -group.id : 0);
-      const existing = byKey.get(stageKey) ?? {
-        stageKey,
-        name: group?.name ?? 'Ungrouped',
-        sequence: group?.sequence ?? 9999,
+      const stage = stageOfStep(db, journey, step);
+      const existing = byKey.get(stage.key) ?? {
+        stageKey: stage.key,
+        name: stage.name,
+        sequence: stage.sequence,
         taskCount: 0,
         tasksOutstanding: 0,
         minActiveSequence: null,
@@ -93,7 +108,7 @@ function stagesOf(db: Db, project: ObProjectRow): StageRollup[] {
             ? step.sequence
             : Math.min(existing.minActiveSequence, step.sequence);
       }
-      byKey.set(stageKey, existing);
+      byKey.set(stage.key, existing);
     }
   }
 
@@ -102,16 +117,96 @@ function stagesOf(db: Db, project: ObProjectRow): StageRollup[] {
   );
 }
 
+/** The whole project's roll-up — every journey folded onto one set of stages. */
+function stagesOf(db: Db, project: ObProjectRow): StageRollup[] {
+  return stagesOfJourneys(db, journeysOf(db, project));
+}
+
+/**
+ * Roll-up rows as the contract's `ObProjectStage`.
+ *
+ * `isCurrent` is resolved within whatever set was passed, which is what makes
+ * this usable for both readings: over the project it names the project's
+ * running stage, and over one journey it names that service's.
+ */
+function stageDtos(stages: StageRollup[]) {
+  const earliestActive = stages
+    .map((s) => s.minActiveSequence)
+    .filter((s): s is number => s != null)
+    .sort((a, b) => a - b)[0];
+
+  return stages.map((s) => ({
+    stageKey: s.stageKey,
+    name: s.name,
+    sequence: s.sequence,
+    taskCount: s.taskCount,
+    tasksOutstanding: s.tasksOutstanding,
+    // An empty stage has nothing outstanding either, so `taskCount > 0` is what
+    // separates "finished" from "never set up".
+    isComplete: s.taskCount > 0 && s.tasksOutstanding === 0,
+    isCurrent: earliestActive != null && s.minActiveSequence === earliestActive,
+  }));
+}
+
 function gateStatusOfProject(db: Db, project: ObProjectRow): 'OPEN' | 'LOCKED' {
   const journeys = journeysOf(db, project);
   return journeys.some((j) => j.gateStatus === 'OPEN') ? 'OPEN' : 'LOCKED';
 }
 
+/**
+ * How long this project **takes**, in working days — `ObProjectTatPath` and
+ * `JourneyTatCalculator` folded together, mirroring the Java exactly.
+ *
+ * <p>It was Σ over every task of every journey, which overstated a project the
+ * moment anything ran alongside anything else: two four-day services waiting on
+ * nothing reported eight days and put the tentative completion a week late.
+ *
+ * <p>Two levels, both of them "a dependency adds, a parallel branch does not":
+ * inside a service, the critical path through its tasks; across services, the
+ * heaviest chain through the templates' own `dependsOnTemplateIds`. A
+ * dependency on a service this client did not buy holds nothing up.
+ */
 function totalTatDaysOf(db: Db, project: ObProjectRow): number {
-  return journeysOf(db, project).reduce(
-    (total, journey) => total + journey.steps.reduce((sum, step) => sum + (step.tatDays ?? 0), 0),
-    0,
+  const journeys = journeysOf(db, project);
+
+  const ownDays = new Map(journeys.map((j) => [j.id, criticalPathDays(j.steps)] as const));
+
+  const waitsOn = new Map(
+    journeys.map((journey) => {
+      const template = db.obJourneyTemplates.find((t) => t.id === journey.templateId);
+      const ids = (template?.dependsOnTemplateIds ?? [])
+        .map((templateId) => journeys.find((o) => o.templateId === templateId && o.id !== journey.id))
+        .filter((o): o is ObJourney => o != null)
+        .map((o) => o.id);
+      return [journey.id, ids] as const;
+    }),
   );
+
+  /*
+    Longest path, memoised, with the same cycle guard the Java keeps: a graph
+    that should be acyclic but is not must still return rather than hang.
+  */
+  const cost = new Map<number, number>();
+  const walk = (id: number, visiting: Set<number>): number => {
+    const cached = cost.get(id);
+    if (cached != null) return cached;
+    if (visiting.has(id) || !ownDays.has(id)) return 0;
+
+    visiting.add(id);
+    let heaviest = 0;
+    for (const dependency of waitsOn.get(id) ?? []) {
+      heaviest = Math.max(heaviest, walk(dependency, visiting));
+    }
+    visiting.delete(id);
+
+    const total = (ownDays.get(id) ?? 0) + heaviest;
+    cost.set(id, total);
+    return total;
+  };
+
+  let longest = 0;
+  for (const journey of journeys) longest = Math.max(longest, walk(journey.id, new Set()));
+  return longest;
 }
 
 /** The earliest due date this project is already past, or null. */
@@ -192,10 +287,14 @@ function projectDto(project: ObProjectRow, db: Db, now: Date) {
     startDate: project.startDate,
     salesPerson: userRef(project.salesPersonId, db),
     implementor: userRef(project.implementorUserId, db),
+    implementorManager: userRef(project.implementorManagerUserId, db),
     status: project.status,
     gateStatus,
     currentStage: current?.name ?? null,
-    stagesComplete: stages.filter((s) => s.tasksOutstanding === 0).length,
+    // `taskCount > 0` as well: an empty stage has no outstanding work
+    // either, and counting it complete would report six of seven stages done
+    // on a project where one was finished and five were never set up.
+    stagesComplete: stages.filter((s) => s.taskCount > 0 && s.tasksOutstanding === 0).length,
     stagesTotal: stages.length,
     journeyCount: journeysOf(db, project).length,
     delayedByDays,
@@ -205,24 +304,10 @@ function projectDto(project: ObProjectRow, db: Db, now: Date) {
 }
 
 function projectDetailDto(project: ObProjectRow, db: Db, now: Date) {
-  const stages = stagesOf(db, project);
-  const earliestActive = stages
-    .map((s) => s.minActiveSequence)
-    .filter((s): s is number => s != null)
-    .sort((a, b) => a - b)[0];
-
   return {
     ...projectDto(project, db, now),
     statusReason: project.statusReason,
-    stages: stages.map((s) => ({
-      stageKey: s.stageKey,
-      name: s.name,
-      sequence: s.sequence,
-      taskCount: s.taskCount,
-      tasksOutstanding: s.tasksOutstanding,
-      isComplete: s.tasksOutstanding === 0,
-      isCurrent: earliestActive != null && s.minActiveSequence === earliestActive,
-    })),
+    stages: stageDtos(stagesOf(db, project)),
     moduleServices: journeysOf(db, project).map((j) => {
       const template = db.obJourneyTemplates.find((t) => t.id === j.templateId);
       return {
@@ -233,6 +318,10 @@ function projectDetailDto(project: ObProjectRow, db: Db, now: Date) {
         serviceName: template?.name ?? 'Onboarding',
         gateStatus: j.gateStatus,
         isComplete: j.completedAt != null,
+        // This service's own stages, unfolded. Summed across the services they
+        // reproduce `stages` above, which is the property the server gets from
+        // grouping one query by journey and folding it back.
+        stages: stageDtos(stagesOfJourneys(db, [j])),
       };
     }),
     createdBy: userRef(project.createdById, db),
@@ -240,7 +329,123 @@ function projectDetailDto(project: ObProjectRow, db: Db, now: Date) {
   };
 }
 
+/**
+ * The three ways a task belongs to somebody — owner, backup owner, or
+ * inherited from the project's implementor where nobody was pinned.
+ *
+ * Mirrored from the server's own predicate rather than simplified: the
+ * inherited case is the rule `ObJourneyStepLifecycle` authorises by, so a
+ * queue that dropped it would show fewer tasks than the person can actually
+ * act on, and the screen built against this mock would look right and be
+ * wrong on the first real login.
+ */
+function belongsTo(step: ObJourney['steps'][number], project: ObProjectRow, userId: number): boolean {
+  if (step.ownerUserId === userId || step.backupOwnerUserId === userId) return true;
+  return (
+    step.ownerUserId == null &&
+    step.backupOwnerUserId == null &&
+    project.implementorUserId === userId
+  );
+}
+
+const OPEN_STEP_STATUSES = new Set(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT']);
+
+/** Null due dates sort last — see the endpoint's own note on why. */
+const NO_DUE_DATE = '9999-12-31T00:00:00.000Z';
+
+/**
+ * Every task of one user, whatever its state — the shape both My Tasks reads
+ * project from.
+ *
+ * Built once rather than twice because the two reads differ only in what they
+ * filter out, and two constructions of one row is how a list and the page it
+ * opens onto come to disagree about a due date.
+ */
+function myTaskRows(db: Db, userId: number, now: Date) {
+  return db.obProjects
+    .flatMap((project) =>
+      journeysOf(db, project)
+        .flatMap((journey) =>
+          journey.steps
+            .filter((step) => belongsTo(step, project, userId))
+            .map((step) => {
+              const client = clientOf(db, project);
+              const stage = stageOfStep(db, journey, step);
+              const template = db.obJourneyTemplates.find((t) => t.id === journey.templateId);
+              const dueAt = step.dueAt ?? null;
+              return {
+                projectStatus: project.status,
+                taskId: step.id,
+                taskName: step.name,
+                status: step.status,
+                dueAt,
+                isOverdue: dueAt != null && new Date(dueAt) < now,
+                projectId: project.id,
+                projectName: project.name,
+                obClientId: project.obClientId,
+                obClientName: client?.name ?? `Client ${project.obClientId}`,
+                obClientCode: client?.clientCode ?? null,
+                journeyId: journey.id,
+                serviceName: template?.name ?? 'Onboarding',
+                stepKey: stage.key,
+                stepName: stage.name,
+                stepSequence: stage.sequence,
+              };
+            }),
+        ),
+    )
+    .sort(
+      (a, b) =>
+        (a.dueAt ?? NO_DUE_DATE).localeCompare(b.dueAt ?? NO_DUE_DATE) || a.taskId - b.taskId,
+    );
+}
+
+/** `projectStatus` is the list's own filter and is not on the contract's row. */
+function myTaskDto(row: ReturnType<typeof myTaskRows>[number]) {
+  const { projectStatus, ...dto } = row;
+  void projectStatus;
+  return dto;
+}
+
 export const onboardingProjectHandlers = [
+  /**
+   * `/onboarding/my-tasks` — the implementor's own queue.
+   *
+   * The caller is the filter and there is no parameter to say otherwise, which
+   * is the endpoint's whole security model: mirrored here so a screen built
+   * against the mock cannot come to rely on one.
+   */
+  http.get(url('/onboarding/my-tasks'), ({ request }) => {
+    const db = getDb();
+    const now = new Date();
+
+    const rows = myTaskRows(db, currentUser(db).id, now)
+      .filter((row) => OPEN_STEP_STATUSES.has(row.status))
+      // Stopped on purpose — a dropped or held project is not work anybody is
+      // waiting on, so listing its tasks would ask for what was called off.
+      .filter((row) => row.projectStatus !== 'ON_HOLD' && row.projectStatus !== 'DROPPED')
+      .map(myTaskDto);
+
+    const { page, meta } = paginate(rows, new URL(request.url));
+    return ok(page, meta);
+  }),
+
+  /**
+   * One task of the caller's.
+   *
+   * Neither filter above applies: this answers "show me this one", and a task
+   * just completed is still theirs to look at. A task belonging to somebody
+   * else is a **404**, never a 403 — the id would otherwise confirm the task
+   * exists, and these ids are sequential.
+   */
+  http.get(url('/onboarding/my-tasks/:taskId'), ({ params }) => {
+    const db = getDb();
+    const taskId = Number(params.taskId);
+    const row = myTaskRows(db, currentUser(db).id, new Date())
+      .find((candidate) => candidate.taskId === taskId);
+    return row ? ok(myTaskDto(row)) : notFound('Task');
+  }),
+
   http.get(url('/onboarding/projects'), ({ request }) => {
     const db = getDb();
     const q = new URL(request.url);
@@ -286,6 +491,7 @@ export const onboardingProjectHandlers = [
       startDate?: string;
       salesPersonId?: number | null;
       implementorUserId?: number | null;
+      implementorManagerUserId?: number | null;
       moduleServiceIds?: number[];
     };
 
@@ -294,6 +500,20 @@ export const onboardingProjectHandlers = [
     if (body.clientId == null) errors.clientId = ['Choose a client.'];
     if (body.productId == null) errors.productId = ['Choose the product bought.'];
     if (!body.startDate) errors.startDate = ['Give the project a start date.'];
+    // Required on create and nullable on the update, exactly as
+    // `ObProjectCreateRequest` has it — an implementor is what an ownerless
+    // task falls to, so a project cannot be born without one.
+    if (body.salesPersonId == null) {
+      errors.salesPersonId = ['Choose the sales person who owns this project.'];
+    }
+    if (body.implementorUserId == null) {
+      errors.implementorUserId = ['Choose the implementor. Tasks with no responsible fall to them.'];
+    }
+    if (body.implementorManagerUserId == null) {
+      errors.implementorManagerUserId = [
+        'Choose the implementor manager this project escalates to.',
+      ];
+    }
     if (!body.moduleServiceIds?.length) {
       errors.moduleServiceIds = ['Keep at least one module service.'];
     }
@@ -371,6 +591,7 @@ export const onboardingProjectHandlers = [
       startDate: body.startDate!,
       salesPersonId: body.salesPersonId ?? null,
       implementorUserId: body.implementorUserId ?? null,
+      implementorManagerUserId: body.implementorManagerUserId ?? null,
       status: 'RUNNING',
       statusReason: null,
       createdById: 1,
@@ -519,6 +740,7 @@ export const onboardingProjectHandlers = [
       startDate?: string;
       salesPersonId?: number | null;
       implementorUserId?: number | null;
+      implementorManagerUserId?: number | null;
       status?: ProjectStatus;
       statusReason?: string | null;
     };
@@ -542,6 +764,7 @@ export const onboardingProjectHandlers = [
     // is how an implementor is unassigned.
     project.salesPersonId = body.salesPersonId ?? null;
     project.implementorUserId = body.implementorUserId ?? null;
+    project.implementorManagerUserId = body.implementorManagerUserId ?? null;
     if (body.status != null) {
       project.status = body.status;
       project.statusReason = body.statusReason ?? null;

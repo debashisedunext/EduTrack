@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { ObDashboardCard } from '@/api/generated/model'
 
-import { cardAccessibleName, cardLook, describeDelta } from './obDashboardCards'
+import {
+  cardAccessibleName,
+  cardLook,
+  describeDelta,
+  visibleCardCount,
+  visibleCards,
+} from './obDashboardCards'
 
 const card = (over: Partial<ObDashboardCard> = {}): ObDashboardCard => ({
   key: 'live',
@@ -24,6 +30,83 @@ describe('cardLook', () => {
     expect(cardLook('sales-pipeline')).toEqual({
       label: 'sales-pipeline', unit: '', caption: '', tone: 'neutral',
     })
+  })
+})
+
+describe('visibleCards', () => {
+  const sent = [
+    { key: 'ongoing-projects' },
+    { key: 'this-weeks-deadlines' },
+    { key: 'todays-delivery' },
+    { key: 'overdue-clients' },
+    { key: 'client-escalations' },
+    { key: 'live' },
+    { key: 'at-risk' },
+  ]
+
+  it('gives an Admin every card the server sent, in that order', () => {
+    expect(visibleCards(sent, true)).toEqual(sent)
+  })
+
+  /**
+   * `at-risk` and `client-escalations` are readings of other people's work.
+   * The server sends both to everybody — the contract's enum is one list — so
+   * this filter is the only thing keeping them off a non-admin's row.
+   */
+  it('takes At risk and Client escalations off a non-admin board', () => {
+    expect(visibleCards(sent, false).map((card) => card.key)).toEqual([
+      'ongoing-projects',
+      'this-weeks-deadlines',
+      'todays-delivery',
+      'overdue-clients',
+      'live',
+    ])
+  })
+
+  /**
+   * `live` was filtered here once, for everybody. It is a counter about the
+   * reader's own clients rather than a management figure, so it stayed on the
+   * board when the two management ones came off.
+   */
+  it('keeps Live for both readers', () => {
+    expect(visibleCards(sent, true).some((card) => card.key === 'live')).toBe(true)
+    expect(visibleCards(sent, false).some((card) => card.key === 'live')).toBe(true)
+  })
+
+  /**
+   * An unknown key means a server newer than this bundle, and it should add a
+   * card rather than be dropped by a filter that only knows last month's enum.
+   * The two admin keys are deliberately not covered by that tolerance.
+   */
+  it('passes an unrecognised key through for either reader', () => {
+    const withNew = [...sent, { key: 'sales-pipeline' }]
+
+    expect(visibleCards(withNew, false).map((card) => card.key)).toContain('sales-pipeline')
+    expect(visibleCards(withNew, true).map((card) => card.key)).toContain('sales-pipeline')
+  })
+})
+
+describe('visibleCardCount', () => {
+  /**
+   * The skeleton's width. It has to agree with what {@link visibleCards} will
+   * return for the same reader, or the row reflows the moment the figures
+   * land — which is the single thing a fixed count exists to prevent.
+   */
+  it('matches what the same reader is actually drawn', () => {
+    const sent = [
+      { key: 'ongoing-projects' },
+      { key: 'this-weeks-deadlines' },
+      { key: 'todays-delivery' },
+      { key: 'overdue-clients' },
+      { key: 'client-escalations' },
+      { key: 'live' },
+      { key: 'at-risk' },
+    ]
+
+    expect(visibleCardCount(true)).toBe(visibleCards(sent, true).length)
+    expect(visibleCardCount(false)).toBe(visibleCards(sent, false).length)
+    expect(visibleCardCount(true)).toBe(7)
+    expect(visibleCardCount(false)).toBe(5)
   })
 })
 

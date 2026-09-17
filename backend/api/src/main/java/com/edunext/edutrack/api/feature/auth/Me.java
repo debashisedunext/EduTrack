@@ -3,6 +3,7 @@ package com.edunext.edutrack.api.feature.auth;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * A-020 · {@code Me} in {@code contracts/openapi.yaml} — {@code UserRef} plus
@@ -69,7 +70,41 @@ record Me(
          */
         @Schema(description = "Modules this user may reach: TICKETING, ONBOARDING, or both. "
                 + "Advisory to the UI; reachability is decided server-side per request.")
-        List<String> modules
+        List<String> modules,
+
+        /**
+         * The role held <em>inside</em> each module, keyed by module code —
+         * {@code {"ONBOARDING": "OB_STEP_OWNER"}}.
+         *
+         * <h2>Why this is here now</h2>
+         *
+         * <p>The onboarding module's roles — OB_ADMIN, OB_MANAGER, OB_SALES,
+         * OB_STEP_OWNER, OB_VIEWER — are not blueprint §2's six, and until this
+         * field the session carried no way to tell them apart. The sidebar said
+         * so in its own comment and gated its administration rows on the
+         * <em>platform</em> role as an acknowledged approximation, so a platform
+         * PM who is an onboarding OB_ADMIN lost those links.
+         *
+         * <p>{@code AccessTokenIssuer} has minted the claim since A-112 and
+         * {@code AuthenticatedUser} has carried it just as long; this only stops
+         * dropping it on the way out.
+         *
+         * <p><b>Advisory to the UI in exactly the sense {@code permissions} and
+         * {@code modules} are.</b> {@code ObModuleRoleFilter} decides what a
+         * caller may reach on every request and answers 404, so a client that
+         * drew a link for a screen it does not hold gets a not-found rather than
+         * a leak. What this buys is My Tasks appearing for the people whose
+         * screen it is, on first paint, instead of being discovered by firing a
+         * request and watching it come back empty.
+         *
+         * <p>The same staleness bargain the claim makes: a grant changed
+         * mid-session stays visible here until the access token expires, at most
+         * fifteen minutes. Stated rather than discovered.
+         */
+        @Schema(description = "The role held inside each module, keyed by module code — "
+                + "e.g. {\"ONBOARDING\": \"OB_STEP_OWNER\"}. Advisory to the UI; "
+                + "authorisation is decided server-side per request.")
+        Map<String, String> moduleRoles
 ) {
 
     static Me from(AuthenticatedUser user) {
@@ -83,6 +118,7 @@ record Me(
                 user.projectIds(),
                 user.reporteeIds(),
                 user.timezone(),
-                user.modules());
+                user.modules(),
+                user.moduleRoles());
     }
 }

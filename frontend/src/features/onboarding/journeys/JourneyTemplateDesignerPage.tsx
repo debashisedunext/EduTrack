@@ -643,7 +643,7 @@ function Designer({
               Total TAT: {totalTatDays}d
             </b>
             {' '}across {steps.length} task{steps.length === 1 ? '' : 's'} in{' '}
-            {stageGroups.length} stage{stageGroups.length === 1 ? '' : 's'}
+            {stageGroups.length} step{stageGroups.length === 1 ? '' : 's'}
             {' '}
             <button
               type="button"
@@ -695,8 +695,8 @@ function Designer({
           id="ob-how-this-reads"
           className="m-0 rounded-card border border-dashed border-border px-3 py-2 text-caption text-content-muted"
         >
-          Each implementation stage groups the tasks that belong to it. A <b>step</b> runs in
-          parallel from day 1; a <b>task</b> nested inside one starts the day that one ends, to any
+          Each <b>step</b> groups the tasks that belong to it. A <b>task</b> with no dependency runs in
+          parallel from day 1; a task nested inside another starts the day that one ends, to any
           depth. A task carries the TAT, the implementor and its <b>checklist</b> — the ticks and
           documents that have to be answered before it can complete on a client&rsquo;s journey.
           Required items gate the task; optional ones do not.
@@ -712,8 +712,8 @@ function Designer({
 
       {stageGroups.length === 0 ? (
         <EmptyState
-          title="No implementation stages on this Module Service"
-          description="A service picks up the active stages when it is created. This one has none, which means the master was empty at the time."
+          title="No implementation steps on this Module Service"
+          description="A service picks up the active steps when it is created. This one has none, which means the master was empty at the time."
         />
       ) : (
         <div className="flex flex-col gap-2">
@@ -744,7 +744,7 @@ function Designer({
           <div className="overflow-x-auto">
             <div
               role="group"
-              aria-label="Stages and tasks"
+              aria-label="Steps and tasks"
               onKeyDown={treeKeyDown}
               className="flex min-w-[940px] flex-col gap-2.5"
             >
@@ -752,7 +752,7 @@ function Designer({
                 aria-hidden
                 className="flex items-end pl-3 pr-[22px] text-caption font-semibold uppercase tracking-wide text-content-muted"
               >
-                <span className="flex-1">Stage / Step / Task</span>
+                <span className="flex-1">Step / Task</span>
                 <MetaCells
                   editable={editable}
                   schedule="Schedule"
@@ -818,13 +818,26 @@ function Designer({
       */}
       {editable && (
         <p className="m-0 text-caption text-content-muted">
-          These stages come from the{' '}
+          These steps come from the{' '}
           <Link to="/onboarding/implementation-stages" className="text-primary hover:underline">
             Implementation Stage master
           </Link>
-          , picked up when this Module Service was created. Edit a stage&rsquo;s TAT, owner and
-          checklist here; add or retire stages themselves on that page.
+          , picked up when this Module Service was created. Edit a step&rsquo;s TAT, owner and
+          checklist here; add or retire steps themselves on that page.
         </p>
+      )}
+
+      {/* Drawn only when the service has stages to list — an empty state here
+          would repeat the one the board is already showing. */}
+      {stageGroups.length > 0 && (
+        <ClientSignoffPanel
+          templateId={templateId}
+          groups={stageGroups}
+          scheduleOf={scheduleOf}
+          users={userList}
+          editable={editable}
+          etag={etag}
+        />
       )}
 
       {/*
@@ -1047,7 +1060,8 @@ function MetaCells({
 }
 
 /**
- * Stage, Step, Task — the level in a word, beside the name that has it.
+ * Step or Task — the level in a word, beside the name that has it. Every card is a
+ * Task; a parallel one is told apart by its filled disc and the Parallel chip.
  *
  * <p>The enclosure and the tone say the same thing to the eye; this says it
  * outright, and is why the {@code sr-only} "Step. " it replaced is gone. One
@@ -1157,7 +1171,7 @@ function StageBlock({
         ) : (
           <span aria-hidden className="h-5 w-5 shrink-0" />
         )}
-        <LevelBadge>Stage</LevelBadge>
+        <LevelBadge>Step</LevelBadge>
         <h2 id={headingId} className="m-0 text-sm font-semibold text-content">
           {stage.name}
         </h2>
@@ -1205,7 +1219,7 @@ function StageBlock({
 
           {tasks.length === 0 && filter == null && (
             <p className="m-0 px-1 py-0.5 text-caption text-content-muted">
-              This stage came from the Implementation Stage master with no tasks in it.
+              This step came from the Implementation Stage master with no tasks in it.
             </p>
           )}
 
@@ -1347,7 +1361,7 @@ function AddTaskForm({
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="What has to happen in this stage?"
+            placeholder="What has to happen in this step?"
             aria-label={`Name of the new task in ${stage.name}`}
             className="h-8 text-caption"
           />
@@ -1498,7 +1512,7 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
       ? {
           name: parent.name,
           stageName:
-            allStages.find((g) => g.id === parent.templateStageId)?.name ?? 'another stage',
+            allStages.find((g) => g.id === parent.templateStageId)?.name ?? 'another step',
         }
       : null
 
@@ -1598,7 +1612,7 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
           >
             {node.number}
           </span>
-          <LevelBadge>{isStep ? 'Step' : 'Task'}</LevelBadge>
+          <LevelBadge>Task</LevelBadge>
           <span id={headingId} className="min-w-0 break-words font-medium text-content">
             {step.name}
           </span>
@@ -2293,7 +2307,7 @@ function EditStepForm({
       <p className="m-0 text-caption text-content-muted">
         Editing <b className="text-content">{step.name}</b>. Its name comes from the
         Implementation Stage master and cannot be changed here — remove the step and add another
-        stage instead.
+        step instead.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -2398,8 +2412,195 @@ function EditStepForm({
   )
 }
 
+/**
+ * **Client sign-off** — every task in this service the client will be asked to
+ * sign off, and the one place all of them can be set at once.
+ *
+ * <h2>Why a panel when the board already has the column</h2>
+ *
+ * <p>Sign-off is the field somebody configures in a pass of its own: not
+ * "while I am editing this task" but "which of these seven does the client
+ * have to approve". Answering that from the board means opening seven Edit
+ * forms and reading a column that is two boxes wide, in a service whose tasks
+ * are nested three deep across four stages. Here it is one list, in stage
+ * order, with the count in the heading.
+ *
+ * <h2>It writes, and it is the second place that does</h2>
+ *
+ * <p>Deliberately, and with one rule kept: the board's own Sign-off column
+ * stays read-only. The objection to a live tick in a table cell was that the
+ * task's Edit form saves TAT, owner and sign-off together under one
+ * precondition, so a cell writing on each tick would make that form's Cancel a
+ * lie about one of its fields. A panel outside the form is not inside that
+ * bargain — each tick here is its own {@code PATCH} carrying nothing but
+ * {@code requiresSignoff}.
+ *
+ * <p>The two surfaces cannot silently disagree, because both send the
+ * template's {@code ETag} as {@code If-Match}: a tick here moves the tag, and
+ * an Edit form that was open when it happened is refused rather than allowed
+ * to write yesterday's value back over it.
+ *
+ * <h2>Every task, not only the ticked ones</h2>
+ *
+ * <p>A list of what already needs sign-off cannot be used to ask for sign-off
+ * on anything else, which is most of what somebody opens this for. So every
+ * task is listed and the ticked ones are checked — the count in the heading is
+ * what says how many of them gate.
+ */
+function ClientSignoffPanel({
+  templateId,
+  groups,
+  scheduleOf,
+  users,
+  editable,
+  etag,
+}: {
+  templateId: number
+  /** Stage and its tasks, in the order the board draws them. */
+  groups: readonly {
+    stage: ObJourneyTemplateStage
+    tasks: readonly ObJourneyTemplateStep[]
+  }[]
+  /** Task id → its node in the template-wide tree, for the day range. */
+  scheduleOf: ReadonlyMap<number, StepNode<ObJourneyTemplateStep>>
+  users: readonly UserRef[]
+  /** A published version is frozen here exactly as it is everywhere else. */
+  editable: boolean
+  etag: string | null
+}) {
+  const update = useUpdateJourneyTemplateStep()
+  /* The one row being written, so a slow response disables its own box and
+     not the other six — this panel exists to tick several in a row. */
+  const [pendingId, setPendingId] = React.useState<number | null>(null)
+
+  const filled = groups.filter((group) => group.tasks.length > 0)
+  const all = filled.flatMap((group) => group.tasks)
+  const gated = all.filter((task) => task.requiresSignoff).length
+
+  const toggle = async (step: ObJourneyTemplateStep, next: boolean) => {
+    setPendingId(step.id)
+    try {
+      await update.mutateAsync({
+        templateId,
+        stepId: step.id,
+        data: { requiresSignoff: next },
+        etag,
+      })
+      toast({
+        title: next
+          ? `${step.name} now needs client sign-off`
+          : `${step.name} no longer needs client sign-off`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Could not change that sign-off',
+        description: problemDetail(error),
+        variant: 'danger',
+      })
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  return (
+    <section
+      aria-labelledby="ob-signoff-heading"
+      className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4 shadow-rest"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="ob-signoff-heading" className="m-0 text-h3 text-content">
+          Client sign-off
+        </h2>
+        <Chip variant={gated > 0 ? 'info' : 'neutral'}>
+          {gated} of {all.length} task{all.length === 1 ? '' : 's'}
+        </Chip>
+      </div>
+      <p className="m-0 text-caption text-content-muted">
+        The client is asked to sign off each ticked task on their journey, and the task cannot
+        complete until they do.{' '}
+        {editable
+          ? 'Tick a task to ask for it; each tick saves on its own.'
+          : 'Read-only — this version is published.'}
+      </p>
+
+      {all.length === 0 ? (
+        <p className="m-0 text-caption text-content-muted">
+          No tasks on this service yet. Add one to a step above.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {filled.map(({ stage, tasks }) => (
+            <div key={stage.id} className="flex flex-col gap-0.5">
+              <h3 className="m-0 text-caption font-semibold uppercase tracking-wide text-content-muted">
+                {stage.name}
+              </h3>
+              <ul className="m-0 flex list-none flex-col p-0">
+                {tasks.map((task) => {
+                  const node = scheduleOf.get(task.id)
+                  const who = implementorName(task, users)
+                  return (
+                    <li
+                      key={task.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-1 py-1 hover:bg-subtle"
+                    >
+                      <label className="flex min-w-0 flex-1 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={task.requiresSignoff}
+                          disabled={!editable || pendingId === task.id}
+                          aria-label={`Client sign-off for ${task.name}`}
+                          onChange={(event) => void toggle(task, event.target.checked)}
+                          className="h-4 w-4 shrink-0 rounded border-border"
+                        />
+                        <span
+                          className={`min-w-0 break-words text-sm ${
+                            task.requiresSignoff ? 'text-content' : 'text-content-muted'
+                          }`}
+                        >
+                          {task.name}
+                        </span>
+                      </label>
+                      <span className="w-24 shrink-0 text-right text-caption tabular-nums text-content-muted">
+                        {node ? scheduleLabel(node) : ''}
+                      </span>
+                      {/* Same wording as the board's own column: nobody pinned
+                          means the project's implementor picks it up, which is
+                          the ordinary case and not a gap to fill in. */}
+                      <span className="w-40 shrink-0 truncate text-caption text-content-muted">
+                        {who ?? 'The project’s implementor'}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+
 // ── pure helpers ─────────────────────────────────────────────────────────────
 
+
+/**
+ * The person pinned to a task, or `null` for the ordinary case: nobody, which
+ * means the task goes to whoever is running the project it is boarded for.
+ *
+ * <p>Falling through to `user #id` covers an owner whose user row the active
+ * list does not offer — deactivated since the task was written, or simply not
+ * loaded yet. One function because two surfaces read it, and two copies of the
+ * fallback is two chances to name a deactivated user differently.
+ */
+function implementorName(
+  step: ObJourneyTemplateStep,
+  users: readonly UserRef[],
+): string | null {
+  if (step.ownerUserId == null) return null
+  return users.find((u) => u.id === step.ownerUserId)?.displayName ?? `user #${step.ownerUserId}`
+}
 
 /** Up to two initials for the responsible avatar — `avatar-stack`'s own rule. */
 function initials(name: string): string {

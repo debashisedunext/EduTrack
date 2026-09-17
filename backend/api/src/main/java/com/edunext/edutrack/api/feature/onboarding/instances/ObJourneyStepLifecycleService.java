@@ -17,6 +17,8 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
+import com.edunext.edutrack.domain.onboarding.ObProject;
+import com.edunext.edutrack.domain.onboarding.ObProjectRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
@@ -26,6 +28,8 @@ import com.edunext.edutrack.domain.onboarding.ObStepClockEvent;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEventRepository;
 import com.edunext.edutrack.domain.onboarding.ObStepClockEventType;
 import com.edunext.edutrack.domain.onboarding.ObStepHistory;
+import com.edunext.edutrack.domain.onboarding.ObStepReviewState;
+import com.edunext.edutrack.domain.onboarding.ObStepRowState;
 import com.edunext.edutrack.domain.onboarding.ObStepTatBudget;
 import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.stereotype.Service;
@@ -122,12 +126,29 @@ public class ObJourneyStepLifecycleService {
     private static final Set<String> MODERATOR_ROLES = Set.of("OB_MANAGER", "OB_ADMIN");
 
     /**
+     * The one role that reviews without being named on the project — see
+     * {@link #requireReviewer} for why the escape hatch exists at all.
+     */
+    private static final String OB_ADMIN_ROLE = "OB_ADMIN";
+
+    /**
      * C-105 · the only pausing reason written today — {@code
      * ck_ob_clock_pause_reason}'s mandatory value on a {@code PAUSED} row.
      * See {@link ObStepClockEvent#getPauseReason()} for why the column
      * itself stays a plain string rather than an enum with one member.
      */
     private static final String WAITING_ON_CLIENT_PAUSE_REASON = "WAITING_ON_CLIENT";
+
+    /**
+     * The second pausing reason — a task sitting in {@code PENDING_REVIEW}.
+     *
+     * <p>Distinct from {@link #WAITING_ON_CLIENT_PAUSE_REASON} because the
+     * two waits are charged to different people: {@code ObStepClockAttribution}
+     * is {@code CLIENT} there and {@code INTERNAL} here, and the TAT report
+     * that answers "who was this time lost to" reads exactly that. A review
+     * queue backing up is our problem, and it should look like ours.
+     */
+    private static final String PENDING_REVIEW_PAUSE_REASON = "PENDING_REVIEW";
 
     /**
      * B-115 · the {@code gateFailures} vocabulary, named here because
@@ -163,14 +184,17 @@ public class ObJourneyStepLifecycleService {
     private final ObStepClockEventRepository clockEvents;
     private final ObStepClockRecorder clockRecorder;
     private final ObJourneyDependencyRelease dependencyRelease;
+    private final ObProjectRepository projects;
 
     public ObJourneyStepLifecycleService(ObJourneyStepRepository journeySteps, ObJourneyRepository journeys,
             ObJourneyStepItemRepository stepItems, ObJourneyTemplateStepItemRepository templateStepItems,
             ObJourneyTemplateStepDocRepository templateStepDocs, ObAttachmentRepository attachments,
             ObSignoffRepository signoffs, ObStepJournal stepJournal, WorkingHoursService workingHours,
             WorkingCalendarRepository workingCalendars, ObStepClockEventRepository clockEvents,
-            ObStepClockRecorder clockRecorder, ObJourneyDependencyRelease dependencyRelease) {
+            ObStepClockRecorder clockRecorder, ObJourneyDependencyRelease dependencyRelease,
+            ObProjectRepository projects) {
         this.dependencyRelease = dependencyRelease;
+        this.projects = projects;
         this.journeySteps = journeySteps;
         this.journeys = journeys;
         this.stepItems = stepItems;
@@ -245,12 +269,45 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
-     * {@code IN_PROGRESS → DONE}. C-106's completion gate runs after the
-     * transition check and before anything is written — see
-     * {@link #requireCompletionGate} and the class javadoc. C-119 · once
-     * {@code DONE}, {@link #activateEligibleSteps} re-evaluates the journey:
-     * any sibling step whose only dependency was this one moves straight to
-     * {@code IN_PROGRESS}.
+     * {@code IN_PROGRESS →} either {@code PENDING_REVIEW} or {@code DONE}.
+     * C-106's completion gate runs after the transition check and before
+     * anything is written — see {@link #requireCompletionGate} and the class
+     * javadoc.
+     *
+     * <h2>Marking a task complete no longer closes it</h2>
+     *
+     * <p>Where {@link ObJourneyStep#isRequiresReview()} is set — the default,
+     * for every template step and every in-flight task ({@code
+     * V20260916_1700}) — this submits rather than closes: the task lands in
+     * {@code PENDING_REVIEW} and an OB Manager decides.
+     *
+     * <h2>The implementor presses this twice</h2>
+     *
+     * <p>The first press submits the work. The second closes the task, and it
+     * is only reachable once the review has come back with every row accepted
+     * — {@link #reviewPassed}, which is what this branches on. In between, the
+     * button is not theirs to press at all: the task is {@code PENDING_REVIEW},
+     * {@link #requireStatus} refuses it, and the bar hides it rather than
+     * offering a refusal.
+     *
+     * <p>So the manager's word is not the last one either. Review checks the
+     * implementor's claim; it does not replace it, and the act of closing
+     * stays with the person accountable for the work — see
+     * {@link #returnAccepted}.
+     *
+     * <p>The <em>method name is unchanged deliberately</em>. It is the same
+     * act by the same person from the same button; what differs is where it
+     * lands. Renaming it to {@code submit} would leave every caller, test and
+     * contract description saying "complete" about a route called something
+     * else, and would suggest a second route exists for the other case — it
+     * does not. Where review is off, this closes the task exactly as it
+     * always has.
+     *
+     * <p>C-119 · once {@code DONE} — by either path — {@link
+     * #activateEligibleSteps} re-evaluates the journey: any sibling step
+     * whose only dependency was this one moves straight to {@code
+     * IN_PROGRESS}. That half lives in {@link #closeStep}, called from here
+     * and from {@link #closeReview}, so the cascade stays written once.
      *
      * @throws JourneyStepNotFoundException  no such step
      * @throws NotStepOwnerException          caller is neither owner nor backup owner
@@ -267,13 +324,574 @@ public class ObJourneyStepLifecycleService {
         requireCompletionGate(step);
 
         ObJourney journey = requireJourney(step);
+        return needsReview(step) && !reviewPassed(step)
+                ? submitForReview(journey, step, callerId)
+                : closeStep(journey, step, ObJourneyStepStatus.IN_PROGRESS, callerId);
+    }
+
+    /**
+     * Has this task's check list already been through review and come back
+     * accepted?
+     *
+     * <p>Every row {@code VERIFIED} is the whole condition, and it needs no
+     * column of its own: it is only reachable from {@link #closeReview}'s
+     * accepted branch, because a rejection leaves at least one row
+     * {@code REJECTED} and a resubmission puts those rows back to
+     * {@code NOT_REVIEWED}. So the check list carries the answer already, and
+     * a {@code reviewPassedAt} stamp would be a second place for the same
+     * fact to be wrong in.
+     *
+     * <p>This is what stops the implementor's closing press from bouncing
+     * back into review. Their first press submits; the manager accepts; their
+     * second press closes. Without it {@link #complete} would see
+     * {@code requiresReview} and submit a second time, and the task would
+     * never leave the loop.
+     */
+    private boolean reviewPassed(ObJourneyStep step) {
+        List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
+        return !items.isEmpty()
+                && items.stream().allMatch(i -> i.getRowState() == ObStepRowState.VERIFIED);
+    }
+
+    /**
+     * Whether this task has anything for a manager to read.
+     *
+     * <h2>An empty check list is not a review, it is a dead end</h2>
+     *
+     * <p>{@link ObJourneyStep#isRequiresReview()} alone is not enough. A
+     * verdict is recorded <em>per row</em> — {@link #reviewItem} is the only
+     * way into {@link #closeReview} — so a task carrying no rows at all has
+     * nothing to press, never settles, and sits in {@code PENDING_REVIEW}
+     * with no route out for anybody, including an admin.
+     *
+     * <p>Observed on live data 17 Sep 2026: four tasks
+     * ({@code Old Data Migration}, {@code Student Group}) whose templates
+     * define no check list were submitted and stranded. They are not rare —
+     * plenty of template steps are a single act with nothing to tick.
+     *
+     * <p>So a task with no rows closes on completion exactly as it did before
+     * the review gate existed. That is also the honest reading: review here
+     * means "somebody checked the check list", and there is no check list to
+     * have checked. The alternative — a task-level approve button for this
+     * case only — would put a second, differently-shaped way to close a task
+     * on the one screen, reachable only on the tasks where the reviewer has
+     * least to go on.
+     */
+    private boolean needsReview(ObJourneyStep step) {
+        return step.isRequiresReview()
+                && !stepItems.findByStepIdOrderBySequenceAsc(step.getId()).isEmpty();
+    }
+
+    /**
+     * {@code IN_PROGRESS → PENDING_REVIEW} — the implementor's half of the
+     * review gate.
+     *
+     * <h2>A resubmission is a smaller review than the first one</h2>
+     *
+     * <p>Only the rows that came back go in front of the manager again:
+     * {@code REJECTED} returns to {@code NOT_REVIEWED}, and a {@code
+     * VERIFIED} row keeps its verdict and is skipped. That is what keeps a
+     * third and a fourth round affordable — round two puts one row on the
+     * screen, not five — and it is the same fact that
+     * {@link StepItemAlreadyVerifiedException} enforces against writes.
+     *
+     * <p><b>The TAT clock pauses here</b>, on the {@code PAUSED} row {@link
+     * #waitOnClient} already uses, and resumes in {@link #closeReview} if
+     * the task comes back. Charging an implementor for the hours their work
+     * spends in somebody else's inbox measures the wrong person — and the
+     * attribution is {@code INTERNAL} rather than {@code CLIENT}, because
+     * this wait is ours.
+     */
+    private ObJourneyStep submitForReview(ObJourney journey, ObJourneyStep step, long callerId) {
+        Instant now = Instant.now();
+        for (ObJourneyStepItem item : stepItems.findByStepIdOrderBySequenceAsc(step.getId())) {
+            if (item.getRowState().isWithImplementor() && item.getAnswer() != null) {
+                sendRow(item, now, callerId);
+            }
+        }
+        settleAfterRowMove(journey, step, now, callerId);
+        return step;
+    }
+
+    /**
+     * One row on to the reviewer's desk — the per-row send, {@code C-141}.
+     *
+     * <p>Every route that sends anything goes through here, so the bulk press
+     * and the row's own button cannot drift apart: what <b>Mark complete</b>
+     * does to five rows is exactly five of these.
+     *
+     * <p>A row that comes back and goes out again returns to
+     * {@code NOT_REVIEWED}: round two puts one row in front of the manager
+     * rather than five, and a verdict from the round before must not be read
+     * as a verdict on the work that has replaced it. {@code outcomeSeenAt} is
+     * cleared with it — the outcome it referred to no longer exists.
+     */
+    private void sendRow(ObJourneyStepItem item, Instant now, long callerId) {
+        item.setRowState(ObStepRowState.SENT);
+        item.setSubmittedAt(now);
+        item.setSubmittedBy(callerId);
+        item.setReviewState(ObStepReviewState.NOT_REVIEWED);
+        item.setReviewedBy(null);
+        item.setReviewedAt(null);
+        item.setOutcomeSeenAt(null);
+    }
+
+    /**
+     * One row back to its implementor, carrying the verdict the reviewer
+     * recorded on it.
+     *
+     * <p>{@code outcomeSeenAt} is set to null rather than left alone: this is
+     * a new outcome, and it is unseen until the implementor opens the task —
+     * which is the whole of what makes the banner and the My Tasks highlight
+     * a signal rather than permanent decoration.
+     */
+    private void releaseRow(ObJourneyStepItem item, Instant now, long reviewerId) {
+        if (item.getReviewState() == ObStepReviewState.REJECTED
+                && (item.getRemark() == null || item.getRemark().isBlank())) {
+            throw new RejectReasonRequiredException(item.getId());
+        }
+        item.setRowState(item.getReviewState() == ObStepReviewState.VERIFIED
+                ? ObStepRowState.VERIFIED
+                : ObStepRowState.REJECTED);
+        item.setReviewedBy(reviewerId);
+        item.setReviewedAt(now);
+        item.setOutcomeSeenAt(null);
+
+        if (item.getRowState() == ObStepRowState.REJECTED) {
+            // The claim is withdrawn with the verdict — see closeReview.
+            item.setAnswer(null);
+            item.setAnsweredBy(null);
+            item.setAnsweredAt(null);
+        }
+    }
+
+    /**
+     * The task's status, recomputed from its rows — the one place
+     * {@code PENDING_REVIEW} is written or taken away.
+     *
+     * <h2>Why the column survives at all</h2>
+     *
+     * <p>With the row carrying the state machine, a task's "status" is
+     * properly a reading of its rows. It is still stored, because
+     * {@link #requireCompletionGate}, {@link #activateEligibleSteps}, the RAG
+     * service, My Tasks and every dashboard query read that column — teaching
+     * each of them to aggregate rows instead would be five copies of this
+     * method, in SQL, kept in step by hand. So it is materialised here, once,
+     * after every row that moves.
+     *
+     * <p><b>Only the review pair is touched.</b> {@code PENDING},
+     * {@code BLOCKED}, {@code WAITING_ON_CLIENT}, {@code DONE} and
+     * {@code SKIPPED} are facts about the task that no row can contradict, so
+     * a task in any of them is left exactly where it is — a blocked task whose
+     * rows are being reviewed stays blocked.
+     *
+     * <p>The clock pairs with the same transition: {@code PAUSED} as the first
+     * row goes out, {@code RESUMED} as the last one comes back. Per-row
+     * pausing would be the more precise answer and the wrong one — the ledger
+     * is per step, and five overlapping pauses on one step cannot be summed.
+     */
+    private void settleAfterRowMove(ObJourney journey, ObJourneyStep step, Instant now, long actorId) {
+        List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
+        boolean anyOut = items.stream().anyMatch(i -> i.getRowState() == ObStepRowState.SENT);
+        ObJourneyStepStatus was = step.getStatus();
+
+        if (anyOut && was == ObJourneyStepStatus.IN_PROGRESS) {
+            step.setStatus(ObJourneyStepStatus.PENDING_REVIEW);
+            step.setSubmittedAt(now);
+            step.setSubmittedBy(actorId);
+            appendStatusHistory(journey, step, "SUBMITTED_FOR_REVIEW",
+                    ObJourneyStepStatus.IN_PROGRESS, ObJourneyStepStatus.PENDING_REVIEW,
+                    actorId, "status", outstandingNote(items));
+
+            ObStepClockEvent paused = new ObStepClockEvent();
+            paused.setStepId(step.getId());
+            paused.setJourneyId(step.getJourneyId());
+            paused.setEventType(ObStepClockEventType.PAUSED);
+            paused.setPauseReason(PENDING_REVIEW_PAUSE_REASON);
+            paused.setAttributedTo(ObStepClockAttribution.INTERNAL);
+            paused.setOccurredAt(now);
+            paused.setActorId(actorId);
+            paused.setActorType(ObStepClockActorType.USER);
+            clockRecorder.record(paused);
+            return;
+        }
+
+        if (!anyOut && was == ObJourneyStepStatus.PENDING_REVIEW) {
+            List<String> rejected = items.stream()
+                    .filter(i -> i.getRowState() == ObStepRowState.REJECTED)
+                    .map(ObJourneyStepItem::getLabel)
+                    .toList();
+
+            step.setStatus(ObJourneyStepStatus.IN_PROGRESS);
+            step.setReviewedAt(now);
+            step.setReviewedBy(actorId);
+            appendStatusHistory(journey, step,
+                    rejected.isEmpty() ? "REVIEW_ACCEPTED" : "REVIEW_REJECTED",
+                    ObJourneyStepStatus.PENDING_REVIEW, ObJourneyStepStatus.IN_PROGRESS,
+                    actorId, "status",
+                    rejected.isEmpty()
+                            ? "every row verified \u2014 with " + ownerLabel(step) + " to close"
+                            : rejectionRemarks(rejected));
+
+            recomputeDueAtOnResume(step, now);
+
+            ObStepClockEvent resumed = new ObStepClockEvent();
+            resumed.setStepId(step.getId());
+            resumed.setJourneyId(step.getJourneyId());
+            resumed.setEventType(ObStepClockEventType.RESUMED);
+            resumed.setAttributedTo(ObStepClockAttribution.INTERNAL);
+            resumed.setOccurredAt(now);
+            resumed.setActorId(actorId);
+            resumed.setActorType(ObStepClockActorType.USER);
+            clockRecorder.record(resumed);
+        }
+    }
+
+    /** What went out, for a history row a person reads rather than decodes. */
+    private static String outstandingNote(List<ObJourneyStepItem> items) {
+        long out = items.stream().filter(i -> i.getRowState() == ObStepRowState.SENT).count();
+        long kept = items.size() - out;
+        return kept == 0
+                ? out + (out == 1 ? " row sent for review" : " rows sent for review")
+                : out + " of " + items.size() + " rows sent for review";
+    }
+
+    /**
+     * The {@code DONE} half, named once because two paths reach it.
+     *
+     * <p>{@code finishedAt}, the history row, the dependency cascade and the
+     * journey settle used to sit inline in {@link #complete}. Review gave
+     * them a second caller in {@link #closeReview}, and two copies of a
+     * four-step closing sequence is one edit away from a task that completes
+     * without releasing whatever was waiting on it.
+     *
+     * @param previousStatus what the step is moving from — {@code IN_PROGRESS}
+     *                       on the unreviewed path, {@code PENDING_REVIEW}
+     *                       when a review passed. The history row records it,
+     *                       so it cannot be assumed.
+     */
+    private ObJourneyStep closeStep(ObJourney journey, ObJourneyStep step,
+                                    ObJourneyStepStatus previousStatus, long actorId) {
         step.setStatus(ObJourneyStepStatus.DONE);
         step.setFinishedAt(Instant.now());
         appendStatusHistory(journey, step, "COMPLETED",
-                ObJourneyStepStatus.IN_PROGRESS, ObJourneyStepStatus.DONE, callerId, "status", null);
+                previousStatus, ObJourneyStepStatus.DONE, actorId, "status", null);
         activateEligibleSteps(step.getJourneyId());
         settleJourney(step.getJourneyId());
         return step;
+    }
+
+    /**
+     * One row's verdict — the OB Manager's only write in this feature.
+     *
+     * <h2>There is no "close the review" call</h2>
+     *
+     * <p>The task moves when the last row is decided, not when somebody
+     * <p><b>A verdict decides a row, never the task.</b> Recording one leaves
+     * the review open, so the reviewer may cycle a row as often as they like —
+     * {@code Not reviewed → Verified → Rejected} — and change their mind right
+     * up until they say they are finished. {@link #closeReview} is where the
+     * task moves, and it moves once — <b>back to its implementor either way</b>:
+     * accepted, with every row locked and nothing left but the closing press;
+     * or rejected, with the refused rows reopened and unanswered.
+     *
+     * <p>This used to settle the task on the last verdict, which read as
+     * economical and was simply wrong: on a single-row check list the first
+     * press closed the task, locked the row and released its dependants — so
+     * the three-state control had exactly one usable position and a reviewer
+     * who meant Rejected had no way to say so.
+     *
+     * <p><b>Gated by {@link #requireReviewer}, not by ownership</b>: reviewing
+     * is by definition an act on somebody else's work, so
+     * {@link #requireOwnership} would refuse exactly the caller this route
+     * exists for. It is the project's own
+     * {@code implementor_manager_user_id} — not a role anybody can hold — so
+     * a manager reviews the engagements they are accountable for and nothing
+     * else.
+     *
+     * @param verdict {@code NOT_REVIEWED} is a legitimate value — it is how a
+     *                manager takes back a mark they pressed by mistake, and
+     *                it clears {@code reviewedBy}/{@code reviewedAt} with it.
+     * @param remark  the reason, written to the row's own {@code remark} on a
+     *                {@code REJECTED} and ignored otherwise, so a verdict of
+     *                Verified can never rewrite the implementor's note it is
+     *                passing.
+     *
+     *                <p><b>Not required here.</b> Rejecting is one press of a
+     *                cycling button and the box that holds the reason only
+     *                opens once the row is rejected — demanding it at this
+     *                moment made the press impossible, which is exactly what
+     *                it did until {@code V20260917_1015}. The rule is enforced
+     *                where the review is finished instead: {@link #closeReview}
+     *                refuses while any rejected row is unexplained, so nothing
+     *                reaches an implementor without a reason.
+     *
+     * @throws JourneyStepItemNotFoundException    no such row
+     * @throws JourneyStepNotFoundException        the caller holds no onboarding role at all —
+     *                                             404 rather than 403, so the route discloses nothing
+     * @throws NotAnOnboardingModeratorException   the caller is neither this project's implementor
+     *                                             manager nor an {@code OB_ADMIN}
+     * @throws InvalidStepTransitionException      the step is not {@code PENDING_REVIEW}
+     * @throws StepItemAlreadyVerifiedException    the row was verified in an earlier round
+     */
+    @Transactional
+    public ObJourneyStepItem reviewItem(long itemId, long callerId, String moduleRole,
+                                        ObStepReviewState verdict, String remark) {
+        ObJourneyStepItem item = stepItems.findById(itemId)
+                .orElseThrow(() -> new JourneyStepItemNotFoundException(itemId));
+        ObJourneyStep step = requireStep(item.getStepId());
+        requireReviewer(step, callerId, moduleRole);
+
+        // A verdict is recordable exactly while the row is on the reviewer's
+        // desk. Released rows are final — that is what `rowState` says, and it
+        // replaces the submittedAt/reviewedAt comparison this used to need to
+        // tell "verified in this review" from "verified in an earlier one".
+        if (item.getRowState() != ObStepRowState.SENT) {
+            throw item.getRowState() == ObStepRowState.VERIFIED
+                    ? new StepItemAlreadyVerifiedException(itemId)
+                    : new InvalidStepTransitionException(step.getId(), "review", step.getStatus());
+        }
+
+        String trimmed = remark == null || remark.isBlank() ? null : remark.trim();
+
+        item.setReviewState(verdict);
+        item.setReviewedBy(verdict.isDecided() ? callerId : null);
+        item.setReviewedAt(verdict.isDecided() ? Instant.now() : null);
+        // Only ever written, never cleared. Rejecting is one press of a cycling
+        // button and the reason is typed afterwards, so a reject that arrives
+        // without one must not wipe what is already on the row — and a verdict
+        // of Verified must not touch the implementor's own note at all.
+        if (verdict == ObStepReviewState.REJECTED && trimmed != null) {
+            item.setRemark(trimmed);
+        }
+
+        // Nothing settles here. A verdict is a mark on a row, not a decision
+        // about the task — the reviewer may cycle any row as often as they
+        // like, and `closeReview` is where they say they are finished.
+        return item;
+    }
+
+    /**
+     * The manager's deliberate close — {@code PENDING_REVIEW → DONE}.
+     *
+     * <h2>Why rejection settles itself and acceptance does not</h2>
+     *
+     * <p>They are not the same kind of act. A rejection is <em>already</em>
+     * explicit: the manager pressed Rejected and typed a reason, so the task
+     * going back needs no second confirmation. Accepting is one press of a
+     * button whose previous position was also one press away, and closing on
+     * it would take the control away in the same instant — a manager who
+     * pressed Verified meaning Reject would find the row locked and the task
+     * closed, with its dependants already released.
+     *
+     * <p>So a verdict of Verified is reversible for as long as the review is
+     * open, and this is what ends it. It is also the irreversible half — it
+     * sets {@code finishedAt}, releases whatever was waiting on this task and
+     * can settle the whole Step — which is exactly the kind of thing worth one
+     * deliberate press.
+     *
+     * @throws JourneyStepNotFoundException      no such step, or the caller holds
+     *                                           no onboarding role at all
+     * @throws NotAnOnboardingModeratorException the caller is neither this project's
+     *                                           implementor manager nor an {@code OB_ADMIN}
+     * @throws InvalidStepTransitionException    the step is not {@code PENDING_REVIEW}
+     * @throws CompletionGateException           a row is still unreviewed, or one was
+     *                                           rejected — in which case the task is on
+     *                                           its way back and there is nothing to close
+     */
+    @Transactional
+    public ObJourneyStep closeReview(long stepId, long callerId, String moduleRole) {
+        ObJourneyStep step = requireStep(stepId);
+        requireReviewer(step, callerId, moduleRole);
+        requireStatus(step, "close review on", ObJourneyStepStatus.PENDING_REVIEW);
+
+        List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(step.getId());
+        List<ObJourneyStepItem> out = items.stream()
+                .filter(i -> i.getRowState() == ObStepRowState.SENT)
+                .toList();
+
+        List<String> undecided = out.stream()
+                .filter(i -> i.getReviewState() == ObStepReviewState.NOT_REVIEWED)
+                .map(ObJourneyStepItem::getLabel)
+                .toList();
+        if (!undecided.isEmpty()) {
+            // The owner's own completion answers with this shape, so a client
+            // that understands one understands both.
+            throw new CompletionGateException(stepId, undecided, 0, false);
+        }
+
+        ObJourney journey = requireJourney(step);
+        Instant now = Instant.now();
+
+        // Reasons are checked across the whole set before anything is written,
+        // so a press that is going to be refused refuses having changed
+        // nothing. `releaseRow` throws on its own row; doing it here as well
+        // is what makes the refusal all-or-nothing rather than "the first two
+        // went and the third did not".
+        for (ObJourneyStepItem row : out) {
+            if (row.getReviewState() == ObStepReviewState.REJECTED
+                    && (row.getRemark() == null || row.getRemark().isBlank())) {
+                throw new RejectReasonRequiredException(row.getId());
+            }
+        }
+        for (ObJourneyStepItem row : out) {
+            releaseRow(row, now, callerId);
+        }
+
+        if (out.stream().anyMatch(i -> i.getRowState() == ObStepRowState.REJECTED)) {
+            step.setReviewRound(step.getReviewRound() + 1);
+        }
+        settleAfterRowMove(journey, step, now, callerId);
+        return step;
+    }
+
+    /**
+     * One row out for review — the implementor's per-row Send, {@code C-141}.
+     *
+     * <h2>Two of five, and the other three keep</h2>
+     *
+     * <p>This is the half of the row-level flow that belongs to the person
+     * doing the work: a row is finished, so it goes, and nothing waits for the
+     * rest of the check list. The task's own <b>Mark complete</b> is unchanged
+     * and still sends everything that is ready in one press — it is this
+     * method five times over — so the bulk path and the row path cannot drift.
+     *
+     * <p><b>Answered first.</b> A row with no answer has nothing to verify;
+     * sending one would put a blank line in front of a reviewer and ask them
+     * what they think of it.
+     *
+     * @throws JourneyStepItemNotFoundException no such row
+     * @throws NotStepOwnerException            not the caller's row to send
+     * @throws StepAlreadyTerminalException     the task is closed
+     * @throws StepUnderReviewException         the row is already out
+     * @throws StepItemAlreadyVerifiedException the row is approved and shut
+     * @throws CompletionGateException          the row has no answer yet
+     */
+    @Transactional
+    public ObJourneyStepItem submitItem(long itemId, long callerId) {
+        ObJourneyStepItem item = stepItems.findById(itemId)
+                .orElseThrow(() -> new JourneyStepItemNotFoundException(itemId));
+        ObJourneyStep step = requireStep(item.getStepId());
+        requireOwnership(step, callerId);
+
+        if (step.getStatus().isTerminal()) {
+            throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
+        }
+        if (item.getRowState() == ObStepRowState.VERIFIED) {
+            throw new StepItemAlreadyVerifiedException(itemId);
+        }
+        if (item.getRowState() == ObStepRowState.SENT) {
+            throw new StepUnderReviewException(step.getId(), itemId);
+        }
+        if (item.getAnswer() == null) {
+            throw new CompletionGateException(step.getId(), List.of(item.getLabel()), 0, false);
+        }
+
+        ObJourney journey = requireJourney(step);
+        Instant now = Instant.now();
+        sendRow(item, now, callerId);
+        settleAfterRowMove(journey, step, now, callerId);
+        return item;
+    }
+
+    /**
+     * One row back to its implementor — the reviewer's per-row Send,
+     * {@code C-141}.
+     *
+     * <h2>Recording a verdict is not sending one</h2>
+     *
+     * <p>{@link #reviewItem} cycles the verdict and keeps it reversible;
+     * this is what releases it. Two presses deliberately: the first is a
+     * thought, the second is a message somebody else starts acting on, and
+     * releasing on the first would turn a mis-click into work another person
+     * begins doing.
+     *
+     * <p>The task itself moves only when the <em>last</em> row comes back —
+     * {@link #settleAfterRowMove} — so a manager may release two now and read
+     * the rest after lunch without the task pretending the review is over.
+     *
+     * @throws InvalidStepTransitionException   the row is not out for review
+     * @throws CompletionGateException          no verdict recorded on it yet
+     * @throws RejectReasonRequiredException    rejected with an empty remark
+     */
+    @Transactional
+    public ObJourneyStepItem releaseItem(long itemId, long callerId, String moduleRole) {
+        ObJourneyStepItem item = stepItems.findById(itemId)
+                .orElseThrow(() -> new JourneyStepItemNotFoundException(itemId));
+        ObJourneyStep step = requireStep(item.getStepId());
+        requireReviewer(step, callerId, moduleRole);
+
+        if (item.getRowState() != ObStepRowState.SENT) {
+            throw new InvalidStepTransitionException(step.getId(), "send back", step.getStatus());
+        }
+        if (item.getReviewState() == ObStepReviewState.NOT_REVIEWED) {
+            throw new CompletionGateException(step.getId(), List.of(item.getLabel()), 0, false);
+        }
+
+        ObJourney journey = requireJourney(step);
+        Instant now = Instant.now();
+        releaseRow(item, now, callerId);
+        if (item.getRowState() == ObStepRowState.REJECTED) {
+            step.setReviewRound(step.getReviewRound() + 1);
+        }
+        settleAfterRowMove(journey, step, now, callerId);
+        return item;
+    }
+
+    /**
+     * Mark this task's outcomes as looked at.
+     *
+     * <h2>What makes a signal a signal</h2>
+     *
+     * <p>"2 rows came back" has to stop saying so once they have been read, or
+     * it is not a notification but a permanent label — and it has to survive a
+     * refresh, or it is not a notification but a flicker. Both need the same
+     * one thing: a stamp on the row saying when its implementor last opened
+     * the outcome. That is {@code outcome_seen_at}, and this is the only
+     * writer.
+     *
+     * <p>Idempotent, and deliberately not a transition: calling it on a task
+     * with nothing new writes nothing and answers zero. The client calls it
+     * whenever the task is opened rather than working out whether it needs to.
+     *
+     * <p><b>The owner's, not the reader's.</b> Seen-ness is about the person
+     * the outcome is addressed to, so a manager or an admin opening the task
+     * does not quietly mark it read for the implementor who has not.
+     *
+     * @return how many rows this press cleared
+     */
+    @Transactional
+    public int markOutcomesSeen(long stepId, long callerId) {
+        ObJourneyStep step = requireStep(stepId);
+        requireOwnership(step, callerId);
+
+        Instant now = Instant.now();
+        int cleared = 0;
+        for (ObJourneyStepItem item : stepItems.findByStepIdOrderBySequenceAsc(stepId)) {
+            if (item.isUnseenOutcome()) {
+                item.setOutcomeSeenAt(now);
+                cleared++;
+            }
+        }
+        return cleared;
+    }
+
+    /** Who the task goes back to, for a history row that is read by people. */
+    private static String ownerLabel(ObJourneyStep step) {
+        return step.getOwnerUserId() == null ? "its implementor" : "user " + step.getOwnerUserId();
+    }
+
+    /**
+     * What the history row says a rejection was about.
+     *
+     * <p>The count leads and the labels follow, so a reader scanning the
+     * chain sees how much came back before they read what. Not truncated:
+     * {@code ob_step_history.remarks} is {@code TEXT}, and a task carrying
+     * twenty rejected rows is exactly the event worth recording in full.
+     */
+    private static String rejectionRemarks(List<String> labels) {
+        return labels.size() + (labels.size() == 1 ? " row rejected: " : " rows rejected: ")
+                + String.join("; ", labels);
     }
 
     /**
@@ -288,8 +906,8 @@ public class ObJourneyStepLifecycleService {
      * gives for its own default: every item predates the choice of
      * whether to gate on it, so the value that preserves existing
      * behaviour is the safe one. The False-needs-a-remark half of §5.8 is
-     * not re-checked here — {@code ck_ob_journey_step_items_remark} makes
-     * it impossible to store a False with no remark in the first place.
+     * not checked here or anywhere else any more — PLAN.md §4, D-17 drops
+     * it, and this gate has always counted a False as answered regardless.
      *
      * <p><b>Required documents.</b> The checklist is per template step
      * ({@code ObJourneyTemplateStepDoc}), but nothing links one attachment
@@ -900,10 +1518,42 @@ public class ObJourneyStepLifecycleService {
      * unanswered clears it too, because a reason for a decision no longer
      * recorded is a sentence about nothing.
      *
+     * <p><b>The remark is optional on both answers</b> — PLAN.md §4, D-17, a
+     * recorded deviation from §5.8's "False requires a remark". This method
+     * used to refuse a False with an empty remark ahead of
+     * {@code ck_ob_journey_step_items_remark}; the constraint is dropped
+     * (V20260916_1520) and so is the refusal. An implementor records a reason
+     * where there is one to record.
+     *
+     * <h2>Three refusals the review gate adds</h2>
+     *
+     * <p><b>A step under review is shut.</b> An answer that changed while a
+     * manager was reading it would make their verdict describe something they
+     * never saw — so {@code PENDING_REVIEW} refuses every write, and says so
+     * with {@link StepUnderReviewException} rather than borrowing the
+     * terminal one, which would tell an implementor their open task was
+     * closed.
+     *
+     * <p><b>A verified row is shut for good.</b> {@link
+     * StepItemAlreadyVerifiedException} — this is what makes "only the
+     * rejected rows reopen" a fact about the data rather than two disabled
+     * controls.
+     *
+     * <p><b>A rejected row keeps its reason.</b> The rejection rides on this
+     * same {@code remark} (see {@code V20260916_1700}'s header), so blanking
+     * it while the row is still {@code REJECTED} would leave a rejection with
+     * nothing on it — refused here with {@link RejectReasonRequiredException}
+     * so the caller gets a 422 naming the field rather than the 500 that
+     * {@code ck_ob_journey_step_items_reject_reason} would otherwise produce.
+     * The implementor may freely <em>replace</em> the text; they may not
+     * empty it.
+     *
      * @throws JourneyStepItemNotFoundException no such item
      * @throws NotStepOwnerException            caller is neither owner nor backup owner of its step
      * @throws StepAlreadyTerminalException     the step is {@code DONE} or {@code SKIPPED}
-     * @throws StepItemRemarkRequiredException  answered False with no reason — see that class
+     * @throws StepUnderReviewException         the step is {@code PENDING_REVIEW}
+     * @throws StepItemAlreadyVerifiedException an OB Manager has verified this row
+     * @throws RejectReasonRequiredException    the row is rejected and the remark would be blanked
      */
     @Transactional
     public ObJourneyStepItem answerItem(long itemId, long callerId, Boolean answer, String remark) {
@@ -916,21 +1566,39 @@ public class ObJourneyStepLifecycleService {
         // it afterwards would change what the completion gate was satisfied
         // by, retroactively — the same reasoning every other transition
         // applies to a terminal step.
-        if (step.getStatus() == ObJourneyStepStatus.DONE || step.getStatus() == ObJourneyStepStatus.SKIPPED) {
+        if (step.getStatus().isTerminal()) {
             throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
         }
+        // The gate is the ROW's, not the task's — V20260917_1210. A row out
+        // with the manager is frozen so their verdict describes what they
+        // actually saw; its neighbours are untouched, which is what lets
+        // somebody carry on with rows three to five while one and two are
+        // being read. The task-level refusal this replaces froze all five.
+        if (item.getRowState() == ObStepRowState.VERIFIED) {
+            throw new StepItemAlreadyVerifiedException(itemId);
+        }
+        if (item.getRowState() == ObStepRowState.SENT) {
+            throw new StepUnderReviewException(step.getId(), itemId);
+        }
 
+        // Blank and absent are the same thing: a remark box somebody cleared
+        // holds no reason, and storing "" would make `remark IS NOT NULL` a
+        // question about whitespace.
         String trimmed = remark == null || remark.isBlank() ? null : remark.trim();
-        if (Boolean.FALSE.equals(answer) && trimmed == null) {
-            // Refused here rather than left to `ck_ob_journey_step_items_remark`,
-            // which would surface as a 500 naming a database object.
-            throw new StepItemRemarkRequiredException(itemId);
+
+        boolean carriesRejection = item.getReviewState() == ObStepReviewState.REJECTED;
+        if (carriesRejection && trimmed == null) {
+            throw new RejectReasonRequiredException(itemId);
         }
 
         item.setAnswer(answer);
         item.setAnsweredBy(answer == null ? null : callerId);
         item.setAnsweredAt(answer == null ? null : Instant.now());
-        item.setRemark(answer == null ? null : trimmed);
+        // Clearing an answer normally clears the remark with it — a reason for
+        // a decision no longer recorded is a sentence about nothing. A rejected
+        // row is the exception: the remark there is the manager's, not the
+        // answer's, and it outlives the answer being taken back.
+        item.setRemark(answer == null && !carriesRejection ? null : trimmed);
         return item;
     }
 
@@ -989,9 +1657,47 @@ public class ObJourneyStepLifecycleService {
     }
 
     private void requireOwnership(ObJourneyStep step, long callerId) {
-        if (!ObStepOwnership.mayAct(callerId, step)) {
+        if (!ObStepOwnership.mayAct(callerId, step) && !isInheritingImplementor(step, callerId)) {
             throw new NotStepOwnerException(step.getId(), step.getOwnerUserId(), step.getBackupOwnerUserId());
         }
+    }
+
+    /**
+     * Whether {@code callerId} is the implementor of the project this step's
+     * journey belongs to, on a step that names nobody at all.
+     *
+     * <h2>The same fallback the read applies, applied to authorisation</h2>
+     *
+     * <p>{@code ObJourneyReadService#inheritedOwner} resolves a task with
+     * neither owner nor backup onto the project's implementor, and OB-06 draws
+     * it as theirs. This is the half that makes that true rather than
+     * decorative: without it the page would offer Complete on a task the five
+     * transitions then refuse, which is a worse answer than the unassigned
+     * state it replaced.
+     *
+     * <p><b>Both nulls are required, not just the owner.</b> A step with a
+     * backup owner already has somebody to inherit to — see
+     * {@link ObBackupOwnerResolver} — and widening this to cover it would let a
+     * project's implementor act on work a template deliberately routed
+     * elsewhere.
+     *
+     * <p>Read through {@link ObJourneyRepository} rather than a scoped one, on
+     * this class's own {@code @UnscopedAccess} reasoning: the journey being
+     * read is this step's own parent, and it discloses nothing except who the
+     * caller would have to be. A project row that has gone missing, or one with
+     * no implementor, answers false — the step stays unassigned and the
+     * transition is refused, which is the behaviour before this method existed.
+     */
+    private boolean isInheritingImplementor(ObJourneyStep step, long callerId) {
+        if (step.getOwnerUserId() != null || step.getBackupOwnerUserId() != null) {
+            return false;
+        }
+        return journeys.findById(step.getJourneyId())
+                .map(ObJourney::getProjectId)
+                .flatMap(projects::findById)
+                .map(ObProject::getImplementorUserId)
+                .filter(implementor -> implementor.longValue() == callerId)
+                .isPresent();
     }
 
     private void requireStatus(ObJourneyStep step, String action, ObJourneyStepStatus required) {
@@ -1163,6 +1869,60 @@ public class ObJourneyStepLifecycleService {
      *       they hold a role in it.</li>
      * </ul>
      */
+    /**
+     * Who may record a verdict on this step — <b>the project's own manager</b>.
+     *
+     * <h2>Not a role, and that is the point</h2>
+     *
+     * <p>This was {@link #requireModerator} at first, on {@link #skip}'s
+     * precedent, which let anybody holding {@code OB_MANAGER} review every
+     * submitted task in the module. {@code ob_projects} carries
+     * {@code implementor_manager_user_id} — "who is accountable for this
+     * engagement above the implementor" — and that is a narrower and truer
+     * answer to "whose judgement is this". A manager reviews the engagements
+     * they own and is not shown anybody else's.
+     *
+     * <p><b>{@code OB_ADMIN} still passes.</b> A project whose manager has
+     * left, is on leave, or was never set would otherwise have no way to close
+     * a review at all, and the work would sit in {@code PENDING_REVIEW} for
+     * ever with no route out. An admin is the unsticking path. {@code
+     * OB_MANAGER} on its own is <em>not</em> enough any more — holding the role
+     * says you manage something, not that you manage this.
+     *
+     * <p>Refused with {@link NotAnOnboardingModeratorException} — a 403, the
+     * same shape {@link #skip} answers with. A caller holding no onboarding
+     * role at all still gets {@link JourneyStepNotFoundException} from
+     * {@link #requireModuleStanding}, so the route discloses nothing about
+     * which item ids exist.
+     */
+    private void requireReviewer(ObJourneyStep step, long callerId, String moduleRole) {
+        requireModuleStanding(step.getId(), moduleRole);
+        if (OB_ADMIN_ROLE.equals(moduleRole)) {
+            return;
+        }
+        boolean managesThisProject = journeys.findById(step.getJourneyId())
+                .map(ObJourney::getProjectId)
+                .flatMap(projects::findById)
+                .map(ObProject::getImplementorManagerUserId)
+                .filter(manager -> manager.longValue() == callerId)
+                .isPresent();
+        if (!managesThisProject) {
+            throw new NotAnOnboardingModeratorException(moduleRole);
+        }
+    }
+
+    /**
+     * The half {@link #requireReviewer} shares with {@link #requireModerator}:
+     * a caller with no onboarding standing at all is answered 404, not 403,
+     * so neither route confirms that an id exists to somebody outside the
+     * module.
+     */
+    private void requireModuleStanding(long stepId, String moduleRole) {
+        if (moduleRole == null || moduleRole.isBlank()) {
+            throw new JourneyStepNotFoundException(stepId);
+        }
+    }
+
     private void requireModerator(long stepId, String moduleRole) {
         if (moduleRole == null || moduleRole.isBlank()) {
             throw new JourneyStepNotFoundException(stepId);

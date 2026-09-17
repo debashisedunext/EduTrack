@@ -60,10 +60,18 @@ standing note that False-with-a-remark was unreachable.
  */
   answer: ObJourneyStepItemUpdateRequestAnswer;
   /**
-   * Mandatory when `answer` is `false` — the server answers
-`ob-step-item-remark-required` without one. Cleared by sending
-`null`, and ignored on an item being cleared to unanswered, since a
-reason for an answer nobody gave is not a thing.
+   * Optional on either answer. It was mandatory on a `false` and
+refused as `ob-step-item-remark-required`; that rule is gone —
+PLAN.md §4, D-17 — along with the CHECK constraint that held it,
+so an implementor records a reason where there is one rather than
+being held at a text box to state the obvious.
+
+Cleared by sending `null`, and ignored on an item being cleared to
+unanswered, since a reason for an answer nobody gave is not a thing.
+
+**Except on a rejected row.** There the remark is the manager's
+reason, not the answer's, so it outlives the answer being taken
+back and cannot be blanked — `ob-step-reject-reason-required`.
 
    * @maxLength 500
    */

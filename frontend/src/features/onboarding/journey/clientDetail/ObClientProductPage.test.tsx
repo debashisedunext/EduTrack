@@ -7,13 +7,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ObClientProductPage } from './ObClientProductPage'
 
 /**
- * OB-05's product half against the mock server — the journeys, the ribbons and
- * the sign-offs that used to be stacked on the client page.
+ * OB-05 against the mock server — the whole of it, since the client page was
+ * removed and its gate, portal login, client info, communications panel and
+ * LIVE banner came here to stand beside the journeys and ribbons.
  *
- * Most of what is here moved from `ObClientDetailPage.test.tsx` unchanged in
- * substance: the assertions are about the accordion, the dots, the step panel
- * and §8's sign-off panel, none of which changed. What changed is the route
- * they are reached on, so the fixtures are addressed as (client, product):
+ * Nearly all of this moved from `ObClientDetailPage.test.tsx` unchanged in
+ * substance: the assertions are about the same accordions, dots, step panels
+ * and cards, none of which changed. What changed is the route they are reached
+ * on, so the fixtures are addressed as (client, product):
  *
  * - **Client 1 (GreenValley)** — LIVE, gate cleared. Product 1 (ERP) carries
  *   the signed go-live; product 2 (Biometric) is finished and never asked, so
@@ -23,8 +24,10 @@ import { ObClientProductPage } from './ObClientProductPage'
  * - **Client 3 (Horizon)** — product 1 running, product 2 past the gate and
  *   held behind it. The sibling-hold case, and the one that proves the hold
  *   can name a sibling belonging to a *different* product.
- * - **Client 7 (Little Scholars)** — gate `LOCKED`, so its product page has to
- *   say what is holding the ribbons and point at where to clear it.
+ * - **Client 7 (Little Scholars)** — gate `LOCKED` with one SUBMITTED, one
+ *   VERIFIED and three PENDING tasks. The checklist that used to be one page up
+ *   is on this page now, and this is the only fixture where its actions do
+ *   anything.
  * - **Client 8 (Trinity)** — a running journey with a BLOCKED step, which is
  *   what the ribbon centres on and the panel opens onto.
  */
@@ -59,8 +62,8 @@ describe('ObClientProductPage', () => {
       expect(await screen.findByRole('heading', { name: 'EduTrack ERP', level: 1 }, SLOW))
         .toBeInTheDocument()
       // The client is the caption — a reader who arrived from a mail link
-      // needs to know whose product this is. Twice over, in fact: the back
-      // link is the client's name too.
+      // needs to know whose product this is. It is the only place the name is
+      // promised: the back link goes to the roster and says so.
       expect(screen.getAllByText(/GreenValley International School/).length).toBeGreaterThan(0)
       expect(screen.getByText(/2 module services|1 module service/)).toBeInTheDocument()
       expect(screen.getByText(/Enterprise · 120 units/)).toBeInTheDocument()
@@ -74,14 +77,16 @@ describe('ObClientProductPage', () => {
       expect(screen.getByText('8 of 8 services complete')).toBeInTheDocument()
     })
 
-    it('offers the way back to the client', async () => {
+    /**
+     * Back to the roster, not to the client: there is no client page to return
+     * to any more. `/onboarding/clients/1` would be `ObClientRedirect`, which
+     * resolves the client's first product and would bounce a reader on the
+     * biometric page straight back to the ERP.
+     */
+    it('offers the way back to the list', async () => {
       renderProduct(1, 2)
-      const back = await screen.findByRole(
-        'link',
-        { name: /GreenValley International School/ },
-        SLOW,
-      )
-      expect(back).toHaveAttribute('href', '/onboarding/clients/1')
+      const back = await screen.findByRole('link', { name: /All clients/ }, SLOW)
+      expect(back).toHaveAttribute('href', '/onboarding/clients')
     })
   })
 
@@ -97,7 +102,25 @@ describe('ObClientProductPage', () => {
       expect(dotStrips).toHaveLength(1)
       expect(within(dotStrips[0]).getAllByRole('img')).toHaveLength(8)
 
-      expect(screen.queryByText('Biometric Attendance')).not.toBeInTheDocument()
+      /*
+        The other product *is* named on this page, and legitimately, in both of
+        the client-level panels that came here when the client page was removed:
+        the info card lists everything bought, and the communications filter
+        lists every service it could filter to. What must not appear is a second
+        product's *journey* — so the claim is about where the name is allowed to
+        be, not whether it occurs at all.
+
+        Asserted as containment rather than as a count, because a count would
+        pass for the wrong reason the moment either panel changed how many times
+        it prints a name.
+      */
+      const clientLevel = [
+        screen.getByRole('region', { name: 'Client info' }),
+        screen.getByTestId('client-communications'),
+      ]
+      for (const mention of screen.getAllByText('Biometric Attendance')) {
+        expect(clientLevel.some((panel) => panel.contains(mention))).toBe(true)
+      }
     })
 
     it('draws the other product on the other product page', async () => {
@@ -186,27 +209,165 @@ describe('ObClientProductPage', () => {
   })
 
   /**
-   * The gate belongs to the client and is administered on the client page, so
-   * this page states what is outstanding and points at where to clear it —
-   * rather than repeating a checklist that would then exist twice with one
-   * copy always slightly behind.
+   * The gate, which used to be one page up.
+   *
+   * These assertions moved here wholesale from `ObClientDetailPage.test.tsx`
+   * when that page was removed: the checklist did not change, only the screen
+   * it stands on. It is addressed as (client 7, product 1) now — Little
+   * Scholars' gate is `LOCKED` with one SUBMITTED, one VERIFIED and three
+   * PENDING tasks, which is the verifier's queue and the only fixture where the
+   * prerequisite actions do anything.
+   *
+   * <p>The old banner here — "prerequisites have not cleared … Open the
+   * checklist" — is gone with the page it linked to. It was a signpost, and the
+   * thing it pointed at is now on this screen.
    */
-  describe('a locked gate', () => {
-    /**
-     * It reports; it does not warn anybody off. The gate stopped refusing a
-     * start, so the old wording — "nothing here starts until this client's
-     * prerequisites clear" — would now be contradicted by the live Start
-     * button on the panel below it.
-     */
-    it('says what is outstanding without claiming it blocks, and links to the checklist', async () => {
+  describe('the prerequisites accordion', () => {
+    /** The checklist and the link to it cannot both exist; this is the one that
+     * survived. A banner offering to open what is already open would send a
+     * reader somewhere they are standing. */
+    it('draws the checklist itself rather than a link to it', async () => {
       renderProduct(7, 1)
-      expect(
-        await screen.findByText(/prerequisites have not cleared/i, undefined, SLOW),
-      ).toBeInTheDocument()
-      expect(screen.getByText(/may start their own service ahead of the checklist/i)).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Open the checklist' })).toHaveAttribute(
-        'href',
-        '/onboarding/clients/7',
+      await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+      expect(screen.queryByRole('link', { name: 'Open the checklist' })).not.toBeInTheDocument()
+      expect(screen.queryByText(/prerequisites have not cleared/i)).not.toBeInTheDocument()
+    })
+
+    /**
+     * §9: "defaults open until the gate clears, collapsed after". Little
+     * Scholars' gate is locked, and its tasks are the only thing on the page
+     * anybody can act on while it stays that way.
+     */
+    it('opens itself on a client whose gate is still locked', async () => {
+      renderProduct(7, 1)
+      const trigger = await screen.findByRole(
+        'button',
+        { name: /Prerequisites — \d of \d mandatory tasks verified/ },
+        SLOW,
+      )
+      expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('collapses itself on a client whose gate has cleared', async () => {
+      renderProduct(1, 1)
+      const trigger = await screen.findByRole('button', { name: 'Prerequisites — cleared' }, SLOW)
+      expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    /**
+     * The strip has to say both numbers. A bar reading 4/4 beside a locked gate
+     * looks broken unless the screen can also say what else is holding it —
+     * `ObClientPrereqs.optionalOutstanding`'s whole reason for existing.
+     */
+    it('reports mandatory progress as a meter in words, not only as a bar', async () => {
+      renderProduct(7, 1)
+      const meter = await screen.findByRole('meter', { name: 'Mandatory prerequisites verified' }, SLOW)
+      expect(meter).toHaveAttribute('aria-valuetext', expect.stringMatching(/^\d of \d verified$/))
+    })
+
+    /**
+     * The checklist's job is to say what to send and what to send it on, so a
+     * row carries the Admin's wording, its TAT budget beside the due date, and
+     * the reference document by name.
+     */
+    it('gives each task its description, its TAT budget and its reference document', async () => {
+      renderProduct(7, 1)
+      const list = await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+
+      const rows = within(list).getAllByRole('listitem')
+      const masterData = rows.find((r) => within(r).queryByText(/Master data extract/))
+      expect(masterData).toBeDefined()
+
+      expect(within(masterData!).getByText(/Staff, student and department masters/)).toBeInTheDocument()
+      // The budget and the date together — one without the other cannot say
+      // whether a task is nearly out of time.
+      expect(within(masterData!).getByText(/TAT 7d · due/)).toBeInTheDocument()
+      expect(within(masterData!).getByText('master-data-format.xlsx')).toBeInTheDocument()
+    })
+
+    /**
+     * A chip, not a link. A-102 refuses to serve bytes for an attachment that
+     * is not CLEAN, so a download control here would be one that refuses — the
+     * name is what the reader needs, without the broken promise.
+     */
+    it('names the reference document without offering a download', async () => {
+      renderProduct(7, 1)
+      const doc = await screen.findByText('master-data-format.xlsx', undefined, SLOW)
+      expect(doc.closest('a')).toBeNull()
+    })
+
+    /**
+     * Plan §5.3 has no override: a mandatory task cannot be waived, and the
+     * server answers 422 as a fact about the row. Offering the button and
+     * letting the refusal arrive from the network would advertise a valve that
+     * does not exist.
+     */
+    it('offers no waiver on a mandatory task', async () => {
+      renderProduct(7, 1)
+      const list = await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+
+      const mandatory = within(list)
+        .getAllByRole('listitem')
+        .filter((row) => within(row).queryByText(/^Mandatory/))
+      expect(mandatory.length).toBeGreaterThan(0)
+      for (const row of mandatory) {
+        expect(within(row).queryByRole('button', { name: 'Waive' })).not.toBeInTheDocument()
+      }
+    })
+
+    /**
+     * Verify and return exist only on a SUBMITTED task. Rendering them disabled
+     * on every pending row would put two dead controls on the page — B-121's
+     * line about a dead control teaching the user the board is broken.
+     *
+     * Scoped to the checklist rather than to the page, which the client page
+     * did not have to do: the journey ribbons below this carry controls of
+     * their own, and a page-wide count would be asserting about both.
+     */
+    it('offers verify and return only on a submitted task', async () => {
+      renderProduct(7, 1)
+      const list = await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+
+      expect(within(list).getAllByRole('button', { name: 'Verify' })).toHaveLength(1)
+      expect(within(list).getAllByRole('button', { name: 'Return' })).toHaveLength(1)
+    })
+
+    /**
+     * `ObPrereqReturnRequest.comment` is `minLength: 1`, and the contract says
+     * why: this is the one message the client is guaranteed to read, and
+     * "returned" with no reason is a round trip that teaches them nothing. The
+     * requirement is the point of the dialog rather than a rule the user broke,
+     * so the button says so before it is pressed.
+     */
+    it('will not send a return with no reason', async () => {
+      const user = userEvent.setup()
+      renderProduct(7, 1)
+      const list = await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+
+      await user.click(within(list).getByRole('button', { name: 'Return' }))
+
+      const confirm = await screen.findByRole('button', { name: 'Return submission' })
+      expect(confirm).toBeDisabled()
+
+      const dialog = await screen.findByRole('dialog')
+      await user.type(within(dialog).getByRole('textbox'), 'The certificate is unsigned.')
+      expect(confirm).toBeEnabled()
+    })
+
+    it('sends a submission back and the task returns to pending', async () => {
+      const user = userEvent.setup()
+      renderProduct(7, 1)
+      const list = await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+
+      await user.click(within(list).getByRole('button', { name: 'Return' }))
+      const dialog = await screen.findByRole('dialog')
+      await user.type(within(dialog).getByRole('textbox'), 'The certificate is unsigned.')
+      await user.click(screen.getByRole('button', { name: 'Return submission' }))
+
+      // The one submitted task is now pending, so nothing is verifiable.
+      await waitFor(
+        () => expect(within(list).queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument(),
+        SLOW,
       )
     })
 
@@ -214,6 +375,86 @@ describe('ObClientProductPage', () => {
       renderProduct(7, 1)
       expect(await screen.findAllByText('Prerequisites pending', undefined, SLOW)).not.toHaveLength(0)
       expect(screen.queryByText(/^Held for /)).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * §9's closing pair and C-112's panel, which came here with the gate when the
+   * client page was removed. They are client-level on a page that is one
+   * product, and drawn below the ribbons deliberately: none of the three is
+   * worked down, so they go where they push nothing actionable off the fold.
+   */
+  describe('the closing grid — §9\'s "client portal access + client info"', () => {
+    it('mounts B-126\'s portal-login panel with the account it reads', async () => {
+      renderProduct(1, 1)
+      await screen.findByRole('heading', { name: 'Client portal login' }, SLOW)
+      expect(await screen.findAllByText(/GREENVALLEY\.deepa/, undefined, SLOW)).not.toHaveLength(0)
+    })
+
+    it('draws the client info card from the detail document', async () => {
+      renderProduct(1, 1)
+      await screen.findByRole('heading', { name: 'Client info' }, SLOW)
+
+      // SPOCs — the primary flagged, and the departed one still visible: the
+      // contract sends inactive contacts so a past sign-off stays explicable.
+      expect(screen.getByText('Deepa Kulkarni')).toBeInTheDocument()
+      expect(screen.getByText('PRIMARY')).toBeInTheDocument()
+      expect(screen.getByText('Farida Qureshi')).toBeInTheDocument()
+
+      // Requirements and the address; attachments are the card's one extra
+      // read, listed by name.
+      expect(screen.getByText('Single sign-on')).toBeInTheDocument()
+      expect(screen.getByText(/14 Ridge Rd/)).toBeInTheDocument()
+      expect(await screen.findByText('greenvalley-msa-signed.pdf', undefined, SLOW)).toBeInTheDocument()
+    })
+
+    /** C-112's stitched view is the client's, not the product's — "everything
+     * said to this client, across every service" is the question it answers, so
+     * it is handed every journey rather than this product's. */
+    it("mounts the client's communications panel", async () => {
+      renderProduct(1, 1)
+      const panel = await screen.findByTestId('client-communications', undefined, SLOW)
+      expect(within(panel).getByRole('heading', { name: 'Communications' })).toBeInTheDocument()
+    })
+
+    /**
+     * §9's OB-05 row opens with this: "**PAN is not shown in the header**". The
+     * API masks it for all but two roles and the unmasked value has its own
+     * audited reveal — so this assertion is not what protects the value. It is
+     * what keeps a masked identity string off a screen that gets shared and
+     * screenshotted all day.
+     */
+    it('keeps identity data out of the header', async () => {
+      renderProduct(1, 1)
+      await screen.findByRole('heading', { name: 'EduTrack ERP', level: 1 }, SLOW)
+      expect(screen.queryByText(/AAGCG/)).not.toBeInTheDocument()
+    })
+
+    /** Plan §1.2 removed financial tracking from the module. The prototype had
+     * a payments card and the prototype is not the specification. */
+    it('has no payments card', async () => {
+      renderProduct(1, 1)
+      await screen.findByRole('heading', { name: 'Client info' }, SLOW)
+      expect(screen.queryByText(/payment/i)).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * The LIVE banner, also rescued from the client page. It carries the go-live
+   * date and the CSAT score — B-119's survey answer from the GO_LIVE sign-off,
+   * seeded 5 for GreenValley — and nothing else on any screen carries either.
+   */
+  describe('the LIVE banner', () => {
+    it('celebrates a LIVE client, with the go-live date and the CSAT score', async () => {
+      renderProduct(1, 1)
+      const banner = await screen.findByText(/Fully onboarded & LIVE since 7 Aug 2026/, undefined, SLOW)
+      expect(banner).toHaveTextContent(/all 2 journeys complete, sign-offs on record · CSAT 5\/5/)
+    })
+
+    it('does not appear on a client still onboarding', async () => {
+      renderProduct(7, 1)
+      await screen.findByRole('list', { name: 'Prerequisite tasks' }, SLOW)
+      expect(screen.queryByText(/Fully onboarded/)).not.toBeInTheDocument()
     })
   })
 
@@ -399,8 +640,8 @@ describe('ObClientProductPage', () => {
   it('says so when this client has no journey for the product', async () => {
     renderProduct(1, 3)
     expect(await screen.findByText('Product not found', undefined, SLOW)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /GreenValley International School/ }))
-      .toHaveAttribute('href', '/onboarding/clients/1')
+    expect(screen.getByRole('link', { name: /All clients/ }))
+      .toHaveAttribute('href', '/onboarding/clients')
   })
 
   it('says so rather than rendering an empty page when the client is out of scope', async () => {

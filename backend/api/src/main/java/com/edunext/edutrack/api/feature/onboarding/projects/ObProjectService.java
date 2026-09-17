@@ -28,9 +28,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Assembles the Projects grid and the project header.
@@ -108,12 +110,26 @@ class ObProjectService {
         CursorPage<Row> page = CursorPage.of(fetched, limit,
                 row -> new Cursor(row.startDate().toString(), row.id()));
 
-        Map<Long, List<StageRow>> stages =
-                reads.stagesByProject(page.data().stream().map(Row::id).toList());
+        /*
+          The roll-up arrives at journey grain — one row per service per stage,
+          which is what the detail page's tree needs. The grid needs the
+          project's own figures, so each project's rows are folded here. Summing
+          is exactly what the SQL used to do in its GROUP BY, moved up one
+          level so both readings come from one query.
+        */
+        List<Long> ids = page.data().stream().map(Row::id).toList();
+        Map<Long, List<StageRow>> stages = reads.stagesByProject(ids);
+        /*
+          One more query for the page, not one per row: the project's TAT is the
+          heaviest chain through its Module Services and a chain is a graph walk
+          — see `ObProjectTatPath` for why that is not a scalar subquery.
+        */
+        Map<Long, Integer> tat = reads.criticalPathTatByProject(ids);
 
         Calendar calendar = calendar();
         List<ObProjectSummary> data = page.data().stream()
-                .map(row -> summary(row, stages.getOrDefault(row.id(), List.of()), now, calendar))
+                .map(row -> summary(row, foldToProject(stages.getOrDefault(row.id(), List.of())),
+                        tat.getOrDefault(row.id(), 0), now, calendar))
                 .toList();
 
         return new ObProjectListResponse(data, page.meta());
@@ -129,14 +145,28 @@ class ObProjectService {
         }
         Instant now = clock.instant();
         return reads.findDetail(scope, projectId, now).map(row -> {
-            List<StageRow> stageRows = reads.stagesByProject(List.of(row.id()))
+            List<StageRow> journeyRows = reads.stagesByProject(List.of(row.id()))
                     .getOrDefault(row.id(), List.of());
+            /*
+              One query, read two ways. `stageRows` is the project's own
+              roll-up, for the header and the summary strip; `byJourney` is the
+              same rows kept at service grain, for the tree. Fetching the second
+              separately is what would let the header disagree with the branch
+              underneath it.
+            */
+            List<StageRow> stageRows = foldToProject(journeyRows);
+            Map<Long, List<StageRow>> byJourney = journeyRows.stream()
+                    .collect(Collectors.groupingBy(StageRow::journeyId, LinkedHashMap::new,
+                            Collectors.toList()));
             List<ServiceRow> serviceRows = reads.servicesByProject(List.of(row.id()))
                     .getOrDefault(row.id(), List.of());
-            ObProjectSummary summary = summary(row, stageRows, now, calendar());
+            int totalTatDays = reads.criticalPathTatByProject(List.of(row.id()))
+                    .getOrDefault(row.id(), 0);
+            ObProjectSummary summary = summary(row, stageRows, totalTatDays, now, calendar());
             return new ObProjectDetail(
                     summary.id(), summary.name(), summary.client(), summary.product(),
                     summary.startDate(), summary.salesPerson(), summary.implementor(),
+                    summary.implementorManager(),
                     summary.status(), row.statusReason(), summary.gateStatus(),
                     summary.currentStage(), summary.stagesComplete(), summary.stagesTotal(),
                     summary.journeyCount(), summary.delayedByDays(), summary.tentativeCompletion(),
@@ -144,7 +174,8 @@ class ObProjectService {
                     stages(stageRows),
                     serviceRows.stream()
                             .map(s -> new ObProjectServiceRef(s.journeyId(), s.templateId(),
-                                    s.serviceName(), s.gateStatus(), s.completedAt() != null))
+                                    s.serviceName(), s.gateStatus(), s.completedAt() != null,
+                                    stages(byJourney.getOrDefault(s.journeyId(), List.of()))))
                             .toList(),
                     UserRef.of(row.createdBy(), row.createdByName()),
                     row.createdAt());
@@ -155,7 +186,8 @@ class ObProjectService {
     // One row
     // ------------------------------------------------------------------
 
-    private ObProjectSummary summary(Row row, List<StageRow> stageRows, Instant now, Calendar calendar) {
+    private ObProjectSummary summary(Row row, List<StageRow> stageRows, int totalTatDays,
+                                     Instant now, Calendar calendar) {
         ObProjectStatus status = parseStatus(row.status());
         return new ObProjectSummary(
                 row.id(),
@@ -165,6 +197,7 @@ class ObProjectService {
                 row.startDate(),
                 UserRef.of(row.salesPersonId(), row.salesPersonName()),
                 UserRef.of(row.implementorId(), row.implementorName()),
+                UserRef.of(row.implementorManagerId(), row.implementorManagerName()),
                 row.status(),
                 row.gateStatus(),
                 currentStageName(stageRows),
@@ -178,8 +211,8 @@ class ObProjectService {
                 stageRows.size(),
                 row.journeyCount(),
                 delayedByDays(row.earliestOverdueAt(), now, status, calendar),
-                tentativeCompletion(row.startDate(), row.totalTatDays(), calendar),
-                row.totalTatDays());
+                tentativeCompletion(row.startDate(), totalTatDays, calendar),
+                totalTatDays);
     }
 
     /**
@@ -197,6 +230,59 @@ class ObProjectService {
                 .min(Comparator.comparingInt(StageRow::minActiveSequence))
                 .map(StageRow::stageName)
                 .orElse(null);
+    }
+
+    /**
+     * Journey-grain roll-up rows, summed onto the project.
+     *
+     * <p>{@code STAGE_ROLLUP} groups by journey so each Module Service can
+     * carry its own stages. Everything that speaks for the project as a whole —
+     * the grid row, the header, {@code ObProjectDetail.stages} — wants them
+     * folded, and this is the one place that happens.
+     *
+     * <p>The three aggregates fold the way the SQL's own {@code GROUP BY} did:
+     * counts add, and {@code minActiveSequence} takes the minimum across
+     * services, because the running stage of a project is the earliest one
+     * running in any of them. Two services sharing a template therefore report
+     * one Configuration, exactly as before this was grouped finer.
+     *
+     * <p>Returned in ribbon order — sequence, then key — so callers that index
+     * by position are reading the same order the query gave them.
+     */
+    // Package-private, not private: this is the one piece of arithmetic that
+    // decides every project's "Stages 2/7", and it is asserted directly in
+    // ObProjectStageFoldTest rather than through a container.
+    static List<StageRow> foldToProject(List<StageRow> journeyRows) {
+        Map<Long, StageRow> byStage = new LinkedHashMap<>();
+        for (StageRow row : journeyRows) {
+            byStage.merge(row.stageKey(), row, (a, b) -> new StageRow(
+                    a.projectId(),
+                    // The fold has no single journey, and saying it does would
+                    // invite a caller to believe it. Zero is the "no journey"
+                    // value, and nothing downstream of the fold reads it.
+                    0L,
+                    a.stageKey(),
+                    a.stageName(),
+                    a.stageSequence(),
+                    a.taskCount() + b.taskCount(),
+                    a.tasksOutstanding() + b.tasksOutstanding(),
+                    minActive(a.minActiveSequence(), b.minActiveSequence())));
+        }
+        return byStage.values().stream()
+                .sorted(Comparator.comparingInt(StageRow::stageSequence)
+                        .thenComparingLong(StageRow::stageKey))
+                .toList();
+    }
+
+    /** The earlier of two running-task sequences, either of which may be absent. */
+    private static Integer minActive(Integer a, Integer b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return Math.min(a, b);
     }
 
     private static List<ObProjectStage> stages(List<StageRow> stageRows) {

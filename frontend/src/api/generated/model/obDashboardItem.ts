@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObDashboardItemType } from './obDashboardItemType';
 import type { ObDashboardItemJourneyId } from './obDashboardItemJourneyId';
+import type { ObDashboardItemObProjectId } from './obDashboardItemObProjectId';
 import type { ObDashboardItemProduct } from './obDashboardItemProduct';
 import type { ObDashboardItemOwner } from './obDashboardItemOwner';
 import type { ObDashboardItemBlockedReason } from './obDashboardItemBlockedReason';
@@ -69,6 +70,19 @@ why a row cannot be acted on without reading it first.
   obClientName: string;
   /** Null on a prerequisite — the gate sits in front of every journey, not inside one. */
   journeyId?: ObDashboardItemJourneyId;
+  /** The project this row opens onto — `jr.project_id` on a service row,
+always present. On a prerequisite it is the client's project **only
+when they have exactly one**, and null otherwise: a prerequisite is
+the client-level gate and names no single project, so a client
+running several cannot be resolved to one.
+
+The drill-down's "Open" opens `/onboarding/projects/{obProjectId}`
+when this is set, and the client-filtered project grid
+(`/onboarding/projects?clientId=`) when it is not — the older
+`/onboarding/clients/{id}` journey overview is no longer where a row
+opens. Added as an optional field — CONVENTIONS.md §1, not breaking.
+ */
+  obProjectId?: ObDashboardItemObProjectId;
   /** Null on a prerequisite, for the same reason `journeyId` is. */
   product?: ObDashboardItemProduct;
   /** The service name or the prerequisite task title — plan §9's "item" column. */

@@ -175,6 +175,18 @@ describe('the stage roll-up', () => {
   });
 });
 
+/**
+ * The three people every create must name.
+ *
+ * <p>`ObProjectCreateRequest` requires a sales person, an implementor and an
+ * implementor manager, and the handler refuses a body missing any of them with
+ * a 400 — so a test omitting them would assert a validation failure it did not
+ * mean to write, whatever it was actually checking. Spread into each body
+ * rather than defaulted inside `send`, so a test that wants to *check* the
+ * refusal can still leave one out on purpose.
+ */
+const PEOPLE = { salesPersonId: 1, implementorUserId: 1, implementorManagerUserId: 1 };
+
 describe('creating a project', () => {
   /** A client with nothing bought, so each create starts from a clean pair. */
   async function freshClient(code: string) {
@@ -197,6 +209,7 @@ describe('creating a project', () => {
       clientId,
       productId: product.id,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: services.map((s) => s.id),
     });
 
@@ -230,6 +243,7 @@ describe('creating a project', () => {
       clientId,
       productId: product.id,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: [services[0].id],
     });
 
@@ -246,6 +260,7 @@ describe('creating a project', () => {
       clientId: existing.obClientId,
       productId: existing.productId,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: [1],
     });
 
@@ -266,6 +281,7 @@ describe('creating a project', () => {
       clientId,
       productId: product.id,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: [999_999],
     });
 
@@ -281,6 +297,7 @@ describe('creating a project', () => {
       clientId,
       productId: 1,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: [],
     });
     expect(status).toBe(400);
@@ -298,6 +315,7 @@ describe('creating a project', () => {
       clientId,
       productId: product.id,
       startDate: '2026-09-15',
+      ...PEOPLE,
       moduleServiceIds: services.map((s) => s.id),
     });
 

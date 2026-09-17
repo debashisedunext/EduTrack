@@ -5,6 +5,9 @@ import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObD
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDashboardSummaryResponse;
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObDelayedProjectListResponse;
 import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObImplementorWorkloadListResponse;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObProjectBoardResponse;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObReviewSummary;
+import com.edunext.edutrack.api.feature.onboarding.dashboard.ObDashboardDtos.ObReviewSummaryResponse;
 import com.edunext.edutrack.api.security.CallerIdentity;
 import com.edunext.edutrack.common.pagination.PageMeta;
 import io.swagger.v3.oas.annotations.Operation;
@@ -70,13 +73,18 @@ class ObDashboardController {
     private final ObDashboardCardItemsService cardItems;
     private final ObDelayedProjectsService delayedProjects;
     private final ObImplementorWorkloadService implementorWorkload;
+    private final ObReviewSummaryService reviewSummary;
+    private final ObProjectBoardService projectBoard;
 
     ObDashboardController(ObDashboardService dashboard, ObDashboardCardItemsService cardItems,
-            ObDelayedProjectsService delayedProjects, ObImplementorWorkloadService implementorWorkload) {
+            ObDelayedProjectsService delayedProjects, ObImplementorWorkloadService implementorWorkload,
+            ObReviewSummaryService reviewSummary, ObProjectBoardService projectBoard) {
         this.dashboard = dashboard;
         this.cardItems = cardItems;
         this.delayedProjects = delayedProjects;
         this.implementorWorkload = implementorWorkload;
+        this.reviewSummary = reviewSummary;
+        this.projectBoard = projectBoard;
     }
 
     /**
@@ -199,6 +207,63 @@ class ObDashboardController {
         return CallerIdentity.of(authentication)
                 .map(caller -> implementorWorkload.list(caller, statDate, includeInactive, cursor, limit))
                 .orElseGet(() -> new ObImplementorWorkloadListResponse(List.of(), PageMeta.last()));
+    }
+
+    /**
+     * OB-02's project board — the counters, the schedule split and one row per
+     * running project, in one answer.
+     *
+     * <p><b>Its own route rather than more cards on {@link #summary}.</b> That
+     * board is a product-keyed pre-aggregate whose seven counters are journeys
+     * per product; these six are counted per <em>project</em>, from live rows,
+     * against the project's completion date. Adding them to a response whose
+     * every other figure comes from {@code ob_dashboard_summary} would have put
+     * two grains under one {@code computedAt} and made the staleness caveat on
+     * that response false for half of it.
+     *
+     * <p>No {@code ETag} and no {@code productId}: the rows are a live read, so
+     * there is no {@code computed_at} to build a cheap validator from
+     * ({@link #delayedProjects}'s own reasoning), and the board is the whole
+     * scope by design — a per-product cut of it is the Projects grid's filter,
+     * on the screen that already has one.
+     *
+     * <p>An unidentifiable caller reaches an empty board rather than an error,
+     * as every other route here does: {@code @PreAuthorize} has already refused
+     * the anonymous case.
+     */
+    @GetMapping(path = "/project-board", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getObProjectBoard",
+            summary = "The project-level board \u2014 schedule health, cards and rows (OB-02)")
+    ObProjectBoardResponse projectBoard(Authentication authentication) {
+        return CallerIdentity.of(authentication)
+                .map(caller -> new ObProjectBoardResponse(projectBoard.board(caller)))
+                .orElseGet(() -> new ObProjectBoardResponse(ObProjectBoardService.empty()));
+    }
+
+    /**
+     * C-141 · the caller's own review figures.
+     *
+     * <p><b>Its own route rather than an eighth card.</b> The seven of OB-02
+     * are a fixed layout keyed by {@code ObDashboardCardKey}, deliberately
+     * closed (A-118), and they are counted <em>per product</em> out of
+     * {@code ob_dashboard_summary}. These are counted per <em>person</em>, out
+     * of a different table, and mean nothing summed across a product
+     * dimension. Forcing them into that vocabulary would have made the card
+     * board's one invariant — every card is a figure about this scope's
+     * clients — quietly untrue.
+     *
+     * <p>No {@code statDate} parameter: "what is waiting on me" has no
+     * historical reading anybody wants, and offering one would invite a client
+     * to ask for last Tuesday's queue.
+     */
+    @GetMapping(path = "/review-summary", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getObReviewSummary",
+            summary = "The caller's own review counters (C-141)")
+    ObReviewSummaryResponse reviewSummary(Authentication authentication) {
+        return CallerIdentity.of(authentication)
+                .map(caller -> new ObReviewSummaryResponse(reviewSummary.summaryFor(caller.userId())))
+                .orElseGet(() -> new ObReviewSummaryResponse(
+                        new ObReviewSummary(0, 0, 0, 0, null)));
     }
 
     /**

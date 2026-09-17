@@ -1,43 +1,74 @@
 import * as React from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { useGetMe } from '@/api/generated/auth/auth'
-import { useGetObClientPrereqs } from '@/api/generated/onboarding/onboarding'
 import { useListUsers } from '@/api/generated/users/users'
-import type { ObClientPrereqs } from '@/api/generated/model/obClientPrereqs'
 import type { ObProjectDetail } from '@/api/generated/model/obProjectDetail'
-import type { ObProjectStage } from '@/api/generated/model/obProjectStage'
 
+import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { Skeleton } from '@/components/ui/skeleton'
 
 import { EscalationBanner } from '@/features/onboarding/journey/clientDetail/EscalationBanner'
-import { PrereqAccordion } from '@/features/onboarding/journey/clientDetail/PrereqAccordion'
 import { SignoffPanel } from '@/features/onboarding/journey/clientDetail/SignoffPanel'
-import { useOpenEscalations } from '@/features/onboarding/journey/clientDetail/useOpenEscalations'
+import {
+  toTaskEscalation,
+  useOpenEscalations,
+} from '@/features/onboarding/journey/clientDetail/useOpenEscalations'
 
-import { ObProjectStageBody } from './ObProjectStageBody'
-import { ObStageRibbon } from './ObStageRibbon'
-import { PROJECT_KEY, useObProject } from './projectQueries'
-import { delayCell, formatDate, stageProgress } from './projectRow'
-import { defaultStageKey } from './stageRibbon'
-import { isMine, myStageKeys, tasksOfStage, useProjectTasks } from './useProjectTasks'
+import { EditObProjectDialog } from './EditObProjectDialog'
+import { ObProjectWorkspace } from './ObProjectWorkspace'
+import { buildProjectTree, projectTally, type ProjectTally } from './projectTree'
+import { useObProject } from './projectQueries'
+import { delayCell, formatDate } from './projectRow'
+import { useProjectTasks } from './useProjectTasks'
+import { isObAdmin, isObProjectEditor, isMineOnly, obViewerScope } from './viewerScope'
 
 /**
  * One project — `/onboarding/projects/:obProjectId`, and the screen the
  * onboarding module is read from.
  *
- * <h2>Five levels, in one order</h2>
+ * <h2>The hierarchy, in one order</h2>
  *
  * <pre>
- *   Project → Prerequisites → Implementation stage → Task → Sub-task
+ *   Project → Prerequisites → Module Service → Step → Task → Check list
  * </pre>
  *
  * <p>The project leads because it is what the page is about; the client is who
- * it is for, which is a different question and one line of caption. The stage
- * ribbon is the third level and it is the navigation — selecting a stop decides
- * which tasks the body underneath shows.
+ * it is for, which is a different question and one line of caption.
+ *
+ * <p>Below the header the page is an <b>accordion of module services</b>, each
+ * opening onto a timeline of its Steps with every task listed under its Step,
+ * and a task opening as a popup. See {@link ObProjectWorkspace}.
+ *
+ * <p><b>Step is this product's word for an implementation stage.</b> The API
+ * still says stage — `ObProjectStage`, `stageKey`, `ob_journey_template_stages`
+ * — because `ob_journey_steps` is already the *task* table and renaming the
+ * model would mean a migration across the append-only history for a word. So
+ * the screen says Step and the schema says stage, and this is the sentence that
+ * says so.
+ *
+ * <h2>Steps are per Module Service, never the project-level roll-up</h2>
+ *
+ * <p>The ribbon this page once drew from `ObProjectDetail.stages` — the roll-up
+ * folded across every journey — could not say whether SIS had finished its one
+ * task or Attendance none of its two. Each service's timeline draws the
+ * server's roll-up at journey grain, which can.
+ *
+ * <p>The project's own totals stay in the header, folded from the same tree the
+ * strips are built from rather than from the project-level roll-up — otherwise
+ * a filtered page would carry an unfiltered header.
+ *
+ * <h2>The page counts whoever is reading it</h2>
+ *
+ * <p>An implementor gets their own tasks, their own Steps and their own four
+ * figures on every Module strip; an admin gets everybody's, with a per-person
+ * accordion under each strip. One {@link ObViewerScope}, decided here and
+ * passed down, so the header and the tree cannot answer differently.
+ *
+ * <p><b>It is presentation, never permission.</b> CLAUDE.md's row-scoping rule
+ * is categorical and the server has already applied it — this only chooses
+ * between two readings of rows the caller was entitled to.
  *
  * <h2>It no longer nests `ObClientProductPage`</h2>
  *
@@ -54,16 +85,25 @@ import { isMine, myStageKeys, tasksOfStage, useProjectTasks } from './useProject
  *
  * <h2>What stayed from it, and where</h2>
  *
- * <p>Escalations and go-live sign-off are kept **below** the hierarchy. Neither
+ * <p>Escalations and go-live sign-off are kept **below** the modules. Neither
  * is a task, and dropping them would remove working function; putting them
- * above would push the work a reader came for off the fold.
+ * above would push the work a reader came for off the fold. Each has a line
+ * to say when there is nothing in it, so the section is always there to find.
  *
  * <p>The client-level **communications panel is deliberately not here**. Every
  * task now carries its own append-only timeline inside its panel, and the
  * stitched view repeated all of it a second time at the bottom of the page —
  * the same two entries, under a different heading, a screen further down. It
- * remains on the client page, which is where "everything said to this client,
- * across every service" is the question being asked.
+ * remains on `ObClientProductPage`, which is where "everything said to this
+ * client, across every service" is the question being asked.
+ *
+ * <p>The **prerequisite checklist is not here either**, any more. It sat as a
+ * row under the header with a View that unfolded the accordion, on a page
+ * whose reader came for the Steps and tasks — and the header's own chip
+ * already says the gate is pending and that tasks can start regardless. The
+ * checklist itself is on the client's product page, where the client record,
+ * the contacts and the portal login are, and the client's name in the header
+ * links straight to it.
  *
  * <h2>Everyone navigates; only the owner changes anything</h2>
  *
@@ -89,46 +129,6 @@ export function ObProjectDetailPage() {
     Number.isFinite(obProjectId) ? obProjectId : null,
   )
 
-  /*
-    The gate, read off the project's client. Enabled only once the project read
-    has produced one — the client id is not in the URL here, it is a field on
-    the project, so this is necessarily the second request rather than a
-    parallel one.
-  */
-  const obClientId = data?.project.client.id
-  const prereqs = useGetObClientPrereqs(obClientId ?? 0, {
-    query: { enabled: obClientId != null },
-  })
-  const gate = prereqs.data?.data
-
-  /*
-    Open while the gate is locked, closed once it clears — and an explicit
-    click wins over both. Written from what is on screen rather than negating
-    the stored value, on `ObClientDetailPage`'s own note: the first click
-    happens while the state is still derived, so flipping a stale `false` would
-    open the checklist the reader is trying to close.
-  */
-  const [prereqsOverride, setPrereqsOverride] = React.useState<boolean | null>(null)
-  const prereqsOpen = prereqsOverride ?? gate?.gateStatus === 'LOCKED'
-
-  /*
-    Keep the header honest when the gate moves under it.
-
-    `PrereqAccordion` invalidates the checklist and the client document — the
-    two reads it was built beside — and knows nothing about this project read.
-    So verifying the last mandatory task would start every task below while the
-    header above still wore "Prerequisites pending", the one inconsistency a
-    reader on this page would actually notice.
-  */
-  const queryClient = useQueryClient()
-  const headerGate = data?.project.gateStatus
-  const checklistGate = gate?.gateStatus
-  React.useEffect(() => {
-    if (headerGate && checklistGate && headerGate !== checklistGate) {
-      void queryClient.invalidateQueries({ queryKey: PROJECT_KEY(obProjectId) })
-    }
-  }, [headerGate, checklistGate, obProjectId, queryClient])
-
   if (isPending) {
     return (
       <div className="mx-auto flex max-w-[88rem] flex-col gap-4 p-6">
@@ -153,20 +153,12 @@ export function ObProjectDetailPage() {
     )
   }
 
-  return (
-    <ProjectBody
-      project={data.project}
-      gate={gate}
-      prereqsError={prereqs.isError}
-      prereqsOpen={prereqsOpen}
-      onTogglePrereqs={() => setPrereqsOverride(!prereqsOpen)}
-    />
-  )
+  return <ProjectBody project={data.project} etag={data.etag} />
 }
 
 /**
- * The page below its two reads, split out so the stage selection can hold state
- * without the guards above it having to run first.
+ * The page below its read, split out so the selections can hold state without
+ * the guards above having to run first.
  *
  * <p>Keeping these hooks in the component that returns early on `isPending`
  * would either sit above the guards — including one request per module service,
@@ -175,59 +167,79 @@ export function ObProjectDetailPage() {
  */
 function ProjectBody({
   project,
-  gate,
-  prereqsError,
-  prereqsOpen,
-  onTogglePrereqs,
+  etag,
 }: {
   project: ObProjectDetail
-  gate: ObClientPrereqs | undefined
-  prereqsError: boolean
-  prereqsOpen: boolean
-  onTogglePrereqs: () => void
+  /** The read's `ETag`, for the edit dialog's `If-Match`. */
+  etag: string | null
 }) {
   const obClientId = project.client.id
-  const stages = React.useMemo(() => project.stages ?? [], [project.stages])
   const services = React.useMemo(() => project.moduleServices ?? [], [project.moduleServices])
 
   const me = useGetMe()
-  const meId = me.data?.data?.id
   const users = useListUsers({ isActive: true, limit: 200 })
   const userList = React.useMemo(() => users.data?.data ?? [], [users.data?.data])
 
   const { tasks, isPending: tasksPending } = useProjectTasks(project)
-  const mine = React.useMemo(() => myStageKeys(tasks, meId), [tasks, meId])
+
+  /*
+    Who is reading, and therefore what the page counts.
+
+    There is no control over it any more. It used to carry an implementor's
+    **Show all Steps**, which swapped the whole page between "my work" and
+    "everybody's" — and the tree below now has its own two-position switch
+    between a reader's outstanding tasks and all of theirs. Two controls in one
+    corner, both reading "show all" and meaning different things, is one too
+    many; this is the reader's own work, and the switch says which of it.
+  */
+  const scope = React.useMemo(() => obViewerScope(me.data?.data), [me.data?.data])
+
+  /*
+    Edit is offered to the roles the server accepts it from — OB Admin and
+    Sales — and to nobody else. The button is the only way in; the dialog is
+    fed this page's own read so its `If-Match` names what the reader saw.
+  */
+  const canEdit = isObProjectEditor(me.data?.data)
+  const [editing, setEditing] = React.useState(false)
+
+  /*
+    The header, folded from the same tree the strips below are built from.
+
+    It used to sum `ObProjectDetail.stages` — the project-level roll-up — which
+    is right for an unfiltered page and wrong the moment the strips are scoped:
+    an implementor would read "Steps 2/7, Tasks done 3/9" above three strips
+    that between them account for six tasks. `buildProjectTree` is a pure fold
+    over props this component already holds, so calling it here as well as in
+    the tree costs a pass over a few dozen tasks and buys a header that cannot
+    drift from the list under it.
+  */
+  const tally = React.useMemo(
+    () => projectTally(buildProjectTree(services, tasks, scope)),
+    [services, tasks, scope],
+  )
 
   /**
-   * Which stage is selected, and therefore which stage's tasks show below.
+   * One task to open the tree onto, from `?task=`.
    *
-   * <p>Derived until the reader touches it, and the default is the first stage
-   * holding their own work — every other stop is locked, so opening on one
-   * would be opening on a dead end. It moves while the page is open (finishing
-   * your last task in a stage hands you the next), which is why it is derived
-   * rather than stored. Once they choose, their choice wins: that is what
-   * `null` means here.
+   * <p>In the URL and not in state, because a task is the one thing on this
+   * page worth linking to: a notification mail can carry it so a recipient
+   * lands on the row rather than on the project. Which branches are open
+   * otherwise stays private to the component — that is a scroll position, not
+   * a link.
+   *
+   * <p>Read-only now. It used to be written here too, by a your-work strip that
+   * named the reader's next task and offered a **Go** — and the strip is gone,
+   * so nothing on this page sets `?task=` any more. An arriving link still
+   * works exactly as it did.
    */
-  const [chosenStageKey, setChosenStageKey] = React.useState<number | null>(null)
-  const fallbackKey = React.useMemo(() => {
-    const ordered = [...stages].sort((a, b) => a.sequence - b.sequence || a.stageKey - b.stageKey)
-    return ordered.find((st) => mine.has(st.stageKey))?.stageKey ?? defaultStageKey(stages)
-  }, [stages, mine])
-  const selectedStageKey = chosenStageKey ?? fallbackKey
-
-  const selectedStage = stages.find((st) => st.stageKey === selectedStageKey)
-  const stageTasks = React.useMemo(
-    () => tasksOfStage(tasks, selectedStageKey),
-    [tasks, selectedStageKey],
-  )
-
-  const myOutstanding = React.useMemo(
-    () => tasks.filter((t) => isMine(t, meId) && t.status !== 'DONE' && t.status !== 'SKIPPED'),
-    [tasks, meId],
-  )
-  const firstMine = myOutstanding[0]
+  const [params] = useSearchParams()
+  const revealTaskId = numberOrNull(params.get('task'))
 
   const { escalations } = useOpenEscalations(obClientId)
+  const completedServices = React.useMemo(
+    () => services.filter((service) => service.isComplete),
+    [services],
+  )
 
   /*
     Keyed by task so the panel can draw its own banner. The page-level
@@ -236,173 +248,110 @@ function ProjectBody({
     scrolling to a stage they have not opened needs the second.
   */
   const escalationsByTask = React.useMemo(
-    () =>
-      new Map(
-        escalations.map((e) => [
-          e.stepId,
-          {
-            id: e.id,
-            raisedBy: e.raisedByContact?.name ?? 'Client',
-            raisedAt: e.raisedAt,
-            note: e.comment,
-          },
-        ]),
-      ),
+    // `toTaskEscalation` rather than an object literal here: the My Tasks popup
+    // and a task's own page open the same panel and draw the same banner, and
+    // three copies of this mapping is how one of them ends up attributing an
+    // escalation to a different person.
+    () => new Map(escalations.map((e) => [e.stepId, toTaskEscalation(e)])),
     [escalations],
   )
 
   return (
     <div className="flex flex-col">
-      <ProjectHeader project={project} taskTally={taskTotals(stages)} />
+      <ProjectHeader
+        onEdit={canEdit ? () => setEditing(true) : undefined} project={project} tally={tally} mineOnly={isMineOnly(scope)} />
+      <EditObProjectDialog
+        project={project}
+        etag={etag}
+        open={editing}
+        onClose={() => setEditing(false)}
+        people={userList}
+      />
 
       <div className="mx-auto flex w-full max-w-[88rem] flex-col gap-2.5 px-6 py-4">
-        {/* The gate and your own work share one row: each is a sentence and a
-            control, and neither earns a full band of its own. */}
-        <div className="flex flex-wrap gap-2.5">
-          {gate && (
-            <div
-              className={
-                gate.gateStatus === 'LOCKED'
-                  ? 'flex min-w-[16rem] flex-1 items-center gap-2.5 rounded-control border border-warning bg-level-high-soft px-3.5 py-2.5 text-caption text-warning-text'
-                  : 'flex min-w-[16rem] flex-1 items-center gap-2.5 rounded-control border border-success bg-level-low-soft px-3.5 py-2.5 text-caption text-success-text'
-              }
-            >
-              <span aria-hidden="true" className="font-bold">
-                {gate.gateStatus === 'LOCKED' ? '!' : '✓'}
-              </span>
-              <span>
-                <strong className="font-semibold">
-                  {gate.gateStatus === 'LOCKED' ? 'Prerequisites pending' : 'Prerequisites cleared'}
-                </strong>
-                {` — ${gate.mandatoryVerified} of ${gate.mandatoryTotal}`}
-                {gate.clearedAt ? `, ${shortDay(gate.clearedAt)}` : ''}
-              </span>
-              <span className="min-w-0 flex-1" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={onTogglePrereqs}
-                aria-expanded={prereqsOpen}
-                className="rounded-chip border border-current px-2.5 py-0.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {prereqsOpen ? 'Hide' : 'View'}
-              </button>
-            </div>
-          )}
-
-          <div className="flex min-w-[16rem] flex-1 items-center gap-2.5 rounded-control border border-primary bg-primary-soft px-3.5 py-2.5 text-caption text-primary">
-            <span aria-hidden="true">●</span>
-            <span>
-              {firstMine ? (
-                <>
-                  <strong className="font-semibold">
-                    {myOutstanding.length} task{myOutstanding.length === 1 ? '' : 's'} assigned to you
-                  </strong>
-                  {` — ${firstMine.name}`}
-                  {firstMine.dueAt ? `, due ${shortDay(firstMine.dueAt)}` : ''}
-                </>
-              ) : (
-                <strong className="font-semibold">No tasks assigned to you</strong>
-              )}
-            </span>
-            <span className="min-w-0 flex-1" aria-hidden="true" />
-            {firstMine?.stageKey != null && (
-              <button
-                type="button"
-                onClick={() => setChosenStageKey(firstMine.stageKey)}
-                className="rounded-chip border border-current px-2.5 py-0.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                Go
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Rendered only while open: the strip above *is* this accordion's
-            collapsed state, so drawing both would say one thing twice. */}
-        {gate && prereqsOpen && (
-          <PrereqAccordion obClientId={obClientId} prereqs={gate} isOpen onToggle={onTogglePrereqs} />
-        )}
-        {prereqsError && (
-          <div
-            className="rounded-card border border-danger bg-danger-soft px-5 py-3 text-sm text-danger-text"
-            role="status"
-          >
-            The prerequisites checklist could not be loaded, so this page cannot say what is holding
-            the tasks below. Reload to try again.
-          </div>
-        )}
-
-        <ObStageRibbon
-          stages={stages}
-          selectedKey={selectedStageKey}
-          onSelect={setChosenStageKey}
-          isYours={(stage) => mine.has(stage.stageKey)}
-          caption="Every stage opens — only the task owner can change anything"
-        />
-
-        <ObProjectStageBody
-          stage={selectedStage}
-          tasks={stageTasks}
-          meId={meId}
+        <ObProjectWorkspace
+          services={services}
+          tasks={tasks}
+          scope={scope}
           users={userList}
           isPending={tasksPending}
-          showServiceName={services.length > 1}
           escalations={escalationsByTask}
+          revealTaskId={revealTaskId}
+          canReview={
+            isObAdmin(me.data?.data) ||
+            (project.implementorManager?.id != null &&
+              project.implementorManager.id === scope.meId)
+          }
+          below={
+            <>
+              {/*
+                Kept below the task rather than dropped: neither is a task, and
+                both are things somebody on this page needs. The rail's two
+                links land here, so each says something even when it is empty
+                — a link that scrolls to nothing teaches the reader it is dead.
+              */}
+              <div id={ESCALATIONS_ANCHOR} className="scroll-mt-4">
+                {escalations.length > 0 ? (
+                  <EscalationBanner obClientId={obClientId} escalations={escalations} />
+                ) : (
+                  <p className="m-0 rounded-card border border-border bg-surface px-4 py-3 text-caption text-content-muted">
+                    <span className="font-semibold text-content">Escalations</span> — none open from
+                    this client.
+                  </p>
+                )}
+              </div>
+
+              <div id={GO_LIVE_ANCHOR} className="flex scroll-mt-4 flex-col gap-2.5">
+                {completedServices.length > 0 ? (
+                  completedServices.map((service) => (
+                    <SignoffPanel
+                      key={service.journeyId}
+                      kind="GO_LIVE"
+                      journeyId={service.journeyId}
+                      obClientId={obClientId}
+                    />
+                  ))
+                ) : (
+                  <p className="m-0 rounded-card border border-border bg-surface px-4 py-3 text-caption text-content-muted">
+                    <span className="font-semibold text-content">Go-live sign-off</span> — asked for
+                    once a module service completes. None has yet.
+                  </p>
+                )}
+              </div>
+            </>
+          }
         />
-
-        {/* Kept below the hierarchy rather than dropped: none of these is a
-            task, and all three are things somebody on this page needs. */}
-        <EscalationBanner obClientId={obClientId} escalations={escalations} />
-
-        {services
-          .filter((service) => service.isComplete)
-          .map((service) => (
-            <SignoffPanel
-              key={service.journeyId}
-              kind="GO_LIVE"
-              journeyId={service.journeyId}
-              obClientId={obClientId}
-            />
-          ))}
       </div>
     </div>
   )
 }
 
-/**
- * Tasks settled over tasks scheduled, summed across the stage roll-up.
- *
- * <p>Read off `stages` rather than off the per-journey reads, so the figure
- * agrees with the ribbon beneath it even while those are still in flight. Two
- * places counting one thing from two sources is how a header ends up
- * disagreeing with the list under it.
- */
-function taskTotals(stages: readonly ObProjectStage[]): { done: number; total: number } {
-  return stages.reduce(
-    (acc, s) => ({
-      done: acc.done + (s.taskCount - s.tasksOutstanding),
-      total: acc.total + s.taskCount,
-    }),
-    { done: 0, total: 0 },
-  )
+/** The two panels under the modules, addressable — a mailed link can name them. */
+const ESCALATIONS_ANCHOR = 'ob-escalations'
+const GO_LIVE_ANCHOR = 'ob-go-live'
+
+/** A hand-edited `?task=abc` reads as no task rather than as `NaN`. */
+function numberOrNull(value: string | null): number | null {
+  if (!value) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
-/** `2026-09-14T09:42:02Z` and `2026-09-14` both → "14 Sep". */
-function shortDay(value: string): string {
-  const parsed = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
-  if (Number.isNaN(parsed.getTime())) return value
-  return parsed.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
-}
 
 function ProjectHeader({
   project,
-  taskTally,
+  tally,
+  mineOnly,
+  onEdit,
 }: {
   project: ObProjectDetail
-  taskTally: { done: number; total: number }
+  tally: ProjectTally
+  /** The figures are this reader's own, so the labels say so. */
+  mineOnly: boolean
+  /** Present only for a reader the server lets edit — see `isObProjectEditor`. */
+  onEdit?: () => void
 }) {
   const delay = delayCell(project)
-  const stages = stageProgress(project)
 
   return (
     <header className="border-b border-default bg-surface px-6 py-4">
@@ -410,16 +359,22 @@ function ProjectHeader({
         <div className="flex flex-wrap items-start gap-x-5 gap-y-3">
           <div className="min-w-0 flex-1 basis-80">
             {/*
-              The breadcrumb carries the route and nothing else. The client used
-              to sit here *as well as* on the caption line below and again in
-              the nested page's back link — three prints of one name on one
-              screen. It is named once now, on the line under the title, where
-              it is one of four facts rather than a second heading.
+              The breadcrumb carries the route and the client's code — the one
+              short, unique handle a reader quotes on a call — and nothing
+              else. The client's *name* used to sit here as well as on the line
+              below; it is named once now, under the title, where it is one of
+              four facts rather than a second heading.
             */}
-            <p className="text-caption text-content-muted">
+            <p className="flex items-center gap-1.5 text-caption text-content-muted">
               <Link to="/onboarding/projects" className="hover:underline">
                 Projects
               </Link>
+              {project.client.clientCode ? (
+                <>
+                  <span aria-hidden="true">/</span>
+                  <span className="tabular-nums">{project.client.clientCode}</span>
+                </>
+              ) : null}
             </p>
 
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
@@ -447,45 +402,115 @@ function ProjectHeader({
             </div>
 
             {/*
-              One line, four facts: who it is for, what they bought, who sold
-              it, when it started. The client is a link because the prerequisite
-              checklist and the portal login live on the client record.
+              One line, five facts: who it is for, what they bought, who sold
+              it, who is implementing it, when it started.
+
+              The client is a link to **this project's product page**, not to a
+              client page — there is no longer one. A project is a (client,
+              product) pair, so that page is the same pair seen from the other
+              side, and it is where the prerequisite checklist, the portal login
+              and the client record now live. Linking at the client instead
+              would go through `ObClientRedirect`, which would resolve the
+              client's *first* product and could land a reader on a different
+              one than the project they are reading.
             */}
             <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-sm text-content-muted">
               <Link
-                to={`/onboarding/clients/${project.client.id}`}
+                to={`/onboarding/clients/${project.client.id}/products/${project.product.id}`}
                 className="font-medium text-content hover:underline"
                 title="The client record — prerequisites, contacts and portal login"
               >
                 {project.client.name}
               </Link>
-              {project.client.clientCode ? (
-                <span className="tabular-nums">({project.client.clientCode})</span>
-              ) : null}
               <Sep />
               <span>{project.product.name}</span>
               <Sep />
               <span>Sales: {project.salesPerson?.displayName ?? 'unassigned'}</span>
+              <Sep />
+              {/*
+                Beside the sales person rather than instead of them: they are
+                the people a reader chasing this project asks for, and which
+                one they want depends on whether the question is about the
+                contract, about the work, or about who to escalate it to. All
+                three print "unassigned" rather than disappearing — a project
+                routinely has one before the others, and a line that silently
+                drops the missing half reads as though nobody thought to record
+                it.
+              */}
+              <span>Implementor: {project.implementor?.displayName ?? 'unassigned'}</span>
+              <Sep />
+              <span>Manager: {project.implementorManager?.displayName ?? 'unassigned'}</span>
               <Sep />
               <span>Started {formatDate(project.startDate)}</span>
             </p>
           </div>
 
           {/*
-            Four figures. "Current stage" is left to the ribbon, which says the
-            same thing where the reader is already looking, and the city is a
-            client fact rather than one about this engagement.
+            Four figures, and the first two answer the question the header is
+            actually asked: how far along is this, and how much of it is
+            finished work rather than work in flight.
+
+            They replaced "Steps 3/5" and "Tasks done 5/7", which were the same
+            progress said twice in two denominators — a reader comparing 3/5
+            against 5/7 has to do the arithmetic the first figure now does for
+            them, and neither fraction said anything about the level a project
+            is actually reported at, which is the module. The per-Step and
+            per-task fractions are not lost: every Module strip below still
+            carries its own, over its own work, where they are a fact about
+            something a reader can open.
+
+            Completion stays the reader's own where the page is filtered — the
+            label says "Your completion" rather than leaving two people to
+            compare two percentages neither of them can see the denominator
+            for. Modules do not: a module is finished or it is not, whoever is
+            reading. See `ProjectTally`.
           */}
-          <dl className="flex flex-wrap gap-x-7 gap-y-2">
-            <Fact label="Stages" value={stages.label} />
-            <Fact label="Tasks done" value={`${taskTally.done}/${taskTally.total}`} />
-            <Fact label="Total TAT" value={`${project.totalTatDays}d`} />
-            <Fact
-              label="Tentative"
-              value={formatDate(project.tentativeCompletion)}
-              hint={`${project.totalTatDays} working days of TAT from the start date`}
-            />
-          </dl>
+          <div className="flex flex-col items-end gap-2">
+            <dl className="flex flex-wrap gap-x-7 gap-y-2">
+              <Fact
+                label={mineOnly ? 'Your completion' : 'Completion'}
+                value={`${tally.completionPercent}%`}
+                hint={
+                  mineOnly
+                    ? `${tally.tasksDone} of your ${tally.tasksTotal} tasks completed`
+                    : `${tally.tasksDone} of ${tally.tasksTotal} tasks completed`
+                }
+              />
+              <Fact
+                label="Modules done"
+                value={`${tally.modulesComplete}/${tally.modulesTotal}`}
+                hint="Module Services this project was boarded through, and how many have finished"
+              />
+              <Fact label="Total TAT" value={`${project.totalTatDays}d`} />
+              <Fact
+                label="Tentative"
+                value={formatDate(project.tentativeCompletion)}
+                hint={`${project.totalTatDays} working days of TAT from the start date`}
+              />
+            </dl>
+            {/*
+              The completion figure, as a bar with its fraction: the percentage
+              above says how far, this says out of how much. The bar is
+              decorative — the fraction beside it is the accessible form.
+            */}
+            <p className="m-0 flex w-full items-center gap-2.5 text-caption tabular-nums text-content-muted">
+              <span aria-hidden="true" className="flex h-1.5 flex-1 overflow-hidden rounded-chip bg-subtle">
+                <span className="block h-full bg-primary" style={{ width: `${tally.completionPercent}%` }} />
+              </span>
+              <span>
+                {tally.tasksDone} of {mineOnly ? 'your ' : ''}
+                {tally.tasksTotal} tasks completed
+              </span>
+            </p>
+          </div>
+
+          {onEdit ? (
+            <div className="self-start">
+              <Button variant="secondary" onClick={onEdit}>
+                Edit project
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {project.statusReason ? (

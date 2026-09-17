@@ -267,16 +267,57 @@ public class OnboardingFixture {
     }
 
     /**
-     * {@code true} once the ERP product exists — the idempotency check the
+     * {@code true} once this corpus has been written — the idempotency check the
      * loader runs before writing anything.
      *
      * <p>Deliberately separate from B-007's. The two corpora share a database
      * and a profile but not a lifetime: a developer who loaded tickets last week
      * and pulls this branch today needs the onboarding half to load without the
      * ticket half being reloaded on top of itself.
+     *
+     * <h2>Why it asks about users and not only the ERP product</h2>
+     *
+     * <p>It used to ask one question — does {@code ob_products} hold
+     * {@code PRODUCTS.get(0).code()}, the literal {@code ERP}. That probe has
+     * two faults, and 15 Sep 2026 hit both at once on a local database holding
+     * products coded {@code EDUNEXT_ERP}, {@code CRM} and {@code BIOMETRIC}:
+     *
+     * <ul>
+     *   <li><b>Products are editable.</b> Once OB-07's Products master shipped,
+     *       a product could be created, renamed or re-coded through the UI. A
+     *       developer who seeds one by hand — the obvious thing to do on a demo
+     *       box — leaves {@code ERP} absent, and the probe concludes nothing was
+     *       ever loaded.</li>
+     *   <li><b>It probes the wrong write.</b> {@link #load} calls
+     *       {@link #createUsers} <em>before</em> {@code createProducts}, so the
+     *       product is the second thing written and the users are the first. The
+     *       statement that actually collides is never the one being asked
+     *       about.</li>
+     * </ul>
+     *
+     * <p>Together those turn a skip into a crash: {@code alreadyLoaded} answers
+     * false, {@code load} re-runs over a corpus that is already there, and the
+     * context dies on {@code Duplicate entry 'B101-001' for key
+     * users.uq_users_emp_code} — after {@code Started EduTrackApplication} has
+     * already printed, so it reads as the app dying rather than as a seeder
+     * refusing.
+     *
+     * <p>So it now also asks whether the corpus's own users exist, which is what
+     * {@link #EMP_CODE_PREFIX} was reserved for: unlike products, nothing in the
+     * product surfaces a screen for editing an emp code, so the answer cannot be
+     * invalidated by ordinary use. The product probe is kept as well — either
+     * signal alone means "this corpus has been here", and a database carrying
+     * one but not the other is half-loaded, which is still not something to
+     * write over.
      */
     @Transactional(readOnly = true)
     public boolean alreadyLoaded() {
+        Integer users = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE emp_code LIKE ?", Integer.class,
+                EMP_CODE_PREFIX + "%");
+        if (users != null && users > 0) {
+            return true;
+        }
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM ob_products WHERE code = ?", Integer.class,
                 OnboardingFixtureData.PRODUCTS.get(0).code());
@@ -305,6 +346,75 @@ public class OnboardingFixture {
                  WHERE NOT EXISTS (SELECT 1 FROM ob_client_prereqs p WHERE p.ob_client_id = c.id)
                 """, Integer.class);
         return count == null ? 0 : count;
+    }
+
+    /**
+     * Corpus clients with no active SPOC — {@link #clientsMissingPrereqs}'
+     * shape, topped up for the same reason and one layer beneath it.
+     *
+     * <p>A client with no contact is not a cosmetic gap. {@code
+     * ob_signoffs.sent_to_contact_id} is {@code NOT NULL} behind a foreign key,
+     * so <b>every sign-off route refuses outright</b> — including
+     * {@code DevSignoffSimulationService}, the one thing that can satisfy a
+     * step's sign-off gate on a box with no customer and no mailbox. The
+     * symptom is three screens away from the cause: a task owner presses
+     * Complete, gets {@code completion-gate-not-satisfied} with
+     * {@code signoffMissing}, goes to accept the sign-off, and is told to add a
+     * SPOC to a client they were not otherwise thinking about.
+     *
+     * <p>Observed 15 Sep 2026 on a local database whose seven corpus clients
+     * all held zero contacts while the two created through the wizard held one
+     * each — {@code ObClientWriteService} writes a SPOC for its own clients, so
+     * only the seeded ones were short. {@link #createContacts} has always been
+     * part of {@link #load}; a database seeded before it was, or one that
+     * skipped the load, never receives them, and {@link #alreadyLoaded} is what
+     * keeps it that way.
+     */
+    /*
+      Counted over the corpus's own specs rather than with a `COUNT(*)` over
+      `ob_clients`, so the number reported is the number that will actually be
+      written. A plain count of every contactless client says "7" on a database
+      whose clients were all created through the wizard and then seeds none of
+      them, because {@link #loadMissingContacts} matches by corpus name and
+      those are deliberately out of its scope — a log line that overstates what
+      it did is worse than no log line, and that exact mismatch was observed on
+      15 Sep 2026 before this was narrowed.
+    */
+    @Transactional(readOnly = true)
+    public int clientsMissingContacts() {
+        int missing = 0;
+        for (ClientSpec spec : OnboardingFixtureData.CLIENTS) {
+            Long clientId = clientIdByName(spec.name());
+            if (clientId != null && contactIdsOf(clientId).isEmpty()) {
+                missing++;
+            }
+        }
+        return missing;
+    }
+
+    /**
+     * Seed the SPOCs for the clients {@link #clientsMissingContacts} counted,
+     * and nothing else.
+     *
+     * <p>Same top-up contract as {@link #loadMissingPrereqs}: only absent rows
+     * are written, a complete database is a no-op, and a client the corpus did
+     * not write is skipped because the wizard already gave it a contact. It
+     * must run <b>before</b> the prerequisites top-up — {@link
+     * #loadMissingPrereqs} passes {@link #contactIdsOf} into
+     * {@code createClientPrereqs}, so a checklist seeded while the contact map
+     * is empty is a checklist with nobody against it.
+     */
+    @Transactional
+    public void loadMissingContacts() {
+        Map<String, Long> userIds = userIdsByKey();
+
+        for (ClientSpec spec : OnboardingFixtureData.CLIENTS) {
+            Long clientId = clientIdByName(spec.name());
+            if (clientId == null || !contactIdsOf(clientId).isEmpty()) {
+                continue;
+            }
+            createContacts(spec, clientId, userIds, onboardingDateOf(clientId));
+        }
     }
 
     /**
@@ -1106,8 +1216,9 @@ public class OnboardingFixture {
      * <p>The default is the prototype's: everything on a completed step is True,
      * the first item of the in-flight step is True, the rest unanswered. The
      * overrides in {@link OnboardingFixtureData#ITEM_ANSWERS} are what make the
-     * corpus interesting — a False with its mandatory remark, which is the shape
-     * {@code ck_ob_journey_step_items_remark} refuses to store without one.
+     * corpus interesting — a False with the reason beside it. The remark is
+     * optional now (PLAN.md §4, D-17), but the seed keeps writing one: a demo
+     * corpus exists to show the screen at its most readable.
      */
     private void createStepItems(ClientSpec client, JourneySpec journey, StepSpec stepSpec,
                                  StepSchedule step, long stepId, int stepIndex, Long ownerId,

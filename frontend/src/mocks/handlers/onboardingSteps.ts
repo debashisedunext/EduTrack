@@ -3,6 +3,7 @@ import type {
   Db, ObClient, ObJourney, ObStep, ObStepCommunicationRow, ObStepItem,
 } from '../db';
 import { getDb, nextId } from '../db';
+import { stageOfStep } from './obStageFold';
 import { notFound, ok, paginate, problem, url, userRef, validationFailed } from './util';
 
 /**
@@ -201,9 +202,21 @@ function effectiveOwnerUserId(step: ObStep, db: Db): number | null {
   return ownerOnLeave ? step.backupOwnerUserId : step.ownerUserId;
 }
 
-function stepDetailDto(step: ObStep, db: Db, journeyId: number) {
+function stepDetailDto(step: ObStep, db: Db, journeyId: number, journey?: ObJourney) {
+  /*
+    The stage a task sits in, and how much of its budget is gone. Both are
+    resolved rather than stored, exactly as the server resolves them — see
+    `obStageFold` for why the mock can share one copy where the server cannot.
+  */
+  const stage = journey ? stageOfStep(db, journey, step) : null;
+  const budgetHours = step.tatDays * 8;
   return {
     ...stepDto(step, journeyId),
+    stageKey: stage?.key ?? 0,
+    stageName: stage?.name ?? 'Ungrouped',
+    // Null rather than 0 for a task with no budget: 0% reads as "on time with
+    // everything still to do", a claim about a clock that has said nothing.
+    tatUsedPercent: budgetHours === 0 ? null : (step.usedHours / budgetHours) * 100,
     items: (step.items ?? []).map((i) => stepItemDto(i, step.id, db)),
     docs: (step.docs ?? []).map((d) => ({
       id: d.id,
@@ -240,6 +253,8 @@ function journeySummaryDto(client: ObClient, journey: ObJourney, db: Db) {
           status: current.status,
           rag: stepRag(current),
           dependsOnStepId: current.dependsOnStepId,
+          stageKey: stageOfStep(db, journey, current).key,
+          stageName: stageOfStep(db, journey, current).name,
         }
       : null,
     owner: current ? userRef(current.ownerUserId ?? null, db) : null,
@@ -281,11 +296,31 @@ function parallelGroups(journey: ObJourney): number[][] {
 }
 
 function journeyDetailDto(client: ObClient, journey: ObJourney, db: Db) {
+  /*
+    Who an ownerless task falls to — the implementor on the project this journey
+    belongs to. Resolved once for the journey, exactly as
+    `ObJourneyReadService` resolves it, and applied only here: the single-step
+    read reports the owner the row actually carries, which is what the contract
+    says and what a caller who just changed that row is asking about.
+  */
+  const implementor =
+    db.obProjects.find(
+      (p) => p.obClientId === client.id && p.productId === journey.productId,
+    )?.implementorUserId ?? null;
+
   return {
     ...journeySummaryDto(client, journey, db),
     templateId: journey.templateId ?? 0,
     templateVersion: journey.templateVersion ?? 1,
-    steps: journey.steps.map((s) => stepDto(s, journey.id)),
+    steps: journey.steps.map((s) => {
+      const view = stepDto(s, journey.id);
+      // Last in the chain: a task with an owner or a backup keeps it.
+      const inherits =
+        implementor != null && s.ownerUserId == null && s.backupOwnerUserId == null;
+      return inherits
+        ? { ...view, ownerUserId: implementor, ownerIsInherited: true }
+        : { ...view, ownerIsInherited: false };
+    }),
     parallelGroups: parallelGroups(journey),
   };
 }
@@ -383,7 +418,7 @@ export const obJourneyHandlers = [
   http.get(url('/onboarding/journey-steps/:stepId'), ({ params }) => {
     const db = getDb();
     const found = findStep(db, Number(params.stepId));
-    return found ? ok(stepDetailDto(found.step, db, found.journey.id)) : notFound('Step');
+    return found ? ok(stepDetailDto(found.step, db, found.journey.id, found.journey)) : notFound('Step');
   }),
 
   http.patch(url('/onboarding/journey-steps/:stepId'), async ({ params, request }) => {
@@ -401,7 +436,7 @@ export const obJourneyHandlers = [
     if (body.tatDays !== undefined) found.step.tatDays = body.tatDays;
     if (body.dueAt !== undefined) found.step.dueAt = body.dueAt;
     // `status` is deliberately not accepted here — the transition routes own it.
-    return ok(stepDetailDto(found.step, db, found.journey.id));
+    return ok(stepDetailDto(found.step, db, found.journey.id, found.journey));
   }),
 
   http.post(url('/onboarding/journey-steps/:stepId/skip'), async ({ params, request }) => {
@@ -420,7 +455,7 @@ export const obJourneyHandlers = [
     step.status = 'SKIPPED';
     step.skipReason = body.reason;
     step.skippedById = db.currentUserId;
-    return ok(stepDetailDto(step, db, found.journey.id));
+    return ok(stepDetailDto(step, db, found.journey.id, found.journey));
   }),
 
   http.patch(url('/onboarding/journey-step-items/:itemId'), async ({ params, request }) => {
@@ -445,12 +480,13 @@ export const obJourneyHandlers = [
           if (body.answer === undefined) {
             return validationFailed({ answer: ['Required'] });
           }
+          /*
+            The remark is optional on both answers — PLAN.md §4, D-17. It was
+            mandatory on a False and refused as `ob-step-item-remark-required`;
+            `ck_ob_journey_step_items_remark` has been dropped, so a False with
+            an empty remark is stored here exactly as the server stores it.
+          */
           const remark = body.remark?.trim() || null;
-          if (body.answer === false && !remark) {
-            // `ck_ob_journey_step_items_remark` — an exception nobody explained
-            // is one the next reader has to go and ask about.
-            return problem(422, 'ob-step-item-remark-required', 'A False answer needs a reason');
-          }
           item.answer = body.answer;
           item.isDone = body.answer !== null;
           item.remark = body.answer === null ? null : remark;

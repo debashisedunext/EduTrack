@@ -1,12 +1,21 @@
 # `features/onboarding/journey/clientDetail/`
 
-C-110 — OB-05, the onboarding client detail page — and **C-111 — OB-06**, the
-step update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
+C-110 — OB-05, the onboarding product page — and **C-111 — OB-06**, the step
+update panel inside it. `Onboarding-Module-Plan.md` §9, OB-05 and OB-06.
+
+> **The client page is gone.** `ObClientDetailPage` was removed and everything
+> on it that could be acted on — the prerequisites gate, the portal-login
+> panel, the client info card, the communications panel and the LIVE banner —
+> moved onto `ObClientProductPage`, beside the ribbons it gates. What was left
+> above them was a header and a scroll on the way to the same controls.
+> `/onboarding/clients/:obClientId` survives as `ObClientRedirect`, because
+> `ObMailLinks` has been sending onboarding mail there since B-108 and mail
+> already delivered cannot be rewritten.
 
 | File | What it is |
 |---|---|
-| `ObClientDetailPage.tsx` | The client route page — header, the prerequisites gate, one card per purchased product, and §9's closing pair. |
-| `ObClientProductPage.tsx` | One purchased product — `/onboarding/clients/:obClientId/products/:productId`. The journey accordions, and the one directory read their ribbons resolve owners from. |
+| `ObClientRedirect.tsx` | `/onboarding/clients/:obClientId` — a forwarder, not a page. Resolves a client id with no product to that client's first product page. |
+| `ObClientProductPage.tsx` | OB-05 — `/onboarding/clients/:obClientId/products/:productId`. The client's gate above, that product's journey accordions, the client record and the stitched timeline below. |
 | `productGroups.ts` | The fold from journeys to products, and the figures a card prints. Pure. |
 | `ObAccordion.tsx` | One accordion: an always-visible strip, a region that mounts on expand, and the anchoring below. |
 | `useAnchoredToggle.ts` | §9's "never scrolls the page", made mechanical. |
@@ -41,15 +50,14 @@ biometric rollout's.
 
 | Screen | Route | What it answers |
 |---|---|---|
-| `ObClientDetailPage` | `/onboarding/clients/:obClientId` | *Which product?* The gate, a card per purchased product, the closing pair, the stitched timeline. |
-| `ObClientProductPage` | `/onboarding/clients/:obClientId/products/:productId` | *How is it going?* That product's journeys — ribbons, step panels, sign-offs — and nothing else's. |
+| `ObClientRedirect` | `/onboarding/clients/:obClientId` | Nothing — it forwards. A caller holding a client id and no product lands on the first product bought. |
+| `ObClientProductPage` | `/onboarding/clients/:obClientId/products/:productId` | *How is it going?* That product's journeys — ribbons, step panels, sign-offs — under the client's gate and above the client's record. |
 
 Three things this preserves rather than changes:
 
-- **§9's ordering inside each page.** The gate is still above everything on the
-  client page, because nothing below it can move while it is locked, and the
-  product page says so rather than drawing live-looking ribbons over a locked
-  gate.
+- **§9's ordering.** The gate is still above everything, because nothing below
+  it can move while it is locked, and the closing pair is still below the
+  ribbons, because none of it is worked down.
 - **The strip/ribbon split.** The contract splits them so "a client with six
   journeys does not pay for six ribbons on first paint". The client page now
   pays for **none**, which is the strongest form of that rule; its test asserts
@@ -122,7 +130,7 @@ the top of the viewport before the state change and corrects by the difference
 in a layout effect, before paint.
 
 jsdom performs no layout, so the correction is a no-op in tests. What
-`ObClientDetailPage.test.tsx` can and does prove is the half that regresses:
+`ObClientProductPage.test.tsx` can and does prove is the half that regresses:
 that nothing on the page asks the window to scroll at all.
 
 ## What this task is not

@@ -48,6 +48,12 @@ export default {
           high:     { DEFAULT: 'var(--level-high)',     soft: 'var(--level-high-soft)',     text: 'var(--level-high-text)' },
           critical: { DEFAULT: 'var(--level-critical)', soft: 'var(--level-critical-soft)', text: 'var(--level-critical-text)' },
         },
+        // OB-05 — the onboarding delivery-health ramp's orange step. Not part
+        // of the level ramp above: that one is ticket priority, and Delayed is
+        // a status. See tokens.css for why a fourth hue was needed at all.
+        status: {
+          delayed: { DEFAULT: 'var(--status-delayed)', soft: 'var(--status-delayed-soft)', text: 'var(--status-delayed-text)' },
+        },
         // Colour-blind-safe series order for charts — use in index order, never by name.
         chart: {
           1: 'var(--chart-1)', 2: 'var(--chart-2)', 3: 'var(--chart-3)', 4: 'var(--chart-4)',

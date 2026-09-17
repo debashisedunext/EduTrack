@@ -69,12 +69,14 @@ import type {
   ConflictResponse,
   ForbiddenResponse,
   GetObDashboardSummaryParams,
+  GetObMyTask200,
   ListObClientEscalationsParams,
   ListObClientsParams,
   ListObDashboardCardItemsParams,
   ListObDelayedProjectsParams,
   ListObEscalationsParams,
   ListObImplementorWorkloadParams,
+  ListObMyTasksParams,
   ListObPrereqCommentsParams,
   ListObPrereqHistoryParams,
   ListObProjectsParams,
@@ -108,6 +110,7 @@ import type {
   ObEscalationResponse,
   ObImplementorWorkloadListResponse,
   ObModuleGatedResponse,
+  ObMyTaskListResponse,
   ObPrereqCommentCreateRequest,
   ObPrereqCommentListResponse,
   ObPrereqCommentResponse,
@@ -117,6 +120,7 @@ import type {
   ObPrereqSkipRequest,
   ObPrereqSubmitRequest,
   ObPrereqVerifyRequest,
+  ObProjectBoardResponse,
   ObProjectCreateRequest,
   ObProjectListResponse,
   ObProjectResponse,
@@ -125,6 +129,7 @@ import type {
   ObReportResponse,
   ObRequirementUpdateRequest,
   ObRequirementWriteRequest,
+  ObReviewSummaryResponse,
   ObSignoffAcceptRequest,
   ObSignoffAcceptResultResponse,
   ObSignoffCancelRequest,
@@ -147,6 +152,242 @@ import type {
 } from '.././model';
 
 import { http } from '../../http';
+
+
+
+
+/**
+ * Every task still open against the **calling user**, whichever project or
+client it belongs to, soonest due first.
+
+**There is no `ownerUserId` parameter, by design.** The caller is the
+filter. One that existed would let an implementor read a colleague's
+queue by guessing a user id, and adding it later behind a role check
+would put an authorisation decision on a query parameter — the shape
+`runReport` already refuses for the same reason.
+
+**Three ways a task is yours.** Owner, backup owner, or *inherited* — a
+task nobody was pinned to, on a project you are the implementor of. The
+third is not a convenience: it is the rule `ObJourneyStepLifecycle`
+already authorises by, so a task listed here is one the five transitions
+will accept from you. A queue listing work the server would then refuse
+is worse than no queue. The backup owner counts for the reason
+`OnboardingScopeResolver.hasStepOwnedBy` counts them — a stand-in asked
+to cover a task needs to see it.
+
+**Blocked and Waiting on client are included.** They are still open and
+still yours; `status` says which, and a queue that hid them would hide
+the work that has been stuck longest. Tasks behind a locked prerequisite
+gate are included too — the checklist reports, it does not hold.
+
+**Excluded is work nobody expects:** a project that is `ON_HOLD` or
+`DROPPED` has had its clock stopped on purpose, so listing its tasks
+would ask somebody to do what the organisation decided to stop.
+
+Ordered by due date with nulls last, then by task id. The keyset cursor
+carries the coalesced sort key, so a page boundary in a run of tasks
+sharing a due date neither skips nor repeats.
+
+ * @summary The implementor's open tasks, across every project
+ */
+export const listObMyTasks = (
+    params?: ListObMyTasksParams,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObMyTaskListResponse>(
+      {url: `/onboarding/my-tasks`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+  
+
+
+
+export const getListObMyTasksQueryKey = (params?: ListObMyTasksParams,) => {
+    return [
+    `/onboarding/my-tasks`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const getListObMyTasksQueryOptions = <TData = Awaited<ReturnType<typeof listObMyTasks>>, TError = UnauthorizedResponse>(params?: ListObMyTasksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListObMyTasksQueryKey(params);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listObMyTasks>>> = ({ signal }) => listObMyTasks(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListObMyTasksQueryResult = NonNullable<Awaited<ReturnType<typeof listObMyTasks>>>
+export type ListObMyTasksQueryError = UnauthorizedResponse
+
+
+export function useListObMyTasks<TData = Awaited<ReturnType<typeof listObMyTasks>>, TError = UnauthorizedResponse>(
+ params: undefined |  ListObMyTasksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObMyTasks>>,
+          TError,
+          Awaited<ReturnType<typeof listObMyTasks>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObMyTasks<TData = Awaited<ReturnType<typeof listObMyTasks>>, TError = UnauthorizedResponse>(
+ params?: ListObMyTasksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listObMyTasks>>,
+          TError,
+          Awaited<ReturnType<typeof listObMyTasks>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListObMyTasks<TData = Awaited<ReturnType<typeof listObMyTasks>>, TError = UnauthorizedResponse>(
+ params?: ListObMyTasksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The implementor's open tasks, across every project
+ */
+
+export function useListObMyTasks<TData = Awaited<ReturnType<typeof listObMyTasks>>, TError = UnauthorizedResponse>(
+ params?: ListObMyTasksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listObMyTasks>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListObMyTasksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * The header of the focused task page — project, client, module service,
+step, due date and status for a single task **belonging to the caller**.
+
+**404 for a task that is somebody else's, and for one that does not
+exist.** Deliberately the same answer: a `403` would confirm the task
+exists, and `ob_journey_steps` ids are sequential, so the difference
+between the two statuses is an enumeration oracle over every onboarding
+task in the organisation.
+
+**Neither the status nor the project-status filter of the list applies.**
+The list leaves out settled tasks because a queue is work still to do;
+this answers "show me this one", and a task just completed — or one on a
+project since put on hold — is still the caller's to look at. Following
+a link and getting a 404 because the work is finished would read as the
+record having been deleted.
+
+This carries the labels and **not the check list**. The focused page
+reads `GET /onboarding/journey-steps/{stepId}` for that, which already
+owns it and returns the documents and the effective owner beside it.
+
+ * @summary One of the caller's own tasks
+ */
+export const getObMyTask = (
+    taskId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<GetObMyTask200>(
+      {url: `/onboarding/my-tasks/${taskId}`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObMyTaskQueryKey = (taskId?: number,) => {
+    return [
+    `/onboarding/my-tasks/${taskId}`
+    ] as const;
+    }
+
+    
+export const getGetObMyTaskQueryOptions = <TData = Awaited<ReturnType<typeof getObMyTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(taskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObMyTaskQueryKey(taskId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObMyTask>>> = ({ signal }) => getObMyTask(taskId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(taskId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObMyTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getObMyTask>>>
+export type GetObMyTaskQueryError = void | UnauthorizedResponse | NotFoundResponse
+
+
+export function useGetObMyTask<TData = Awaited<ReturnType<typeof getObMyTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ taskId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObMyTask>>,
+          TError,
+          Awaited<ReturnType<typeof getObMyTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObMyTask<TData = Awaited<ReturnType<typeof getObMyTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ taskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObMyTask>>,
+          TError,
+          Awaited<ReturnType<typeof getObMyTask>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObMyTask<TData = Awaited<ReturnType<typeof getObMyTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ taskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One of the caller's own tasks
+ */
+
+export function useGetObMyTask<TData = Awaited<ReturnType<typeof getObMyTask>>, TError = void | UnauthorizedResponse | NotFoundResponse>(
+ taskId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObMyTask>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObMyTaskQueryOptions(taskId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
 
 
 
@@ -3913,6 +4154,117 @@ export function useListObDelayedProjects<TData = Awaited<ReturnType<typeof listO
 
 
 /**
+ * Two cards in one answer: **Pending your verification** for a manager,
+and **Sent / Approved / Rejected** as one card for an implementor.
+
+Both roles together because plenty of people are both — a manager who
+still carries tasks of their own — and a client cannot know in advance
+which figures it will need. A zero is a real answer meaning "nothing",
+so draw a card only where there is something to say.
+
+Read from `ob_implementor_daily_stats`, never counted live
+(CLAUDE.md). **A card is therefore as fresh as the last worker run** —
+`PT5M` committed — so "3 rows pending your verification" can be
+minutes behind the queue it describes. The My Tasks highlight beside it
+is computed live for the opposite reason: the count invites, the
+highlight directs, and only a stale highlight would send somebody to an
+empty task.
+
+`computedAt` is **null when the worker has never run**, and the screen
+should say so rather than present four zeroes as fact.
+
+ * @summary The caller's own review counters (C-141)
+ */
+export const getObReviewSummary = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObReviewSummaryResponse>(
+      {url: `/onboarding/dashboard/review-summary`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObReviewSummaryQueryKey = () => {
+    return [
+    `/onboarding/dashboard/review-summary`
+    ] as const;
+    }
+
+    
+export const getGetObReviewSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getObReviewSummary>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObReviewSummaryQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObReviewSummary>>> = ({ signal }) => getObReviewSummary(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObReviewSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getObReviewSummary>>>
+export type GetObReviewSummaryQueryError = UnauthorizedResponse
+
+
+export function useGetObReviewSummary<TData = Awaited<ReturnType<typeof getObReviewSummary>>, TError = UnauthorizedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObReviewSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getObReviewSummary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObReviewSummary<TData = Awaited<ReturnType<typeof getObReviewSummary>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObReviewSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getObReviewSummary>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObReviewSummary<TData = Awaited<ReturnType<typeof getObReviewSummary>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The caller's own review counters (C-141)
+ */
+
+export function useGetObReviewSummary<TData = Awaited<ReturnType<typeof getObReviewSummary>>, TError = UnauthorizedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObReviewSummary>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObReviewSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
  * Plan §9's second grid, reading `ob_implementor_daily_stats`.
 
 ## Two things this route must do that its schema cannot enforce
@@ -4022,6 +4374,157 @@ export function useListObImplementorWorkload<TData = Awaited<ReturnType<typeof l
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListObImplementorWorkloadQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Everything OB-02's redesigned first screen draws, in one round trip:
+six project-level counters, the schedule-health split behind the
+first donut, and **one row per running project** for the two
+people-donuts and the three Summary lists.
+
+## One pass, one answer
+
+The counters and the split are computed **from the same rows this
+response carries**, in the same request, and the rows are what the
+screen groups by salesperson and by implementor. So a card, a slice
+and the list it opens can never disagree — which is the property the
+card board built on `ob_dashboard_summary` could not offer, because
+its numbers were pre-aggregated at a different grain (journeys per
+product) from the list behind them (steps and prerequisite tasks).
+
+## Every figure is on the project's completion date
+
+`tentativeCompletion` is `listObProjects`'s own column — the start
+date plus the project's critical-path TAT, walked through the working
+calendar — and it is the one date every bucket and card on this route
+is measured against:
+
+| Figure | Rule |
+|---|---|
+| `ON_TIME` | the completion date is today or later |
+| `AHEAD` | on time, nothing overdue, and task progress runs ahead of the budget used |
+| `DELAYED` | 1–7 **working** days past the completion date |
+| `AT_RISK` | more than 7 working days past it |
+| `NOT_SCHEDULED` | no completion date — the project has no instantiated task to budget from |
+
+Working days, not calendar days, through `WorkingHoursService` —
+CLAUDE.md's rule. A project due Friday and still running on Saturday
+morning is not late; on Monday it is one day late, not three.
+
+`daysPastCompletion` is the number those two buckets are read from,
+and it is **null, not zero**, while the project is not past its date.
+`delayedByDays` (the earliest overdue *task*, as `listObProjects`
+reports it) rides along unchanged because it is a different fact: a
+project can be inside its completion date with a task already late,
+and the screen says so beside the row rather than moving it to a
+redder bucket the definition does not put it in.
+
+## Not a `COUNT(*)`
+
+A bounded row fetch of the projects currently `RUNNING` in the
+caller's scope, then arithmetic in Java — the line
+`listObDelayedProjects` draws, and for the same reason: the bucket
+boundaries are working-calendar maths SQL cannot do, and the set is a
+fraction of the project table on any real deployment. There is no
+`computedAt` because nothing here is pre-aggregated; `asOf` is when
+this request ran.
+
+Scoped by the project's client through the same predicate
+`listObProjects` applies, so an OB_SALES caller's board is their own
+clients' projects and nothing else. A caller whose module role can see
+no project gets an empty board with every count at zero and
+`appliedScope` saying so — not a `404`, because the route is theirs;
+they simply have nothing in it.
+
+ * @summary The project-level board — schedule health, cards and rows (OB-02)
+ */
+export const getObProjectBoard = (
+    
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObProjectBoardResponse>(
+      {url: `/onboarding/dashboard/project-board`, method: 'GET', signal
+    },
+      );
+    }
+  
+
+
+
+export const getGetObProjectBoardQueryKey = () => {
+    return [
+    `/onboarding/dashboard/project-board`
+    ] as const;
+    }
+
+    
+export const getGetObProjectBoardQueryOptions = <TData = Awaited<ReturnType<typeof getObProjectBoard>>, TError = UnauthorizedResponse | ObModuleGatedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetObProjectBoardQueryKey();
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getObProjectBoard>>> = ({ signal }) => getObProjectBoard(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetObProjectBoardQueryResult = NonNullable<Awaited<ReturnType<typeof getObProjectBoard>>>
+export type GetObProjectBoardQueryError = UnauthorizedResponse | ObModuleGatedResponse
+
+
+export function useGetObProjectBoard<TData = Awaited<ReturnType<typeof getObProjectBoard>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObProjectBoard>>,
+          TError,
+          Awaited<ReturnType<typeof getObProjectBoard>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObProjectBoard<TData = Awaited<ReturnType<typeof getObProjectBoard>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getObProjectBoard>>,
+          TError,
+          Awaited<ReturnType<typeof getObProjectBoard>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetObProjectBoard<TData = Awaited<ReturnType<typeof getObProjectBoard>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The project-level board — schedule health, cards and rows (OB-02)
+ */
+
+export function useGetObProjectBoard<TData = Awaited<ReturnType<typeof getObProjectBoard>>, TError = UnauthorizedResponse | ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getObProjectBoard>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetObProjectBoardQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

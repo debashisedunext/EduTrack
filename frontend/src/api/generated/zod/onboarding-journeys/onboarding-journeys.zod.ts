@@ -728,7 +728,7 @@ export const startObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(startObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(startObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -768,11 +768,85 @@ export const completeObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(completeObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(completeObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
   "blockedNote": zod.string().max(completeObJourneyStepResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * Stamps every approved or returned row of this task that its owner has
+not yet looked at. **The task's owner only** — seen-ness is about the
+person the outcome is addressed to, so a manager or an admin opening
+the task does not mark it read on their behalf.
+
+This is what stops "2 rows came back" either shouting for ever or
+forgetting on refresh. Call it whenever the owner opens the task: it is
+idempotent, and a task with nothing new answers `0` having written
+nothing.
+
+ * @summary Mark this task's review outcomes as read
+ */
+export const markObJourneyStepOutcomesSeenParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const markObJourneyStepOutcomesSeenResponse = zod.object({
+  "data": zod.object({
+  "stepId": zod.number(),
+  "cleared": zod.number().describe('How many rows this press stamped. A count rather than a `204`, so a\nclient can tell \"there were three and now there are none\" from\n\"there was nothing to clear\" without re-reading the task.\n')
+})
+})
+
+/**
+ * `PENDING_REVIEW` → `DONE`, once every check-list row is `VERIFIED`.
+
+**The reviewer's deliberate press, and the only way an accepted
+review closes.**
+
+A rejection needs no equivalent: pressing Rejected and typing a
+reason is already explicit, so the task returns to its implementor
+on its own. Accepting is one press of a button whose *next* position
+is also one press away — `Not reviewed → Verified → Rejected` — so
+closing on the verdict itself would lock the row and release this
+task's dependants in the same instant a reviewer might have meant to
+press again. A verdict stays changeable for as long as the review is
+open; this ends it.
+
+**Who may call it:** the project's own `implementorManagerUserId`, or
+an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+and a caller with no onboarding role answers `404`.
+
+ * @summary Close a review as accepted (manager review gate)
+ */
+export const closeObJourneyStepReviewParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const closeObJourneyStepReviewResponseDataNameMax = 200;
+
+export const closeObJourneyStepReviewResponseDataBlockedReasonCodeMax = 40;
+
+export const closeObJourneyStepReviewResponseDataBlockedNoteMax = 500;
+
+
+
+export const closeObJourneyStepReviewResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(closeObJourneyStepReviewResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(closeObJourneyStepReviewResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(closeObJourneyStepReviewResponseDataBlockedNoteMax).nullish(),
   "startedAt": zod.string().datetime({}).nullish(),
   "finishedAt": zod.string().datetime({}).nullish(),
   "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
@@ -816,7 +890,7 @@ export const blockObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(blockObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(blockObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -853,7 +927,7 @@ export const markObJourneyStepWaitingOnClientResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(markObJourneyStepWaitingOnClientResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(markObJourneyStepWaitingOnClientResponseDataBlockedReasonCodeMax).nullish(),
@@ -890,7 +964,7 @@ export const resumeObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(resumeObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(resumeObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -1062,12 +1136,13 @@ export const getObJourneyResponse = zod.object({
 }).describe('One row of the cross-client journey list (OB-02, OB-03).').and(zod.object({
   "templateId": zod.number(),
   "templateVersion": zod.number().describe('The version this journey was instantiated from and is pinned\nto. A template revised after this journey started does not\nchange it — which is why the step rows are copies rather than\nreferences, and why a TAT report years later still means what\nit meant on the day.\n'),
+  "implementorManagerUserId": zod.number().nullish().describe('Who may review this journey\'s submitted tasks — the project\'s\nown `implementor_manager_user_id`, the person accountable for\nthe engagement above the implementor.\n\nCarried on the journey rather than per task because it is a\nfact about the engagement, and because a screen has to know it\nbefore it decides whether to draw the Review column. Compare it\nwith the signed-in user\'s id: equal means this reader records\nthe verdicts here.\n\n\*\*Not a role.\*\* Holding `OB_MANAGER` says you manage something,\nnot that you manage \*this\*, and the server agrees —\n`requireReviewer` checks this same column. `null` where the\nproject names nobody, in which case only an `OB_ADMIN` can\nclose a review on it.\n'),
   "steps": zod.array(zod.object({
   "id": zod.number(),
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(getObJourneyResponseDataStepsItemNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(getObJourneyResponseDataStepsItemBlockedReasonCodeMax).nullish(),
@@ -1084,6 +1159,7 @@ export const getObJourneyResponse = zod.object({
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
   "skippedByUserId": zod.number().nullish(),
+  "ownerIsInherited": zod.boolean().optional().describe('`ownerUserId` on this view came from the \*\*project\'s\nimplementor\*\* rather than from the module service, because the\ntemplate pinned nobody to this task and no backup owner is set.\n\nThe fallback itself is not new — `ObJourneyInstantiationService`\nhas written the project\'s implementor onto an ownerless step\nsince instantiation. What this field covers is every step that\npredates it or was later reassigned to nobody: those rows carry\n`owner_user_id = NULL` and would otherwise read as unassigned\non a project that does have an implementor.\n\nSo the resolution happens on the read, and this flag says it\ndid. The distinction is worth a field because an inherited owner\nread as a deliberate one makes somebody accountable for a task\nnobody assigned them — OB-06 labels it rather than printing the\nname flat.\n\n`false` when the task carries its own owner, and also when\nnothing could be resolved: an ownerless task on a project with\nno implementor reports `ownerUserId: null` and `false`, which is\nthe genuinely unassigned state the Manager\'s list still shows.\n\nAuthorisation agrees with this field. `ObJourneyStepLifecycle`\nadmits the project\'s implementor on a step with neither owner\nnor backup, so a task shown as theirs here is one the five\ntransitions will accept from them — a display-only fallback\nwould have offered Complete to a caller the server refuses.\n'),
   "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
   "stageName": zod.string().max(getObJourneyResponseDataStepsItemStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
   "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
@@ -1095,7 +1171,7 @@ export const getObJourneyResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(getObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(getObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1103,7 +1179,28 @@ export const getObJourneyResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1206,12 +1303,13 @@ export const archiveObJourneyResponse = zod.object({
 }).describe('One row of the cross-client journey list (OB-02, OB-03).').and(zod.object({
   "templateId": zod.number(),
   "templateVersion": zod.number().describe('The version this journey was instantiated from and is pinned\nto. A template revised after this journey started does not\nchange it — which is why the step rows are copies rather than\nreferences, and why a TAT report years later still means what\nit meant on the day.\n'),
+  "implementorManagerUserId": zod.number().nullish().describe('Who may review this journey\'s submitted tasks — the project\'s\nown `implementor_manager_user_id`, the person accountable for\nthe engagement above the implementor.\n\nCarried on the journey rather than per task because it is a\nfact about the engagement, and because a screen has to know it\nbefore it decides whether to draw the Review column. Compare it\nwith the signed-in user\'s id: equal means this reader records\nthe verdicts here.\n\n\*\*Not a role.\*\* Holding `OB_MANAGER` says you manage something,\nnot that you manage \*this\*, and the server agrees —\n`requireReviewer` checks this same column. `null` where the\nproject names nobody, in which case only an `OB_ADMIN` can\nclose a review on it.\n'),
   "steps": zod.array(zod.object({
   "id": zod.number(),
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(archiveObJourneyResponseDataStepsItemNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(archiveObJourneyResponseDataStepsItemBlockedReasonCodeMax).nullish(),
@@ -1228,6 +1326,7 @@ export const archiveObJourneyResponse = zod.object({
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
   "skippedByUserId": zod.number().nullish(),
+  "ownerIsInherited": zod.boolean().optional().describe('`ownerUserId` on this view came from the \*\*project\'s\nimplementor\*\* rather than from the module service, because the\ntemplate pinned nobody to this task and no backup owner is set.\n\nThe fallback itself is not new — `ObJourneyInstantiationService`\nhas written the project\'s implementor onto an ownerless step\nsince instantiation. What this field covers is every step that\npredates it or was later reassigned to nobody: those rows carry\n`owner_user_id = NULL` and would otherwise read as unassigned\non a project that does have an implementor.\n\nSo the resolution happens on the read, and this flag says it\ndid. The distinction is worth a field because an inherited owner\nread as a deliberate one makes somebody accountable for a task\nnobody assigned them — OB-06 labels it rather than printing the\nname flat.\n\n`false` when the task carries its own owner, and also when\nnothing could be resolved: an ownerless task on a project with\nno implementor reports `ownerUserId: null` and `false`, which is\nthe genuinely unassigned state the Manager\'s list still shows.\n\nAuthorisation agrees with this field. `ObJourneyStepLifecycle`\nadmits the project\'s implementor on a step with neither owner\nnor backup, so a task shown as theirs here is one the five\ntransitions will accept from them — a display-only fallback\nwould have offered Complete to a caller the server refuses.\n'),
   "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
   "stageName": zod.string().max(archiveObJourneyResponseDataStepsItemStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
   "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
@@ -1239,7 +1338,7 @@ export const archiveObJourneyResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(archiveObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(archiveObJourneyResponseDataStepsItemItemsItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1247,7 +1346,28 @@ export const archiveObJourneyResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1294,7 +1414,7 @@ export const getObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(getObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(getObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -1311,6 +1431,7 @@ export const getObJourneyStepResponse = zod.object({
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
   "skippedByUserId": zod.number().nullish(),
+  "ownerIsInherited": zod.boolean().optional().describe('`ownerUserId` on this view came from the \*\*project\'s\nimplementor\*\* rather than from the module service, because the\ntemplate pinned nobody to this task and no backup owner is set.\n\nThe fallback itself is not new — `ObJourneyInstantiationService`\nhas written the project\'s implementor onto an ownerless step\nsince instantiation. What this field covers is every step that\npredates it or was later reassigned to nobody: those rows carry\n`owner_user_id = NULL` and would otherwise read as unassigned\non a project that does have an implementor.\n\nSo the resolution happens on the read, and this flag says it\ndid. The distinction is worth a field because an inherited owner\nread as a deliberate one makes somebody accountable for a task\nnobody assigned them — OB-06 labels it rather than printing the\nname flat.\n\n`false` when the task carries its own owner, and also when\nnothing could be resolved: an ownerless task on a project with\nno implementor reports `ownerUserId: null` and `false`, which is\nthe genuinely unassigned state the Manager\'s list still shows.\n\nAuthorisation agrees with this field. `ObJourneyStepLifecycle`\nadmits the project\'s implementor on a step with neither owner\nnor backup, so a task shown as theirs here is one the five\ntransitions will accept from them — a display-only fallback\nwould have offered Complete to a caller the server refuses.\n'),
   "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
   "stageName": zod.string().max(getObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
   "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
@@ -1322,7 +1443,7 @@ export const getObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1330,7 +1451,28 @@ export const getObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1349,7 +1491,7 @@ export const getObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(getObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1357,7 +1499,28 @@ export const getObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1421,7 +1584,7 @@ export const updateObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(updateObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(updateObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -1438,6 +1601,7 @@ export const updateObJourneyStepResponse = zod.object({
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
   "skippedByUserId": zod.number().nullish(),
+  "ownerIsInherited": zod.boolean().optional().describe('`ownerUserId` on this view came from the \*\*project\'s\nimplementor\*\* rather than from the module service, because the\ntemplate pinned nobody to this task and no backup owner is set.\n\nThe fallback itself is not new — `ObJourneyInstantiationService`\nhas written the project\'s implementor onto an ownerless step\nsince instantiation. What this field covers is every step that\npredates it or was later reassigned to nobody: those rows carry\n`owner_user_id = NULL` and would otherwise read as unassigned\non a project that does have an implementor.\n\nSo the resolution happens on the read, and this flag says it\ndid. The distinction is worth a field because an inherited owner\nread as a deliberate one makes somebody accountable for a task\nnobody assigned them — OB-06 labels it rather than printing the\nname flat.\n\n`false` when the task carries its own owner, and also when\nnothing could be resolved: an ownerless task on a project with\nno implementor reports `ownerUserId: null` and `false`, which is\nthe genuinely unassigned state the Manager\'s list still shows.\n\nAuthorisation agrees with this field. `ObJourneyStepLifecycle`\nadmits the project\'s implementor on a step with neither owner\nnor backup, so a task shown as theirs here is one the five\ntransitions will accept from them — a display-only fallback\nwould have offered Complete to a caller the server refuses.\n'),
   "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
   "stageName": zod.string().max(updateObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
   "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
@@ -1449,7 +1613,7 @@ export const updateObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1457,7 +1621,28 @@ export const updateObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1476,7 +1661,7 @@ export const updateObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(updateObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1484,7 +1669,28 @@ export const updateObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1550,7 +1756,7 @@ export const skipObJourneyStepResponse = zod.object({
   "journeyId": zod.number(),
   "sequence": zod.number(),
   "name": zod.string().max(skipObJourneyStepResponseDataNameMax),
-  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n'),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
   "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
   "backupOwnerUserId": zod.number().nullish(),
   "blockedReasonCode": zod.string().max(skipObJourneyStepResponseDataBlockedReasonCodeMax).nullish(),
@@ -1567,6 +1773,7 @@ export const skipObJourneyStepResponse = zod.object({
   "dependsOnStepId": zod.number().nullish(),
   "skipReason": zod.string().nullish(),
   "skippedByUserId": zod.number().nullish(),
+  "ownerIsInherited": zod.boolean().optional().describe('`ownerUserId` on this view came from the \*\*project\'s\nimplementor\*\* rather than from the module service, because the\ntemplate pinned nobody to this task and no backup owner is set.\n\nThe fallback itself is not new — `ObJourneyInstantiationService`\nhas written the project\'s implementor onto an ownerless step\nsince instantiation. What this field covers is every step that\npredates it or was later reassigned to nobody: those rows carry\n`owner_user_id = NULL` and would otherwise read as unassigned\non a project that does have an implementor.\n\nSo the resolution happens on the read, and this flag says it\ndid. The distinction is worth a field because an inherited owner\nread as a deliberate one makes somebody accountable for a task\nnobody assigned them — OB-06 labels it rather than printing the\nname flat.\n\n`false` when the task carries its own owner, and also when\nnothing could be resolved: an ownerless task on a project with\nno implementor reports `ownerUserId: null` and `false`, which is\nthe genuinely unassigned state the Manager\'s list still shows.\n\nAuthorisation agrees with this field. `ObJourneyStepLifecycle`\nadmits the project\'s implementor on a step with neither owner\nnor backup, so a task shown as theirs here is one the five\ntransitions will accept from them — a display-only fallback\nwould have offered Complete to a caller the server refuses.\n'),
   "stageKey": zod.number().optional().describe('The implementation stage this task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the\nstage\'s `implementation_stage_id`, else the negated template\nstage-group id, else `0` where the template row has gone.\n\nThree schemas now carry this key and all three must fold the\nsame way, because the project page files a task under the\nribbon stop a reader clicked by matching them. Divergence would\nshow as a stage that looks populated and opens empty, which is\na bug nobody would read as a key mismatch.\n'),
   "stageName": zod.string().max(skipObJourneyStepResponseDataStageNameMax).optional().describe('The stage\'s name as the template published it. A snapshot, like\n`ObStepDot.stageName` — renaming a stage on OB-15 must not\nre-label a journey that is already running.\n'),
   "tatUsedPercent": zod.number().nullish().describe('Working hours consumed over this task\'s budget, as a percentage\n— the figure OB-06 prints as \*\*TAT used\*\*, and the one that goes\nover 100 on a breach.\n\nComputed server-side from `ObJourneyStepRagService.hoursConsumed`\nagainst `ObStepTatBudget`, so numerator and denominator agree\nabout how long a working day is and client waits are excluded\nfrom both. A browser deriving it from `dueAt` would be counting\nweekends, holidays and resource leave as working time.\n\nNull where nothing has been consumed to measure — a task that\nhas never started, or one whose budget is zero.\n'),
@@ -1578,7 +1785,7 @@ export const skipObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1586,7 +1793,28 @@ export const skipObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('This task\'s sub-tasks — the third and fourth levels of Module\nService → Stage → Task → \*\*Task list\*\*.\n\n\*\*Filled by the journey read\*\*, which fetches every task\'s\nchecklist for the whole journey in one query, because the\nproject page\'s stage body draws each task with its sub-tasks\nopen underneath and per-task fetching would be a request per\nrow on first paint.\n\nOptional here and \*\*required\*\* on `ObJourneyStepDetail`, which\nis the difference between the two shapes: a caller holding a\ndetail always has the checklist, a caller holding a view should\ncheck.\n'),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1605,7 +1833,7 @@ export const skipObJourneyStepResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(skipObJourneyStepResponseDataItemsItemRemarkMaxOne).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1613,7 +1841,28 @@ export const skipObJourneyStepResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })),
   "docs": zod.array(zod.object({
   "id": zod.number(),
@@ -1648,7 +1897,7 @@ export const updateObJourneyStepItemBodyRemarkMax = 500;
 
 export const updateObJourneyStepItemBody = zod.object({
   "answer": zod.boolean().nullable().describe('`true`, `false`, or `null` to clear the answer back to unanswered.\n\n\*\*This replaced `isDone: boolean`\*\*, which could say neither\n\"false, and here is why\" nor \"I answered this by mistake\". The\ncolumn has been a nullable `tinyint` beside a `remark` since it was\nwritten; only the request was binary, and `StepTaskList` carried a\nstanding note that False-with-a-remark was unreachable.\n'),
-  "remark": zod.string().max(updateObJourneyStepItemBodyRemarkMax).nullish().describe('Mandatory when `answer` is `false` — the server answers\n`ob-step-item-remark-required` without one. Cleared by sending\n`null`, and ignored on an item being cleared to unanswered, since a\nreason for an answer nobody gave is not a thing.\n')
+  "remark": zod.string().max(updateObJourneyStepItemBodyRemarkMax).nullish().describe('Optional on either answer. It was mandatory on a `false` and\nrefused as `ob-step-item-remark-required`; that rule is gone —\nPLAN.md §4, D-17 — along with the CHECK constraint that held it,\nso an implementor records a reason where there is one rather than\nbeing held at a text box to state the obvious.\n\nCleared by sending `null`, and ignored on an item being cleared to\nunanswered, since a reason for an answer nobody gave is not a thing.\n\n\*\*Except on a rejected row.\*\* There the remark is the manager\'s\nreason, not the answer\'s, so it outlives the answer being taken\nback and cannot be blanked — `ob-step-reject-reason-required`.\n')
 })
 
 export const updateObJourneyStepItemResponseDataRemarkMax = 500;
@@ -1664,7 +1913,7 @@ export const updateObJourneyStepItemResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(updateObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(updateObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -1672,7 +1921,266 @@ export const updateObJourneyStepItemResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
+})
+})
+
+/**
+ * Puts one check-list row on the implementor manager's desk. **The row's
+owner only** — anybody else answers `403`.
+
+The row must be answered (`422` `completion-gate-not-satisfied`
+otherwise — there is nothing to verify about a blank line), must not
+already be out (`422` `ob-step-under-review`) and must not be approved
+(`422` `ob-step-item-verified`).
+
+While it is out, **that row alone is frozen**: its neighbours stay
+writable, which is what lets somebody carry on with rows three to five
+while one and two are being read. The task shows as `PENDING_REVIEW`
+for as long as any row is out.
+
+The task's own **Mark complete** is unchanged and still sends
+everything that is ready in one press — it is this call, once per
+ready row.
+
+ * @summary Send one Task List entry for verification
+ */
+export const submitObJourneyStepItemParams = zod.object({
+  "itemId": zod.number().describe('A-118 · an `ob_journey_step_items` id — one checklist entry on a live\nservice, not the `ObJourneyTemplateStepItemId` it was instantiated\nfrom.\n')
+})
+
+export const submitObJourneyStepItemResponseDataRemarkMax = 500;
+
+
+
+export const submitObJourneyStepItemResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(submitObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
+})
+})
+
+/**
+ * Sends one reviewed row back to whoever it belongs to, carrying the
+verdict recorded on it. **OB Manager named on the project, or OB
+Admin**; anybody else answers `403` `step-moderator-required`, and a
+caller with no onboarding role at all answers `404`.
+
+**Recording a verdict is not sending one.** `PATCH .../review` cycles
+the verdict and keeps it reversible; this releases it. Two presses
+deliberately: the first is a thought, the second is a message somebody
+else starts acting on.
+
+The row must be out for review (`422` `invalid-step-transition`) and
+must carry a verdict (`422` `completion-gate-not-satisfied`). A
+`REJECTED` row must say why (`422` `ob-step-reject-reason-required`).
+
+**A rejection returns the row unanswered** — the claim it carried is
+withdrawn with the verdict. The reviewer's reason survives on the
+row's `remark`, which is what the implementor opens the row to read.
+
+The task itself moves only when the **last** row comes back, so a
+manager may release two now and read the rest later.
+
+ * @summary Release one verdict to the implementor
+ */
+export const sendBackObJourneyStepItemParams = zod.object({
+  "itemId": zod.number().describe('A-118 · an `ob_journey_step_items` id — one checklist entry on a live\nservice, not the `ObJourneyTemplateStepItemId` it was instantiated\nfrom.\n')
+})
+
+export const sendBackObJourneyStepItemResponseDataRemarkMax = 500;
+
+
+
+export const sendBackObJourneyStepItemResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(sendBackObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
+})
+})
+
+/**
+ * The manager review gate. An implementor marking a task complete no
+longer closes it — where the task's `requiresReview` is set it lands in
+`PENDING_REVIEW`, and this is how it leaves.
+
+**OB Manager or OB Admin only.** Anybody else answers `403`
+`step-moderator-required`; a caller with no onboarding role at all
+answers `404`, so the route discloses nothing about which items exist.
+Gated by role rather than by ownership on purpose: reviewing is by
+definition an act on somebody else's work, so an ownership check would
+refuse exactly the caller this route exists for.
+
+**A rejection must say why.** `remark` is mandatory on `REJECTED` and
+is written to the row's own remark; on the other two states it is
+ignored, so verifying can never overwrite the implementor's note.
+
+**There is no separate call to close the review.** The task moves by
+itself when the last undecided row is given a verdict: to `DONE` if
+every row is `VERIFIED`, or back to `IN_PROGRESS` with its own owner if
+any is `REJECTED`. A confirm step after a set of per-row decisions is a
+place for a review to sit half-finished, and a half-reviewed task is in
+no state anybody can describe.
+
+**On a return, only the rejected rows reopen.** The verified ones are
+locked for good and are not put in front of the manager again when the
+implementor resubmits. There is nothing to reassign: the task goes back
+to the owner it already has, because `ob_journey_step_items` has no
+assignee of its own.
+
+The response is the row. A caller who needs the task's new status
+re-reads the step — which is what the screen does anyway to redraw the
+check list.
+
+ * @summary Record an OB Manager's verdict on one checklist entry
+ */
+export const reviewObJourneyStepItemParams = zod.object({
+  "itemId": zod.number().describe('A-118 · an `ob_journey_step_items` id — one checklist entry on a live\nservice, not the `ObJourneyTemplateStepItemId` it was instantiated\nfrom.\n')
+})
+
+export const reviewObJourneyStepItemBodyRemarkMax = 500;
+
+
+
+export const reviewObJourneyStepItemBody = zod.object({
+  "state": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "remark": zod.string().max(reviewObJourneyStepItemBodyRemarkMax).nullish().describe('The reason, written to the row\'s own `remark`.\n\n\*\*Mandatory on `REJECTED`\*\* — `ob-step-reject-reason-required`.\nIgnored on `VERIFIED` and `NOT_REVIEWED` rather than refused: a\nclient that sends the box\'s contents with every verdict is doing\nsomething reasonable, and silently not writing it is kinder than a\n400 it cannot act on. That is also what stops a verdict of\nVerified overwriting the implementor\'s own note.\n')
+})
+
+export const reviewObJourneyStepItemResponseDataRemarkMax = 500;
+
+
+
+export const reviewObJourneyStepItemResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "stepId": zod.number(),
+  "sequence": zod.number(),
+  "label": zod.string(),
+  "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
+  "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
+  "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
+  "remark": zod.string().max(reviewObJourneyStepItemResponseDataRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
+  "doneAt": zod.string().datetime({}).nullish(),
+  "doneBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })
 })
 

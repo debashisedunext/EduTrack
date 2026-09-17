@@ -53,6 +53,20 @@ and "dependency not met" — C-104 only ever writes
 `IN_PROGRESS`/`BLOCKED`/`WAITING_ON_CLIENT`/`DONE`; `SKIPPED` is
 C-107's own transition.
 
+`PENDING_REVIEW` is the manager review gate. The owner has marked the
+task complete and an OB Manager has not finished reading it.
+
+**Open, not terminal.** It still counts against its Step and still
+appears in its owner's queue; what it is not is *theirs* any more —
+every write to the task and to its check-list rows is refused while it
+sits here. Anything treating "not open" and "terminal" as one question
+will either let an answer through during a review or report a Step done
+while a task under it is unread.
+
+It leaves in one of two directions, neither of them an implementor's to
+make: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the
+moment any row is `REJECTED`. The TAT clock is paused throughout.
+
  */
 export type ObJourneyStepStatus = typeof ObJourneyStepStatus[keyof typeof ObJourneyStepStatus];
 
@@ -63,6 +77,7 @@ export const ObJourneyStepStatus = {
   IN_PROGRESS: 'IN_PROGRESS',
   BLOCKED: 'BLOCKED',
   WAITING_ON_CLIENT: 'WAITING_ON_CLIENT',
+  PENDING_REVIEW: 'PENDING_REVIEW',
   DONE: 'DONE',
   SKIPPED: 'SKIPPED',
 } as const;

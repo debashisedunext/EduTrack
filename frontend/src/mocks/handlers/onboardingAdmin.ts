@@ -93,7 +93,8 @@ function cardCount(key: CardKey, db: Db): number {
 interface DashItem {
   itemType: 'SERVICE' | 'PREREQUISITE';
   itemId: number; obClientId: number; obClientName: string;
-  journeyId: number | null; product: { id: number; code: string; name: string } | null;
+  journeyId: number | null; obProjectId: number | null;
+  product: { id: number; code: string; name: string } | null;
   title: string; owner: ReturnType<typeof userRef>; status: string;
   /** The recorded block reason — non-null only when `status` is BLOCKED. */
   blockedReason: string | null;
@@ -135,6 +136,10 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
       itemType: 'SERVICE' as const,
       itemId: s.id, obClientId: c.id, obClientName: c.name,
       journeyId: j.id,
+      // The project behind this journey, so Open can open it directly — the
+      // server reads it from `jr.project_id`.
+      obProjectId:
+        db.obProjects.find((x) => x.obClientId === c.id && x.productId === j.productId)?.id ?? null,
       product: p ? { id: p.id, code: p.code, name: p.name } : null,
       title: s.name,
       owner: userRef(s.ownerUserId ?? null, db),
@@ -173,7 +178,14 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
         // Null on a prerequisite: the gate sits in front of every journey
         // rather than inside one, and its counterparty is the client rather
         // than an implementor.
-        journeyId: null, product: null,
+        journeyId: null,
+        // The client's project only when they run exactly one — a prerequisite
+        // names no single project otherwise, matching the server's resolution.
+        obProjectId: (() => {
+          const owned = db.obProjects.filter((x) => x.obClientId === t.obClientId)
+          return owned.length === 1 ? owned[0].id : null
+        })(),
+        product: null,
         title: t.title, owner: null, status: t.status,
         blockedReason: null,
         dueAt: t.dueAt,
@@ -224,6 +236,10 @@ function dashboardItems(key: CardKey, db: Db): DashItem[] {
             itemType: 'SERVICE' as const,
             itemId: lastStep?.id ?? c.id, obClientId: c.id, obClientName: c.name,
             journeyId: journey?.id ?? null,
+            obProjectId:
+              (journey &&
+                db.obProjects.find((x) => x.obClientId === c.id && x.productId === journey.productId)?.id) ??
+              null,
             product: p ? { id: p.id, code: p.code, name: p.name } : null,
             title: `Live since ${new Date(c.liveAt ?? c.onboardingDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}`,
             owner: null, status: 'DONE', blockedReason: null,
@@ -437,6 +453,125 @@ const MERGE_TAGS = [
   '{{owner_name}}', '{{due_date}}', '{{reason}}', '{{link}}',
 ];
 
+
+// ── OB-02's project board ───────────────────────────────────────────────────
+
+/**
+ * `GET /onboarding/dashboard/project-board`.
+ *
+ * <h2>Computed from the fixtures, at the same grain the server computes it</h2>
+ *
+ * The real route buckets each running project against `tentativeCompletion` —
+ * the start date plus the critical-path TAT, walked through the working
+ * calendar. This reproduces the **shape** of that, not its exactness: weekends
+ * are skipped, org holidays are not, which is the same trade
+ * `onboardingProjects.ts` documents for the Projects grid's own two computed
+ * columns. It reuses that file's helpers rather than growing a second copy,
+ * so a screen built here sees one definition of "late".
+ *
+ * <h2>Every figure is derived from the rows this response carries</h2>
+ *
+ * Which is the property the screen depends on — a card, a donut slice and a
+ * list row are the same projects — and the one thing a mock must not fake,
+ * because a mock whose cards were hand-written would let a component ship that
+ * reads them from two places.
+ */
+const boardDay = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00.000Z`) / 86_400_000);
+
+/** Working days between two day serials, weekends excluded. Negative before the date. */
+function boardWorkingDays(fromDay: number, toDay: number): number {
+  if (toDay <= fromDay) return 0;
+  let days = 0;
+  for (let day = fromDay + 1; day <= toDay; day++) {
+    // 1970-01-01 was a Thursday, so serial % 7 === 2 is Saturday and 3 is Sunday.
+    const weekday = ((day % 7) + 7) % 7;
+    if (weekday !== 2 && weekday !== 3) days++;
+  }
+  return days;
+}
+
+/** The seven-working-day line between DELAYED and AT_RISK — the server's own constant. */
+const AT_RISK_AFTER = 7;
+
+function projectBoardRows(db: Db) {
+  const today = boardDay(COMPUTED_AT);
+
+  return db.obProjects
+    .filter((project) => project.status === 'RUNNING')
+    .sort((a, b) => b.id - a.id)
+    .map((project) => {
+      const client = db.obClients.find((c) => c.id === project.obClientId);
+      const product = db.obProducts.find((p) => p.id === project.productId);
+      const journeys = (client?.journeys ?? []).filter(
+        (j) => j.productId === project.productId && j.archivedAt == null,
+      );
+      const steps = journeys.flatMap((j) => j.steps);
+      const tasksDone = steps.filter((s) => s.status === 'DONE' || s.status === 'SKIPPED').length;
+
+      const totalTatDays = steps.reduce((sum, s) => sum + s.tatDays, 0);
+      const tentativeCompletion = totalTatDays > 0
+        ? new Date((boardDay(project.startDate) + Math.ceil(totalTatDays * 1.4)) * 86_400_000)
+          .toISOString().slice(0, 10)
+        : null;
+
+      const pastDays = tentativeCompletion
+        ? boardWorkingDays(boardDay(tentativeCompletion), today)
+        : 0;
+      const daysPastCompletion = pastDays > 0 ? pastDays : null;
+
+      const overdueStep = steps.find(
+        (s) => s.dueAt && boardDay(s.dueAt) < today
+          && s.status !== 'DONE' && s.status !== 'SKIPPED' && s.status !== 'WAITING_ON_CLIENT',
+      );
+      const delayedByDays = overdueStep?.dueAt
+        ? boardWorkingDays(boardDay(overdueStep.dueAt), today) || null
+        : null;
+
+      const budgetUsedPercent = totalTatDays > 0
+        ? Math.round((boardWorkingDays(boardDay(project.startDate), today) / totalTatDays) * 100)
+        : null;
+
+      const progress = steps.length > 0 ? Math.round((tasksDone / steps.length) * 100) : 0;
+      let bucket: string;
+      if (!tentativeCompletion) bucket = 'NOT_SCHEDULED';
+      else if (daysPastCompletion) bucket = daysPastCompletion > AT_RISK_AFTER ? 'AT_RISK' : 'DELAYED';
+      else if (!delayedByDays && tasksDone > 0 && budgetUsedPercent != null && progress > budgetUsedPercent) {
+        bucket = 'AHEAD';
+      } else bucket = 'ON_TIME';
+
+      const openEscalations = db.obClientEscalations.filter(
+        (e) => !e.resolvedAt && journeys.some((j) => j.id === e.journeyId),
+      ).length;
+
+      return {
+        id: project.id,
+        name: project.name,
+        client: {
+          id: client?.id ?? project.obClientId,
+          name: client?.name ?? `Client ${project.obClientId}`,
+          clientCode: client?.clientCode ?? null,
+          city: client?.city ?? null,
+        },
+        product: product
+          ? { id: product.id, code: product.code, name: product.name }
+          : { id: project.productId, code: 'UNKNOWN', name: `Product ${project.productId}` },
+        startDate: project.startDate,
+        salesPerson: userRef(project.salesPersonId, db),
+        implementor: userRef(project.implementorUserId, db),
+        gateStatus: journeys.some((j) => j.gateStatus === 'OPEN') ? 'OPEN' : 'LOCKED',
+        currentStage: currentStepIn(journeys[0] ?? { steps: [] } as unknown as ObJourney)?.name ?? null,
+        bucket,
+        tentativeCompletion,
+        daysPastCompletion,
+        delayedByDays,
+        tasksTotal: steps.length,
+        tasksDone,
+        budgetUsedPercent,
+        openEscalations,
+      };
+    });
+}
+
 export const obAdminHandlers = [
   // ── OB-02 ─────────────────────────────────────────────────────────────────
   http.get(url('/onboarding/dashboard/summary'), () => {
@@ -447,6 +582,51 @@ export const obAdminHandlers = [
       cards: CARD_KEYS.map((key) => ({ key, count: cardCount(key, db), deltaFromYesterday: null })),
       computedAt: COMPUTED_AT,
       appliedScope: 'all clients',
+    });
+  }),
+
+  /**
+   * The project board — six counters, the schedule split and one row per
+   * running project, all counted from the same rows. See `projectBoardRows`.
+   */
+  http.get(url('/onboarding/dashboard/project-board'), () => {
+    const db = getDb();
+    const rows = projectBoardRows(db);
+    const today = COMPUTED_AT.slice(0, 10);
+
+    const monday = startOfWeek();
+    const sunday = new Date(monday);
+    sunday.setUTCDate(sunday.getUTCDate() + 6);
+    const weekStart = monday.toISOString().slice(0, 10);
+    const weekEnd = sunday.toISOString().slice(0, 10);
+
+    const inBucket = (bucket: string) => rows.filter((r) => r.bucket === bucket).length;
+
+    return ok({
+      asOf: COMPUTED_AT,
+      today,
+      weekStart,
+      weekEnd,
+      appliedScope: 'all clients',
+      cards: {
+        ongoingProjects: rows.length,
+        thisWeeksDeadlines: rows.filter(
+          (r) => r.tentativeCompletion && r.tentativeCompletion >= weekStart && r.tentativeCompletion <= weekEnd,
+        ).length,
+        todaysDelivery: rows.filter((r) => r.tentativeCompletion === today).length,
+        overdueProjects: inBucket('DELAYED'),
+        atRiskProjects: inBucket('AT_RISK'),
+        clientEscalations: rows.filter((r) => r.openEscalations > 0).length,
+      },
+      schedule: {
+        onTime: inBucket('ON_TIME'),
+        ahead: inBucket('AHEAD'),
+        delayed: inBucket('DELAYED'),
+        atRisk: inBucket('AT_RISK'),
+        notScheduled: inBucket('NOT_SCHEDULED'),
+      },
+      projects: rows,
+      truncated: false,
     });
   }),
 

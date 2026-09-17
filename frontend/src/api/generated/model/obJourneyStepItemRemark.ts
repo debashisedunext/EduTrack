@@ -48,9 +48,20 @@ the database rejects mutation independently via triggers and grants.
  */
 
 /**
- * Why. **Required when `answer` is false** and optional otherwise:
-an exception nobody explained is an exception the next reader has
-to go and ask about.
+ * Why — **one field with two authors**, depending on who the row
+currently belongs to.
+
+The implementor's note while they are working it, **optional on
+either answer** (PLAN.md §4, D-17; it was once mandatory on a
+`false` and is not any more). The OB Manager's reason once they
+have rejected the row, where it is **mandatory** —
+`ck_ob_journey_step_items_reject_reason`, and the service refuses
+a `REJECTED` without one.
+
+A manager may write here only on a row they are rejecting, never
+on one they are verifying, so a verdict cannot overwrite the note
+it is passing. An implementor reworking a rejected row may replace
+the text but not blank it, since the row is still rejected.
 
  * @maxLength 500
  */

@@ -196,7 +196,14 @@ export function PrereqAccordion({ obClientId, prereqs, isOpen, onToggle }: Prere
           </>
         }
       >
-        <ul role="list" className="flex flex-col gap-2">
+        {/*
+          Named, because this list is no longer alone on its page. The gate now
+          stands on `ObClientProductPage` directly above the journey ribbons,
+          whose step lists are also `list`s — so "the tasks" has to be askable
+          for by name, by a screen reader and by a test, without depending on
+          which list happens to come first in the tree.
+        */}
+        <ul role="list" aria-label="Prerequisite tasks" className="flex flex-col gap-2">
           {tasks.map((task) => {
             const chip = STATUS_CHIP[task.status] ?? STATUS_CHIP.PENDING
             const isBusy =

@@ -666,7 +666,11 @@ class ObJourneyInstantiationServiceTest {
             long obClientId, long productId, Long implementorUserId, Long createdBy) {
         var project = new com.edunext.edutrack.domain.onboarding.ObProject(
                 obClientId, productId, "Fixture project",
-                java.time.LocalDate.of(2026, 9, 14), null, implementorUserId, createdBy);
+                // salesPerson, implementor, implementorManager, createdBy — the
+                // manager arrived with V20260916_1415 and this call was never
+                // widened for it, so the whole api test module stopped
+                // compiling. Null here: nothing below asserts on the manager.
+                java.time.LocalDate.of(2026, 9, 14), null, implementorUserId, null, createdBy);
         try {
             var field = com.edunext.edutrack.domain.onboarding.ObProject.class.getDeclaredField("id");
             field.setAccessible(true);

@@ -95,7 +95,8 @@ export const loginResponse = zod.object({
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
   "timezone": zod.string().optional(),
-  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional(),
+  "moduleRoles": zod.record(zod.string(), zod.string()).optional().describe('The onboarding vocabulary is `OB_ADMIN`, `OB_MANAGER`,\n`OB_SALES`, `OB_STEP_OWNER`, `OB_VIEWER`. Open rather than an\nenum: a module added later brings its own roles, and an enum\nhere would make each arrival a breaking client change.\n\nSame staleness bargain as `modules` — a grant changed\nmid-session stays visible until the access token expires, at\nmost fifteen minutes.\n')
 }))
 })
 })
@@ -130,7 +131,8 @@ export const refreshSessionResponse = zod.object({
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
   "timezone": zod.string().optional(),
-  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional(),
+  "moduleRoles": zod.record(zod.string(), zod.string()).optional().describe('The onboarding vocabulary is `OB_ADMIN`, `OB_MANAGER`,\n`OB_SALES`, `OB_STEP_OWNER`, `OB_VIEWER`. Open rather than an\nenum: a module added later brings its own roles, and an enum\nhere would make each arrival a breaking client change.\n\nSame staleness bargain as `modules` — a grant changed\nmid-session stays visible until the access token expires, at\nmost fifteen minutes.\n')
 }))
 })
 })
@@ -178,7 +180,8 @@ export const getMeResponse = zod.object({
   "projectIds": zod.array(zod.number()).optional(),
   "reporteeIds": zod.array(zod.number()).optional(),
   "timezone": zod.string().optional(),
-  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional()
+  "modules": zod.array(zod.enum(['TICKETING', 'ONBOARDING'])).optional(),
+  "moduleRoles": zod.record(zod.string(), zod.string()).optional().describe('The onboarding vocabulary is `OB_ADMIN`, `OB_MANAGER`,\n`OB_SALES`, `OB_STEP_OWNER`, `OB_VIEWER`. Open rather than an\nenum: a module added later brings its own roles, and an enum\nhere would make each arrival a breaking client change.\n\nSame staleness bargain as `modules` — a grant changed\nmid-session stays visible until the access token expires, at\nmost fifteen minutes.\n')
 }))
 })
 

@@ -69,8 +69,15 @@ function docDto(d: ObJourneyTemplateStepDocRow) {
  * day beside 2 days is 2, and 1 day followed by 2 days is 3. Kept in step with
  * the Java and with `journeyTemplateTree.ts`, which walks the same shape to
  * draw the designer's Schedule column.
+ *
+ * <p>Exported, and typed on the three fields it reads rather than on one row
+ * shape: a project's own TAT folds this over each of its journeys' steps
+ * before chaining the services — see `onboardingProjects.ts`. One walk, so the
+ * two handlers cannot answer differently.
  */
-function criticalPathDays(tasks: readonly ObJourneyTemplateStepRow[]): number {
+export function criticalPathDays(
+  tasks: readonly { id: number; tatDays?: number | null; dependsOnStepId: number | null }[],
+): number {
   const byId = new Map(tasks.map((t) => [t.id, t] as const));
   const endDays = new Map<number, number>();
 

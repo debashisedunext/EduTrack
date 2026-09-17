@@ -18,6 +18,8 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDoc;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
+import com.edunext.edutrack.domain.onboarding.ObProject;
+import com.edunext.edutrack.domain.onboarding.ObProjectRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
@@ -70,6 +72,9 @@ class ObJourneyStepLifecycleServiceTest {
     private static final long OWNER = 10L;
     private static final long BACKUP_OWNER = 11L;
     private static final long STRANGER = 99L;
+    /** The implementor on the project behind {@code JOURNEY} — see {@code wireFakes}. */
+    private static final long PROJECT_IMPLEMENTOR = 12L;
+    private static final long PROJECT = 300L;
     private static final long JOURNEY = 500L;
     private static final long STEP = 700L;
 
@@ -91,10 +96,12 @@ class ObJourneyStepLifecycleServiceTest {
     private final ObStepClockEventRepository clockEvents = mock(ObStepClockEventRepository.class);
     private final ObStepClockRecorder clockRecorder = mock(ObStepClockRecorder.class);
     private final ObJourneyDependencyRelease dependencyRelease = mock(ObJourneyDependencyRelease.class);
+    private final ObProjectRepository projects = mock(ObProjectRepository.class);
 
     private final ObJourneyStepLifecycleService service = new ObJourneyStepLifecycleService(
             journeySteps, journeys, stepItems, templateStepItems, templateStepDocs, attachments, signoffs,
-            stepJournal, workingHours, workingCalendars, clockEvents, clockRecorder, dependencyRelease);
+            stepJournal, workingHours, workingCalendars, clockEvents, clockRecorder, dependencyRelease,
+            projects);
 
     @BeforeEach
     void wireFakes() {
@@ -168,7 +175,14 @@ class ObJourneyStepLifecycleServiceTest {
         journey.setProductId(1L);
         journey.setTemplateId(1L);
         journey.setGateStatus(ObGateStatus.OPEN);
+        journey.setProjectId(PROJECT);
         journeyRows.put(JOURNEY, journey);
+
+        // The project behind this journey, named so a step with no owner and no
+        // backup has somebody to fall to — see `requireOwnership`.
+        ObProject project = new ObProject(1L, 1L, "Sunrise — Dataport", null, null,
+                PROJECT_IMPLEMENTOR, null, null);
+        when(projects.findById(PROJECT)).thenReturn(Optional.of(project));
 
         stepRows.put(STEP, pendingStep());
     }
@@ -206,6 +220,59 @@ class ObJourneyStepLifecycleServiceTest {
     @Test
     void startRefusesACallerWhoIsNeitherOwnerNorBackupOwner() {
         assertThatThrownBy(() -> service.start(STEP, STRANGER))
+                .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    /**
+     * The project's implementor inherits a task the module service pinned
+     * nobody to.
+     *
+     * <p>The other half of {@code ObJourneyReadService#inheritedOwner}: the
+     * read paints such a task as the implementor's, so the transitions have to
+     * accept it from them. A page offering Complete on a task the server then
+     * refuses is the failure this pair exists to prevent.
+     */
+    @Test
+    void startIsAllowedForTheProjectImplementorOnATaskWithNoOwnerAndNoBackup() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setOwnerUserId(null);
+        step.setBackupOwnerUserId(null);
+
+        ObJourneyStep started = service.start(STEP, PROJECT_IMPLEMENTOR);
+
+        assertThat(started.getStatus()).isEqualTo(ObJourneyStepStatus.IN_PROGRESS);
+    }
+
+    /**
+     * The fallback is last in the chain, not first. A task with an owner is
+     * that owner's, and the implementor of the project it sits on has no
+     * standing on it — widening this would hand them every task on the project.
+     */
+    @Test
+    void theProjectImplementorMayNotActOnATaskThatNamesAnOwner() {
+        assertThatThrownBy(() -> service.start(STEP, PROJECT_IMPLEMENTOR))
+                .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    /** A backup owner is somebody to inherit to, so the project never enters into it. */
+    @Test
+    void theProjectImplementorMayNotActOnATaskThatNamesOnlyABackupOwner() {
+        stepRows.get(STEP).setOwnerUserId(null);
+
+        assertThatThrownBy(() -> service.start(STEP, PROJECT_IMPLEMENTOR))
+                .isInstanceOf(NotStepOwnerException.class);
+    }
+
+    /** No implementor on the project, so an ownerless task stays unassigned. */
+    @Test
+    void startStillRefusesAnOwnerlessTaskWhenTheProjectNamesNoImplementor() {
+        ObJourneyStep step = stepRows.get(STEP);
+        step.setOwnerUserId(null);
+        step.setBackupOwnerUserId(null);
+        when(projects.findById(PROJECT)).thenReturn(Optional.of(
+                new ObProject(1L, 1L, "Sunrise — Dataport", null, null, null, null, null)));
+
+        assertThatThrownBy(() -> service.start(STEP, PROJECT_IMPLEMENTOR))
                 .isInstanceOf(NotStepOwnerException.class);
     }
 
@@ -1260,7 +1327,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        ObJourneyStepItem answered = service.answerItem(1L, OWNER, true);
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, true, null);
 
         assertThat(answered.getAnswer()).isTrue();
         assertThat(answered.getAnsweredBy()).isEqualTo(OWNER);
@@ -1268,19 +1335,23 @@ class ObJourneyStepLifecycleServiceTest {
     }
 
     /**
-     * Unticking returns the item to unanswered and takes the remark with it:
-     * a remark explains an answer, and keeping one after clearing the other
+     * Clearing returns the item to unanswered and takes the remark with it: a
+     * remark explains an answer, and keeping one after clearing the other
      * leaves a reason for a decision no longer recorded.
+     *
+     * <p><b>`null` clears, where this test used to pass `false`.</b> False is a
+     * real answer now — "no, and here is why" — so the two had to stop sharing
+     * a value.
      */
     @Test
-    void untickingAnItemReturnsItToUnansweredAndClearsTheRemark() {
+    void clearingAnItemReturnsItToUnansweredAndClearsTheRemark() {
         stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
         ObJourneyStepItem item = stepItem(1L, 100L, Boolean.TRUE, "Signed agreement received");
         item.setRemark("was fine");
         item.setAnsweredBy(OWNER);
         when(stepItems.findById(1L)).thenReturn(Optional.of(item));
 
-        ObJourneyStepItem answered = service.answerItem(1L, OWNER, false);
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, null, null);
 
         assertThat(answered.getAnswer()).isNull();
         assertThat(answered.getAnsweredBy()).isNull();
@@ -1298,7 +1369,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        assertThatThrownBy(() -> service.answerItem(1L, STRANGER, true))
+        assertThatThrownBy(() -> service.answerItem(1L, STRANGER, true, null))
                 .isInstanceOf(NotStepOwnerException.class);
     }
 
@@ -1309,7 +1380,7 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, null, "Signed agreement received")));
 
-        assertThat(service.answerItem(1L, BACKUP_OWNER, true).getAnswer()).isTrue();
+        assertThat(service.answerItem(1L, BACKUP_OWNER, true, null).getAnswer()).isTrue();
     }
 
     /**
@@ -1323,15 +1394,55 @@ class ObJourneyStepLifecycleServiceTest {
         when(stepItems.findById(1L)).thenReturn(Optional.of(
                 stepItem(1L, 100L, Boolean.TRUE, "Signed agreement received")));
 
-        assertThatThrownBy(() -> service.answerItem(1L, OWNER, false))
+        assertThatThrownBy(() -> service.answerItem(1L, OWNER, null, null))
                 .isInstanceOf(StepAlreadyTerminalException.class);
+    }
+
+    /**
+     * The remark is optional on a False — PLAN.md §4, D-17.
+     *
+     * <p>It was compulsory: this method threw `StepItemRemarkRequiredException`
+     * and `ck_ob_journey_step_items_remark` refused the row underneath.
+     * V20260916_1520 drops the constraint and the refusal went with it, so a
+     * blank reason now stores as no reason rather than as a 422.
+     */
+    @Test
+    void answeringFalseWithoutAReasonIsRecorded() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        ObJourneyStepItem answered = service.answerItem(1L, OWNER, false, "  ");
+
+        assertThat(answered.getAnswer()).isFalse();
+        // Blank is stored as absent, never as "": `remark IS NOT NULL` stays a
+        // question about whether a reason was given.
+        assertThat(answered.getRemark()).isNull();
+        assertThat(answered.getAnsweredBy()).isEqualTo(OWNER);
+        assertThat(answered.getAnsweredAt()).isNotNull();
+    }
+
+    /** False with a reason is an answer, and satisfies the gate as True does. */
+    @Test
+    void answeringFalseWithAReasonRecordsBoth() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(stepItems.findById(1L)).thenReturn(Optional.of(
+                stepItem(1L, 100L, null, "Signed agreement received")));
+
+        ObJourneyStepItem answered =
+                service.answerItem(1L, OWNER, false, "  client has not sent the signed copy  ");
+
+        assertThat(answered.getAnswer()).isFalse();
+        assertThat(answered.getRemark()).isEqualTo("client has not sent the signed copy");
+        assertThat(answered.getAnsweredBy()).isEqualTo(OWNER);
+        assertThat(answered.getAnsweredAt()).isNotNull();
     }
 
     @Test
     void answeringAnItemThatDoesNotExistIsNotFound() {
         when(stepItems.findById(404L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.answerItem(404L, OWNER, true))
+        assertThatThrownBy(() -> service.answerItem(404L, OWNER, true, null))
                 .isInstanceOf(JourneyStepItemNotFoundException.class);
     }
 

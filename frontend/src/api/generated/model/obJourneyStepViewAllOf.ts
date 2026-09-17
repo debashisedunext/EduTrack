@@ -65,6 +65,35 @@ export type ObJourneyStepViewAllOf = {
   dependsOnStepId?: ObJourneyStepViewAllOfDependsOnStepId;
   skipReason?: ObJourneyStepViewAllOfSkipReason;
   skippedByUserId?: ObJourneyStepViewAllOfSkippedByUserId;
+  /** `ownerUserId` on this view came from the **project's
+implementor** rather than from the module service, because the
+template pinned nobody to this task and no backup owner is set.
+
+The fallback itself is not new — `ObJourneyInstantiationService`
+has written the project's implementor onto an ownerless step
+since instantiation. What this field covers is every step that
+predates it or was later reassigned to nobody: those rows carry
+`owner_user_id = NULL` and would otherwise read as unassigned
+on a project that does have an implementor.
+
+So the resolution happens on the read, and this flag says it
+did. The distinction is worth a field because an inherited owner
+read as a deliberate one makes somebody accountable for a task
+nobody assigned them — OB-06 labels it rather than printing the
+name flat.
+
+`false` when the task carries its own owner, and also when
+nothing could be resolved: an ownerless task on a project with
+no implementor reports `ownerUserId: null` and `false`, which is
+the genuinely unassigned state the Manager's list still shows.
+
+Authorisation agrees with this field. `ObJourneyStepLifecycle`
+admits the project's implementor on a step with neither owner
+nor backup, so a task shown as theirs here is one the five
+transitions will accept from them — a display-only fallback
+would have offered Complete to a caller the server refuses.
+ */
+  ownerIsInherited?: boolean;
   /** The implementation stage this task sits in, folded exactly as
 `ObProjectStage.stageKey` and `ObStepDot.stageKey` are — the
 stage's `implementation_stage_id`, else the negated template

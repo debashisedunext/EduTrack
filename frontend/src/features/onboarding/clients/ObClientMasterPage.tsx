@@ -30,6 +30,9 @@ import {
 } from '@/components/ui/table'
 import { toast } from '@/components/ui/use-toast'
 
+import { ObCursorPager } from '@/features/onboarding/pagination/ObCursorPager'
+import { OB_PAGE_SIZE, useCursorPages } from '@/features/onboarding/pagination/useCursorPages'
+
 import {
   blockersFrom,
   useCreateObClient,
@@ -69,6 +72,14 @@ import {
  * Delete on the one row somebody typed wrong is a dead end; a refused Delete is
  * a sentence that tells them what to do instead.
  *
+ * <h2>Ten rows a page</h2>
+ *
+ * The search term is in the URL and the page within it is not, for the reason
+ * the Projects grid gives: a keyset cursor is an opaque position in one ordered
+ * result set, useless to whoever a link is pasted to and actively misleading if
+ * resumed under a different search. `useCursorPages` is keyed on the term, so
+ * typing in the box returns to page one.
+ *
  * <h2>The name guard is a two-step confirm, not a blocker</h2>
  *
  * `409 ob-client-name-similar` is advisory — two trusts really can share a name
@@ -96,7 +107,12 @@ export function ObClientMasterPage() {
   const [editingId, setEditingId] = React.useState<number | null>(null)
   const [deleting, setDeleting] = React.useState<ObClient | null>(null)
 
-  const { data, isPending, isError } = useObClients({ q: search })
+  const pages = useCursorPages(search)
+  const { data, isPending, isError, isFetching } = useObClients({
+    q: search,
+    cursor: pages.cursor,
+    limit: OB_PAGE_SIZE,
+  })
   const clients = data?.data ?? []
 
   return (
@@ -173,6 +189,24 @@ export function ObClientMasterPage() {
           </Table>
         </TableContainer>
       )}
+
+      {/*
+        Outside the loading branch above, and kept while a page is empty as long
+        as there is a page behind it — a search that empties page three has to
+        leave a way back to page two.
+      */}
+      {!isError && (clients.length > 0 || pages.canGoBack) ? (
+        <ObCursorPager
+          noun="clients"
+          pageIndex={pages.pageIndex}
+          rowsOnPage={clients.length}
+          hasMore={data?.meta?.hasMore ?? false}
+          isFetching={isFetching}
+          canGoBack={pages.canGoBack}
+          onPrevious={pages.previous}
+          onNext={() => pages.next(data?.meta?.nextCursor)}
+        />
+      ) : null}
 
       <CreateClientDialog open={creating} onOpenChange={setCreating} />
       <EditClientDialog obClientId={editingId} onClose={() => setEditingId(null)} />

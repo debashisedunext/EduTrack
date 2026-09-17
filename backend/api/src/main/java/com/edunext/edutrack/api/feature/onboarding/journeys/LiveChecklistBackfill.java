@@ -34,8 +34,8 @@ import java.util.Map;
  *
  * <p><b>It writes items, never answers.</b> A back-filled row arrives
  * unanswered, exactly as instantiation leaves one. {@code answer},
- * {@code remark}, {@code answeredBy} and {@code answeredAt} stay null and
- * {@code ck_ob_journey_step_items_remark} is never in play.
+ * {@code remark}, {@code answeredBy} and {@code answeredAt} stay null, which
+ * the completion gate reads as outstanding until somebody answers it.
  *
  * <p><b>It does not reopen a finished step.</b> A step already {@code DONE} or
  * {@code SKIPPED} takes the row too — its checklist is the record of what that

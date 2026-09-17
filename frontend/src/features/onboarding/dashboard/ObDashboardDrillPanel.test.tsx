@@ -29,6 +29,7 @@ const ROW = {
   obClientId: 42,
   obClientName: 'Horizon Retail',
   journeyId: 9,
+  obProjectId: 300,
   product: { id: 1, code: 'ERP', name: 'ERP' },
   title: 'Data migration',
   owner: { id: 7, displayName: 'Meera Nair' },
@@ -116,14 +117,26 @@ describe('ObDashboardDrillPanel', () => {
     expect(screen.getAllByText('—')).toHaveLength(2)
   })
 
-  it('a row opens the client and closes the panel, never one without the other', async () => {
+  it('a service row opens its project page and closes the panel, never one without the other', async () => {
     const onClose = vi.fn()
     renderPanel({ onClose })
 
     await userEvent.click(screen.getByRole('button', { name: 'Open →' }))
 
-    expect(navigate).toHaveBeenCalledWith('/onboarding/clients/42')
+    // Straight to the project detail — not the old client journey overview.
+    expect(navigate).toHaveBeenCalledWith('/onboarding/projects/300')
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back to the client's project grid when the row names no single project", async () => {
+    // A prerequisite on a client running more than one project — the server
+    // could not resolve one, so obProjectId is absent.
+    served([{ ...ROW, itemType: 'PREREQUISITE', journeyId: null, obProjectId: null, product: null, owner: null }])
+    renderPanel()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open →' }))
+
+    expect(navigate).toHaveBeenCalledWith('/onboarding/projects?clientId=42')
   })
 
   it('says how many more there are, rather than silently truncating', () => {

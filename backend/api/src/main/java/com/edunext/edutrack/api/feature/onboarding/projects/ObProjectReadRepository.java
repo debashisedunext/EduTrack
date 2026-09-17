@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.projects;
 
 import com.edunext.edutrack.api.feature.onboarding.clients.ObClientScope;
+import com.edunext.edutrack.api.feature.onboarding.journeys.JourneyTatCalculator;
 import com.edunext.edutrack.common.pagination.Cursor;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -14,9 +15,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The read side of {@code /onboarding/projects} — the grid and the header.
@@ -97,20 +100,56 @@ class ObProjectReadRepository {
      * date every time an admin edited the Module Service, which is the exact
      * thing version pinning exists to prevent.
      *
-     * <p><b>It is a sum, including across parallel tasks</b>, which overstates
-     * elapsed time wherever the dependency graph lets two tasks run at once.
-     * That is plan §5.10's own convention for a journey total — "the sum of its
-     * services' TAT days" — followed here rather than quietly improved on. A
-     * critical-path figure is computable from {@code depends_on_step_id} and
-     * would be a different number on every screen that prints this one, so it
-     * is a decision for the plan rather than for this query.
+     * <p><b>This used to be a flat sum across every journey of the project</b>,
+     * and said so: it overstated elapsed time wherever two services ran side by
+     * side, and left the critical path as "a decision for the plan rather than
+     * for this query". The decision was taken — see {@link ObProjectTatPath} —
+     * and the figure is now the heaviest chain through
+     * {@code ob_journey_template_dependencies} rather than the total of
+     * everything. A project boarded through two independent services takes as
+     * long as the longer of them.
+     *
+     * <p>The fold is in Java because a longest path is a graph walk, and a
+     * recursive CTE that has to defend itself against a cycle is a worse place
+     * to keep one than a tested function.
      */
-    private static final String TOTAL_TAT_DAYS = """
-            (SELECT COALESCE(SUM(ts.tat_days), 0)
-               FROM ob_journeys tj
-               JOIN ob_journey_steps ts ON ts.journey_id = tj.id
-              WHERE tj.project_id = p.id
-                AND tj.archived_at IS NULL)
+    private static final String SERVICE_TASK_TATS = """
+            SELECT j.project_id        AS projectId,
+                   j.id                AS journeyId,
+                   s.id                AS stepId,
+                   COALESCE(s.tat_days, 0) AS tatDays,
+                   s.depends_on_step_id AS dependsOnStepId
+              FROM ob_journeys j
+         LEFT JOIN ob_journey_steps s ON s.journey_id = j.id
+             WHERE j.project_id IN (:projectIds)
+               AND j.archived_at IS NULL
+            """;
+
+    /**
+     * Which of this project's services wait on which.
+     *
+     * <p>The edge is on the <b>template</b> — a service's template declares
+     * what it depends on — so it is resolved back to this project's own
+     * journeys. A template dependency on a service the client did not buy
+     * produces a null and holds nothing up.
+     *
+     * <p>One row per (journey, dependency): a service waiting on two arrives
+     * twice, a service waiting on none arrives once with a null.
+     */
+    private static final String SERVICE_DEPENDENCIES = """
+            SELECT j.project_id AS projectId,
+                   j.id         AS journeyId,
+                   dep.id       AS dependsOnJourneyId
+              FROM ob_journeys j
+         LEFT JOIN ob_journey_template_dependencies d
+                ON d.template_id = j.template_id
+         LEFT JOIN ob_journeys dep
+                ON dep.project_id = j.project_id
+               AND dep.template_id = d.depends_on_template_id
+               AND dep.archived_at IS NULL
+               AND dep.id <> j.id
+             WHERE j.project_id IN (:projectIds)
+               AND j.archived_at IS NULL
             """;
 
     /**
@@ -156,17 +195,19 @@ class ObProjectReadRepository {
                    sp.full_name          AS salesPersonName,
                    p.implementor_user_id AS implementorId,
                    im.full_name          AS implementorName,
+                   p.implementor_manager_user_id AS implementorManagerId,
+                   imm.full_name                 AS implementorManagerName,
                    %s                    AS gateStatus,
                    %s                    AS journeyCount,
-                   %s                    AS earliestOverdueAt,
-                   %s                    AS totalTatDays
+                   %s                    AS earliestOverdueAt
               FROM ob_projects p
               JOIN ob_clients  cl ON cl.id = p.ob_client_id
               JOIN ob_products pr ON pr.id = p.product_id
          LEFT JOIN users sp ON sp.id = p.sales_person_id
          LEFT JOIN users im ON im.id = p.implementor_user_id
+         LEFT JOIN users imm ON imm.id = p.implementor_manager_user_id
          LEFT JOIN users cb ON cb.id = p.created_by
-            """.formatted(GATE_STATUS, JOURNEY_COUNT, EARLIEST_OVERDUE_AT, TOTAL_TAT_DAYS);
+            """.formatted(GATE_STATUS, JOURNEY_COUNT, EARLIEST_OVERDUE_AT);
 
     /**
      * The grid's filters. Every one is null-tolerant in the same shape, so an
@@ -259,10 +300,29 @@ class ObProjectReadRepository {
      * used outer joins. The two arms cannot collide: the first only ever emits
      * a positive implementation-stage id or a negative group id, the second
      * only ever emits {@code 0}.
+     *
+     * <h2>Grouped by journey, then folded</h2>
+     *
+     * <p>The grain is one row per <em>journey</em> and stage, not per project
+     * and stage. The project page is a tree — Module Service, then Stage, then
+     * Task, then Checklist — so each service needs its own stage roll-up, and
+     * a result already folded across journeys cannot say "SIS is 1/1 through
+     * Configuration" however it is sliced afterwards.
+     *
+     * <p>The project-level figures the header and the grid print are summed
+     * back up in Java rather than fetched a second time. Two queries counting
+     * the same tasks is how a header comes to disagree with the tree beneath
+     * it; one query at the finer grain cannot.
+     *
+     * <p>The first arm joins the template's stages per journey, so a project
+     * boarded through two services sharing a template contributes two rows per
+     * stage. That is the point — each names its own service — and summing them
+     * reproduces exactly what the project-grain grouping used to return.
      */
     private static final String STAGE_ROLLUP = """
             SELECT * FROM (
             SELECT j.project_id                                     AS projectId,
+                   j.id                                             AS journeyId,
                    COALESCE(g.implementation_stage_id, -g.id)       AS stageKey,
                    MIN(g.name)                                      AS stageName,
                    MIN(g.sequence)                                  AS stageSequence,
@@ -277,9 +337,10 @@ class ObProjectReadRepository {
                                       AND js.journey_id = j.id
              WHERE j.project_id IN (:projectIds)
                AND j.archived_at IS NULL
-             GROUP BY j.project_id, COALESCE(g.implementation_stage_id, -g.id)
+             GROUP BY j.project_id, j.id, COALESCE(g.implementation_stage_id, -g.id)
             UNION ALL
             SELECT j.project_id                                     AS projectId,
+                   j.id                                             AS journeyId,
                    0                                                AS stageKey,
                    'Ungrouped'                                      AS stageName,
                    9999                                             AS stageSequence,
@@ -293,9 +354,9 @@ class ObProjectReadRepository {
              WHERE j.project_id IN (:projectIds)
                AND j.archived_at IS NULL
                AND (ts.id IS NULL OR ts.template_stage_id IS NULL)
-             GROUP BY j.project_id
+             GROUP BY j.project_id, j.id
             ) r
-             ORDER BY r.projectId, r.stageSequence, r.stageKey
+             ORDER BY r.projectId, r.journeyId, r.stageSequence, r.stageKey
             """;
 
     private static final String MODULE_SERVICES = """
@@ -368,6 +429,88 @@ class ObProjectReadRepository {
     }
 
     /** The journeys of each project, in pinned catalogue order. */
+    /**
+     * Each project's TAT along its heaviest chain of Module Services.
+     *
+     * <p>Batched by project id like every other fold on this page, so the grid
+     * costs one query for the page rather than one per row.
+     *
+     * <p>A project with no journeys is absent from the map rather than present
+     * with a zero; callers default it, which is the same answer the old
+     * {@code COALESCE(SUM(...), 0)} gave an unstarted project.
+     */
+    Map<Long, Integer> criticalPathTatByProject(Collection<Long> projectIds) {
+        if (projectIds.isEmpty()) {
+            return Map.of();
+        }
+
+        record TaskRow(long projectId, long journeyId, Long stepId, int tatDays, Long dependsOnStepId) {
+        }
+        record DepRow(long projectId, long journeyId, Long dependsOnJourneyId) {
+        }
+
+        /*
+          Level one: how long each service takes on its own.
+
+          `JourneyTatCalculator` rather than a second walk written here — it is
+          what the product catalogue's own figure uses, and two arithmetics for
+          "how long does this service take" is how a project comes to disagree
+          with the product it was boarded from. Its convention is the one that
+          matters: a null `depends_on_step_id` means parallel, not first.
+        */
+        Map<Long, Map<Long, List<JourneyTatCalculator.Task>>> tasks = new LinkedHashMap<>();
+        jdbc.sql(SERVICE_TASK_TATS).param("projectIds", projectIds)
+                .query((rs, n) -> new TaskRow(
+                        rs.getLong("projectId"),
+                        rs.getLong("journeyId"),
+                        nullableLong(rs, "stepId"),
+                        rs.getInt("tatDays"),
+                        nullableLong(rs, "dependsOnStepId")))
+                .list()
+                .forEach(row -> {
+                    List<JourneyTatCalculator.Task> bucket = tasks
+                            .computeIfAbsent(row.projectId(), k -> new LinkedHashMap<>())
+                            .computeIfAbsent(row.journeyId(), k -> new ArrayList<>());
+                    // A journey with no tasks arrives as one row with a null
+                    // step, so the service exists in the fold with zero days
+                    // rather than vanishing from its project.
+                    if (row.stepId() != null) {
+                        bucket.add(new JourneyTatCalculator.Task(
+                                row.stepId(), row.tatDays(), row.dependsOnStepId()));
+                    }
+                });
+
+        // Level two: which services wait on which.
+        Map<Long, Map<Long, Set<Long>>> waitsOn = new LinkedHashMap<>();
+        jdbc.sql(SERVICE_DEPENDENCIES).param("projectIds", projectIds)
+                .query((rs, n) -> new DepRow(
+                        rs.getLong("projectId"),
+                        rs.getLong("journeyId"),
+                        nullableLong(rs, "dependsOnJourneyId")))
+                .list()
+                .forEach(row -> {
+                    Set<Long> deps = waitsOn
+                            .computeIfAbsent(row.projectId(), k -> new LinkedHashMap<>())
+                            .computeIfAbsent(row.journeyId(), k -> new LinkedHashSet<>());
+                    if (row.dependsOnJourneyId() != null) {
+                        deps.add(row.dependsOnJourneyId());
+                    }
+                });
+
+        Map<Long, Integer> byProject = new LinkedHashMap<>();
+        tasks.forEach((projectId, journeys) -> {
+            Map<Long, Set<Long>> edges = waitsOn.getOrDefault(projectId, Map.of());
+            List<ObProjectTatPath.Node> nodes = journeys.entrySet().stream()
+                    .map(e -> new ObProjectTatPath.Node(
+                            e.getKey(),
+                            JourneyTatCalculator.criticalPathDays(e.getValue()),
+                            edges.getOrDefault(e.getKey(), Set.of())))
+                    .toList();
+            byProject.put(projectId, ObProjectTatPath.longestPath(nodes));
+        });
+        return byProject;
+    }
+
     Map<Long, List<ServiceRow>> servicesByProject(Collection<Long> projectIds) {
         if (projectIds.isEmpty()) {
             return Map.of();
@@ -389,13 +532,22 @@ class ObProjectReadRepository {
                long productId, String productCode, String productName,
                Long salesPersonId, String salesPersonName,
                Long implementorId, String implementorName,
+               Long implementorManagerId, String implementorManagerName,
                String gateStatus, int journeyCount,
-               Instant earliestOverdueAt, int totalTatDays) {
+               Instant earliestOverdueAt) {
     }
 
-    /** One implementation stage of one project. {@code minActiveSequence} is null where nothing runs. */
-    record StageRow(long projectId, long stageKey, String stageName, int stageSequence,
-                    int taskCount, int tasksOutstanding, Integer minActiveSequence) {
+    /**
+     * One implementation stage of <b>one journey</b> — the grain
+     * {@code STAGE_ROLLUP} returns. {@code minActiveSequence} is null where
+     * nothing runs.
+     *
+     * <p>Project-level figures come from folding these, never from a second
+     * query — see {@code ObProjectService.foldToProject}.
+     */
+    record StageRow(long projectId, long journeyId, long stageKey, String stageName,
+                    int stageSequence, int taskCount, int tasksOutstanding,
+                    Integer minActiveSequence) {
     }
 
     record ServiceRow(long projectId, long journeyId, long templateId, String serviceName,
@@ -422,13 +574,15 @@ class ObProjectReadRepository {
             rs.getString("salesPersonName"),
             nullableLong(rs, "implementorId"),
             rs.getString("implementorName"),
+            nullableLong(rs, "implementorManagerId"),
+            rs.getString("implementorManagerName"),
             rs.getString("gateStatus"),
             rs.getInt("journeyCount"),
-            instant(rs, "earliestOverdueAt"),
-            rs.getInt("totalTatDays"));
+            instant(rs, "earliestOverdueAt"));
 
     private static final RowMapper<StageRow> STAGE_MAPPER = (rs, n) -> new StageRow(
             rs.getLong("projectId"),
+            rs.getLong("journeyId"),
             rs.getLong("stageKey"),
             rs.getString("stageName"),
             rs.getInt("stageSequence"),

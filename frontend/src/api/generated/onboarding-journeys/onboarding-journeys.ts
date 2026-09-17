@@ -67,11 +67,13 @@ import type {
 
 import type {
   ConflictResponse,
+  ForbiddenResponse,
   ListObClientCommunicationsParams,
   ListObJourneyTemplatesParams,
   ListObJourneysParams,
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
+  NotFoundResponse,
   ObBlockJourneyStepRequest,
   ObClientCommunicationListResponse,
   ObCompletionGateProblem,
@@ -104,10 +106,13 @@ import type {
   ObStepCommunicationResponse,
   ObStepHasDependentsProblem,
   ObStepHistoryListResponse,
+  ObStepItemReviewRequest,
+  ObStepOutcomesSeenResponse,
   ObStepSkipRequest,
   PreconditionFailedResponse,
   Problem,
   UnauthorizedResponse,
+  UnprocessableTransitionResponse,
   ValidationFailedResponse
 } from '.././model';
 
@@ -1626,6 +1631,158 @@ export const useCompleteObJourneyStep = <TError = ObModuleGatedResponse | ObComp
       return useMutation(mutationOptions, queryClient);
     }
     /**
+ * Stamps every approved or returned row of this task that its owner has
+not yet looked at. **The task's owner only** — seen-ness is about the
+person the outcome is addressed to, so a manager or an admin opening
+the task does not mark it read on their behalf.
+
+This is what stops "2 rows came back" either shouting for ever or
+forgetting on refresh. Call it whenever the owner opens the task: it is
+idempotent, and a task with nothing new answers `0` having written
+nothing.
+
+ * @summary Mark this task's review outcomes as read
+ */
+export const markObJourneyStepOutcomesSeen = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObStepOutcomesSeenResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/outcomes-seen`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getMarkObJourneyStepOutcomesSeenMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['markObJourneyStepOutcomesSeen'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  markObJourneyStepOutcomesSeen(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkObJourneyStepOutcomesSeenMutationResult = NonNullable<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>>
+    
+    export type MarkObJourneyStepOutcomesSeenMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse
+
+    /**
+ * @summary Mark this task's review outcomes as read
+ */
+export const useMarkObJourneyStepOutcomesSeen = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getMarkObJourneyStepOutcomesSeenMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * `PENDING_REVIEW` → `DONE`, once every check-list row is `VERIFIED`.
+
+**The reviewer's deliberate press, and the only way an accepted
+review closes.**
+
+A rejection needs no equivalent: pressing Rejected and typing a
+reason is already explicit, so the task returns to its implementor
+on its own. Accepting is one press of a button whose *next* position
+is also one press away — `Not reviewed → Verified → Rejected` — so
+closing on the verdict itself would lock the row and release this
+task's dependants in the same instant a reviewer might have meant to
+press again. A verdict stays changeable for as long as the review is
+open; this ends it.
+
+**Who may call it:** the project's own `implementorManagerUserId`, or
+an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+and a caller with no onboarding role answers `404`.
+
+ * @summary Close a review as accepted (manager review gate)
+ */
+export const closeObJourneyStepReview = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/review/complete`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getCloseObJourneyStepReviewMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof closeObJourneyStepReview>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof closeObJourneyStepReview>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['closeObJourneyStepReview'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof closeObJourneyStepReview>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  closeObJourneyStepReview(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CloseObJourneyStepReviewMutationResult = NonNullable<Awaited<ReturnType<typeof closeObJourneyStepReview>>>
+    
+    export type CloseObJourneyStepReviewMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem
+
+    /**
+ * @summary Close a review as accepted (manager review gate)
+ */
+export const useCloseObJourneyStepReview = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof closeObJourneyStepReview>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof closeObJourneyStepReview>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getCloseObJourneyStepReviewMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
  * `IN_PROGRESS` → `BLOCKED`. `reasonCode` is mandatory (plan's
 addition 5, "blocked-with-reason") — `400` if blank. Internal
 `BLOCKED` does not pause the TAT clock; see `waiting-on-client` for
@@ -2421,6 +2578,264 @@ export const useUpdateObJourneyStepItem = <TError = ValidationFailedResponse | U
       > => {
 
       const mutationOptions = getUpdateObJourneyStepItemMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Puts one check-list row on the implementor manager's desk. **The row's
+owner only** — anybody else answers `403`.
+
+The row must be answered (`422` `completion-gate-not-satisfied`
+otherwise — there is nothing to verify about a blank line), must not
+already be out (`422` `ob-step-under-review`) and must not be approved
+(`422` `ob-step-item-verified`).
+
+While it is out, **that row alone is frozen**: its neighbours stay
+writable, which is what lets somebody carry on with rows three to five
+while one and two are being read. The task shows as `PENDING_REVIEW`
+for as long as any row is out.
+
+The task's own **Mark complete** is unchanged and still sends
+everything that is ready in one press — it is this call, once per
+ready row.
+
+ * @summary Send one Task List entry for verification
+ */
+export const submitObJourneyStepItem = (
+    itemId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepItemResponse>(
+      {url: `/onboarding/journey-step-items/${itemId}/submit`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitObJourneyStepItemMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext> => {
+
+const mutationKey = ['submitObJourneyStepItem'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitObJourneyStepItem>>, {itemId: number}> = (props) => {
+          const {itemId} = props ?? {};
+
+          return  submitObJourneyStepItem(itemId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitObJourneyStepItemMutationResult = NonNullable<Awaited<ReturnType<typeof submitObJourneyStepItem>>>
+    
+    export type SubmitObJourneyStepItemMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse
+
+    /**
+ * @summary Send one Task List entry for verification
+ */
+export const useSubmitObJourneyStepItem = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitObJourneyStepItem>>,
+        TError,
+        {itemId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitObJourneyStepItemMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Sends one reviewed row back to whoever it belongs to, carrying the
+verdict recorded on it. **OB Manager named on the project, or OB
+Admin**; anybody else answers `403` `step-moderator-required`, and a
+caller with no onboarding role at all answers `404`.
+
+**Recording a verdict is not sending one.** `PATCH .../review` cycles
+the verdict and keeps it reversible; this releases it. Two presses
+deliberately: the first is a thought, the second is a message somebody
+else starts acting on.
+
+The row must be out for review (`422` `invalid-step-transition`) and
+must carry a verdict (`422` `completion-gate-not-satisfied`). A
+`REJECTED` row must say why (`422` `ob-step-reject-reason-required`).
+
+**A rejection returns the row unanswered** — the claim it carried is
+withdrawn with the verdict. The reviewer's reason survives on the
+row's `remark`, which is what the implementor opens the row to read.
+
+The task itself moves only when the **last** row comes back, so a
+manager may release two now and read the rest later.
+
+ * @summary Release one verdict to the implementor
+ */
+export const sendBackObJourneyStepItem = (
+    itemId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepItemResponse>(
+      {url: `/onboarding/journey-step-items/${itemId}/send-back`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getSendBackObJourneyStepItemMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendBackObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof sendBackObJourneyStepItem>>, TError,{itemId: number}, TContext> => {
+
+const mutationKey = ['sendBackObJourneyStepItem'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendBackObJourneyStepItem>>, {itemId: number}> = (props) => {
+          const {itemId} = props ?? {};
+
+          return  sendBackObJourneyStepItem(itemId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendBackObJourneyStepItemMutationResult = NonNullable<Awaited<ReturnType<typeof sendBackObJourneyStepItem>>>
+    
+    export type SendBackObJourneyStepItemMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse
+
+    /**
+ * @summary Release one verdict to the implementor
+ */
+export const useSendBackObJourneyStepItem = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendBackObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendBackObJourneyStepItem>>,
+        TError,
+        {itemId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getSendBackObJourneyStepItemMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The manager review gate. An implementor marking a task complete no
+longer closes it — where the task's `requiresReview` is set it lands in
+`PENDING_REVIEW`, and this is how it leaves.
+
+**OB Manager or OB Admin only.** Anybody else answers `403`
+`step-moderator-required`; a caller with no onboarding role at all
+answers `404`, so the route discloses nothing about which items exist.
+Gated by role rather than by ownership on purpose: reviewing is by
+definition an act on somebody else's work, so an ownership check would
+refuse exactly the caller this route exists for.
+
+**A rejection must say why.** `remark` is mandatory on `REJECTED` and
+is written to the row's own remark; on the other two states it is
+ignored, so verifying can never overwrite the implementor's note.
+
+**There is no separate call to close the review.** The task moves by
+itself when the last undecided row is given a verdict: to `DONE` if
+every row is `VERIFIED`, or back to `IN_PROGRESS` with its own owner if
+any is `REJECTED`. A confirm step after a set of per-row decisions is a
+place for a review to sit half-finished, and a half-reviewed task is in
+no state anybody can describe.
+
+**On a return, only the rejected rows reopen.** The verified ones are
+locked for good and are not put in front of the manager again when the
+implementor resubmits. There is nothing to reassign: the task goes back
+to the owner it already has, because `ob_journey_step_items` has no
+assignee of its own.
+
+The response is the row. A caller who needs the task's new status
+re-reads the step — which is what the screen does anyway to redraw the
+check list.
+
+ * @summary Record an OB Manager's verdict on one checklist entry
+ */
+export const reviewObJourneyStepItem = (
+    itemId: number,
+    obStepItemReviewRequest: ObStepItemReviewRequest,
+ ) => {
+      
+      
+      return http<ObJourneyStepItemResponse>(
+      {url: `/onboarding/journey-step-items/${itemId}/review`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: obStepItemReviewRequest
+    },
+      );
+    }
+  
+
+
+export const getReviewObJourneyStepItemMutationOptions = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewObJourneyStepItem>>, TError,{itemId: number;data: ObStepItemReviewRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof reviewObJourneyStepItem>>, TError,{itemId: number;data: ObStepItemReviewRequest}, TContext> => {
+
+const mutationKey = ['reviewObJourneyStepItem'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewObJourneyStepItem>>, {itemId: number;data: ObStepItemReviewRequest}> = (props) => {
+          const {itemId,data} = props ?? {};
+
+          return  reviewObJourneyStepItem(itemId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewObJourneyStepItemMutationResult = NonNullable<Awaited<ReturnType<typeof reviewObJourneyStepItem>>>
+    export type ReviewObJourneyStepItemMutationBody = ObStepItemReviewRequest
+    export type ReviewObJourneyStepItemMutationError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse
+
+    /**
+ * @summary Record an OB Manager's verdict on one checklist entry
+ */
+export const useReviewObJourneyStepItem = <TError = ValidationFailedResponse | UnauthorizedResponse | Problem | ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewObJourneyStepItem>>, TError,{itemId: number;data: ObStepItemReviewRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reviewObJourneyStepItem>>,
+        TError,
+        {itemId: number;data: ObStepItemReviewRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getReviewObJourneyStepItemMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

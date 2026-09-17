@@ -74,6 +74,27 @@
   --level-high-text:     #B45309;
   --level-critical-text: #B91C1C;
 
+  /* OB-05 · the delivery-health ramp's fourth step.
+
+     The onboarding Module strip reads On time / At risk / Delayed / Stuck, and
+     that is a *four-hue* escalation: green, yellow, orange, red. The level ramp
+     above offers three of them — --level-low is the green, --level-high the
+     amber, --level-critical the red — and nothing between amber and red, so
+     Delayed and At risk would wear the same chip and the ramp would say three
+     things in four words.
+
+     One hue, derived the way every other value in this file is: Tailwind
+     orange-500 / -50 / -700 in light, one to two steps lighter in dark, so it
+     sits in the same family as the amber it has to be told apart from. Named
+     for what it marks rather than for its place in a ramp, because it belongs
+     to a status vocabulary rather than to a priority level.
+
+     Requested by Stream B; needs Divyansh's sign-off, as this file is C-002's
+     and frozen. #C2410C is 5.9:1 on white and 5.5:1 on --status-delayed-soft. */
+  --status-delayed:      #F97316;
+  --status-delayed-soft: #FFF7ED;
+  --status-delayed-text: #C2410C;
+
   /* Chart palette — colour-blind safe, blueprint §12.1 */
   --chart-1: #4F46E5;
   --chart-2: #06B6D4;
@@ -192,6 +213,14 @@
   --level-medium-text:   #93C5FD;
   --level-high-text:     #FCD34D;
   --level-critical-text: #FCA5A5;
+
+  /* OB-05 · orange-400 / -950 / -300, the same one-to-two-steps-lighter rule
+     the level ramp follows, so Delayed stays distinguishable from At risk in
+     both themes rather than only in daylight. #FDBA74 is 11.1:1 on
+     --bg-surface and 10.4:1 on --status-delayed-soft. */
+  --status-delayed:      #FB923C;
+  --status-delayed-soft: #431407;
+  --status-delayed-text: #FDBA74;
 
   /* Chart palette — the same eight hues in the same order, 500 → 400, so a
      series keeps its colour identity across themes. The order is

@@ -5,7 +5,9 @@ import {
   Building2, Timer, Mail, ShieldCheck, Layers, ClipboardList, Milestone, Package,
 } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
+import { isObImplementor } from '@/features/onboarding/mytasks/myTasks'
 import { useSidebarStore } from './sidebarStore'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -13,6 +15,18 @@ interface NavItem {
   label: string
   icon: typeof LayoutDashboard
   adminOnly?: boolean
+  /*
+    Shown only to the module role that owns onboarding tasks — the one the
+    Module Service designer labels **Implementor**. Unlike `adminOnly` this is
+    not an approximation: `Me.moduleRoles` carries the real onboarding role now,
+    so the row appears for exactly the people whose screen it is.
+
+    Same bargain as every other flag here: this decides what is easy to find,
+    never what is permitted. `/onboarding/my-tasks` returns the caller's own
+    tasks and has no parameter to say otherwise, so the worst a wrong answer
+    does is hide a screen from somebody entitled to it.
+  */
+  stepOwnerOnly?: boolean
   /*
     Overrides the default prefix match, which lights two rows at once wherever
     one destination sits under another — `/onboarding/clients` and
@@ -22,9 +36,16 @@ interface NavItem {
   isActive?: (pathname: string) => boolean
 }
 
-/** A labelled break in the list. Renders as a rule when the rail is collapsed. */
+/**
+ * A labelled break in the list. Renders as a rule when the rail is collapsed.
+ *
+ * <p>Carries `adminOnly` for the same reason an item does: a heading whose
+ * every row is hidden is a heading over nothing, and the filter cannot infer
+ * that from the section alone — it sees a flat list, not a tree.
+ */
 interface NavSection {
   section: string
+  adminOnly?: boolean
 }
 
 type NavEntry = NavItem | NavSection
@@ -108,24 +129,62 @@ const TICKETING_NAV: NavEntry[] = [
   arrived that way, added below rather than left for the next task to notice
   this comment.
 
-  <h2>Ungated, like the entry that leads here</h2>
+  <h2>Three rows are everyone's; the rest is Admin's</h2>
 
-  No row carries `adminOnly`. That flag reads the *platform* role
-  (ADMIN/PM/DEVELOPER/…), and the entries below divide on the *onboarding*
-  role (OB_ADMIN, OB_MANAGER, OB_SALES, …) — a different vocabulary, and one
-  the session does not carry: `Me` has `modules` but no `moduleRoles`, though
-  `AccessTokenIssuer` already mints the claim into the token. Gating on the
-  platform role would be worse than not gating, since the two do not
-  correspond: an onboarding OB_VIEWER may well be a platform ADMIN.
+  Dashboard, Projects and Reports are the screens somebody opens this module
+  to *work* in, and every holder of the module gets them. Clients and the
+  whole Administration section carry `adminOnly`, because they are where the
+  module is *configured* — a vocabulary of services, products, prerequisites
+  and stages that the people running onboardings read the effects of rather
+  than edit.
 
-  So the Administration section is shown to everyone holding the module, and
-  `ObModuleRoleFilter` refuses what the caller may not have — the same bargain
-  the ticketing Onboarding entry already documents above. Exposing
-  `moduleRoles` on `Me` is the follow-up that makes real gating possible; it is
-  a contract change and does not belong in a navigation task.
+  <h3>The flag is an approximation, and knowingly so</h3>
+
+  `adminOnly` reads the *platform* role (ADMIN/PM/DEVELOPER/…), while the
+  division these rows actually want is the *onboarding* role (OB_ADMIN,
+  OB_MANAGER, OB_SALES, …) — a different vocabulary, and one the session
+  still does not carry: `Me` has `modules` but no `moduleRoles`, though
+  `AccessTokenIssuer` already mints the claim into the token. The two do not
+  correspond, so the mismatch is worth naming here rather than leaving to be
+  discovered: a platform PM who is an onboarding OB_ADMIN loses these links
+  and reaches the screens only by URL.
+
+  That is the acceptable direction of the error, because **this list decides
+  what is easy to find, not what is permitted**. `ObModuleRoleFilter` is the
+  authority either way and refuses what the caller may not have whether or
+  not a row was drawn — so the worst this gating can do is hide a screen from
+  somebody entitled to it, never show one to somebody who is not. Exposing
+  `moduleRoles` on `Me` is the follow-up that replaces the approximation with
+  the real division; it is a contract change and does not belong in a
+  navigation task.
 */
 const ONBOARDING_NAV: NavEntry[] = [
   { to: '/onboarding/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  /*
+    The implementor's own queue, above Projects because for somebody who
+    implements it *is* the first screen — the same argument Stage Queue makes
+    one module over for QA and Deployment.
+
+    <h3>Shown to every holder of the module, not only to OB_STEP_OWNER</h3>
+
+    It was gated on that role first, because the screen is the implementor's.
+    The gate is gone for two reasons, and the second is the stronger one.
+
+    The weak one: it is safe to drop. `/onboarding/my-tasks` answers for the
+    caller and has no parameter to say otherwise, so somebody who owns no task
+    opens an empty queue — never a colleague's work, whatever role they hold.
+
+    The real one: **a moderator can be assigned a task.** An OB Admin or
+    Manager who owns one had no way to reach their own queue while the row was
+    hidden from them, and "the screen exists but not for you" is worse than a
+    row that is sometimes empty. The one-line way back is `stepOwnerOnly: true`
+    on this entry — see the filter below, which still honours the flag.
+
+    `isActive` is the default prefix match and wants no override: nothing else
+    lives under `/onboarding/my-tasks` except the focused task, which is this
+    row's own child and should light it.
+  */
+  { to: '/onboarding/my-tasks', label: 'My Tasks', icon: ListChecks },
   /*
     Projects leads, and Clients follows it.
 
@@ -159,10 +218,11 @@ const ONBOARDING_NAV: NavEntry[] = [
     to: '/onboarding/clients',
     label: 'Clients',
     icon: Building2,
+    adminOnly: true,
     isActive: (p) => p.startsWith('/onboarding/clients') && !p.includes('/products/'),
   },
   { to: '/onboarding/reports', label: 'Reports', icon: BarChart3 },
-  { section: 'Administration' },
+  { section: 'Administration', adminOnly: true },
   /*
     C-123 · Module Service leads the section, because it is the one entry the
     others are configured *against*: a Module Service is what a client buys,
@@ -171,7 +231,7 @@ const ONBOARDING_NAV: NavEntry[] = [
     module up starts here, and somebody returning to change how onboarding
     behaves is most often changing a service.
   */
-  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers },
+  { to: '/onboarding/journey-templates', label: 'Module Service', icon: Layers, adminOnly: true },
   /*
     OB-07 · Products — what a Module Service is written *for*. Directly under
     Module Service rather than above it, although a product logically comes
@@ -181,10 +241,15 @@ const ONBOARDING_NAV: NavEntry[] = [
     most on top. Creating a product here is what makes it appear in the
     Module Service form's "For product" picker.
   */
-  { to: '/onboarding/products', label: 'Products', icon: Package },
+  { to: '/onboarding/products', label: 'Products', icon: Package, adminOnly: true },
   // B-124 · Prerequisites master (OB-14) — the last of the design's nine
   // entries, added the day its screen landed, per the section comment above.
-  { to: '/onboarding/prereq-master', label: 'Prerequisites master', icon: ClipboardList },
+  {
+    to: '/onboarding/prereq-master',
+    label: 'Prerequisites master',
+    icon: ClipboardList,
+    adminOnly: true,
+  },
   /*
     OB-15 · Implementation Stage — the tenth entry, and the first past the
     design's nine. Added on the same rule the section comment sets rather than
@@ -196,10 +261,20 @@ const ONBOARDING_NAV: NavEntry[] = [
     an onboarding is configured from, while roles, TAT and templates configure
     how the module behaves around it.
   */
-  { to: '/onboarding/implementation-stages', label: 'Implementation Stage', icon: Milestone },
-  { to: '/onboarding/module-access', label: 'Roles & module access', icon: ShieldCheck },
-  { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer },
-  { to: '/onboarding/templates', label: 'Notification templates', icon: Mail },
+  {
+    to: '/onboarding/implementation-stages',
+    label: 'Implementation steps',
+    icon: Milestone,
+    adminOnly: true,
+  },
+  {
+    to: '/onboarding/module-access',
+    label: 'Roles & module access',
+    icon: ShieldCheck,
+    adminOnly: true,
+  },
+  { to: '/onboarding/settings', label: 'TAT & escalation', icon: Timer, adminOnly: true },
+  { to: '/onboarding/templates', label: 'Notification templates', icon: Mail, adminOnly: true },
 ]
 
 /** The module a path belongs to. The URL is the source of truth, not a store. */
@@ -247,6 +322,14 @@ export function Sidebar() {
   */
   const isAdmin = useAuthStore((s) => s.user?.role) === 'ADMIN'
   const modules = useAuthStore((s) => s.user?.modules) ?? []
+  /*
+    The onboarding role, from the same session the platform role comes from.
+
+    This is the division the `adminOnly` note above calls an approximation, now
+    that `Me` carries `moduleRoles` — `POST /auth/login` returns it inside the
+    session and `authStore` already keeps it, so there is nothing to fetch.
+  */
+  const isStepOwner = useAuthStore((s) => isObImplementor(s.user))
   const { pathname } = useLocation()
 
   /*
@@ -265,8 +348,15 @@ export function Sidebar() {
   const inOnboarding =
     pathname.startsWith(ONBOARDING_PREFIX) && modules.includes('ONBOARDING')
 
+  /*
+    Sections are filtered on the same flag rather than waved through, which is
+    the change from when only items carried one. An exempt heading was correct
+    while no section was gated; with Administration's every row now Admin-only,
+    exempting it would leave a label with nothing under it — worse than the row
+    it hid, because it names the screens instead of omitting them.
+  */
   const entries = (inOnboarding ? ONBOARDING_NAV : TICKETING_NAV).filter(
-    (entry) => isSection(entry) || !entry.adminOnly || isAdmin,
+    (entry) => (!entry.adminOnly || isAdmin) && (!('stepOwnerOnly' in entry) || isStepOwner),
   )
 
   return (
@@ -278,73 +368,141 @@ export function Sidebar() {
     >
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <div className="h-6 w-6 shrink-0 rounded bg-primary" aria-hidden />
-        {!collapsed && (
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold tracking-wide text-content">
-              EDUTRACK
-            </span>
-            {/* Which module you are in, said once, where the product is named. */}
-            {inOnboarding && (
-              <span className="block truncate text-[11px] leading-tight text-content-muted">
-                Client Onboarding
-              </span>
-            )}
+        {/*
+          Visually hidden rather than dropped while the rail is collapsed, so
+          a screen reader still hears which product and module it is in.
+        */}
+        <span className={collapsed ? 'sr-only' : 'min-w-0'}>
+          <span className="block truncate text-sm font-semibold tracking-wide text-content">
+            EDUTRACK
           </span>
-        )}
+          {/* Which module you are in, said once, where the product is named. */}
+          {inOnboarding && (
+            <span className="block truncate text-[11px] leading-tight text-content-muted">
+              Client Onboarding
+            </span>
+          )}
+        </span>
       </div>
 
-      <nav
-        className="flex-1 space-y-1 overflow-y-auto p-2"
-        aria-label={inOnboarding ? 'Onboarding' : 'Main'}
-      >
-        {entries.map((entry) =>
-          isSection(entry) ? (
-            collapsed ? (
-              <hr key={entry.section} className="mx-2 my-2 border-t border-border" />
-            ) : (
-              <div
-                key={entry.section}
-                className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-content-muted"
-              >
-                {entry.section}
-              </div>
-            )
-          ) : (
-            <Link
-              key={entry.to}
-              to={entry.to}
-              title={collapsed ? entry.label : undefined}
-              /*
-                `aria-current` and the highlight are decided together, from one
-                predicate. `NavLink` would compute its own for the attribute
-                and accept an override only for the class, so a row corrected
-                visually would still announce itself as the current page —
-                two of them, on the wizard route.
-              */
-              aria-current={isEntryActive(entry, pathname) ? 'page' : undefined}
-              className={cn(
-                'flex items-center gap-3 rounded-control px-3 py-2 text-sm font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                isEntryActive(entry, pathname)
-                  ? 'bg-primary-soft text-primary'
-                  : 'text-content-muted hover:bg-subtle hover:text-content',
-              )}
-            >
-              <entry.icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span className="truncate">{entry.label}</span>}
-            </Link>
-          ),
-        )}
-      </nav>
-
+      {/*
+        The expand/collapse control sits above the menu, where it is found
+        without scrolling and is the first thing the rail offers whichever
+        state it is in. It used to be the last row; on a long onboarding
+        Administration section that put it below the fold.
+      */}
       <button
         type="button"
         onClick={toggle}
+        aria-expanded={!collapsed}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="flex h-10 items-center justify-center gap-2 border-t border-border text-content-muted transition-colors hover:bg-subtle hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        title={collapsed ? 'Expand menu' : 'Collapse menu'}
+        className={cn(
+          'flex h-10 items-center gap-2 border-b border-border text-content-muted transition-colors',
+          'hover:bg-subtle hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          collapsed ? 'justify-center' : 'px-4',
+        )}
       >
-        {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+        {collapsed ? (
+          <ChevronsRight className="h-4 w-4" />
+        ) : (
+          <>
+            <ChevronsLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Collapse menu</span>
+          </>
+        )}
       </button>
+
+      {/*
+        One provider for the whole rail: `skipDelayDuration` is what makes the
+        second tooltip open at once while the pointer sweeps down the icons,
+        instead of each row waiting out its own delay.
+      */}
+      <TooltipProvider delayDuration={300} skipDelayDuration={500}>
+        <nav
+          className="flex-1 space-y-1 overflow-y-auto p-2"
+          aria-label={inOnboarding ? 'Onboarding' : 'Main'}
+        >
+          {entries.map((entry) =>
+            isSection(entry) ? (
+              collapsed ? (
+                <div key={entry.section} role="presentation">
+                  {/* The rule is the visual break; the name stays for screen readers. */}
+                  <hr className="mx-2 my-2 border-t border-border" />
+                  <span className="sr-only">{entry.section}</span>
+                </div>
+              ) : (
+                <div
+                  key={entry.section}
+                  className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+                >
+                  {entry.section}
+                </div>
+              )
+            ) : (
+              <NavRow
+                key={entry.to}
+                entry={entry}
+                collapsed={collapsed}
+                active={isEntryActive(entry, pathname)}
+              />
+            ),
+          )}
+        </nav>
+      </TooltipProvider>
     </aside>
+  )
+}
+
+/**
+ * One menu row.
+ *
+ * <p>Collapsed, the label leaves the row but not the DOM: it becomes `sr-only`
+ * so the link keeps its accessible name, and a tooltip to the right shows the
+ * page name on hover and on keyboard focus. Expanded, the label is drawn inline
+ * and there is no tooltip — it would only repeat the text beside it.
+ */
+function NavRow({
+  entry,
+  collapsed,
+  active,
+}: {
+  entry: NavItem
+  collapsed: boolean
+  active: boolean
+}) {
+  const link = (
+    <Link
+      to={entry.to}
+      /*
+        `aria-current` and the highlight are decided together, from one
+        predicate. `NavLink` would compute its own for the attribute and accept
+        an override only for the class, so a row corrected visually would still
+        announce itself as the current page — two of them, on the wizard route.
+      */
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex items-center gap-3 rounded-control py-2 text-sm font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        collapsed ? 'justify-center px-0' : 'px-3',
+        active
+          ? 'bg-primary-soft text-primary'
+          : 'text-content-muted hover:bg-subtle hover:text-content',
+      )}
+    >
+      <entry.icon className="h-4 w-4 shrink-0" />
+      <span className={collapsed ? 'sr-only' : 'truncate'}>{entry.label}</span>
+    </Link>
+  )
+
+  if (!collapsed) return link
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right" className="px-2 py-1 text-sm font-medium">
+        {entry.label}
+      </TooltipContent>
+    </Tooltip>
   )
 }

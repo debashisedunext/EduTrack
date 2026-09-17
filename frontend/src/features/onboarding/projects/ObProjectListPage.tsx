@@ -31,7 +31,15 @@ import {
 
 import { toast } from '@/components/ui/use-toast'
 
-import { projectBlockersFrom, useDeleteObProject, useObProjects } from './projectQueries'
+import { ObCursorPager } from '@/features/onboarding/pagination/ObCursorPager'
+import { OB_PAGE_SIZE, useCursorPages } from '@/features/onboarding/pagination/useCursorPages'
+
+import {
+  projectBlockersFrom,
+  projectQueryString,
+  useDeleteObProject,
+  useObProjects,
+} from './projectQueries'
 import { currentStageLabel, delayCell, formatDate, stageProgress } from './projectRow'
 
 const STATUSES = ['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED'] as const
@@ -42,7 +50,7 @@ const STATUSES = ['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED'] as const
  *
  * <h2>Ten columns, and each is a question a manager asks in a stand-up</h2>
  *
- * Project, client, product, started, sales, implementor, current stage, stages
+ * Project, client, product, started, sales, implementor, current step, steps
  * complete of total, delayed by, tentative completion. Nothing derived on this
  * side except formatting: the two calendar figures are the server's, because
  * every duration in the system routes through the working calendar and a second
@@ -55,6 +63,16 @@ const STATUSES = ['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED'] as const
  * component — the same argument `useObClientFilters` makes for OB-03, applied to
  * the screen that replaced it. The Clients master links here with `?clientId=`
  * for exactly this reason.
+ *
+ * <h2>Ten rows a page, and the position is not in the URL</h2>
+ *
+ * The filters are a link; the page within them is not. A cursor is an opaque
+ * keyset position in one ordered result set, so a pasted `?cursor=` means
+ * nothing to whoever receives it — and resuming one under a different filter
+ * returns rows from an arbitrary position rather than an error. So the cursor
+ * stack lives in `useCursorPages`, keyed on the filter query string, which
+ * returns to page one whenever any filter moves without each of the five change
+ * handlers having to remember to.
  *
  * <h2>Why there is no delay filter</h2>
  *
@@ -73,27 +91,29 @@ export function ObProjectListPage() {
   const clientId = numberParam(params.get('clientId'))
   const productId = numberParam(params.get('productId'))
   const implementorId = numberParam(params.get('implementorId'))
+  const salesPersonId = numberParam(params.get('salesPersonId'))
   const status = params.get('status')
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params)
     if (value) next.set(key, value)
     else next.delete(key)
-    // Any filter change invalidates the cursor: a cursor is a position in one
-    // ordered result set, and resuming it under a different filter returns rows
-    // that are arbitrary rather than empty — which is worse, because it looks
-    // like data.
-    next.delete('cursor')
     setParams(next, { replace: true })
   }
 
-  const { data, isPending, isError } = useObProjects({
-    q,
-    clientId,
-    productId,
-    implementorId,
-    status,
-    cursor: params.get('cursor'),
+  /*
+    Every filter, and nothing else. `projectQueryString` is reused rather than a
+    hand-rolled join so a filter added to the request cannot be forgotten here —
+    which would leave the grid on page four of a result set the new filter never
+    ordered, showing rows that look like an answer.
+  */
+  const filters = { q, clientId, productId, implementorId, salesPersonId, status }
+  const pages = useCursorPages(projectQueryString(filters))
+
+  const { data, isPending, isError, isFetching } = useObProjects({
+    ...filters,
+    cursor: pages.cursor,
+    limit: OB_PAGE_SIZE,
   })
   const { data: products } = useListObProducts({ isActive: true })
   const { data: users } = useListUsers()
@@ -151,6 +171,23 @@ export function ObProjectListPage() {
           getSearchable={(u) => [u.email ?? '']}
         />
 
+        {/*
+          The route has always accepted `salesPersonId` and `projectQueryString`
+          has always sent it; only this page had no control for it, so a link
+          carrying the parameter — OB-02's salesperson donut is the first —
+          landed on an unfiltered grid that looked like an answer. A filter the
+          request honours and the URL does not is worse than no filter.
+        */}
+        <FilterDropdown
+          label="Salesperson"
+          options={people}
+          value={people.find((u) => u.id === salesPersonId) ?? null}
+          onChange={(u) => setParam('salesPersonId', u ? String(u.id) : null)}
+          getKey={(u) => String(u.id)}
+          getLabel={(u) => u.displayName}
+          getSearchable={(u) => [u.email ?? '']}
+        />
+
         <FilterDropdown
           label="Status"
           options={[...STATUSES]}
@@ -201,10 +238,10 @@ export function ObProjectListPage() {
                   Implementor
                 </TableHead>
                 <TableHead scope="col" className="w-44">
-                  Current stage
+                  Current step
                 </TableHead>
                 <TableHead scope="col" className="w-32">
-                  Stages
+                  Steps
                 </TableHead>
                 <TableHead scope="col" className="w-28">
                   Delayed
@@ -230,15 +267,25 @@ export function ObProjectListPage() {
         </TableContainer>
       )}
 
-      <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
-
-      {data?.meta?.nextCursor ? (
-        <div>
-          <Button variant="secondary" onClick={() => setParam('cursor', data.meta!.nextCursor!)}>
-            Next page
-          </Button>
-        </div>
+      {/*
+        Rendered outside the loading branch above, and kept on screen on an
+        empty page as long as there is a page behind it — a filter that empties
+        page three has to leave a way back to page two.
+      */}
+      {!isError && (projects.length > 0 || pages.canGoBack) ? (
+        <ObCursorPager
+          noun="projects"
+          pageIndex={pages.pageIndex}
+          rowsOnPage={projects.length}
+          hasMore={data?.meta?.hasMore ?? false}
+          isFetching={isFetching}
+          canGoBack={pages.canGoBack}
+          onPrevious={pages.previous}
+          onNext={() => pages.next(data?.meta?.nextCursor)}
+        />
       ) : null}
+
+      <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
     </div>
   )
 }
@@ -285,7 +332,7 @@ function ProjectRow({ project, onDelete }: { project: ObProject; onDelete: () =>
             aria-valuemin={0}
             aria-valuemax={project.stagesTotal}
             aria-valuenow={project.stagesComplete}
-            aria-label={`${stages.label} stages complete`}
+            aria-label={`${stages.label} steps complete`}
           >
             <span
               className="block h-full bg-primary"

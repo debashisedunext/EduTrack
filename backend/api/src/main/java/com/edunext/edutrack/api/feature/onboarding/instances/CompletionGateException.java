@@ -4,11 +4,11 @@ import java.util.List;
 
 /**
  * 422 — C-106's own server-side completion gate. Plan §5.8: "a service
- * completes only when every [mandatory] sub-category is answered" (the
- * False-needs-a-remark half already lives in
- * {@code ck_ob_journey_step_items_remark} and cannot fail here), plus the
- * architect's addition 7 (required documents attached) and, where the step
- * demands it, an accepted client sign-off (§8).
+ * completes only when every [mandatory] sub-category is answered" (§5.8's
+ * False-needs-a-remark half is no longer a rule anywhere — PLAN.md §4, D-17
+ * — and never failed here in any case), plus the architect's addition 7
+ * (required documents attached) and, where the step demands it, an accepted
+ * client sign-off (§8).
  *
  * <p>All three are independent failures and are reported together rather
  * than one refusal at a time — a caller fixing the task list should not

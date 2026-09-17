@@ -1,14 +1,19 @@
 import * as React from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { format, parseISO } from 'date-fns'
 
-import { useGetObClient } from '@/api/generated/onboarding/onboarding'
+import { useGetObClient, useGetObClientPrereqs } from '@/api/generated/onboarding/onboarding'
 import { useListUsers } from '@/api/generated/users/users'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { ObClientAccountPanel } from '../../clients/ObClientAccountPanel'
+import { ClientCommunicationsPanel } from '../communications/ClientCommunicationsPanel'
 import { EscalationBanner } from './EscalationBanner'
 import { JourneyAccordion } from './JourneyAccordion'
+import { ObClientInfoCard } from './ObClientInfoCard'
+import { PrereqAccordion } from './PrereqAccordion'
 import { defaultOpenJourneyId, formatTatUsage, ragLabel, ragVariant } from './journeyStrip'
 import { findProductGroup } from './productGroups'
 import { productIcon } from './productIcon'
@@ -52,7 +57,29 @@ import { useOpenEscalations } from './useOpenEscalations'
  * The escalations are **scoped to this product's services** before the banner
  * sees them: they are read per client, and a banner on the biometric page
  * shouting about an ERP migration escalation would send a reader to a ribbon
- * that is not on the screen. The client page keeps the unscoped banner.
+ * that is not on the screen.
+ *
+ * <h2>It absorbed the client page</h2>
+ *
+ * OB-05's client half is gone. Everything on it a reader could act on moved
+ * here — the prerequisites gate, B-126's portal-login panel, the client info
+ * card, C-112's stitched communications panel and the LIVE banner — and
+ * `/onboarding/clients/:obClientId` is now {@link ObClientRedirect}, a
+ * forwarder into this page rather than a screen of its own.
+ *
+ * <p>The gate is the change worth explaining. This page used to carry a banner
+ * saying prerequisites had not cleared and a link to go and clear them, because
+ * the checklist was one page up. It is not any more, so the banner would be a
+ * signpost to the room it is standing in: the real accordion is here, and a
+ * reader who finds out a ribbon is gated can act on it without leaving.
+ *
+ * <p><b>These four are client-level, on a page that is one product.</b> A
+ * client with two products draws the same gate and the same portal login on
+ * both — the same rows, the same writes, one React Query cache entry behind
+ * them, so the second page is a repetition rather than a divergence. That is
+ * the cost of not having a client page, and it is the cheaper half: the
+ * alternative was a screen whose only job was to hold four panels above a list
+ * of links to here.
  */
 /**
  * Both ids, for the one caller that has them without a matching URL.
@@ -71,12 +98,19 @@ export interface ObClientProductPageProps {
   obClientId?: number
   productId?: number
   /**
-   * The host is already drawing the prerequisites checklist above this, so the
-   * gate banner below would point at something one scroll up.
+   * The host is already carrying the client-level context, so this page must
+   * not draw a second copy of it.
    *
-   * `ObProjectDetailPage` sets it. Left false on the standalone route, where
-   * the checklist genuinely is on another page and the banner is the only way
-   * to find it.
+   * It suppresses the prerequisites checklist, the portal-login panel, the
+   * client info card and the communications panel — everything on this page
+   * that belongs to the client rather than to the product. Named for the
+   * checklist because that is the one a host visibly duplicates:
+   * `ObProjectDetailPage` mounts `PrereqAccordion` itself under its own
+   * **View** control, and states in its own docstring why the communications
+   * panel is deliberately not there either.
+   *
+   * <p>Left false on the standalone route, which is the only caller today and
+   * the one place these four have no other home.
    */
   checklistShownAbove?: boolean
 }
@@ -89,6 +123,18 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
   const client = useGetObClient(obClientId, { query: { enabled: Number.isFinite(obClientId) } })
   const users = useListUsers({ isActive: true, limit: 200 })
   const userList = users.data?.data ?? []
+
+  /*
+    The client's prerequisites — the gate that used to be one page up.
+
+    Not read when the host says it is already drawing the checklist: the request
+    would be paid for and its result thrown away, and `ObProjectDetailPage` has
+    made the identical call under the same key by the time this page mounts.
+  */
+  const prereqs = useGetObClientPrereqs(obClientId, {
+    query: { enabled: Number.isFinite(obClientId) && !props.checklistShownAbove },
+  })
+  const gate = prereqs.data?.data
 
   const detail = client.data?.data
   // Memoised for the client page's reason: a fresh `[]` each render would
@@ -117,6 +163,19 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
    */
   const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set())
   const [touched, setTouched] = React.useState(false)
+
+  /**
+   * "Defaults open until the gate clears, collapsed after" — §9's rule for the
+   * checklist, carried over from the client page with its derivation intact.
+   *
+   * Derived rather than stored, because the gate can clear while the page is
+   * open: verifying the last mandatory task flips it, and a remembered default
+   * would leave the checklist expanded over ribbons that just came alive. Once
+   * the reader has touched it, their choice wins — which is what `null` means
+   * here, and why this is not a plain boolean.
+   */
+  const [prereqsOverride, setPrereqsOverride] = React.useState<boolean | null>(null)
+  const prereqsOpen = prereqsOverride ?? gate?.gateStatus === 'LOCKED'
 
   const defaultJourneyId = defaultOpenJourneyId(group?.journeys ?? [])
 
@@ -179,7 +238,7 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
   if (!group) {
     return (
       <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-4 p-6">
-        <BackLink obClientId={obClientId} name={detail.name} />
+        <BackLink />
         <EmptyState
           title="Product not found"
           description={`${detail.name} has no onboarding journey for this product. It may not have been bought, or its journeys may not be instantiated yet.`}
@@ -193,7 +252,29 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-5 p-6">
-      <BackLink obClientId={obClientId} name={detail.name} />
+      <BackLink />
+
+      {/*
+        The mockup's banner-live row, and a fact about the *client* rather than
+        this product: it is the go-live date and the CSAT score, which nothing
+        else on any screen carries. Status is the guard and `liveAt` only the
+        date, so a client flipped LIVE by an old migration with no stamp still
+        reads as live rather than losing its banner.
+      */}
+      {detail.status === 'LIVE' && (
+        <div
+          className="flex flex-wrap items-center gap-2.5 rounded-card border border-level-low bg-level-low-soft px-5 py-3.5 font-semibold text-success-text"
+          role="status"
+        >
+          <span aria-hidden="true">🎉</span>
+          <span>
+            Fully onboarded &amp; LIVE
+            {detail.liveAt && ` since ${formatDay(detail.liveAt)}`} — all {journeys.length}{' '}
+            {journeys.length === 1 ? 'journey' : 'journeys'} complete, sign-offs on record
+            {detail.csatScore != null && ` · CSAT ${detail.csatScore}/5`}.
+          </span>
+        </div>
+      )}
 
       <header className="flex flex-wrap items-start gap-3">
         <span
@@ -248,37 +329,44 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
       </header>
 
       {/*
-        The gate is the client's, and on this route it is administered on the
-        client page — so this says what is outstanding and points at where to
-        go, rather than repeating a checklist that would then exist in two
-        places with one copy always slightly behind.
+        The gate itself, not a signpost to it.
 
-        It reports; it does not warn anybody off. The gate stopped refusing a
-        start, so the old wording ("nothing here starts until…") would now be
-        contradicted by the live Start button two rows below it.
+        While the checklist lived on the client page this was a banner saying
+        prerequisites had not cleared with a link to go and clear them. There is
+        nowhere to send anybody now — the accordion below is the real thing, and
+        a reader who learns here that a ribbon is gated can act on it here.
 
-        `checklistShownAbove` is the host saying it has already mounted the
-        real thing. Then this banner is not a shortcut, it is a second voice
-        saying the same sentence a few pixels below the controls that answer
-        it — so it goes, and the accordion's own chip carries the state.
+        Absent rather than empty while its own read is in flight: a "gate locked"
+        strip drawn from no data would be an assertion the page cannot support,
+        and this is the one claim the ribbons below it depend on. A *failed* read
+        is different — silence would hide that the gate is missing, so that gets
+        a strip which says so.
+
+        Drawn whatever the gate says, cleared or locked, because it is the only
+        copy: `PrereqAccordion` collapses itself once the gate clears, so a
+        cleared client pays one row for it.
       */}
-      {group.hold === 'GATE_LOCKED' && !props.checklistShownAbove && (
+      {gate && !props.checklistShownAbove && (
+        <PrereqAccordion
+          obClientId={obClientId}
+          prereqs={gate}
+          isOpen={prereqsOpen}
+          onToggle={() => {
+            // Written from what is on screen, not flipped blindly. The first
+            // click happens while the open state is still derived from the
+            // gate, so negating a stale `false` would *open* the accordion the
+            // reader is trying to close.
+            setPrereqsOverride(!prereqsOpen)
+          }}
+        />
+      )}
+      {prereqs.isError && !props.checklistShownAbove && (
         <div
-          className="flex flex-wrap items-center gap-2 rounded-card border border-level-high bg-level-high-soft px-5 py-3 text-sm text-warning-text"
-          role="status"
+          className="rounded-card border border-level-high bg-level-high-soft px-5 py-3 text-sm text-warning-text"
+          role="alert"
         >
-          <span aria-hidden="true">📋</span>
-          <span>
-            This client&apos;s prerequisites have not cleared. Nothing here starts on its own — no
-            step activates and no TAT clock runs until they do — but an owner may start their own
-            service ahead of the checklist.
-          </span>
-          <Link
-            to={`/onboarding/clients/${obClientId}`}
-            className="font-semibold text-primary no-underline hover:underline"
-          >
-            Open the checklist
-          </Link>
+          📋 The prerequisites checklist could not be loaded, so the gate cannot be shown. Reload
+          the page to try again.
         </div>
       )}
 
@@ -300,17 +388,57 @@ export function ObClientProductPage(props: ObClientProductPageProps = {}) {
           onToggle={() => onToggle(journey.id)}
         />
       ))}
+
+      {/*
+        §9's closing pair, and C-112's panel under it — the rest of what the
+        client page carried.
+
+        Below the ribbons rather than above them, which is the order §9 already
+        argued for: the gate first because nothing moves while it is locked,
+        then the work, then the record. None of these three is worked down — the
+        portal login is administered once, the info card is reference, and the
+        communications panel is read before a call — so they go where they push
+        nothing a reader has to act on further down.
+
+        `journeys` and not `group.journeys` for the panel: its filter names the
+        client's services, and "everything said to this client, across every
+        service" is the question it answers. Narrowing it to one product would
+        make it a different, smaller panel that happens to share a name.
+      */}
+      {!props.checklistShownAbove && (
+        <>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <ObClientAccountPanel obClientId={obClientId} />
+            <ObClientInfoCard detail={detail} />
+          </div>
+          <ClientCommunicationsPanel obClientId={obClientId} journeys={journeys} />
+        </>
+      )}
     </div>
   )
 }
 
-function BackLink({ obClientId, name }: { obClientId: number; name: string }) {
+/** `2026-08-07T11:40:00Z` and `2026-08-07` both → "7 Aug 2026" — the banner's format. */
+function formatDay(value: string): string {
+  const parsed = parseISO(value)
+  return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'd MMM yyyy')
+}
+
+/**
+ * Back to the roster, not to the client.
+ *
+ * It used to read "← {client name}" and point at the client page. That page is
+ * gone, so the honest destination is the list — and the client is not lost from
+ * the screen by saying so: its name is the caption under the product heading,
+ * and its whole record is in the info card at the bottom.
+ */
+function BackLink() {
   return (
     <Link
-      to={`/onboarding/clients/${obClientId}`}
+      to="/onboarding/clients"
       className="self-start rounded-control px-2 py-1 text-sm font-medium text-primary no-underline hover:bg-subtle"
     >
-      ← {name}
+      ← All clients
     </Link>
   )
 }
