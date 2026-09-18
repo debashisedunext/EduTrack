@@ -3498,6 +3498,8 @@ export interface ObSignoffRow {
   id: number; obClientId: number; journeyId: number; stepId: number | null;
   kind: 'STEP' | 'GO_LIVE';
   status: 'PENDING' | 'SIGNED' | 'OBJECTED' | 'EXPIRED' | 'CANCELLED';
+  /** B-115 · who typed the acceptance, and what they said. Set by the portal's accept only. */
+  signedName?: string | null; acceptanceNote?: string | null;
   token: string; tokenExpiresAt: string;
   otp: string | null; otpAttempts: number;
   requestedById: number | null; requestedAt: string;

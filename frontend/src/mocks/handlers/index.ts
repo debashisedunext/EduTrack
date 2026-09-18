@@ -11,6 +11,7 @@ import { obPrereqHandlers } from './onboardingPrereqs';
 import { obJourneyHandlers } from './onboardingSteps';
 import { obNotificationHandlers } from './obNotifications';
 import { portalHandlers } from './portal';
+import { portalOnboardingHandlers } from './portalOnboarding';
 import { ribbonHandlers } from './ribbon';
 import { restHandlers } from './rest';
 import { slaHandlers } from './sla';
@@ -82,6 +83,11 @@ export const handlers = [
   // only — which is the whole point of forking at the route tree rather than
   // with per-endpoint conditionals (plan §2.3).
   ...portalHandlers,
+  // C-121 · CP-01..CP-04, the portal's onboarding side: login and the
+  // credential link, the home page, escalations, sign-offs and the client's
+  // half of the prerequisites. Same tree as portalHandlers, no overlap with
+  // it — that file is the ticketing reads and says so.
+  ...portalOnboardingHandlers,
 
   // C-026 · `/mock-files/*`, the stand-in object store. Deliberately outside the
   // `/api/v1` prefix, because a signed URL points at MinIO and not at the API —
