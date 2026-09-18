@@ -28,10 +28,10 @@ class ObGoLiveHandoverReader {
 
     /** @param contacts every active contact, primary first — {@code ObClientChildWriteRepository}'s own table. */
     record Data(String clientName, LocalDate onboardingDate, Instant liveAt,
-                List<String> productNames, List<Contact> contacts) {
+                List<String> productNames, List<HandoverContact> contacts) {
     }
 
-    record Contact(String name, String designation, String email, String phone, boolean primary) {
+    record HandoverContact(String name, String designation, String email, String phone, boolean primary) {
     }
 
     Data read(long obClientId) {
@@ -53,13 +53,13 @@ class ObGoLiveHandoverReader {
                  ORDER BY p.name
                 """).param("id", obClientId).query(String.class).list();
 
-        List<Contact> contacts = jdbc.sql("""
+        List<HandoverContact> contacts = jdbc.sql("""
                 SELECT name, designation, email, phone, is_primary_key IS NOT NULL AS is_primary
                   FROM ob_client_contacts
                  WHERE ob_client_id = :id AND is_active = 1
                  ORDER BY is_primary_key IS NULL, name
                 """).param("id", obClientId)
-                .query((rs, row) -> new Contact(
+                .query((rs, row) -> new HandoverContact(
                         rs.getString("name"),
                         rs.getString("designation"),
                         rs.getString("email"),

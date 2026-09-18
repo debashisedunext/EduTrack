@@ -3,13 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ObProjectBoardRow } from '@/api/generated/model'
+
 import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
 
 /**
- * B-128 · the grid in isolation, against a mocked `useListObDelayedProjects`
- * — {@code ObDashboardDrillPanel.test.tsx}'s own shape. What is under test is
- * this component's own rendering and the client-row handoff; the query
- * itself is `ObDelayedProjectsIT`'s job.
+ * B-128 · the grid in isolation.
+ *
+ * <p>It takes the board's rows as a prop now rather than fetching a list of
+ * its own, so there is no query to mock: the cases below hand it projects and
+ * assert which ones it draws. "Behind schedule" is the project's own
+ * completion date having passed — the `DELAYED` and `AT_RISK` buckets — and
+ * the first case is the one that pins it, because a grid that simply drew
+ * every row it was given would pass every other case here.
  */
 
 const navigate = vi.fn()
@@ -18,100 +24,128 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => navigate }
 })
 
-const useListObDelayedProjects = vi.fn()
-vi.mock('@/api/generated/onboarding/onboarding', () => ({
-  useListObDelayedProjects: (...args: unknown[]) => useListObDelayedProjects(...args),
-}))
-
-const ROW = {
-  journeyId: 9,
-  obClientId: 42,
-  obClientName: 'Horizon Retail',
-  startedAt: '2026-03-01T09:00:00.000Z',
-  productsBought: [
-    { id: 1, code: 'ERP', name: 'ERP' },
-    { id: 2, code: 'BIO', name: 'Biometric' },
-  ],
-  product: { id: 1, code: 'ERP', name: 'ERP' },
-  currentStep: { id: 40, sequence: 2, name: 'Data migration', status: 'IN_PROGRESS' },
-  responsible: { id: 7, displayName: 'Meera Nair' },
-  expectedCompletionAt: '2026-08-28T18:30:00.000Z',
-  delayedByDays: 3,
+function row(over: Partial<ObProjectBoardRow> & { id: number }): ObProjectBoardRow {
+  return {
+    name: `Project ${over.id}`,
+    client: { id: 100 + over.id, name: `Client ${over.id}`, clientCode: null, city: null },
+    product: { id: 1, code: 'ERP', name: 'ERP' },
+    startDate: '2026-03-01',
+    gateStatus: 'OPEN',
+    bucket: 'ON_TIME',
+    tasksTotal: 4,
+    tasksDone: 1,
+    openEscalations: 0,
+    ...over,
+  } as ObProjectBoardRow
 }
 
-function served(data: unknown, meta: Record<string, unknown> = {}) {
-  useListObDelayedProjects.mockReturnValue({
-    data: data === undefined ? undefined : { data, meta: { hasMore: false, ...meta } },
-    isPending: false,
-    isError: false,
-  })
-}
+const DELAYED = row({
+  id: 9,
+  name: 'Horizon Retail — ERP',
+  client: { id: 42, name: 'Horizon Retail', clientCode: null, city: null },
+  bucket: 'DELAYED',
+  currentStage: 'Data migration',
+  implementor: { id: 7, displayName: 'Meera Nair' },
+  tentativeCompletion: '2026-08-28',
+  daysPastCompletion: 3,
+} as Partial<ObProjectBoardRow> & { id: number })
 
-function renderGrid() {
+function renderGrid(rows: ObProjectBoardRow[] = [DELAYED], over: Partial<{ isPending: boolean; isError: boolean }> = {}) {
   return render(
     <MemoryRouter>
-      <ObDelayedProjectsGrid />
+      <ObDelayedProjectsGrid
+        rows={rows}
+        isPending={over.isPending ?? false}
+        isError={over.isError ?? false}
+      />
     </MemoryRouter>,
   )
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  served([ROW])
-})
+beforeEach(() => vi.clearAllMocks())
 
 describe('ObDelayedProjectsGrid', () => {
-  it('renders one row per delayed journey, with the working-days-late figure', () => {
-    renderGrid()
+  /*
+    The definition, and the case the rest of the file rests on. On time and
+    ahead are not behind anything; NOT_SCHEDULED has no date to have passed,
+    so it is not behind either — it is unplanned, which is a different
+    problem and not this grid's.
+  */
+  it('draws the projects past their own completion date, and only those', () => {
+    renderGrid([
+      DELAYED,
+      row({ id: 2, name: 'On time project', bucket: 'ON_TIME' }),
+      row({ id: 3, name: 'Ahead project', bucket: 'AHEAD' }),
+      row({ id: 4, name: 'At risk project', bucket: 'AT_RISK', daysPastCompletion: 12 }),
+      row({ id: 5, name: 'Unplanned project', bucket: 'NOT_SCHEDULED' }),
+    ])
 
-    expect(screen.getByRole('cell', { name: /3 working days/ })).toBeInTheDocument()
-    expect(screen.getByRole('row', { name: /Horizon Retail/ })).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /Horizon Retail — ERP/ })).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /At risk project/ })).toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /On time project/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /Ahead project/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /Unplanned project/ })).not.toBeInTheDocument()
   })
 
-  it('names the client, the module and the responsible implementor as their own columns', () => {
-    renderGrid()
+  /** Worked from the top, so the furthest behind leads. */
+  it('orders the grid furthest behind first', () => {
+    renderGrid([
+      row({ id: 1, name: 'Two days', bucket: 'DELAYED', daysPastCompletion: 2 }),
+      row({ id: 2, name: 'Nine days', bucket: 'AT_RISK', daysPastCompletion: 9 }),
+    ])
 
-    const row = screen.getByRole('row', { name: /Horizon Retail/ })
-    expect(row).toHaveTextContent('ERP')
-    expect(row).toHaveTextContent('Data migration')
-    expect(row).toHaveTextContent('Meera Nair')
-    expect(row).toHaveTextContent('ERP, BIO')
+    const names = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+    expect(names[0]).toContain('Nine days')
+    expect(names[1]).toContain('Two days')
   })
 
-  it('renders a dash for a null currentStep rather than guessing one', () => {
-    served([{ ...ROW, currentStep: null }])
+  /*
+    The grid is headed "Delayed projects" and counted in them, so the project
+    names the row and the client qualifies it — it named the client alone
+    while the rows were journeys.
+  */
+  it('names the project first, with the client, module, stage and implementor beside it', () => {
     renderGrid()
 
-    const row = screen.getByRole('row', { name: /Horizon Retail/ })
-    expect(row).toHaveTextContent('—')
+    const row_ = screen.getByRole('row', { name: /Horizon Retail — ERP/ })
+    expect(row_).toHaveTextContent('Horizon Retail — ERP')
+    expect(row_).toHaveTextContent('Horizon Retail')
+    expect(row_).toHaveTextContent('ERP')
+    expect(row_).toHaveTextContent('Data migration')
+    expect(row_).toHaveTextContent('Meera Nair')
+    expect(row_).toHaveTextContent('3 days')
   })
 
-  it("opening a client's row navigates to the client, closing nothing else on this page", async () => {
-    renderGrid()
+  it('renders a dash for a missing current stage rather than guessing one', () => {
+    renderGrid([{ ...DELAYED, currentStage: undefined } as ObProjectBoardRow])
 
-    await userEvent.click(screen.getByRole('row', { name: /Horizon Retail/ }))
-
-    expect(navigate).toHaveBeenCalledWith('/onboarding/clients/42')
+    expect(screen.getByRole('row', { name: /Horizon Retail — ERP/ })).toHaveTextContent('—')
   })
 
-  it('shows an empty state when nothing is delayed, distinct from a loading or error state', () => {
-    served([])
+  /** The project, not the client: this grid is a list of projects to work. */
+  it('opens the project a row is for', async () => {
     renderGrid()
 
-    expect(screen.getByText('Nothing is currently delayed')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('row', { name: /Horizon Retail — ERP/ }))
+
+    expect(navigate).toHaveBeenCalledWith('/onboarding/projects/9')
   })
 
-  it('shows a loading skeleton rather than an empty grid while the request is in flight', () => {
-    useListObDelayedProjects.mockReturnValue({ data: undefined, isPending: true, isError: false })
-    renderGrid()
+  it('shows an empty state when nothing is behind, distinct from loading or error', () => {
+    renderGrid([row({ id: 1, bucket: 'ON_TIME' })])
+
+    expect(screen.getByText('Nothing is behind schedule')).toBeInTheDocument()
+  })
+
+  it('shows a loading skeleton rather than an empty grid while the board is in flight', () => {
+    renderGrid([], { isPending: true })
 
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
-    expect(screen.queryByText('Nothing is currently delayed')).not.toBeInTheDocument()
+    expect(screen.queryByText('Nothing is behind schedule')).not.toBeInTheDocument()
   })
 
   it('shows an error state distinct from the empty one', () => {
-    useListObDelayedProjects.mockReturnValue({ data: undefined, isPending: false, isError: true })
-    renderGrid()
+    renderGrid([], { isError: true })
 
     expect(screen.getByText('The delayed projects grid could not be loaded')).toBeInTheDocument()
   })

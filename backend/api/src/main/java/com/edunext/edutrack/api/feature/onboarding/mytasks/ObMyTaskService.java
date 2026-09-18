@@ -1,6 +1,7 @@
 package com.edunext.edutrack.api.feature.onboarding.mytasks;
 
 import com.edunext.edutrack.api.feature.onboarding.mytasks.ObMyTaskDtos.ObMyTask;
+import com.edunext.edutrack.api.feature.onboarding.mytasks.ObMyTaskDtos.ObMyTaskListMeta;
 import com.edunext.edutrack.api.feature.onboarding.mytasks.ObMyTaskDtos.ObMyTaskListResponse;
 import com.edunext.edutrack.api.feature.onboarding.mytasks.ObMyTaskReadRepository.Row;
 import com.edunext.edutrack.common.pagination.Cursor;
@@ -50,9 +51,17 @@ class ObMyTaskService {
         CursorPage<Row> page = CursorPage.of(fetched, limit,
                 row -> new Cursor(row.sortKey(), row.taskId()));
 
+        /*
+          Page-independent, and asked for on every call rather than folded
+          into `openTasksOf`'s own predicate: whether the "Pending for
+          verification" tab exists at all must not depend on what this
+          particular ten rows happen to hold.
+        */
+        boolean reviewsAnyProject = reads.reviewsAnyProject(userId, admin);
+
         return new ObMyTaskListResponse(
                 page.data().stream().map(row -> task(row, now)).toList(),
-                page.meta());
+                ObMyTaskListMeta.of(page.meta(), reviewsAnyProject));
     }
 
     /**
@@ -99,6 +108,7 @@ class ObMyTaskService {
                 row.stepSequence(),
                 row.rowsOut(),
                 row.rowsReturned(),
-                row.rowsApproved());
+                row.rowsApproved(),
+                row.pendingMyVerification());
     }
 }

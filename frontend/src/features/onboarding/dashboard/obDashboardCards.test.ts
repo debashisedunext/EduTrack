@@ -6,6 +6,7 @@ import {
   cardAccessibleName,
   cardLook,
   describeDelta,
+  seesProjectBoard,
   visibleCardCount,
   visibleCards,
 } from './obDashboardCards'
@@ -180,5 +181,48 @@ describe('cardAccessibleName', () => {
       'Live: unavailable. The board counts journeys containing your services.',
     )
     expect(name).not.toContain('0')
+  })
+})
+
+
+/**
+ * Who the project board and its four tabs are drawn for.
+ *
+ * <p>The board is the same screen for all of them; what differs is the rows
+ * behind it, and that is decided server-side from `CallerIdentity` — so these
+ * cases are about which screen is offered, never about what anyone is allowed
+ * to read.
+ */
+describe('seesProjectBoard', () => {
+  it('draws the board for the three onboarding roles that deliver work', () => {
+    for (const role of ['OB_ADMIN', 'OB_MANAGER', 'OB_STEP_OWNER']) {
+      expect(seesProjectBoard(role, false)).toBe(true)
+    }
+  })
+
+  /*
+    Neither delivers work, so the four tabs — who is delivering what, and
+    when — are a reading of somebody else's week. Both keep the counter row.
+  */
+  it('leaves Sales and a Viewer on the counter row', () => {
+    expect(seesProjectBoard('OB_SALES', false)).toBe(false)
+    expect(seesProjectBoard('OB_VIEWER', false)).toBe(false)
+  })
+
+  /*
+    The gate this replaced. A platform admin who holds no ONBOARDING grant
+    would otherwise have lost the board they already have, which is a
+    regression rather than a permission change.
+  */
+  it('keeps the board for a platform admin with no onboarding grant', () => {
+    expect(seesProjectBoard(undefined, true)).toBe(true)
+    expect(seesProjectBoard(null, true)).toBe(true)
+  })
+
+  it('draws nothing for a caller with no onboarding standing at all', () => {
+    expect(seesProjectBoard(undefined, false)).toBe(false)
+    expect(seesProjectBoard(null, false)).toBe(false)
+    // An unknown role is not a role this screen knows to widen for.
+    expect(seesProjectBoard('OB_SOMETHING_NEW', false)).toBe(false)
   })
 })

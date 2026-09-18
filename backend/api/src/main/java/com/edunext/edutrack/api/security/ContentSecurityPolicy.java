@@ -116,8 +116,19 @@ public class ContentSecurityPolicy {
 
     private final String policy;
 
+    /**
+     * {@link ObjectStorageProperties#browserEndpoint()} rather than
+     * {@code endpoint()}, because the two differ exactly where it matters.
+     *
+     * <p>Against real S3 the endpoint is blank — the SDK derives AWS's own host
+     * from the region — and a blank endpoint reaches {@link #originOf} as null,
+     * dropping the object-store source from {@code img-src} and
+     * {@code connect-src} entirely. The policy would have been correct on every
+     * laptop and, in production, would have blocked the presigned URL that every
+     * attachment download and thumbnail depends on.
+     */
     public ContentSecurityPolicy(ObjectStorageProperties storage) {
-        this.policy = policyFor(storage.endpoint(), new ClassPathResource(INDEX_HTML));
+        this.policy = policyFor(storage.browserEndpoint(), new ClassPathResource(INDEX_HTML));
     }
 
     /** The assembled header value. */

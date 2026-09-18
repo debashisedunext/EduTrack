@@ -13,6 +13,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -92,8 +93,29 @@ class ResourceListIT {
         insertUser("ITRES004", "Bhavesh 100% Patel", "SUPPORT", "Support", true);
     }
 
+    /** A live onboarding grant, or one that has since been withdrawn. */
+    private void grantOnboarding(long userId, String role, boolean revoked) {
+        // revoked_at and revoked_by travel together — the table's own CHECK
+        // refuses one without the other, so a withdrawal names who made it.
+        jdbc.update("INSERT INTO user_module_access "
+                + "(user_id, module, module_role, granted_by, granted_at, revoked_at, revoked_by) "
+                + "VALUES (?, 'ONBOARDING', ?, ?, NOW(6), ?, ?)",
+                userId, role, managerId,
+                revoked ? Timestamp.valueOf("2026-08-14 11:00:00") : null,
+                revoked ? managerId : null);
+    }
+
+    private ResourceFilter obRoles(String... roles) {
+        return new ResourceFilter("ITRES", null, null, null, null, List.of(roles));
+    }
+
     private void clearFixtureRows() {
         jdbc.update("DELETE FROM tickets WHERE ticket_code LIKE 'ITRES%'");
+        // Before the users go: user_module_access is keyed to them, and a
+        // fixture that seeds a grant and does not clear it takes every test in
+        // this class down in @BeforeEach rather than in the one that added it.
+        jdbc.update("DELETE FROM user_module_access WHERE user_id IN "
+                + "(SELECT id FROM users WHERE emp_code LIKE 'ITRES%')");
         jdbc.update("DELETE FROM project_members WHERE user_id IN (SELECT id FROM users WHERE emp_code LIKE 'ITRES%')");
         jdbc.update("UPDATE users SET reporting_manager_id = NULL WHERE emp_code LIKE 'ITRES%'");
         jdbc.update("DELETE FROM users WHERE emp_code LIKE 'ITRES%'");
@@ -162,6 +184,36 @@ class ResourceListIT {
 
             assertThat(namesMatching(new ResourceFilter("ITRES", null, projectId, null, null)))
                     .containsExactly("Priya Sharma");
+        }
+
+        @Test
+        @DisplayName("filtering by onboarding module role reads live grants, and takes more than one")
+        void filterByObModuleRole() {
+            long priya = idOfUser("ITRES001");
+            long zoya = idOfUser("ITRES003");
+            long bhavesh = idOfUser("ITRES004");
+            grantOnboarding(priya, "OB_MANAGER", false);
+            grantOnboarding(zoya, "OB_ADMIN", false);
+            grantOnboarding(bhavesh, "OB_STEP_OWNER", false);
+
+            assertThat(namesMatching(obRoles("OB_MANAGER")))
+                    .containsExactly("Priya Sharma");
+            // Both at once — the Implementor manager picker's actual question,
+            // and the reason the filter is a list rather than a value.
+            assertThat(namesMatching(obRoles("OB_MANAGER", "OB_ADMIN")))
+                    .containsExactlyInAnyOrder("Priya Sharma", "Zoya Khan");
+            // The second person with the same name holds no grant at all, so
+            // this also proves the clause filters rather than merely joining.
+            assertThat(namesMatching(obRoles("OB_SALES"))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a revoked grant is not a grant")
+        void revokedObGrantIsIgnored() {
+            long priya = idOfUser("ITRES001");
+            grantOnboarding(priya, "OB_MANAGER", true);
+
+            assertThat(namesMatching(obRoles("OB_MANAGER"))).isEmpty();
         }
 
         @Test

@@ -82,7 +82,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("every S-07 filter reaches the service")
         void passesEveryFilter() {
-            controller.list(null, null, "ravi", "developer", 7L, 9L, false);
+            controller.list(null, null, "ravi", "developer", 7L, 9L, false, null);
 
             assertThat(capturedFilter()).isEqualTo(
                     new ResourceFilter("ravi", "DEVELOPER", 7L, 9L, false));
@@ -93,7 +93,7 @@ class ResourceControllerTest {
         void unsetStatusMeansBoth() {
             // Defaulting to active would hide every deactivated resource from
             // the screen whose job includes reactivating them.
-            controller.list(null, null, null, null, null, null, null);
+            controller.list(null, null, null, null, null, null, null, null);
 
             assertThat(capturedFilter().isActive()).isNull();
         }
@@ -101,7 +101,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("a blank search box is not a search for the empty string")
         void blankSearchIsNoSearch() {
-            controller.list(null, null, "   ", null, null, null, null);
+            controller.list(null, null, "   ", null, null, null, null, null);
 
             assertThat(capturedFilter().q()).isNull();
         }
@@ -110,7 +110,7 @@ class ResourceControllerTest {
         @ValueSource(strings = {"admin", "Admin", "  pm  ", "DEPLOYMENT"})
         @DisplayName("role codes are accepted in any case and normalised upward")
         void roleIsCaseInsensitive(String role) {
-            controller.list(null, null, null, role, null, null, null);
+            controller.list(null, null, null, role, null, null, null, null);
 
             assertThat(capturedFilter().role()).isEqualTo(role.trim().toUpperCase(java.util.Locale.ROOT));
         }
@@ -121,7 +121,7 @@ class ResourceControllerTest {
         void unknownRoleIsRejected(String role) {
             // SUPPORT_DESK is in the list on purpose: it is the pre-V20260807_1030
             // spelling, so it is the wrong code somebody is most likely to send.
-            assertThatThrownBy(() -> controller.list(null, null, null, role, null, null, null))
+            assertThatThrownBy(() -> controller.list(null, null, null, role, null, null, null, null))
                     .isInstanceOf(ResponseStatusException.class)
                     .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                             .isEqualTo(HttpStatus.BAD_REQUEST));
@@ -135,7 +135,7 @@ class ResourceControllerTest {
             // failure would have looked like a bug in the Role Master.
             when(service.roleExists("AUDITOR")).thenReturn(true);
 
-            controller.list(null, null, null, "auditor", null, null, null);
+            controller.list(null, null, null, "auditor", null, null, null, null);
 
             assertThat(capturedFilter().role()).isEqualTo("AUDITOR");
         }
@@ -169,7 +169,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("xlsx is delivered under the resources stem, so the filename keeps its shape")
         void xlsxAttachment() throws IOException {
-            controller.export("xlsx", null, null, null, null, null, response);
+            controller.export("xlsx", null, null, null, null, null, null, response);
 
             verify(exports).writeTo(eq(response), eq(ReportExporter.Format.XLSX),
                     eq("resources"), eq("Resources"), any(), eq(ResourceExportRows.COLUMNS), any());
@@ -183,7 +183,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("csv asks for the csv writer, and the format parameter is case-insensitive")
         void csvGoesToTheCsvWriter() throws IOException {
-            controller.export("CSV", null, null, null, null, null, response);
+            controller.export("CSV", null, null, null, null, null, null, response);
 
             verify(exports).writeTo(any(), eq(ReportExporter.Format.CSV),
                     any(), any(), any(), any(), any());
@@ -196,7 +196,7 @@ class ResourceControllerTest {
             // declared `format: [xlsx, csv]`. Routing through the engine must not
             // quietly widen what the route answers — a format no schema lists is
             // a behaviour no client can discover.
-            assertThatThrownBy(() -> controller.export("pdf", null, null, null, null, null, response))
+            assertThatThrownBy(() -> controller.export("pdf", null, null, null, null, null, null, response))
                     .isInstanceOf(ResponseStatusException.class);
 
             verify(exports, never()).writeTo(any(), any(), any(), any(), any(), any(), any());
@@ -210,7 +210,7 @@ class ResourceControllerTest {
             // stops compiling. The split is what keeps that from happening.
             assertThat(ResourceController.class
                     .getDeclaredMethod("export", String.class, String.class, String.class,
-                            Long.class, Long.class, Boolean.class,
+                            Long.class, Long.class, Boolean.class, java.util.List.class,
                             jakarta.servlet.http.HttpServletResponse.class)
                     .getAnnotation(org.springframework.web.bind.annotation.GetMapping.class)
                     .value())
@@ -221,7 +221,7 @@ class ResourceControllerTest {
         @ValueSource(strings = {"", "pdf", "xls", "json"})
         @DisplayName("an unsupported format is a 400 before a single byte is written")
         void unsupportedFormat(String format) {
-            assertThatThrownBy(() -> controller.export(format, null, null, null, null, null, response))
+            assertThatThrownBy(() -> controller.export(format, null, null, null, null, null, null, response))
                     .isInstanceOf(ResponseStatusException.class);
 
             assertThat(response.getContentAsByteArray()).isEmpty();
@@ -230,7 +230,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("the export applies the same filters as the grid")
         void exportHonoursFilters() throws IOException {
-            controller.export("csv", "ravi", "QA", 7L, 9L, true, response);
+            controller.export("csv", "ravi", "QA", 7L, 9L, true, null, response);
 
             // B-062 · the filter now travels inside the row source rather than
             // as an argument to a writer, so the assertion drains the source and
@@ -251,7 +251,7 @@ class ResourceControllerTest {
             // A directory narrowed to one project and one manager used to be a
             // file indistinguishable from the whole organisation. Whoever it was
             // forwarded to read 14 rows as the headcount.
-            controller.export("csv", null, "QA", 7L, null, false, response);
+            controller.export("csv", null, "QA", 7L, null, false, null, response);
 
             var scope = forClass(String.class);
             verify(exports).writeTo(any(), any(), any(), any(), scope.capture(), any(), any());
@@ -264,7 +264,7 @@ class ResourceControllerTest {
         @Test
         @DisplayName("an unknown role is rejected on the export path too")
         void exportValidatesRole() {
-            assertThatThrownBy(() -> controller.export("csv", null, "DEV", null, null, null, response))
+            assertThatThrownBy(() -> controller.export("csv", null, "DEV", null, null, null, null, response))
                     .isInstanceOf(ResponseStatusException.class);
         }
     }

@@ -48,9 +48,26 @@ final class ObTemplateDtos {
     ) {
     }
 
+    /*
+     * springdoc keys component schemas by SIMPLE class name, so a record here
+     * called `TemplateResponse` and one in
+     * masters/notificationtemplates/NotificationTemplateDtos called the same
+     * thing are one schema in the served document, and whichever is registered
+     * last wins for BOTH paths. That is not theoretical: it made
+     * GET /masters/notification-templates serve this module's shape, so
+     * `isDeliverable` appeared on a masters row that has no such field and
+     * ContractConformanceTest reported it as drift on the masters path.
+     *
+     * The names below are the contract's own, which were already distinct --
+     * only the Java side collided. `Template` above already carries one for
+     * this reason; these three were missed because nothing read them until the
+     * masters screen landed.
+     */
+    @Schema(name = "ObNotificationTemplateResponse")
     record TemplateResponse(Template data) {
     }
 
+    @Schema(name = "ObNotificationTemplateListResponse")
     record TemplateListResponse(List<Template> data) {
     }
 
@@ -101,6 +118,7 @@ final class ObTemplateDtos {
     ) {
     }
 
+    @Schema(name = "ObNotificationVocabularyResponse")
     record VocabularyResponse(Vocabulary data) {
     }
 

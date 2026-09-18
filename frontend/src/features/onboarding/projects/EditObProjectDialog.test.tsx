@@ -174,4 +174,31 @@ describe('Edit project', () => {
     expect(await screen.findByText(/status is not editable/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^status/i)).not.toBeInTheDocument()
   })
+
+  /**
+   * The field that named a step owner as implementor manager on every project
+   * in the fixture database, and produced a manager the review routes then
+   * refused. The dropdown asks the platform who may hold the job now.
+   */
+  it('offers only onboarding managers and admins as the implementor manager', async () => {
+    const asked: string[] = []
+    server.use(
+      http.get('*/users', ({ request }) => {
+        const q = new URL(request.url).searchParams
+        asked.push(...q.getAll('obModuleRole'))
+        return HttpResponse.json({
+          data: [{ id: 99, displayName: 'Ananya Rao', isActive: true }],
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(await screen.findByLabelText(/implementor manager/i))
+
+    // Comma-joined, not repeated — `explode: false`, which is what `http.ts`
+    // sends and what the mock and Spring both read.
+    await waitFor(() => expect(asked).toContain('OB_MANAGER,OB_ADMIN'))
+    expect(await screen.findByText('Ananya Rao')).toBeInTheDocument()
+  })
 })

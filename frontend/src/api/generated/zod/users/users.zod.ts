@@ -73,7 +73,8 @@ export const listUsersQueryParams = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "projectId": zod.number().optional(),
   "managerId": zod.number().optional(),
-  "isActive": zod.boolean().optional()
+  "isActive": zod.boolean().optional(),
+  "obModuleRole": zod.array(zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).describe('A-118 · the module\'s own role vocabulary, \*\*independent of\n`users.role_id`\*\*. A user\'s platform role says what they are in\nticketing; this says what they are here, and the two do not have to\nagree — plan §3\'s six onboarding roles are not blueprint §2\'s six.\n\n`TICKETING_MEMBER` is the degenerate value on the other module\'s\ngrants: ticketing distinguishes its roles through `users.role_id`\nalready, so a second vocabulary for it would be two places to change\none fact. Its presence in this enum is what lets one table serve both\nmodules without a nullable column.\n\nClosed, because `ck_user_module_access_module_role` is closed. A\nseventh value is a migration.\n')).optional().describe('Only people holding one of these \*\*live\*\* onboarding module grants\n(`user_module_access`), revoked ones excluded.\n\nIt exists for the pickers that name somebody into an onboarding\nresponsibility the server then gates on that role. A project\'s\n\*\*Implementor manager\*\* is the case that forced it: the field was\noffering every user in the directory, so a project could be — and\nwas — handed to an `OB_STEP_OWNER`, who the review routes then\nrefuse with `403`. A screen that can name somebody to a job the\nplatform will not let them do is a screen that produces support\ntickets.\n\nMore than one, because the question is almost never about a single\nrole: `?obModuleRole=OB_MANAGER,OB_ADMIN` is who may review.\nComma-joined rather than repeated — `explode: false`, the house\nstyle the client\'s own serialiser implements.\n\nNot the same thing as `GET \/onboarding\/module-access`, which\nanswers the \*audit\* question and is OB Admin only. This is the\ndirectory, filtered, and every role may read it — the same bargain\nthe rest of this operation makes.\n')
 })
 
 export const listUsersResponseDataItemProjectsItemColourTagRegExp = new RegExp('^#[0-9A-Fa-f]{6}$');
@@ -474,7 +475,8 @@ export const exportUsersQueryParams = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "projectId": zod.number().optional(),
   "managerId": zod.number().optional(),
-  "isActive": zod.boolean().optional()
+  "isActive": zod.boolean().optional(),
+  "obModuleRole": zod.array(zod.enum(['OB_ADMIN', 'OB_MANAGER', 'OB_SALES', 'OB_STEP_OWNER', 'OB_VIEWER', 'TICKETING_MEMBER']).describe('A-118 · the module\'s own role vocabulary, \*\*independent of\n`users.role_id`\*\*. A user\'s platform role says what they are in\nticketing; this says what they are here, and the two do not have to\nagree — plan §3\'s six onboarding roles are not blueprint §2\'s six.\n\n`TICKETING_MEMBER` is the degenerate value on the other module\'s\ngrants: ticketing distinguishes its roles through `users.role_id`\nalready, so a second vocabulary for it would be two places to change\none fact. Its presence in this enum is what lets one table serve both\nmodules without a nullable column.\n\nClosed, because `ck_user_module_access_module_role` is closed. A\nseventh value is a migration.\n')).optional().describe('The same filter `listUsers` documents. Present here because one\ncode path builds both filters, and a download that quietly ignored\nit would be the exact failure the note above is about.\n')
 })
 
 /**

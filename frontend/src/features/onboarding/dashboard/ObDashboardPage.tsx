@@ -1,23 +1,27 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   useGetObDashboardSummary,
   useGetObProjectBoard,
 } from '@/api/generated/onboarding/onboarding'
-import type { ObDashboardCard, ObDashboardCardKey } from '@/api/generated/model'
+import type { ObDashboardCard, ObDashboardCardKey, ObProjectBoardRow } from '@/api/generated/model'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { useAuthStore } from '@/features/auth/authStore'
 
 import { ObDashboardCardRow } from './ObDashboardCardRow'
+import { seesProjectBoard } from './obDashboardCards'
 import { ObReviewCards } from './ObReviewCards'
 import { ObDashboardDrillPanel } from './ObDashboardDrillPanel'
 import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
-import { ObDashboardRagBoard } from './ObDashboardRagBoard'
 import { ObDashboardStuckPanel } from './ObDashboardStuckPanel'
 import { ObProjectCardBand } from './ObProjectCardBand'
 import { ObProjectChartRow } from './ObProjectChartRow'
+import { ObMyTaskDonut } from './ObMyTaskDonut'
+import { ObMyTaskSummaryGrid } from './ObMyTaskSummaryGrid'
+import { ObProjectListPanel } from './ObProjectListPanel'
+import { projectsForCard } from './obProjectBoard'
 import { ObProjectSummaryLists } from './ObProjectSummaryLists'
 import { ObDelayedProjectsGrid } from './ObDelayedProjectsGrid'
 import { ObImplementorWorkloadGrid } from './ObImplementorWorkloadGrid'
@@ -65,29 +69,36 @@ function isTabId(value: string | null): value is TabId {
  *
  * The cards sit **above** the strip rather than inside Summary because they
  * are the page's standing figures, not one tab's content — the row's own file
- * carries that argument. What is left in Summary is the RAG board, which is
- * the Summary *view* of the same clients the other three tabs cut differently.
+ * carries that argument. What is left in Summary is the three project lists:
+ * what lands today, what is overdue, what is at risk of slipping.
  *
- * <h2>The strip is Admin's, the counters are everybody's</h2>
+ * <h2>Who gets the board, and who gets the counters</h2>
  *
- * All four tabs are cross-team readings of the module — every client's health,
- * every stuck step, every delayed project, every implementor's load — so the
- * whole strip comes off for a non-admin rather than being thinned tab by tab.
- * What is left for them is their own row of counters, which is what they
- * opened the board for.
+ * The board and its four tabs are drawn for the three onboarding roles that
+ * deliver work — <b>OB_ADMIN</b>, <b>OB_MANAGER</b> and <b>OB_STEP_OWNER</b>,
+ * the admin, the implementor manager and the implementor. Each of them is
+ * served their own rows: every route behind the board derives its scope from
+ * `CallerIdentity` server-side, so an implementor's tabs are their own
+ * journeys and an admin's are the whole book, through the identical screen.
+ * `seesProjectBoard` in `obDashboardCards.ts` carries the full argument,
+ * including why widening it leaks nothing.
  *
- * `isAdmin` is the platform role off the session (`ADMIN`), the same test
- * `Sidebar` gates its `adminOnly` rows with and for the same reason: the
- * session still carries no onboarding module role — `Me` has `modules` but no
- * `moduleRoles` — so `OB_ADMIN`, which is the division this actually wants, is
- * not answerable client-side yet. Exposing it on `Me` is the contract change
- * that would let both switch over together.
+ * OB_SALES and OB_VIEWER keep the counter row alone. The tabs are cuts of who
+ * is delivering what and when, which is a question about somebody else's week
+ * for both.
+ *
+ * The gate used to be the *platform* `ADMIN` role alone, a stand-in for an
+ * onboarding division the session could not answer. `Me.moduleRoles` answers
+ * it now — `POST /auth/login` returns it and `Sidebar` already reads it — so
+ * the three onboarding roles are added <em>beside</em> that test rather than
+ * replacing it: a platform admin holding no `ONBOARDING` grant keeps the board
+ * they have today. `isAdmin` has a second, narrower job as well — the two
+ * cards `visibleCards` keeps off a non-admin counter row.
  *
  * **It is a display decision, never a permission.** The server scopes and
- * refuses on its own — a non-admin reaching the tabs' underlying routes by any
- * other path gets exactly the answer they always did. Hiding the strip removes
- * a reading they have no use for; it guards nothing, and nothing here should
- * be relied on as if it did.
+ * refuses on its own — anyone reaching these routes by another path gets
+ * exactly the answer they always did. Choosing a screen here guards nothing,
+ * and nothing should be relied on as if it did.
  *
  * <h2>No page header</h2>
  *
@@ -145,9 +156,26 @@ export function ObDashboardPage() {
     asking for it over HTTP cost there.
   */
   const isAdmin = useAuthStore((s) => s.user?.role) === 'ADMIN'
+  /*
+    Who gets the board and the tabs — the onboarding role, not the platform
+    one. `obDashboardCards.ts` carries which roles and why it leaks nothing.
+  */
+  const onboardingRole = useAuthStore((s) => s.user?.moduleRoles?.ONBOARDING)
+  const seesBoard = seesProjectBoard(onboardingRole, isAdmin)
+  /* An implementor and their manager work a queue of their own; everybody
+     else with the board is reading the book rather than delivering it. */
+  const showsMyTasks = onboardingRole === 'OB_STEP_OWNER' || onboardingRole === 'OB_MANAGER'
+  /*
+    An implementor gets one tab — their own queue. The other four are
+    cross-team readings of the book, which is their manager's job and not
+    theirs; `ObMyTaskSummaryGrid` carries the rest of that argument.
+  */
+  const ownQueueOnly = onboardingRole === 'OB_STEP_OWNER'
   const [drill, setDrill] = useState<DrillTarget | null>(null)
+  /* What the project panel is showing, or nothing. Its rows are cut from the
+     board response rather than fetched — see `ObProjectListPanel`. */
+  const [projectList, setProjectList] = useState<{ title: string; rows: ObProjectBoardRow[] } | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
 
   const cards = data?.data?.cards ?? []
   const activeTab: TabId = isTabId(searchParams.get('tab')) ? (searchParams.get('tab') as TabId) : DEFAULT_TAB
@@ -168,51 +196,64 @@ export function ObDashboardPage() {
   }
 
   /**
-   * Where a project card goes when it is pressed.
+   * What a project card opens: the projects it counted, in a panel.
    *
-   * **Not the slide-over.** That panel lists steps and prerequisite tasks —
-   * the grain the seven counters are in — and opening it from a figure counted
-   * in *projects* would show a reader a list whose length disagrees with the
-   * number they just clicked. The rows behind these six are the ones this page
-   * already holds: the Summary tab's three lists. So a card selects that tab,
-   * and the one card whose set the Projects grid can express exactly — every
-   * running project — links there instead, filtered.
+   * <p>Every figure on this board opens one now — a card in the band and a
+   * slice of either people donut — which is what the seven counters above the
+   * strip have always done. A card used to select the Summary tab and a slice
+   * used to leave for the Projects grid; both made a reader navigate away from
+   * the board to answer "which ones?".
+   *
+   * <p>{@link ObProjectListPanel} carries the rest of the argument, including
+   * why this is a second panel rather than {@link ObDashboardDrillPanel}: that
+   * one answers in steps and prerequisite tasks, and these figures are counted
+   * in projects.
    */
-  function openProjectCard(key: string) {
-    if (key === 'ongoing') {
-      navigate('/onboarding/projects?status=RUNNING')
-      return
-    }
-    selectTab('summary')
+  function openProjectCard(key: string, label: string) {
+    if (!projectBoard) return
+    setProjectList({ title: label, rows: projectsForCard(key, projectBoard) })
   }
 
-  const tabs: TabItem[] = [
+  const tabs: TabItem[] = ownQueueOnly
+    ? [{ id: 'summary', label: 'Task summary', content: <ObMyTaskSummaryGrid /> }]
+    : [
     {
       id: 'summary',
       label: 'Summary',
       /*
-        Three project lists, then the RAG board.
+        The three project lists, and nothing under them.
 
-        The lists are what a reader opens this tab for — what lands today, what
-        is beyond rescue, what is slipping — and each names the implementor, so
-        the answer to "who do I talk to" is on the row rather than a click away.
-        The RAG board stays underneath rather than being replaced: it is the
-        *client* health view, cut by journey colour, and it answers a question
-        the project lists do not.
+        They are what a reader opens this tab for — what lands today, what is
+        beyond rescue, what is slipping — and each names the implementor, so
+        the answer to "who do I talk to" is on the row rather than a click
+        away.
+
+        The RAG board — Breached / blocked · At risk · On track — sat
+        underneath as a second cut of the same clients, by journey colour.
+        It is gone: three columns that were empty on most days, answering a
+        question the cards above and the Delayed projects tab already answer,
+        and paying for three client reads to do it.
       */
-      content: (
-        <div className="flex flex-col gap-4">
-          {projectBoard ? (
-            <ObProjectSummaryLists rows={projectBoard.projects} today={projectBoard.today} />
-          ) : (
-            <Skeleton className="h-64 w-full rounded-card" />
-          )}
-          <ObDashboardRagBoard />
-        </div>
+      content: projectBoard ? (
+        <ObProjectSummaryLists rows={projectBoard.projects} today={projectBoard.today} />
+      ) : (
+        <Skeleton className="h-64 w-full rounded-card" />
       ),
     },
     { id: 'stuck', label: "Where it's stuck", content: <ObDashboardStuckPanel /> },
-    { id: 'delayed', label: 'Delayed projects', content: <ObDelayedProjectsGrid /> },
+    {
+      id: 'delayed',
+      label: 'Delayed projects',
+      /* Cut from the board the page already holds — see the grid's own note
+         on why it no longer asks a second endpoint a different question. */
+      content: (
+        <ObDelayedProjectsGrid
+          rows={projectBoard?.projects ?? []}
+          isPending={board.isPending}
+          isError={board.isError}
+        />
+      ),
+    },
     {
       id: 'workload',
       label: 'Implementor workload & performance',
@@ -231,7 +272,10 @@ export function ObDashboardPage() {
         scope's clients. Rendered first because "is anything waiting on me"
         outranks every org-wide number on the page.
       */}
-      <ObReviewCards />
+      {/* In the chart band for an implementor and their manager — see the
+          chart row's `third`. Above it for everybody else, who have no queue
+          of their own for it to sit beside. */}
+      {!showsMyTasks && <ObReviewCards />}
 
       {/*
         One band of standing figures, not two.
@@ -255,9 +299,19 @@ export function ObDashboardPage() {
         further than the first screen should get the shape, since the six
         figures are repeated as lists on the Summary tab.
       */}
-      {isAdmin ? (
+      {seesBoard ? (
         <>
-          <ObProjectChartRow board={projectBoard} isPending={board.isPending} />
+          <ObProjectChartRow
+            board={projectBoard}
+            isPending={board.isPending}
+            onSelectSlice={(title, rows) => setProjectList({ title, rows })}
+            /* The two delivery roles get their own queue where an admin gets
+               the salesperson cut — `ObMyTaskDonut` carries why. */
+            mine={showsMyTasks ? <ObMyTaskDonut /> : undefined}
+            /* And their review state where the team cut was — it is drawn
+               above the charts for everybody else. */
+            third={showsMyTasks ? <ObReviewCards /> : undefined}
+          />
           <ObProjectCardBand
             board={projectBoard}
             isPending={board.isPending}
@@ -291,7 +345,14 @@ export function ObDashboardPage() {
         load. The `?tab=` parameter is left alone — a link into a tab still
         carries it, and it simply decides nothing until an Admin opens it.
       */}
-      {isAdmin && (
+      <ObProjectListPanel
+        title={projectList?.title ?? ''}
+        rows={projectList?.rows ?? []}
+        open={projectList != null}
+        onClose={() => setProjectList(null)}
+      />
+
+      {seesBoard && (
         <Tabs
           tabs={tabs}
           activeId={activeTab}

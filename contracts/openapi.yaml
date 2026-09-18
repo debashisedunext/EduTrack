@@ -448,6 +448,35 @@ paths:
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: managerId, in: query, schema: { type: integer, format: int64 } }
         - { name: isActive, in: query, schema: { type: boolean } }
+        - name: obModuleRole
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/ObModuleRole' }
+          description: |
+            Only people holding one of these **live** onboarding module grants
+            (`user_module_access`), revoked ones excluded.
+
+            It exists for the pickers that name somebody into an onboarding
+            responsibility the server then gates on that role. A project's
+            **Implementor manager** is the case that forced it: the field was
+            offering every user in the directory, so a project could be — and
+            was — handed to an `OB_STEP_OWNER`, who the review routes then
+            refuse with `403`. A screen that can name somebody to a job the
+            platform will not let them do is a screen that produces support
+            tickets.
+
+            More than one, because the question is almost never about a single
+            role: `?obModuleRole=OB_MANAGER,OB_ADMIN` is who may review.
+            Comma-joined rather than repeated — `explode: false`, the house
+            style the client's own serialiser implements.
+
+            Not the same thing as `GET /onboarding/module-access`, which
+            answers the *audit* question and is OB Admin only. This is the
+            directory, filtered, and every role may read it — the same bargain
+            the rest of this operation makes.
       responses:
         '200':
           description: OK.
@@ -633,6 +662,17 @@ paths:
         - { name: projectId, in: query, schema: { type: integer, format: int64 } }
         - { name: managerId, in: query, schema: { type: integer, format: int64 } }
         - { name: isActive, in: query, schema: { type: boolean } }
+        - name: obModuleRole
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/ObModuleRole' }
+          description: |
+            The same filter `listUsers` documents. Present here because one
+            code path builds both filters, and a download that quietly ignored
+            it would be the exact failure the note above is about.
       responses:
         '200':
           description: The file, named by `Content-Disposition`.
@@ -7767,6 +7807,98 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /onboarding/journey-templates/{templateId}/task-import/template:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+    get:
+      tags: [onboarding-journeys]
+      operationId: downloadObJourneyTaskImportTemplate
+      summary: Download the Tasks / Task List / Document Checklist template (OB-07)
+      description: |
+        Three sheets — Tasks, Task List, Document Checklist — plus
+        Instructions. The Stage dropdown and the Instructions sheet's stage
+        list are drawn live from this template's own stage groups, so the
+        file always names stages the import will actually accept.
+      responses:
+        '200':
+          description: The .xlsx template.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journey-templates/{templateId}/task-import/preview:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: previewObJourneyTaskImport
+      summary: Validate a task-import file without writing anything (OB-07)
+      description: |
+        Every row in the workbook, checked against the same rules `POST
+        task-import` commits with. Writes nothing regardless of the outcome:
+        `valid: false` with the row errors, or `valid: true` with the task
+        tree the file describes, for the confirm screen to render before
+        anything is saved.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Always 200 — see `valid` for the outcome.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyTaskImportPreviewResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/journey-templates/{templateId}/task-import:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: commitObJourneyTaskImport
+      summary: Replace this draft's entire task tree with the file's contents (OB-07)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      description: |
+        Every existing task, Task List entry and Document Checklist entry on
+        this draft is removed and re-created from the file, in one
+        transaction — nothing is left half-applied. There is no natural key a
+        checklist row could upsert on, so re-running this import replaces the
+        tree rather than merging into it; safe only because the target is
+        always a draft nothing has been instantiated from yet.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyTaskImportResultResponse' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '409':
+          description: The template has ever been published — only a draft's task tree can be replaced.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            The re-uploaded file no longer validates — the stage groups or
+            the file itself changed since `preview`. Carries the same row
+            errors a failed preview would, as `errors` on the problem body.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ObJourneyTaskImportInvalidProblem' }
+
   /onboarding/journey-template-stages/{stageId}/tasks:
     parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateStageId' }]
     post:
@@ -8236,8 +8368,134 @@ paths:
               schema:
                 $ref: '#/components/schemas/ObStepOutcomesSeenResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: |
+            `ob-step-owner-required` — the caller is not this task's owner or
+            backup owner. A 422 rather than a 403 because the refusal depends
+            on the row: `NotStepOwnerException` is 422 everywhere on this
+            service, including `completeObJourneyStep`, and seen-ness is about
+            the person the outcome is addressed to.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /onboarding/journey-steps/{stepId}/checklist/submit:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: submitObJourneyStepChecklist
+      summary: Send the whole Task List for verification
+      description: |
+        Puts every open check-list row on the implementor manager's desk in
+        **one transaction** — the task's *Send for verification*.
+
+        The screen sends the list as a unit: there is no per-row Send, and the
+        manager gives one verdict for the whole thing, so a half-sent list is
+        a state neither side has a control for. Looping
+        `submitObJourneyStepItem` from a client produced exactly that whenever
+        one call of five failed — some rows on the reviewer's desk, the rest
+        still with their implementor, and a task whose `PENDING_REVIEW` was
+        true of most of it.
+
+        **Every open row must be answered.** `422`
+        `completion-gate-not-satisfied` names the blank ones in
+        `unansweredMandatoryItems`. Sending the list as a unit means the unit
+        has to be complete — unlike the per-row route, which lets two of five
+        go now and the rest keep.
+
+        Rows already `VERIFIED` in an earlier round are left alone and are not
+        counted against that gate: they are shut for good, and a rejection
+        that brought their neighbours back must not ask for them again.
+
+        **Who may call it:** the task's owner. Anybody else answers `403`.
+      responses:
+        '200':
+          description: The list is out; the task is `PENDING_REVIEW`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            The caller does not own this task.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            A row is still unanswered — named in `unansweredMandatoryItems` —
+            or there is nothing left to send (`ob-step-under-review`: the list
+            is already out, or every row is shut). A closed task answers here
+            too.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ObCompletionGateProblem' }
+  /onboarding/journey-steps/{stepId}/review/verdict:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: recordObJourneyStepChecklistVerdict
+      summary: Record one verdict for the whole Task List
+      description: |
+        Sets every row that is out to `VERIFIED` or `REJECTED` and releases
+        them together — the reviewer's *Verification done*.
+
+        **One decision, not one per row.** A manager decides about the task,
+        not about line four: they read the list and either it is right or it
+        goes back. Per-row verdicts asked for five decisions to express one,
+        and let a list return half-approved for its implementor to reconcile
+        row by row.
+
+        Only while the task is `PENDING_REVIEW` (`422`
+        `invalid-step-transition`). `NOT_REVIEWED` is refused the same way —
+        it was how a per-row verdict was taken back, and there is no row to
+        take it back on.
+
+        **A rejection must say why** (`422` `ob-step-reject-reason-required`)
+        and returns the *whole* list unanswered, carrying that reason on every
+        row it is about. The claim each row held is withdrawn with the
+        verdict, so its implementor asserts the work again rather than
+        resubmitting what was refused. Rows already `VERIFIED` in an earlier
+        round stay shut.
+
+        **An acceptance does not close the task.** Every row becomes
+        `VERIFIED` and the task comes back to its owner;
+        `POST /onboarding/journey-steps/{stepId}/review/complete` is still the
+        deliberate press that ends it, so a manager who pressed Verified
+        meaning Reject has not already released this task's dependants.
+
+        **Who may call it:** the project's own `implementorManagerUserId`, or
+        an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+        and a caller with no onboarding role answers `404`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObStepItemReviewRequest' }
+      responses:
+        '200':
+          description: The verdict is recorded and the list released.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            `step-moderator-required` — the caller does not manage this
+            project and is not an `OB_ADMIN`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            The task is not `PENDING_REVIEW`, the verdict is `NOT_REVIEWED`, a
+            rejection carries no reason, or nothing is out to give a verdict
+            on.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ObCompletionGateProblem' }
   /onboarding/journey-steps/{stepId}/review/complete:
     parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
     post:
@@ -9996,7 +10254,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ObJourneyStepItemResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableTransition' }
   /onboarding/journey-step-items/{itemId}/send-back:
@@ -20034,6 +20291,106 @@ components:
       required: [data]
       properties: { data: { $ref: '#/components/schemas/ObJourneyTemplateDetail' } }
 
+    ObJourneyTaskImportRowError:
+      type: object
+      required: [sheet, rowNumber, message]
+      properties:
+        sheet:
+          type: string
+          description: 'Tasks, Task List or Document Checklist — the sheet the row is on.'
+        rowNumber:
+          type: integer
+          description: 1-based Excel row number, matching what the user sees with the sheet open. 0 for a file-level error with no single row to point at.
+        message:
+          type: string
+      description: |
+        One thing wrong with the uploaded workbook, precise enough to act on
+        without reopening the file blind.
+
+    ObJourneyTaskImportedItem:
+      type: object
+      required: [label, mandatory]
+      properties:
+        label: { type: string }
+        mandatory: { type: boolean }
+
+    ObJourneyTaskImportedDoc:
+      type: object
+      required: [label, required]
+      properties:
+        label: { type: string }
+        required: { type: boolean }
+
+    ObJourneyTaskImported:
+      type: object
+      required: [name, tatDays, requiresSignoff, items, docs]
+      properties:
+        stageGroupName:
+          type: [string, 'null']
+          description: 'Null means "Ungrouped".'
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        tatDays: { type: integer }
+        requiresSignoff: { type: boolean }
+        dependsOnTaskName:
+          type: [string, 'null']
+          description: 'Null means the task runs in parallel from journey start.'
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyTaskImportedItem' }
+        docs:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyTaskImportedDoc' }
+      description: One row of the Tasks sheet, with its Task List and Document Checklist rows already attached.
+
+    ObJourneyTaskImportPreview:
+      type: object
+      required: [valid, errors, tasks]
+      properties:
+        valid:
+          type: boolean
+          description: |
+            `false` means `errors` is non-empty and nothing would be written;
+            `true` means `tasks` is the exact tree a commit would produce.
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyTaskImportRowError' }
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/ObJourneyTaskImported' }
+      description: '`previewObJourneyTaskImport`''s body — the row-level result of validating a workbook without writing anything.'
+    ObJourneyTaskImportPreviewResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObJourneyTaskImportPreview' } }
+
+    ObJourneyTaskImportResult:
+      type: object
+      required: [taskCount, itemCount, docCount]
+      properties:
+        taskCount: { type: integer }
+        itemCount: { type: integer }
+        docCount: { type: integer }
+      description: What the commit actually wrote — the draft's new task, Task List and Document Checklist counts.
+    ObJourneyTaskImportResultResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ObJourneyTaskImportResult' } }
+
+    ObJourneyTaskImportInvalidProblem:
+      allOf:
+        - { $ref: '#/components/schemas/Problem' }
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              items: { $ref: '#/components/schemas/ObJourneyTaskImportRowError' }
+      description: |
+        `422` on `commitObJourneyTaskImport` — the re-uploaded file no longer
+        validates. Carries the identical row errors a failed `preview` would,
+        on an ordinary `Problem` envelope rather than a bespoke JSON shape.
+
     ObStepHasDependentsProblem:
       allOf:
         - { $ref: '#/components/schemas/Problem' }
@@ -21428,7 +21785,7 @@ components:
       type: object
       required: [taskId, taskName, status, isOverdue, projectId, projectName, obClientId,
                  obClientName, journeyId, serviceName, stepKey, stepName, stepSequence,
-                 rowsOut, rowsReturned, rowsApproved]
+                 rowsOut, rowsReturned, rowsApproved, pendingMyVerification]
       description: |
         One open task belonging to the calling implementor — a row of My Tasks.
 
@@ -21531,12 +21888,44 @@ components:
 
             Counted separately because the two want different tones and
             different words: one is work to do, the other is news.
+        pendingMyVerification:
+          type: boolean
+          description: |
+            Whether the caller must verify this task rather than merely own
+            it: `status` is `PENDING_REVIEW` and the caller is the project's
+            named manager, or holds `OB_ADMIN`.
+
+            The other three ways a task reaches this endpoint put it there
+            because the caller owns it; this is the fourth, and the only one
+            that means a review rather than a wait. My Tasks' "Pending for
+            verification" tab is this field and nothing else — the same
+            `PENDING_REVIEW` status reads oppositely for the two people a row
+            can belong to, and nothing else on the row says which one is
+            looking.
     ObMyTaskListResponse:
       type: object
       required: [data]
       properties:
         data: { type: array, items: { $ref: '#/components/schemas/ObMyTask' } }
-        meta: { $ref: '#/components/schemas/Meta' }
+        meta:
+          allOf:
+            - { $ref: '#/components/schemas/Meta' }
+            - type: object
+              properties:
+                isReviewerForAnyProject:
+                  type: boolean
+          description: |
+            Carries `isReviewerForAnyProject` alongside the cursor — not
+            `Meta` alone, which deliberately carries no third field (see its
+            own description). `ObDashboardItemListResponse.meta` and
+            `ObNotificationListResponse.meta` already extend `Meta` with a
+            second `allOf` member the same way; this follows that precedent.
+
+            Page-independent, unlike `ObMyTask.pendingMyVerification` on each
+            row: whether the caller reviews at least one project, so the
+            "Pending for verification" tab does not flicker off between pages
+            of a manager's own queue just because a given ten rows happen to
+            be their own work rather than a review.
     ObProjectResponse:
       type: object
       required: [data]

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { useGetMe } from '@/api/generated/auth/auth'
 import { useGetObJourney } from '@/api/generated/onboarding-journeys/onboarding-journeys'
@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import {
@@ -34,13 +35,19 @@ import { isMine } from '@/features/onboarding/projects/useProjectTasks'
 import { isObAdmin } from '@/features/onboarding/projects/viewerScope'
 
 import {
+  DEFAULT_MY_TASKS_TAB,
   focusedTask,
   formatDueDate,
+  MY_TASKS_TAB_EMPTY,
+  MY_TASKS_TAB_IDS,
+  MY_TASKS_TAB_LABEL,
   myTaskDotLabel,
   myTaskDotState,
-  projectLabel,
-  serviceStepLabel,
+  type MyTasksTabId,
+  projectOnlyLabel,
   taskCrumb,
+  tasksForMyTasksTab,
+  visibleMyTasksTabs,
 } from './myTasks'
 import {
   FLAG_BANNER_CLASS,
@@ -102,13 +109,41 @@ import { ObMyTasksLegend } from './ObMyTasksLegend'
  *
  * <h2>Five columns, because two pairs only mean anything together</h2>
  *
- * <p>Client and project share a column, and module service and step share
- * another — {@link projectLabel} and {@link serviceStepLabel} join them. Each
- * half is ambiguous alone: a project named "ERP" needs its school, and half a
- * queue's step reads "Configuration" until the service beside it says what is
- * being configured. That is the opposite of the date and the status above,
- * which say different things and so keep their own columns.
+ * <p>Client and project share a column, and module and step share another —
+ * each printed as two lines rather than joined into one string, the specific
+ * value on top and the value that places it in small type below:
+ * {@link projectOnlyLabel} gives the Project column its top line, with the
+ * client name beneath it, and the Module column prints the step on top with
+ * the module beneath. Each half is ambiguous alone: a project named "ERP"
+ * needs its school, and half a queue's step reads "Configuration" until the
+ * module beside it says what is being configured. That is the opposite of
+ * the date and the status above, which say different things and so keep
+ * their own columns.
+ *
+ * <h2>Five tabs, cut from this page rather than a second request</h2>
+ *
+ * <p>Pending for verification / Work in progress / Approved by manager /
+ * Pending for approval / Pending task — {@link tasksForMyTasksTab} narrows
+ * and, for the second tab, reorders the same rows this screen already
+ * fetched. The `?tab=` search param is the active one, same as the
+ * onboarding dashboard's own strip, so a tab is a link a colleague can paste.
+ * See {@link MY_TASKS_TAB_IDS}'s own doc for why these five and not the seven
+ * statuses underneath them.
+ *
+ * <h2>Pending for verification is drawn for whoever the server says reviews</h2>
+ *
+ * <p>{@link visibleMyTasksTabs} drops it for everyone else — see that
+ * function's own doc for why that is `meta.isReviewerForAnyProject` and not
+ * the caller's module role. An implementor who is also named manager of some
+ * other project gets the tab without anything here having to know that:
+ * the server already folded "owns a task" and "reviews a project" into the
+ * one page, and this only decides which tab shows what.
  */
+
+function isMyTasksTabId(value: string | null): value is MyTasksTabId {
+  return value !== null && (MY_TASKS_TAB_IDS as readonly string[]).includes(value)
+}
+
 export function ObMyTasksPage() {
   /*
     One filter set, so nothing invalidates the cursor but paging itself. The
@@ -124,9 +159,43 @@ export function ObMyTasksPage() {
 
   const tasks = data?.data ?? []
   const overdue = tasks.filter((task) => task.isOverdue).length
+  /*
+    Page-independent — see `visibleMyTasksTabs`'s own doc for why this reads
+    the caller's standing rather than this page's own rows, and why that is
+    what keeps a dual-hat implementor's tab from appearing and disappearing
+    as they page through their own queue.
+  */
+  const visibleTabIds = visibleMyTasksTabs(data?.meta?.isReviewerForAnyProject ?? false)
 
   /** The row whose task is open in the popup. */
   const [openRow, setOpenRow] = React.useState<ObMyTask | null>(null)
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab: MyTasksTabId = isMyTasksTabId(searchParams.get('tab'))
+    ? (searchParams.get('tab') as MyTasksTabId)
+    : DEFAULT_MY_TASKS_TAB
+
+  function selectTab(id: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', id)
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  const tabItems: TabItem[] = visibleTabIds.map((id) => {
+    const rows = tasksForMyTasksTab(tasks, id)
+    return {
+      id,
+      label: `${MY_TASKS_TAB_LABEL[id]} (${rows.length})`,
+      content: (
+        <MyTasksTabPanel rows={rows} emptyMessage={MY_TASKS_TAB_EMPTY[id]} onOpen={setOpenRow} />
+      ),
+    }
+  })
 
   return (
     <div className="mx-auto flex max-w-[88rem] flex-col gap-6 p-6">
@@ -159,34 +228,17 @@ export function ObMyTasksPage() {
         />
       ) : (
         // The key and the thing it is a key to, in one block — the page's own
-        // 24px rhythm would set the legend adrift halfway to the header, where
+        // 24px rhythm would set the legend adrift halfway to the strip, where
         // it reads as a second banner rather than as the table's caption.
         <div className="flex flex-col gap-2">
           <ObMyTasksLegend />
-          <TableContainer>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">Project</TableHead>
-                  <TableHead scope="col">Task</TableHead>
-                  <TableHead scope="col" className="w-64">
-                    Module service step
-                  </TableHead>
-                  <TableHead scope="col" className="w-32">
-                    Due date
-                  </TableHead>
-                  <TableHead scope="col" className="w-20">
-                    Status
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tasks.map((task) => (
-                  <MyTaskRow key={task.taskId} task={task} onOpen={() => setOpenRow(task)} />
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <Tabs
+            tabs={tabItems}
+            activeId={activeTab}
+            onSelect={selectTab}
+            ariaLabel="My Tasks"
+            variant="segmented"
+          />
         </div>
       )}
 
@@ -220,20 +272,21 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
     >
       <TableCell className="text-content-muted">
         {/*
-          Client and project in one label, linked, because "what else is
-          happening here" is the question a row raises and the project page is
-          where it is answered. The task name beside it opens the work itself.
+          The project links to "what else is happening here", and the client
+          it belongs to sits underneath in small type — the project is what a
+          reader picks a row by, the client is what places it.
         */}
         <Link
           to={`/onboarding/projects/${task.projectId}`}
           className="hover:underline"
           title="The whole project"
         >
-          {projectLabel(task)}
+          {projectOnlyLabel(task)}
         </Link>
-        {task.obClientCode ? (
-          <span className="ml-1 font-mono text-[11px] text-content-muted">
-            ({task.obClientCode})
+        {task.obClientName ? (
+          <span className="mt-0.5 block text-[11px] text-content-muted">
+            {task.obClientName}
+            {task.obClientCode ? <span className="ml-1 font-mono">({task.obClientCode})</span> : null}
           </span>
         ) : null}
       </TableCell>
@@ -269,11 +322,19 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
         ) : null}
       </TableCell>
       {/*
-        Service and step together, as plain text rather than the chip the step
-        used to wear: a chip around "SIS — Web/App Reflection" wraps to two
-        lines and reads as a status, which a stage name is not.
+        The step on top, plain text rather than the chip it used to wear (a
+        chip around "Web/App Reflection" wraps to two lines and reads as a
+        status, which a stage name is not). The module beneath it in small
+        type, because a step name is a stage label reused across every
+        module — "Configuration" alone means nothing until the module beside
+        it says what is being configured.
       */}
-      <TableCell className="text-content-muted">{serviceStepLabel(task)}</TableCell>
+      <TableCell className="text-content">
+        {task.stepName}
+        {task.serviceName ? (
+          <span className="mt-0.5 block text-[11px] text-content-muted">{task.serviceName}</span>
+        ) : null}
+      </TableCell>
       <TableCell
         className={cn(
           'tabular-nums',
@@ -295,6 +356,47 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
         <StatusDot state={myTaskDotState(task)} label={myTaskDotLabel(task)} hollow />
       </TableCell>
     </TableRow>
+  )
+}
+
+/** One tab's rows — the grid if there are any, the tab's own empty line if not. */
+function MyTasksTabPanel({
+  rows,
+  emptyMessage,
+  onOpen,
+}: {
+  rows: readonly ObMyTask[]
+  emptyMessage: string
+  onOpen: (task: ObMyTask) => void
+}) {
+  if (rows.length === 0) {
+    return <EmptyState title={emptyMessage} />
+  }
+  return (
+    <TableContainer>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Project</TableHead>
+            <TableHead scope="col">Task</TableHead>
+            <TableHead scope="col" className="w-64">
+              Module
+            </TableHead>
+            <TableHead scope="col" className="w-32">
+              Due date
+            </TableHead>
+            <TableHead scope="col" className="w-20">
+              Status
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((task) => (
+            <MyTaskRow key={task.taskId} task={task} onOpen={() => onOpen(task)} />
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   )
 }
 

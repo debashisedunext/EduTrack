@@ -61,7 +61,7 @@ final class PublicSignoffObjectDtos {
             Object requestedBy,
 
             Instant requestedAt,
-            PublicSignoffAcceptDtos.Contact sentToContact,
+            PublicSignoffAcceptDtos.SignoffContact sentToContact,
             Instant tokenExpiresAt,
             Instant signedAt,
             Instant objectedAt,

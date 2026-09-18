@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -33,6 +33,25 @@ import { ObDashboardPage } from './ObDashboardPage'
 const ADMIN = { id: 1, displayName: 'Priya Nair', role: 'ADMIN' } as Me
 /** Holds the onboarding module without being a platform Admin — the majority case. */
 const MEMBER = { id: 4, displayName: 'Ravi Kumar', role: 'DEVELOPER' } as Me
+
+/**
+ * The implementor and their manager. Not platform Admins — the board reaches
+ * them through their `ONBOARDING` module role, which is the division this
+ * screen actually wants.
+ */
+const IMPLEMENTOR = {
+  id: 5, displayName: 'Kavya Sharma', role: 'DEVELOPER',
+  moduleRoles: { ONBOARDING: 'OB_STEP_OWNER' },
+} as Me
+const IMPLEMENTOR_MANAGER = {
+  id: 6, displayName: 'Meera Pillai', role: 'DEVELOPER',
+  moduleRoles: { ONBOARDING: 'OB_MANAGER' },
+} as Me
+/** Onboarding standing, but not a delivery role — stays on the counter row. */
+const SALES = {
+  id: 7, displayName: 'Imran Qureshi', role: 'DEVELOPER',
+  moduleRoles: { ONBOARDING: 'OB_SALES' },
+} as Me
 
 /** The store is a module singleton; a role left behind would decide the next test. */
 beforeEach(() => useAuthStore.setState(initialAuthState))
@@ -107,7 +126,7 @@ describe('ObDashboardPage', () => {
   it('draws the three donuts with their legends', async () => {
     renderBoard()
 
-    for (const chart of ['Schedule health', 'By salesperson', 'By implementor']) {
+    for (const chart of ['Project Schedule health', 'By salesperson', 'By implementor']) {
       expect(await screen.findByRole('region', { name: chart }, SLOW)).toBeInTheDocument()
     }
     expect(await screen.findByRole('list', { name: 'Implementor shares' }, SLOW)).toBeInTheDocument()
@@ -170,7 +189,14 @@ describe('ObDashboardPage', () => {
    * prerequisite tasks and would answer with a list whose length disagrees
    * with the number that was clicked.
    */
-  it('sends a project card to the lists its rows are on', async () => {
+  /*
+    A card used to select the Summary tab, which answered "which ones?" by
+    moving the reader somewhere else. It opens the projects it counted in a
+    panel now, over the board, and the tab underneath is left alone — which
+    the second half asserts, because a panel that also navigated would pass
+    the first half on its own.
+  */
+  it('opens a project card on the projects it counted, leaving the tab alone', async () => {
     renderBoard()
 
     const band = await screen.findByRole('list', { name: 'Project figures' }, SLOW)
@@ -178,7 +204,37 @@ describe('ObDashboardPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Delayed projects' }))
     await userEvent.click(within(band).getByRole('button', { name: /^At risk/ }))
 
-    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+    // Headed with the words that were on the card.
+    expect(await screen.findByRole('dialog', { name: 'At risk' }, SLOW)).toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW)
+    expect(screen.getByRole('tab', { name: 'Delayed projects' }))
+      .toHaveAttribute('aria-selected', 'true')
+  }, SLOW.timeout)
+
+  /*
+    The other half of "every figure opens a panel". A slice used to leave for
+    the Projects grid, and the schedule donut had no slice action at all
+    because the grid has no filter for its buckets — the panel takes its rows
+    from this response, so all three charts behave alike now.
+  */
+  it('opens a donut slice on the projects behind it', async () => {
+    renderBoard()
+
+    const chart = await screen.findByRole('region', { name: 'Project Schedule health' }, SLOW)
+    /*
+      The legend, not every button in the card — the card also carries the
+      chart/table toggle now, and its first button is "chart".
+    */
+    const legend = within(chart).getByRole('list', { name: 'Status shares' })
+    const slices = within(legend).queryAllByRole('button')
+    // The fixture world may have every project in one bucket, so this asserts
+    // the wiring on whichever slice is drawn rather than on a named one.
+    if (slices.length === 0) return
+
+    await userEvent.click(slices[0])
+    expect(await screen.findByRole('dialog', undefined, SLOW)).toBeInTheDocument()
   }, SLOW.timeout)
 
   /**
@@ -233,19 +289,22 @@ describe('ObDashboardPage', () => {
   }, SLOW.timeout)
 
   /**
-   * Summary opens on the three project lists — today's deliveries, the at-risk
-   * clients and the overdue ones — with the RAG board underneath. The board
-   * was not replaced: it cuts the same module by *client* health, which the
-   * project lists do not answer.
+   * Summary is the three project lists — today's deliveries, the at-risk
+   * clients and the overdue ones — and nothing else.
+   *
+   * <p>The RAG board sat underneath: Breached / blocked · At risk · On
+   * track, a second cut of the same clients by journey colour. Both halves
+   * are asserted, because "the lists are there" would pass just as happily
+   * against a tab that still carried the board.
    */
-  it('opens Summary on the three project lists, with the RAG board under them', async () => {
+  it('opens Summary on the three project lists, and no RAG board', async () => {
     renderBoard()
 
-    for (const list of ["Today's delivery", 'At-risk clients', 'Overdue clients']) {
+    for (const list of ["Today's delivery", 'Project at Risk', 'Project Overdue']) {
       expect(await screen.findByRole('region', { name: list }, SLOW)).toBeInTheDocument()
     }
-    for (const column of ['Breached / blocked', 'On track']) {
-      expect(await screen.findByRole('region', { name: column }, SLOW)).toBeInTheDocument()
+    for (const column of ['Breached / blocked', 'At risk', 'On track']) {
+      expect(screen.queryByRole('region', { name: column })).not.toBeInTheDocument()
     }
   }, SLOW.timeout)
 
@@ -257,7 +316,7 @@ describe('ObDashboardPage', () => {
   it('names the implementor on every at-risk row', async () => {
     renderBoard()
 
-    const list = await screen.findByRole('region', { name: 'At-risk clients' }, SLOW)
+    const list = await screen.findByRole('region', { name: 'Project at Risk' }, SLOW)
     const rows = within(list).queryAllByRole('button')
 
     // The fixture world may have nothing at risk, which is a real state and not
@@ -295,7 +354,7 @@ describe('ObDashboardPage, as a non-admin', () => {
 
     expect(screen.getByRole('list', { name: 'Onboarding summary' })).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Project figures' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Schedule health' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Project Schedule health' })).not.toBeInTheDocument()
   }, SLOW.timeout)
 
   it('draws five counters — the two management figures come off', async () => {
@@ -371,5 +430,156 @@ describe('ObDashboardPage, as a non-admin', () => {
 
     expect(await screen.findByRole('heading', { name: 'Overdue clients' }, SLOW))
       .toBeInTheDocument()
+  }, SLOW.timeout)
+})
+
+
+/**
+ * The board an implementor and their manager get: the same screen the Admin
+ * sees, holding their own work.
+ *
+ * <p>Nothing here asserts *which rows* — that is decided server-side, by the
+ * scope each route derives from `CallerIdentity`, and a frontend test that
+ * claimed to prove it would be proving the fixture instead. What these cases
+ * hold is the thing the frontend does decide: that the screen is offered at
+ * all, which it was not while the gate read the platform role.
+ */
+describe('ObDashboardPage, as an implementor and as their manager', () => {
+  for (const [label, user] of [
+    ['an implementor', IMPLEMENTOR],
+    ['an implementor manager', IMPLEMENTOR_MANAGER],
+  ] as const) {
+    it(`draws the project board and a tab strip for ${label}`, async () => {
+      renderBoard(user)
+
+      await screen.findByRole('list', { name: 'Project figures' }, SLOW)
+      // Which tabs differ by role — see "the implementor's own tab" below.
+      expect(screen.getAllByRole('tab').length).toBeGreaterThan(0)
+    }, SLOW.timeout)
+  }
+
+  /*
+    The other half of the division, and the case that proves the gate is a
+    gate rather than an always-true: onboarding standing on its own is not
+    enough, because Sales delivers nothing the four tabs are cuts of.
+  */
+  it('leaves Sales on the counter row, with no board and no tabs', async () => {
+    renderBoard(SALES)
+
+    await screen.findByText('Ongoing projects', undefined, SLOW)
+    expect(screen.getByRole('list', { name: 'Onboarding summary' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Project figures' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Summary' })).not.toBeInTheDocument()
+  }, SLOW.timeout)
+})
+
+
+/**
+ * The two views of a donut, and the panel that used to open under it.
+ */
+describe('ObDashboardPage, reading a donut', () => {
+  it('toggles a chart to a table and back, without a hover', async () => {
+    renderBoard()
+
+    const chart = await screen.findByRole('region', { name: 'Project Schedule health' }, SLOW)
+    expect(within(chart).getByRole('list', { name: 'Status shares' })).toBeInTheDocument()
+    expect(within(chart).queryByRole('table')).not.toBeInTheDocument()
+
+    await userEvent.click(within(chart).getByRole('button', { name: 'table' }))
+
+    expect(within(chart).getByRole('table')).toBeInTheDocument()
+    // One view at a time — the table replaces the chart rather than adding to it.
+    expect(within(chart).queryByRole('list', { name: 'Status shares' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(chart).getByRole('button', { name: 'chart' }))
+    expect(within(chart).getByRole('list', { name: 'Status shares' })).toBeInTheDocument()
+  }, SLOW.timeout)
+
+  /*
+    The panel that pushed the board down on every pointer crossing. Hovering
+    a legend row still lights its arc; what it must not do any more is put a
+    list of names under the chart.
+  */
+  it('lists nothing under the chart on hover', async () => {
+    renderBoard()
+
+    const chart = await screen.findByRole('region', { name: 'Project Schedule health' }, SLOW)
+    const legend = within(chart).getByRole('list', { name: 'Status shares' })
+    const rows = within(legend).queryAllByRole('button')
+    if (rows.length === 0) return
+
+    /*
+      Counted rather than compared as text: hovering still swaps the centre
+      figure to the slice's own count, which is the point of the hover and
+      happens inside the chart's box. What must not happen is a *list*
+      arriving under it — that is what pushed the board down, and the peek
+      panel was a `ul`.
+    */
+    const listsBefore = chart.querySelectorAll('ul').length
+    await userEvent.hover(rows[0])
+    expect(chart.querySelectorAll('ul')).toHaveLength(listsBefore)
+  }, SLOW.timeout)
+})
+
+/**
+ * What an implementor and their manager get in the two donut slots an admin
+ * spends on the book: their own queue, and their own review state.
+ */
+describe("ObDashboardPage, the delivery roles' chart band", () => {
+  for (const [label, user] of [
+    ['an implementor', IMPLEMENTOR],
+    ['an implementor manager', IMPLEMENTOR_MANAGER],
+  ] as const) {
+    it(`drops the salesperson and implementor cuts for ${label}`, async () => {
+      renderBoard(user)
+
+      await screen.findByRole('region', { name: 'Project Schedule health' }, SLOW)
+      // Schedule health stays — it is about delivery, which is their work.
+      expect(screen.queryByRole('region', { name: 'By salesperson' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'By implementor' })).not.toBeInTheDocument()
+    }, SLOW.timeout)
+  }
+
+  /*
+    The review cards move rather than duplicate: a row above the charts for
+    everybody else, the third slot in the band for these two. Both halves
+    are asserted, since "they are in the band" would pass against a page
+    that drew them twice.
+  */
+  it('moves the review cards into the band rather than leaving them above it', async () => {
+    renderBoard(IMPLEMENTOR)
+
+    const band = await screen.findByRole('region', { name: 'Project Schedule health' }, SLOW)
+    expect(band).toBeInTheDocument()
+    expect(screen.queryAllByTestId('ob-review-cards').length).toBeLessThanOrEqual(1)
+  }, SLOW.timeout)
+})
+
+
+/**
+ * The implementor's one tab, and the manager's four.
+ *
+ * <p>The division is deliberate and asserted from both sides: an implementor
+ * works a queue, their manager triages across people, and a test that only
+ * checked the absence of the four would pass against a page that drew no
+ * tabs at all.
+ */
+describe("ObDashboardPage, the implementor's own tab", () => {
+  it('gives an implementor Task summary and nothing else', async () => {
+    renderBoard(IMPLEMENTOR)
+
+    expect(await screen.findByRole('tab', { name: 'Task summary' }, SLOW)).toBeInTheDocument()
+    for (const tab of ["Where it's stuck", 'Delayed projects', 'Implementor workload & performance']) {
+      expect(screen.queryByRole('tab', { name: tab })).not.toBeInTheDocument()
+    }
+  }, SLOW.timeout)
+
+  it('leaves the manager the four cross-team tabs', async () => {
+    renderBoard(IMPLEMENTOR_MANAGER)
+
+    expect(await screen.findByRole('tab', { name: 'Summary' }, SLOW)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Implementor workload & performance' }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Task summary' })).not.toBeInTheDocument()
   }, SLOW.timeout)
 })

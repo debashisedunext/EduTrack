@@ -47,9 +47,21 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObMyTask } from './obMyTask';
-import type { Meta } from './meta';
+import type { ObMyTaskListResponseMeta } from './obMyTaskListResponseMeta';
 
 export interface ObMyTaskListResponse {
   data: ObMyTask[];
-  meta?: Meta;
+  /** Carries `isReviewerForAnyProject` alongside the cursor — not
+`Meta` alone, which deliberately carries no third field (see its
+own description). `ObDashboardItemListResponse.meta` and
+`ObNotificationListResponse.meta` already extend `Meta` with a
+second `allOf` member the same way; this follows that precedent.
+
+Page-independent, unlike `ObMyTask.pendingMyVerification` on each
+row: whether the caller reviews at least one project, so the
+"Pending for verification" tab does not flicker off between pages
+of a manager's own queue just because a given ten rows happen to
+be their own work rather than a review.
+ */
+  meta?: ObMyTaskListResponseMeta;
 }

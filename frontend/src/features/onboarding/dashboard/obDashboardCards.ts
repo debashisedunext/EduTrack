@@ -124,6 +124,74 @@ export function visibleCardCount(isAdmin: boolean): number {
 }
 
 /**
+ * The onboarding roles the project board and its four tabs are drawn for:
+ * <b>OB_ADMIN</b>, <b>OB_MANAGER</b> and <b>OB_STEP_OWNER</b> — the admin, the
+ * implementor manager and the implementor.
+ *
+ * <p>An implementor and their manager were shown the plain counter row and
+ * nothing else, because the strip was gated on the <em>platform</em> `ADMIN`
+ * role. That was a stand-in: the division this screen wants is an onboarding
+ * one, and the page's own note said so and recorded exposing `moduleRoles` on
+ * `Me` as the change that would let it switch over. It has since been exposed —
+ * `POST /auth/login` returns it and `Sidebar` already reads it — so this is
+ * that switch.
+ *
+ * <p>OB_SALES and OB_VIEWER stay on the counter row. Neither delivers work:
+ * the four tabs are cuts of who is delivering what and when, which is a
+ * question about somebody else's week for both of them.
+ *
+ * <h2>Why widening this leaks nothing</h2>
+ *
+ * <p>Every route behind the board and its tabs takes `CallerIdentity` and
+ * derives its own scope from it server-side — `ObDashboardScope` for the
+ * summary, the card items, the delayed grid and the workload grid,
+ * `ObClientScope` for the project board. An OB_STEP_OWNER is narrowed to
+ * "journeys containing their steps" by `OnboardingScopeResolver`, and the
+ * figures come from `ob_scope_dashboard_summary`, which is keyed by
+ * `scope_user_id` for exactly this. So an implementor opening these tabs is
+ * served their own rows and nobody else's, and this predicate decides which
+ * screen is *offered* — never what is permitted, which is the same bargain
+ * {@link visibleCards} and `Sidebar`'s `adminOnly` make.
+ *
+ * <p><b>Not a client-side filter, and it must never become one.</b> CLAUDE.md
+ * forbids narrowing rows in the frontend; if a tab ever shows a reader
+ * somebody else's work, the fix belongs in that route's scope and not here.
+ *
+ * <h2>Completed projects are already out</h2>
+ *
+ * <p>Nothing here has to exclude them. `ObRunningProjectReader` asks for
+ * status `RUNNING`, and the delayed grid and the stuck table are both built on
+ * `JOURNEY_IS_RUNNING` — so every figure on the board is about work in flight
+ * before it reaches this screen.
+ */
+const BOARD_ROLES: ReadonlySet<string> = new Set([
+  'OB_ADMIN',
+  'OB_MANAGER',
+  'OB_STEP_OWNER',
+])
+
+/**
+ * Whether this reader gets the project board and the four tabs.
+ *
+ * <p><b>Additive.</b> A platform `ADMIN` keeps the board whatever their
+ * onboarding grant says, which is what `isPlatformAdmin` is for. The gate used
+ * to be that test alone, and a platform admin who happens to hold no
+ * `ONBOARDING` module role would otherwise have lost the screen they have
+ * today — a regression dressed up as a permission change. The three onboarding
+ * roles are added beside it, not in place of it.
+ *
+ * <p>Takes two plain values rather than the whole `Me` so the page keeps its
+ * `useAuthStore` selectors narrow and this stays a pure function a test can
+ * drive with strings.
+ */
+export function seesProjectBoard(
+  onboardingRole: string | undefined | null,
+  isPlatformAdmin: boolean,
+): boolean {
+  return isPlatformAdmin || (onboardingRole != null && BOARD_ROLES.has(onboardingRole))
+}
+
+/**
  * How one card is labelled.
  *
  * **Tolerant, on purpose.** The key is a closed enum in the contract, so an

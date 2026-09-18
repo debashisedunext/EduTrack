@@ -50,6 +50,10 @@ function ctx(over: Partial<TaskActionContext> = {}): TaskActionContext {
     yours: true,
     isModerator: false,
     blockers: [],
+    sendBlockers: [],
+    // The default is the task as its owner finds it once the review has
+    // passed: one button, and it closes the task.
+    checklistPhase: 'COMPLETE',
     ownerName: 'Vikram Mehta',
     busy: false,
     ...over,

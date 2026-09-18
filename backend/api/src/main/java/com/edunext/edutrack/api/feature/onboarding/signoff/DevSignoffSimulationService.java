@@ -10,6 +10,7 @@ import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.edunext.edutrack.api.security.scope.UnscopedAccess;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -80,6 +81,18 @@ import java.util.Base64;
  */
 @Service
 @Profile({"dev-noauth", "fixtures"})
+@UnscopedAccess("""
+        This stands in for the CLIENT, not for a staff user, so there is no
+        caller to scope by — the journey it opens is the one the operator
+        named, and the customer it impersonates is exactly the party
+        ScopedJourneys exists to filter staff away from. Scoping the read
+        would ask which journeys a nonexistent signed-in user may see, which
+        is SingleTicketFixture's own argument one module over.
+
+        It never loads where that would matter: the @Profile above keeps it
+        off every deployed profile, and the row it writes goes to the same
+        ObSignoffAcceptService the public page calls, so the completion gate
+        still refuses a step that is genuinely unfinished.""")
 class DevSignoffSimulationService {
 
     /**

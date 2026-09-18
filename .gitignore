@@ -63,6 +63,12 @@ docker/data/
 .minio-data/
 .redis-data/
 
+# ---- Database dumps ----
+# Real row data (client records, portal credentials, encrypted PAN blobs) in a
+# binary-ish blob that only grows the repo on every regeneration. Transfer
+# out-of-band (scp/upload to staging), never as a tracked file.
+dump/
+
 # ---- Test output ----
 .pytest_cache/
 __pycache__/

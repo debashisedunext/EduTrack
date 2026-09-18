@@ -9,6 +9,7 @@ import { onboardingJourneyHandlers } from './onboardingJourneys';
 import { obAdminHandlers } from './onboardingAdmin';
 import { obPrereqHandlers } from './onboardingPrereqs';
 import { obJourneyHandlers } from './onboardingSteps';
+import { obStepReviewHandlers } from './onboardingStepReview';
 import { obNotificationHandlers } from './obNotifications';
 import { portalHandlers } from './portal';
 import { ribbonHandlers } from './ribbon';
@@ -58,6 +59,12 @@ export const handlers = [
   ...onboardingJourneyHandlers,
   // C-104 · the step-lifecycle routes. See onboardingJourneyInstances.ts.
   ...onboardingJourneyInstanceHandlers,
+  // OB-16 · the manager review gate — submit, send-back, verdict, close, and
+  // the outcomes-seen stamp. See onboardingStepReview.ts. Position is
+  // presentation only: a path parameter matches one segment, so
+  // `/journey-step-items/:itemId` in obJourneyHandlers below never matches
+  // `/journey-step-items/5/review` and the two cannot shadow each other.
+  ...obStepReviewHandlers,
   // A-118 · the reads C-104's transitions do not cover — the journey list and
   // ribbon, the step panel, checklist, communications and history.
   ...obJourneyHandlers,

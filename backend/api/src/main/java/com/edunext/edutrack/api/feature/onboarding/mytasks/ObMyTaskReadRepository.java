@@ -157,7 +157,16 @@ class ObMyTaskReadRepository {
                    (SELECT COUNT(*) FROM ob_journey_step_items oi
                      WHERE oi.step_id = js.id
                        AND oi.row_state = 'VERIFIED'
-                       AND oi.outcome_seen_at IS NULL)         AS rowsApproved
+                       AND oi.outcome_seen_at IS NULL)         AS rowsApproved,
+                   -- The fourth `MINE` clause, isolated: true exactly when
+                   -- this row is here because the caller must verify it
+                   -- (status PENDING_REVIEW, caller named manager or admin)
+                   -- rather than because the caller owns it. Without this a
+                   -- PENDING_REVIEW row looks the same on a manager's page
+                   -- and its owner's, and the two mean opposite things — one
+                   -- is a wait, the other is a queue to clear.
+                   ((p.implementor_manager_user_id = :me OR :admin = TRUE)
+                     AND js.status = 'PENDING_REVIEW')          AS pendingMyVerification
               FROM ob_journey_steps js
               JOIN ob_journeys jr ON jr.id = js.journey_id
                                  AND jr.archived_at IS NULL
@@ -231,16 +240,20 @@ class ObMyTaskReadRepository {
     /**
      * One open task of one implementor.
      *
-     * @param sortKey   the key this row was ordered by — {@code created_at} — carried out of
-     *                  SQL rather than recomputed, so the cursor the service
-     *                  encodes is exactly the value the next page compares
-     *                  against
+     * @param sortKey               the key this row was ordered by — {@code created_at} — carried out of
+     *                              SQL rather than recomputed, so the cursor the service
+     *                              encodes is exactly the value the next page compares
+     *                              against
+     * @param pendingMyVerification true when this row reached the page through the
+     *                              reviewer clause of {@link #MINE} rather than an
+     *                              ownership one — see the column's own comment on
+     *                              {@link #PROJECTION}
      */
     record Row(long taskId, String taskName, String status, Instant dueAt, String sortKey,
                long journeyId, String serviceName, long projectId, String projectName,
                long obClientId, String obClientName, String obClientCode,
                long stepKey, String stepName, int stepSequence,
-               int rowsOut, int rowsReturned, int rowsApproved) {
+               int rowsOut, int rowsReturned, int rowsApproved, boolean pendingMyVerification) {
     }
 
     private static final RowMapper<Row> MAPPER = (rs, n) -> new Row(
@@ -261,10 +274,40 @@ class ObMyTaskReadRepository {
             rs.getInt("stepSequence"),
             rs.getInt("rowsOut"),
             rs.getInt("rowsReturned"),
-            rs.getInt("rowsApproved"));
+            rs.getInt("rowsApproved"),
+            rs.getBoolean("pendingMyVerification"));
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
         Timestamp value = rs.getTimestamp(column);
         return value == null ? null : value.toInstant();
+    }
+
+    /**
+     * Whether the caller reviews at least one project — page-independent,
+     * unlike {@code pendingMyVerification} on each row.
+     *
+     * <p>My Tasks' "Pending for verification" tab is drawn only for a caller
+     * this answers {@code true} for. A row's own {@code pendingMyVerification}
+     * cannot carry that decision: it says nothing about a manager whose
+     * current ten rows happen to be their own work rather than a review, and
+     * gating the tab on the page in hand would make it flicker off between
+     * pages of one caller's own queue.
+     *
+     * <p>Same admin exception as {@link #MINE}'s reviewer clause: an
+     * {@code OB_ADMIN} always reviews, which is the unsticking path for a
+     * project whose named manager has left.
+     */
+    boolean reviewsAnyProject(long userId, boolean admin) {
+        return Boolean.TRUE.equals(jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM ob_projects p
+                             WHERE p.status NOT IN ('ON_HOLD', 'DROPPED')
+                               AND (p.implementor_manager_user_id = :me OR :admin = TRUE)
+                        )
+                        """)
+                .param("me", userId)
+                .param("admin", admin)
+                .query(Boolean.class)
+                .single());
     }
 }

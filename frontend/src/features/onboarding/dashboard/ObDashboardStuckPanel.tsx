@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom'
-import { format, parseISO } from 'date-fns'
 
 import { useListObDashboardCardItems } from '@/api/generated/onboarding/onboarding'
 import type { ObDashboardItem } from '@/api/generated/model'
@@ -25,14 +24,20 @@ function stuckChip(status: string) {
 }
 
 /**
- * B-121/A-118 · "Where it's stuck" and "TAT breaches" — plan §9's board,
- * beside the RAG columns. Both tables read the same route the seven cards'
- * own slide-over does (`listObDashboardCardItems`), because the contract
- * already shapes that data for exactly this: `ObDashboardItem.blockedReason`
- * is documented as "the 'Where it's stuck' table's Reason column reads it",
- * and `overdue-clients` is by definition every item `isOverdue`. Nothing
- * here is a new read — it is the `ongoing-projects` and `overdue-clients`
- * cards' own items, filtered and re-labelled for this section's two tables.
+ * B-121/A-118 · "Where it's stuck" — plan §9's board. It reads the same route
+ * the seven cards' own slide-over does (`listObDashboardCardItems`), because
+ * the contract already shapes that data for exactly this:
+ * `ObDashboardItem.blockedReason` is documented as "the 'Where it's stuck'
+ * table's Reason column reads it". Nothing here is a new read — it is the
+ * `ongoing-projects` card's own items, filtered to the two stuck states.
+ *
+ * <p>A second table, <b>TAT breaches</b>, sat under this one: every
+ * `overdue-clients` item, oldest first. It is gone, and so is the read behind
+ * it. The Overdue clients card above the strip counts the same thing and
+ * opens the same slide-over over the same route, and the Delayed projects tab
+ * lists them with the delay in days — a reader had three ways to the one
+ * answer and this was the one that cost an extra request on every visit to
+ * the tab.
  */
 export function ObDashboardStuckPanel() {
   const ongoing = useListObDashboardCardItems(
@@ -40,14 +45,8 @@ export function ObDashboardStuckPanel() {
     { limit: ITEMS_LIMIT },
     { query: OB_DASHBOARD_QUERY },
   )
-  const overdue = useListObDashboardCardItems(
-    'overdue-clients',
-    { limit: ITEMS_LIMIT },
-    { query: OB_DASHBOARD_QUERY },
-  )
 
   const stuck = (ongoing.data?.data ?? []).filter((item) => STUCK_STATUSES.has(item.status))
-  const breaches = overdue.data?.data ?? []
 
   return (
     <section aria-label="Where it's stuck" className="rounded-card border border-border bg-surface p-5 shadow-sm">
@@ -59,23 +58,12 @@ export function ObDashboardStuckPanel() {
         isError={ongoing.isError}
         emptyText="Nothing stuck right now."
       />
-      <div className="mt-5">
-        <StuckTable
-          title="TAT breaches"
-          description="Services past their due date, oldest first."
-          rows={breaches}
-          isPending={overdue.isPending}
-          isError={overdue.isError}
-          emptyText="No breaches. The scanner will flag one the moment it happens."
-          breach
-        />
-      </div>
     </section>
   )
 }
 
 function StuckTable({
-  title, description, rows, isPending, isError, emptyText, breach,
+  title, description, rows, isPending, isError, emptyText,
 }: {
   title: string
   description: string
@@ -83,8 +71,6 @@ function StuckTable({
   isPending: boolean
   isError: boolean
   emptyText: string
-  /** TAT breaches: Client · Step · Owner · Due. Stuck: Client · Step · State · Reason. */
-  breach?: boolean
 }) {
   const navigate = useNavigate()
 
@@ -112,17 +98,8 @@ function StuckTable({
               <tr>
                 <th scope="col" className="bg-subtle py-2 pl-3 font-medium">Client</th>
                 <th scope="col" className="bg-subtle py-2 font-medium">Step</th>
-                {breach ? (
-                  <>
-                    <th scope="col" className="bg-subtle py-2 font-medium">Owner</th>
-                    <th scope="col" className="bg-subtle py-2 pr-3 font-medium">Due</th>
-                  </>
-                ) : (
-                  <>
-                    <th scope="col" className="bg-subtle py-2 font-medium">State</th>
-                    <th scope="col" className="bg-subtle py-2 pr-3 font-medium">Reason</th>
-                  </>
-                )}
+                <th scope="col" className="bg-subtle py-2 font-medium">State</th>
+                <th scope="col" className="bg-subtle py-2 pr-3 font-medium">Reason</th>
               </tr>
             </thead>
             <tbody>
@@ -138,24 +115,10 @@ function StuckTable({
                 >
                   <td className="py-2 pl-3 pr-3 font-medium text-content">{item.obClientName}</td>
                   <td className="py-2 pr-3 text-content-muted">{item.title}</td>
-                  {breach ? (
-                    <>
-                      <td className="py-2 pr-3 text-content-muted">{item.owner?.displayName ?? '—'}</td>
-                      <td className="py-2 pr-3">
-                        <Chip variant="danger">
-                          <span aria-hidden="true">⚠</span>{' '}
-                          {item.dueAt ? format(parseISO(item.dueAt), "d MMM, HH:mm") : 'overdue'}
-                        </Chip>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-2 pr-3">{stuckChip(item.status)}</td>
-                      <td className="py-2 pr-3 text-content-muted">
-                        {item.blockedReason ?? 'Waiting on client input'}
-                      </td>
-                    </>
-                  )}
+                  <td className="py-2 pr-3">{stuckChip(item.status)}</td>
+                  <td className="py-2 pr-3 text-content-muted">
+                    {item.blockedReason ?? 'Waiting on client input'}
+                  </td>
                 </tr>
               ))}
             </tbody>

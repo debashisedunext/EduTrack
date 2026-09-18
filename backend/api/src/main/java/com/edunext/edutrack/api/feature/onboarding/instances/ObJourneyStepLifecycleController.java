@@ -170,6 +170,82 @@ class ObJourneyStepLifecycleController {
     }
 
     /**
+     * The whole check list to the reviewer, in one press and one request.
+     *
+     * <p>Replaces the client loop over {@code POST /journey-step-items/{id}/submit},
+     * which could leave a task half-sent when one call of five failed. The
+     * per-row route stays for now and is unchanged; this is the one the screen
+     * presses.
+     */
+    @PostMapping(value = "/{stepId}/checklist/submit", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "submitObJourneyStepChecklist",
+            summary = "Send the whole Task List for verification",
+            description = """
+                    Puts every open check-list row on the implementor manager's desk in \
+                    one transaction — the task's **Send for verification**. **The task's \
+                    owner only**; anybody else answers `403`.
+
+                    **Every open row must be answered** (`422` \
+                    `completion-gate-not-satisfied`, naming the blank ones). The list is \
+                    sent as a unit, so the unit has to be complete — unlike the per-row \
+                    route, which let two of five go now and the rest keep.
+
+                    Rows already `VERIFIED` from an earlier round are left alone and are \
+                    not counted against that gate: they are shut for good, and a rejection \
+                    that brought their neighbours back must not ask for them again.
+
+                    `422` `ob-step-under-review` when there is nothing left to send — the \
+                    list is already out, or every row is shut. The task becomes \
+                    `PENDING_REVIEW`.""")
+    ObJourneyStepLifecycleDtos.ObJourneyStepResponse submitChecklist(
+            Authentication caller, @PathVariable long stepId) {
+        ObJourneyStep step = service.submitChecklist(stepId, CallerIdentityAccess.requireUserId(caller));
+        return ObJourneyStepLifecycleDtos.ObJourneyStepResponse.of(step);
+    }
+
+    /**
+     * One verdict for the whole check list — the reviewer's single decision.
+     *
+     * <p>A manager decides about the task, not about line four. This records
+     * the same verdict on every row that is out and releases them together;
+     * an acceptance still leaves {@code /review/complete} as the deliberate
+     * press that closes the task.
+     */
+    @PostMapping(value = "/{stepId}/review/verdict",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "recordObJourneyStepChecklistVerdict",
+            summary = "Record one verdict for the whole Task List",
+            description = """
+                    Sets every row that is out to `VERIFIED` or `REJECTED` and releases \
+                    them together — the reviewer's **Verification done**. **OB Manager \
+                    named on the project, or OB Admin**; anybody else answers `403` \
+                    `step-moderator-required`, and a caller with no onboarding role at all \
+                    answers `404`.
+
+                    Only while the task is `PENDING_REVIEW` (`422` \
+                    `invalid-step-transition`). `NOT_REVIEWED` is refused the same way: it \
+                    was how a per-row verdict was taken back, and there is no row to take \
+                    it back on.
+
+                    **A rejection must say why** (`422` `ob-step-reject-reason-required`) \
+                    and returns the *whole* list unanswered, carrying that reason on every \
+                    row it is about. Rows already `VERIFIED` in an earlier round stay shut.
+
+                    **An acceptance does not close the task.** Every row becomes \
+                    `VERIFIED` and the task comes back to its owner; \
+                    `POST /journey-steps/{stepId}/review/complete` is still the press that \
+                    ends it, so a manager who pressed Verified meaning Reject has not \
+                    already released this task's dependants.""")
+    ObJourneyStepLifecycleDtos.ObJourneyStepResponse recordChecklistVerdict(
+            Authentication caller, @PathVariable long stepId,
+            @Valid @RequestBody ObJourneyStepLifecycleDtos.ObStepItemReviewRequest request) {
+        ObJourneyStep step = service.recordChecklistVerdict(stepId,
+                CallerIdentityAccess.requireUserId(caller),
+                CallerIdentityAccess.onboardingModuleRole(caller), request.state(), request.remark());
+        return ObJourneyStepLifecycleDtos.ObJourneyStepResponse.of(step);
+    }
+
+    /**
      * "I have seen what came back" — the read receipt behind the signal.
      *
      * <p>Not a transition and not idempotency-sensitive: the client calls it

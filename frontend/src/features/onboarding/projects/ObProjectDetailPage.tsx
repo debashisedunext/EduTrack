@@ -383,14 +383,6 @@ function ProjectHeader({
               <h1 className="text-2xl font-semibold text-content [text-wrap:balance]">
                 {project.name}
               </h1>
-              {project.gateStatus === 'LOCKED' ? (
-                <Chip
-                  variant="warning"
-                  title="The client's prerequisites have not cleared. Tasks can still be started — the checklist reports, it does not hold."
-                >
-                  Prerequisites pending
-                </Chip>
-              ) : null}
               <Chip
                 variant={
                   delay.tone === 'late' ? 'danger' : delay.tone === 'ok' ? 'success' : 'neutral'

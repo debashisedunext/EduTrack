@@ -149,4 +149,17 @@ Counted separately because the two want different tones and
 different words: one is work to do, the other is news.
  */
   rowsApproved: number;
+  /** Whether the caller must verify this task rather than merely own
+it: `status` is `PENDING_REVIEW` and the caller is the project's
+named manager, or holds `OB_ADMIN`.
+
+The other three ways a task reaches this endpoint put it there
+because the caller owns it; this is the fourth, and the only one
+that means a review rather than a wait. My Tasks' "Pending for
+verification" tab is this field and nothing else — the same
+`PENDING_REVIEW` status reads oppositely for the two people a row
+can belong to, and nothing else on the row says which one is
+looking.
+ */
+  pendingMyVerification: boolean;
 }

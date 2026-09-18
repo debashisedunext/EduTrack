@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -1050,6 +1051,72 @@ public class ObJourneyTemplateService {
     @Transactional(readOnly = true)
     public List<ObJourneyTemplateStepDoc> getStepDocs(long stepId) {
         return stepDocs.findByStepIdOrderBySequenceAsc(stepId);
+    }
+
+    /**
+     * OB-07 · the task-import commit — replaces this draft's entire task tree
+     * with what a validated workbook describes.
+     *
+     * <p>Reuses {@link #addTask}, {@link #addStepItem}, {@link #addStepDoc} and
+     * {@link #removeStep} rather than writing rows directly, so an imported
+     * task gets the same sequencing, stage-group membership and draft-only
+     * guard as one typed into the designer by hand. {@code tasksToImport} must
+     * already be validated — stage names resolved against this template's own
+     * stage groups, dependency names resolved to a task earlier in the list —
+     * {@code ObJourneyTaskImportService} is the only caller and is where that
+     * validation lives; this method trusts it.
+     *
+     * <h2>Existing tasks are deleted first, all of them</h2>
+     *
+     * <p>There is no natural key a checklist row could upsert on — nobody
+     * assigns a code to "Signed order form received" — so a re-import is a
+     * replace: every task, Task List entry and Document Checklist entry this
+     * draft currently holds is removed before the file's own tasks are added,
+     * in the same transaction. Safe only because the target is always a
+     * draft — {@link #requireEditable} enforces that again here regardless of
+     * what the caller has already checked.
+     *
+     * <p>Deleted in reverse {@code sequence} order so {@link #removeStep}'s own
+     * dependents check never finds one: a task can only depend on a task
+     * earlier in the sequence, so by the time a task is reached for deletion,
+     * anything that depended on it is already gone.
+     */
+    @Transactional
+    public void replaceTasksFromImport(long templateId,
+                                       List<ObJourneyTaskImportShapes.ImportedTask> tasksToImport) {
+        requireEditable(templateId);
+
+        List<ObJourneyTemplateStep> existing = steps.findByTemplateIdOrderBySequenceAsc(templateId);
+        for (int i = existing.size() - 1; i >= 0; i--) {
+            removeStep(existing.get(i).getId());
+        }
+
+        Map<String, Long> stageGroupIdByName = new HashMap<>();
+        for (ObJourneyTemplateStage group : stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(templateId)) {
+            stageGroupIdByName.put(group.getName().toUpperCase(Locale.ROOT), group.getId());
+        }
+        long ungroupedId = ungroupedGroupOf(templateId).getId();
+
+        Map<String, Long> createdStepIdByName = new LinkedHashMap<>();
+        for (ObJourneyTaskImportShapes.ImportedTask task : tasksToImport) {
+            long stageGroupId = task.stageGroupName() == null
+                    ? ungroupedId
+                    : stageGroupIdByName.getOrDefault(task.stageGroupName().toUpperCase(Locale.ROOT), ungroupedId);
+            Long dependsOnStepId = task.dependsOnTaskName() == null
+                    ? null
+                    : createdStepIdByName.get(task.dependsOnTaskName().toUpperCase(Locale.ROOT));
+
+            ObJourneyTemplateStep created = addTask(stageGroupId, task.name(), task.description(),
+                    task.tatDays(), null, task.requiresSignoff(), dependsOnStepId);
+            createdStepIdByName.put(task.name().toUpperCase(Locale.ROOT), created.getId());
+
+            for (ObJourneyTaskImportShapes.ImportedItem item : task.items()) {
+                addStepItem(created.getId(), item.label(), item.mandatory());
+            }
+            for (ObJourneyTaskImportShapes.ImportedDoc doc : task.docs()) {
+                addStepDoc(created.getId(), doc.label(), doc.required());
+            }
+        }
     }
 
     /**

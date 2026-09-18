@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { ObProjectBoardRow } from '@/api/generated/model'
 
 import {
+  projectsForCard,
   byLatenessDescending,
   bucketLook,
   lateLabel,
@@ -166,5 +167,69 @@ describe('lateness', () => {
     ].sort(byLatenessDescending)
 
     expect(sorted.map((r) => r.id)).toEqual([2, 1, 3])
+  })
+})
+
+
+/**
+ * Which projects sit behind each of the band's six figures.
+ *
+ * <p>The panel a card opens lists exactly this set, and the card's own count
+ * comes from the server — so these cases are what keeps "At risk: 4" and four
+ * rows in the panel the same four projects.
+ */
+describe('projectsForCard', () => {
+  const board = {
+    today: '2026-09-18',
+    weekStart: '2026-09-14',
+    weekEnd: '2026-09-20',
+    projects: [
+      row({ id: 1, bucket: 'ON_TIME', tentativeCompletion: '2026-09-18' }),
+      row({ id: 2, bucket: 'DELAYED', tentativeCompletion: '2026-09-16' }),
+      row({ id: 3, bucket: 'AT_RISK', tentativeCompletion: '2026-08-30' }),
+      row({ id: 4, bucket: 'ON_TIME', tentativeCompletion: '2026-10-05', openEscalations: 2 }),
+      row({ id: 5, bucket: 'ON_TIME' }),
+    ],
+  }
+
+  const ids = (key: string) => projectsForCard(key, board).map((r) => r.id)
+
+  it('answers every running project for the Ongoing card', () => {
+    expect(ids('ongoing')).toEqual([1, 2, 3, 4, 5])
+  })
+
+  /*
+    Mon–Sun inclusive, the days already gone included — the card's own
+    caption. A project with no completion date is in no week.
+  */
+  it("takes this week's deadlines from the board's own week, inclusive", () => {
+    expect(ids('week')).toEqual([1, 2])
+  })
+
+  it('answers the completion date being today, exactly', () => {
+    expect(ids('today')).toEqual([1])
+  })
+
+  /*
+    The mapping that reads backwards, which is why it is pinned here:
+    Overdue is DELAYED (up to seven working days past), At risk is AT_RISK
+    (more than seven).
+  */
+  it('maps Overdue to DELAYED and At risk to AT_RISK', () => {
+    expect(ids('overdue')).toEqual([2])
+    expect(ids('risk')).toEqual([3])
+  })
+
+  it('answers the projects carrying an open escalation', () => {
+    expect(ids('escalations')).toEqual([4])
+  })
+
+  /*
+    A card added to the band before it is added here opens a panel that is too
+    broad, which a reader can see, rather than an empty one that reads as
+    "nothing matched".
+  */
+  it('answers the whole set for a key it does not know', () => {
+    expect(ids('something-new')).toEqual([1, 2, 3, 4, 5])
   })
 })

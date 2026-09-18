@@ -1998,4 +1998,112 @@ class ObJourneyTemplateServiceTest {
         }
     }
 
+    /**
+     * OB-07 · {@link ObJourneyTemplateService#replaceTasksFromImport}, the
+     * write half of the task-import feature — {@code ObJourneyTaskImportService}
+     * owns validation and is this method's only real caller, so what matters
+     * here is that a validated tree is applied through the same
+     * {@link ObJourneyTemplateService#addTask}/{@code addStepItem}/{@code addStepDoc}
+     * calls the designer itself uses, and that a run always replaces rather
+     * than merges.
+     */
+    @Nested
+    @DisplayName("replaceTasksFromImport")
+    class ReplaceTasksFromImport {
+
+        private ObJourneyTemplate draft;
+
+        @BeforeEach
+        void createDraft() {
+            draft = service.createTemplate(PRODUCT, "Payment Gateway", 1, null, ADMIN);
+        }
+
+        private ObJourneyTaskImportShapes.ImportedTask task(
+                String stageGroupName, String name, String dependsOnTaskName,
+                List<ObJourneyTaskImportShapes.ImportedItem> items,
+                List<ObJourneyTaskImportShapes.ImportedDoc> docs) {
+            return new ObJourneyTaskImportShapes.ImportedTask(
+                    stageGroupName, name, "desc", 2, false, dependsOnTaskName, items, docs);
+        }
+
+        @Test
+        @DisplayName("creates one task per imported row, with its items and docs")
+        void createsTasksWithChecklists() {
+            service.replaceTasksFromImport(draft.getId(), List.of(
+                    task(null, "Kickoff call", null,
+                            List.of(new ObJourneyTaskImportShapes.ImportedItem("Order form signed", true)),
+                            List.of(new ObJourneyTaskImportShapes.ImportedDoc("Signed contract", true)))));
+
+            List<ObJourneyTemplateStep> created = stepsFor(draft.getId());
+            assertThat(created).extracting(ObJourneyTemplateStep::getName).containsExactly("Kickoff call");
+            assertThat(itemsFor(created.get(0).getId()))
+                    .extracting(ObJourneyTemplateStepItem::getLabel).containsExactly("Order form signed");
+            assertThat(docsFor(created.get(0).getId()))
+                    .extracting(ObJourneyTemplateStepDoc::getLabel).containsExactly("Signed contract");
+        }
+
+        @Test
+        @DisplayName("a null stage name files the task under Ungrouped")
+        void nullStageIsUngrouped() {
+            service.replaceTasksFromImport(draft.getId(), List.of(
+                    task(null, "Kickoff call", null, List.of(), List.of())));
+
+            ObJourneyTemplateStep created = stepsFor(draft.getId()).get(0);
+            ObJourneyTemplateStage group = groupRows.get(created.getTemplateStageId());
+            assertThat(group.getName()).isEqualTo("Ungrouped");
+        }
+
+        @Test
+        @DisplayName("a named stage puts the task in that existing stage group")
+        void namedStageResolves() {
+            stageId("Configuration");
+            ObJourneyTemplate withStages = service.createTemplate(PRODUCT + 1, "ERP", 1, null, ADMIN);
+
+            service.replaceTasksFromImport(withStages.getId(), List.of(
+                    task("Configuration", "Kickoff call", null, List.of(), List.of())));
+
+            ObJourneyTemplateStep created = stepsFor(withStages.getId()).get(0);
+            ObJourneyTemplateStage group = groupRows.get(created.getTemplateStageId());
+            assertThat(group.getName()).isEqualTo("Configuration");
+        }
+
+        @Test
+        @DisplayName("a later task can depend on an earlier one by name")
+        void dependsOnResolvesToTheEarlierTask() {
+            service.replaceTasksFromImport(draft.getId(), List.of(
+                    task(null, "Kickoff call", null, List.of(), List.of()),
+                    task(null, "Data migration", "Kickoff call", List.of(), List.of())));
+
+            List<ObJourneyTemplateStep> created = stepsFor(draft.getId());
+            ObJourneyTemplateStep kickoff = created.stream()
+                    .filter(s -> s.getName().equals("Kickoff call")).findFirst().orElseThrow();
+            ObJourneyTemplateStep migration = created.stream()
+                    .filter(s -> s.getName().equals("Data migration")).findFirst().orElseThrow();
+            assertThat(migration.getDependsOnStepId()).isEqualTo(kickoff.getId());
+        }
+
+        @Test
+        @DisplayName("replaces the draft's whole tree rather than adding to it")
+        void replacesRatherThanMerges() {
+            addTaskIn(draft.getId(), "Old task", "d", 1, null, false, null);
+
+            service.replaceTasksFromImport(draft.getId(), List.of(
+                    task(null, "New task", null, List.of(), List.of())));
+
+            assertThat(stepsFor(draft.getId()))
+                    .extracting(ObJourneyTemplateStep::getName).containsExactly("New task");
+        }
+
+        @Test
+        @DisplayName("refuses a template that has ever been published, same as every other edit")
+        void refusesAPublishedTemplate() {
+            addTaskIn(draft.getId(), "Kickoff call", "d", 1, null, false, null);
+            ObJourneyTemplate published = service.publish(draft.getId(), ADMIN);
+
+            assertThatThrownBy(() -> service.replaceTasksFromImport(published.getId(), List.of(
+                    task(null, "Replacement", null, List.of(), List.of()))))
+                    .isInstanceOf(TemplateNotEditableException.class);
+        }
+    }
+
 }

@@ -1,6 +1,4 @@
-import { useNavigate } from 'react-router-dom'
-
-import type { ObProjectBoard } from '@/api/generated/model'
+import type { ObProjectBoard, ObProjectBoardRow } from '@/api/generated/model'
 import { Skeleton } from '@/components/ui/skeleton'
 
 import { ObProjectDonut } from './ObProjectDonut'
@@ -11,7 +9,7 @@ import { peopleSlices, scheduleSlices, type Slice } from './obProjectBoard'
  *
  * <h2>One request behind all three</h2>
  *
- * Schedule health, salesperson and implementor are three cuts of the same
+ * Project Schedule health, salesperson and implementor are three cuts of the same
  * `projects` array, grouped client-side. Not three endpoints: the totals would
  * then be three separate reads that can disagree, and the screen's whole claim
  * is that a slice, a card and a list are the same projects.
@@ -33,10 +31,41 @@ import { peopleSlices, scheduleSlices, type Slice } from './obProjectBoard'
 export interface ObProjectChartRowProps {
   board?: ObProjectBoard
   isPending: boolean
+  /**
+   * What a slice opens: the projects behind it, in the board's own panel.
+   *
+   * <p>A slice used to leave for the Projects grid, filtered by the person.
+   * The grid could express two of the three donuts and not the schedule one,
+   * so one chart was unclickable and the other two navigated away from the
+   * board. All three open the panel now, and the schedule donut is clickable
+   * with them — its rows are on this response like everybody else's, and it
+   * was only ever the *grid* that had no filter for them.
+   */
+  onSelectSlice?: (title: string, rows: ObProjectBoardRow[]) => void
+  /**
+   * Drawn where "By salesperson" is, when the reader is an implementor or
+   * their manager. Who sold a project is a management cut neither of them
+   * acts on; their own queue is what nothing else on this board showed them.
+   * A node rather than a flag, so this row keeps knowing nothing about roles.
+   */
+  mine?: React.ReactNode
+  /**
+   * Drawn where "By implementor" is, when the reader is an implementor or
+   * their manager. That donut is who across the team is delivering what — a
+   * management cut, and the same reason "By salesperson" gives way to their
+   * own queue. What takes its place is their review state, which was a row
+   * above the charts competing with them for the first screen.
+   */
+  third?: React.ReactNode
 }
 
-export function ObProjectChartRow({ board, isPending }: ObProjectChartRowProps) {
-  const navigate = useNavigate()
+export function ObProjectChartRow({
+  board,
+  isPending,
+  onSelectSlice,
+  mine,
+  third,
+}: ObProjectChartRowProps) {
 
   if (isPending || !board) {
     return (
@@ -51,42 +80,43 @@ export function ObProjectChartRow({ board, isPending }: ObProjectChartRowProps) 
   const rows = board.projects
 
   /**
-   * A slice keyed `u<id>` is one person; `others` and `unassigned` are not, and
-   * neither is a filter the grid can express. They open the unfiltered grid
-   * rather than a wrong one.
+   * Every slice answers with its own rows, which it already carries — so
+   * `others` and `unassigned` need no special case any more. They were the
+   * awkward ones while this navigated: neither is a filter the Projects grid
+   * can express, so both opened the unfiltered grid rather than a wrong one.
    */
-  const openPeople = (parameter: 'implementorId' | 'salesPersonId') => (slice: Slice) => {
-    const userId = slice.key.startsWith('u') ? slice.key.slice(1) : null
-    const query = new URLSearchParams({ status: 'RUNNING' })
-    if (userId) query.set(parameter, userId)
-    navigate(`/onboarding/projects?${query.toString()}`)
-  }
+  const openSlice = (slice: Slice) => onSelectSlice?.(slice.label, slice.rows)
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <ObProjectDonut
-        title="Schedule health"
-        caption="every running project against its own completion date"
+        title="Project Schedule health"
+        caption="against each completion date"
         centreLabel="ongoing"
         entryNoun="Status"
         slices={scheduleSlices(rows)}
+        onSelect={openSlice}
       />
-      <ObProjectDonut
-        title="By salesperson"
-        caption="who sold each running project"
-        centreLabel="projects"
-        entryNoun="Salesperson"
-        slices={peopleSlices(rows, 'salesPerson')}
-        onSelect={openPeople('salesPersonId')}
-      />
-      <ObProjectDonut
-        title="By implementor"
-        caption="who is delivering each running project"
-        centreLabel="projects"
-        entryNoun="Implementor"
-        slices={peopleSlices(rows, 'implementor')}
-        onSelect={openPeople('implementorId')}
-      />
+      {mine ?? (
+        <ObProjectDonut
+          title="By salesperson"
+          caption="who sold each project"
+          centreLabel="projects"
+          entryNoun="Salesperson"
+          slices={peopleSlices(rows, 'salesPerson')}
+          onSelect={openSlice}
+        />
+      )}
+      {third ?? (
+        <ObProjectDonut
+          title="By implementor"
+          caption="who is delivering each project"
+          centreLabel="projects"
+          entryNoun="Implementor"
+          slices={peopleSlices(rows, 'implementor')}
+          onSelect={openSlice}
+        />
+      )}
     </div>
   )
 }

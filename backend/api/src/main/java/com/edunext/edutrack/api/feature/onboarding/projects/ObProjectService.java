@@ -220,9 +220,12 @@ class ObProjectService {
      *
      * <p>Not "the first incomplete stage", which would name a stage whose tasks
      * are all still {@code PENDING} behind a dependency and report a project as
-     * being at a stage nobody has started. Null where nothing runs — a locked
-     * gate, a project held behind a sibling service, or every task blocked —
-     * and the grid has words for each of those from {@code gateStatus}.
+     * being at a stage nobody has started. A task still on {@code PENDING}
+     * counts as running here if any of its check list items has been answered —
+     * {@code STAGE_ROLLUP}'s {@code minActiveSequence} — so a task somebody has
+     * been ticking through without formally starting it still surfaces as the
+     * project's current stage. Null where nothing runs at all — a project held
+     * behind a sibling service, or every task blocked.
      */
     private static String currentStageName(List<StageRow> stageRows) {
         return stageRows.stream()

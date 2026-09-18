@@ -113,21 +113,28 @@ const displayedStageNames = () =>
     (stage) => stage.querySelector('header')?.textContent ?? '',
   )
 
-/** A task's Checklist grid — one table per task, named after it. */
-const checklist = (task: string) =>
-  screen.getByRole('table', { name: `Checklist for ${task}` })
-
 /**
- * The written rows of a task's Checklist, in display order — the column header
- * dropped, and the composer with it: it is the row that holds a text box, and
- * the words on it ("Required", "Check") are its controls rather than an item's
- * facts.
+ * The ✕ on a task asks before it writes. Two clicks, not one — and the
+ * second is inside the dialog, which is modal, so the board is unreachable
+ * until it is answered.
  */
+const confirmRemoveTask = async (name: string) => {
+  fireEvent.click(within(stepGroup(name)).getByRole('button', { name: `Remove ${name}` }))
+  fireEvent.click(
+    within(await screen.findByRole('dialog', { name: `Remove ${name}?` })).getByRole('button', {
+      name: 'Remove task',
+    }),
+  )
+}
+
+/** A task's Checklist — one list per task, named after it. */
+const checklist = (task: string) =>
+  screen.getByRole('group', { name: `Checklist for ${task}` })
+
+/** The written rows of a task's Checklist, in display order. */
 const checklistRows = (task: string) =>
   within(checklist(task))
-    .getAllByRole('row')
-    .filter((row) => within(row).queryByRole('textbox') === null)
-    .slice(1)
+    .getAllByRole('listitem')
     .map((row) => row.textContent ?? '')
 
 const savedStepNames = (templateId: number) =>
@@ -190,36 +197,47 @@ describe('the step list renders a draft template', () => {
     expect(screen.queryByText(/Plan runs to day/)).not.toBeInTheDocument()
   })
 
-  it('nests a step under the one it waits for, and calls out a parallel one', async () => {
+  it('names what a task waits for, and calls out a parallel one', async () => {
     await openDesigner(2)
-    // The dependency is no longer a cell naming a row number — it is the
-    // nesting itself. Only a root says anything, because indentation cannot
-    // say "waits for nothing", and null means parallel rather than first.
+    /*
+      Nothing about the layout says "held" now that no card contains another,
+      so the chip carries it: Parallel for a task that waits for nothing, and
+      the name of the predecessor for one that does. The sr-only line is the
+      same fact for a reader who gets no chips.
+    */
     expect(
       within(stepGroup('Device Rollout')).getByText('No dependency, runs in parallel'),
     ).toBeInTheDocument()
+    expect(within(stepGroup('Device Rollout')).getByText('Parallel')).toBeInTheDocument()
     expect(
       within(stepGroup('Attendance Policy Mapping')).queryByText('No dependency, runs in parallel'),
     ).not.toBeInTheDocument()
-    // Indentation says "waits for that one" to the eye and nothing at all to
-    // a screen reader, so the name the removed column printed is still there.
     expect(
-      within(stepGroup('Attendance Policy Mapping')).getByText('Dependency: Device Rollout'),
+      within(stepGroup('Attendance Policy Mapping')).getByText('After Device Rollout'),
     ).toBeInTheDocument()
   })
 
   it('schedules each step from the day its predecessor ends', async () => {
     await openDesigner(2)
     // Device Rollout is 6 working days and runs from the start; Attendance
-    // Policy Mapping waits for it, so it cannot begin before day 7.
-    expect(within(stepGroup('Device Rollout')).getByText('Day 1–6')).toBeInTheDocument()
-    expect(within(stepGroup('Attendance Policy Mapping')).getByText('Day 7–9')).toBeInTheDocument()
+    // Policy Mapping waits for it, so it cannot begin before day 7. The range
+    // and the TAT are one line of text now, so the range is matched inside it.
+    expect(within(stepGroup('Device Rollout')).getByText(/Day 1–6/)).toBeInTheDocument()
+    expect(
+      within(stepGroup('Attendance Policy Mapping')).getByText(/Day 7–9/),
+    ).toBeInTheDocument()
     // The last day of the schedule and the header's Total TAT are one figure
     // now, and this is it.
     expect(screen.getByText('Total TAT: 9d')).toBeInTheDocument()
   })
 
-  it('collapses a step, taking its tasks and its subtree with it', async () => {
+  /*
+    A task's body is its checklist and nothing else: Attendance Policy Mapping
+    waits for Device Rollout and is drawn *beside* it, so closing one no
+    longer takes the other with it. The dependency is still on the card, in
+    words — it is simply not the shape of the tree any more.
+  */
+  it('collapses a task, taking its checklist but not the task that waits for it', async () => {
     await openDesigner(2)
     expect(screen.getByText('Confirm device count against the purchase order')).toBeInTheDocument()
     expect(displayedStepNames()).toHaveLength(2)
@@ -229,11 +247,10 @@ describe('the step list renders a draft template', () => {
     expect(
       screen.queryByText('Confirm device count against the purchase order'),
     ).not.toBeInTheDocument()
-    // Attendance Policy Mapping hangs off Device Rollout, so it goes too.
-    expect(displayedStepNames()).toHaveLength(1)
+    expect(displayedStepNames()).toHaveLength(2)
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand Device Rollout' }))
-    expect(displayedStepNames()).toHaveLength(2)
+    expect(screen.getByText('Confirm device count against the purchase order')).toBeInTheDocument()
   })
 })
 
@@ -326,8 +343,12 @@ describe('the tree shows every level', () => {
     showTo('Task')
     expect(screen.getByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'true')
 
-    // The tree is now at no level at all, and no segment should claim it is.
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Device Rollout' }))
+    /*
+      The tree is now at no level at all, and no segment should claim it is.
+      Closed by hand at the *stage* — below the Checklist level a task has
+      nothing left to disclose, so it is offered no chevron to toggle.
+    */
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Configuration' }))
     for (const level of ['Step', 'Task', 'Checklist']) {
       expect(screen.getByRole('button', { name: level })).toHaveAttribute('aria-pressed', 'false')
     }
@@ -420,25 +441,33 @@ describe('filtering the tree', () => {
   it('puts the tree back exactly as it was when the box is cleared', async () => {
     await openDesigner(2)
     // Collapsed by hand first: a filter narrows the tree, it never rewrites
-    // what the reader had closed.
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Device Rollout' }))
-    expect(displayedStepNames()).toHaveLength(1)
+    // what the reader had closed. Closed at the stage, which is the level
+    // that still takes tasks off the screen now that none nest.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Configuration' }))
+    expect(displayedStepNames()).toHaveLength(0)
 
+    // The hit brings the task it waits for with it, so both are drawn.
     fireEvent.change(filterBox(), { target: { value: 'Attendance' } })
     expect(displayedStepNames()).toHaveLength(2)
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
-    expect(displayedStepNames()).toHaveLength(1)
+    expect(displayedStepNames()).toHaveLength(0)
   })
 
-  it('hides the composers while a filter is narrowing the tree', async () => {
+  /*
+    The composers hid while a filter narrowed the tree: one expanded at the
+    foot of a stage the filter had emptied invited a task nobody was looking
+    at. Neither is a composer any more — both are a button on a strip that
+    opens a panel over the board — so both stay put, and the stage each one
+    writes into is named in the panel that opens rather than inferred from a
+    tree that a filter has rearranged.
+  */
+  it('keeps the add buttons on their strips while a filter is narrowing the tree', async () => {
     await openDesigner(2)
-    expect(screen.getByRole('button', { name: '+ Add a task to Configuration' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add a task to Configuration' })).toBeInTheDocument()
 
     fireEvent.change(filterBox(), { target: { value: 'Attendance' } })
-    // A composer is not a search result, and one under a stage the filter
-    // emptied invites a task nobody was looking at.
-    expect(screen.queryByRole('button', { name: '+ Add a task to Configuration' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add a task to Configuration' })).toBeInTheDocument()
   })
 })
 
@@ -586,7 +615,7 @@ describe('a new Module Service arrives holding the implementation stages', () =>
 
     const active = getDb().obImplementationStages.filter((st) => st.isActive)
     expect(
-      screen.getAllByRole('button', { name: /^\+ Add a task to/ }),
+      screen.getAllByRole('button', { name: /^Add a task to/ }),
     ).toHaveLength(active.length)
     // The level above stays closed: which stages exist is decided on OB-15.
     expect(
@@ -598,7 +627,7 @@ describe('a new Module Service arrives holding the implementation stages', () =>
     const id = await createService('Payment Gateway IV')
     await openDesigner(id)
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a task to Data Migration' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a task to Data Migration' }))
     fireEvent.change(screen.getByLabelText('Name of the new task in Data Migration'), {
       target: { value: 'Map legacy fee heads' },
     })
@@ -621,7 +650,7 @@ describe('a new Module Service arrives holding the implementation stages', () =>
     await openDesigner(id)
     const kavya = getDb().users.find((u) => u.displayName === 'Kavya Sharma')!
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a task to Configuration' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a task to Configuration' }))
     fireEvent.change(screen.getByLabelText('Name of the new task in Configuration'), {
       target: { value: 'Tenant provisioning' },
     })
@@ -657,7 +686,7 @@ describe('a new Module Service arrives holding the implementation stages', () =>
     const id = await createService('Payment Gateway VII')
     await openDesigner(id)
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a task to Configuration' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a task to Configuration' }))
     fireEvent.change(screen.getByLabelText('Name of the new task in Configuration'), {
       target: { value: 'Brand the portal' },
     })
@@ -681,7 +710,7 @@ describe('a new Module Service arrives holding the implementation stages', () =>
     const id = await createService('Payment Gateway VI')
     await openDesigner(id)
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a task to Configuration' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a task to Configuration' }))
     const picker = screen.getByLabelText('Implementor for the new task in Configuration')
     await waitFor(
       () => expect(within(picker).getAllByRole('option').length).toBeGreaterThan(1),
@@ -929,16 +958,30 @@ describe('removing a step', () => {
   it('removes a step nothing depends on', async () => {
     await openDesigner(2)
     // Remove the dependent first so Device Rollout has none left.
-    fireEvent.click(within(stepGroup('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
+    await confirmRemoveTask('Attendance Policy Mapping')
     await waitFor(() => expect(savedStepNames(2)).toEqual(['Device Rollout']), SLOW)
 
-    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    await confirmRemoveTask('Device Rollout')
     await waitFor(() => expect(savedStepNames(2)).toEqual([]), SLOW)
+  })
+
+  it('asks before removing, and removes nothing if the dialog is dismissed', async () => {
+    await openDesigner(2)
+    fireEvent.click(
+      within(stepGroup('Attendance Policy Mapping')).getByRole('button', {
+        name: 'Remove Attendance Policy Mapping',
+      }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Remove Attendance Policy Mapping?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW)
+    expect(savedStepNames(2)).toEqual(['Device Rollout', 'Attendance Policy Mapping'])
   })
 
   it('names the dependents rather than a bare conflict', async () => {
     await openDesigner(2)
-    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    await confirmRemoveTask('Device Rollout')
 
     expect(
       await screen.findByText('Device Rollout still has dependents', undefined, SLOW),
@@ -1004,8 +1047,25 @@ describe('reordering is staged, then saved in one request with If-Match', () => 
  * invisible on screen and wrong in the database.
  */
 describe('the Checklist grid', () => {
+  /**
+   * The panel "+ Add checklist" opens at the end of a task's row, scoped for
+   * querying. The composer's three controls are in here now rather than in
+   * the last row of the grid; their labels are unchanged.
+   *
+   * <p>The panel is modal, so everything behind it is `aria-hidden` while it
+   * is open — a test that wants the board back has to close it first.
+   */
+  const openComposer = (task: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `Add a checklist item to ${task}` }))
+    return within(composerPanel(task))
+  }
+
+  /** The panel itself — named, like every slide-over here, by its own title. */
+  const composerPanel = (task: string) =>
+    screen.getByRole('dialog', { name: `New checklist item for ${task}` })
+
   const composer = (task: string) =>
-    within(checklist(task)).getByLabelText(`New checklist item for ${task}`)
+    within(composerPanel(task)).getByLabelText(`New checklist item for ${task}`)
 
   it('draws ticks and files as one numbered list, each saying which it is', async () => {
     await openDesigner(2)
@@ -1023,19 +1083,31 @@ describe('the Checklist grid', () => {
 
   it('adds a check, and removes an existing one', async () => {
     await openDesigner(2)
-    const row = stepGroup('Device Rollout')
+    const panel = openComposer('Device Rollout')
     fireEvent.change(composer('Device Rollout'), { target: { value: 'Confirm power backup' } })
-    fireEvent.click(within(checklist('Device Rollout')).getByRole('button', { name: 'Add' }))
+    fireEvent.click(panel.getByRole('button', { name: 'Add' }))
 
     await waitFor(() => {
       const item = getDb().obJourneyTemplateStepItems.find((i) => i.label === 'Confirm power backup')
       expect(item?.mandatory).toBe(true)
     }, SLOW)
 
+    // The panel stays open for the next item, so it is closed by hand before
+    // the board underneath it is reachable again.
+    fireEvent.click(panel.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW)
+
     fireEvent.click(
-      within(row).getByRole('button', {
+      within(stepGroup('Device Rollout')).getByRole('button', {
         name: 'Remove Confirm device count against the purchase order',
       }),
+    )
+    // The ✕ asks first — a checklist entry is removed for good.
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Remove this check?' })).getByRole(
+        'button',
+        { name: 'Remove' },
+      ),
     )
     await waitFor(() => {
       expect(
@@ -1048,15 +1120,13 @@ describe('the Checklist grid', () => {
 
   it('writes a document to the document route when the type says so', async () => {
     await openDesigner(2)
-    const row = stepGroup('Device Rollout')
+    const panel = openComposer('Device Rollout')
     fireEvent.change(composer('Device Rollout'), { target: { value: 'Insurance certificate' } })
     fireEvent.change(
-      within(checklist('Device Rollout')).getByLabelText(
-        'Type of the new checklist item for Device Rollout',
-      ),
+      panel.getByLabelText('Type of the new checklist item for Device Rollout'),
       { target: { value: 'document' } },
     )
-    fireEvent.click(within(checklist('Device Rollout')).getByRole('button', { name: 'Add' }))
+    fireEvent.click(panel.getByRole('button', { name: 'Add' }))
 
     await waitFor(() => {
       const doc = getDb().obJourneyTemplateStepDocs.find((d) => d.label === 'Insurance certificate')
@@ -1067,7 +1137,20 @@ describe('the Checklist grid', () => {
       getDb().obJourneyTemplateStepItems.some((i) => i.label === 'Insurance certificate'),
     ).toBe(false)
 
-    fireEvent.click(within(row).getByRole('button', { name: 'Remove Device delivery challan' }))
+    fireEvent.click(panel.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW)
+
+    fireEvent.click(
+      within(stepGroup('Device Rollout')).getByRole('button', {
+        name: 'Remove Device delivery challan',
+      }),
+    )
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Remove this document?' })).getByRole(
+        'button',
+        { name: 'Remove' },
+      ),
+    )
     await waitFor(() => {
       expect(
         getDb().obJourneyTemplateStepDocs.some((d) => d.label === 'Device delivery challan'),
@@ -1076,17 +1159,17 @@ describe('the Checklist grid', () => {
   })
 
   /*
-    The reason the grid exists rather than a dialog. A checklist is written
-    several items at a time, so Enter has to file one and leave the composer
-    ready for the next — same type, same gate, empty label, cursor back in it.
+    A checklist is written several items at a time, so Enter has to file one
+    and leave the panel ready for the next — same type, same gate, empty
+    label, cursor back in it — and the panel has to stay open to do it.
     Re-picking "Check · Required" between items is exactly what the old pair
-    of full-width composers charged for.
+    of full-width composers charged for, and closing on each save would
+    charge for it again.
   */
-  it('files an item on Enter and leaves the composer ready for the next one', async () => {
+  it('files an item on Enter and leaves the panel ready for the next one', async () => {
     await openDesigner(2)
-    const kind = within(checklist('Device Rollout')).getByLabelText(
-      'Type of the new checklist item for Device Rollout',
-    )
+    const panel = openComposer('Device Rollout')
+    const kind = panel.getByLabelText('Type of the new checklist item for Device Rollout')
     fireEvent.change(kind, { target: { value: 'document' } })
     fireEvent.change(composer('Device Rollout'), { target: { value: 'Signed handover note' } })
     fireEvent.keyDown(composer('Device Rollout'), { key: 'Enter' })
@@ -1103,7 +1186,7 @@ describe('the Checklist grid', () => {
     expect(composer('Device Rollout')).toHaveFocus()
     expect(
       (
-        within(checklist('Device Rollout')).getByLabelText(
+        panel.getByLabelText(
           'Type of the new checklist item for Device Rollout',
         ) as HTMLSelectElement
       ).value,
@@ -1167,9 +1250,9 @@ describe('the Publish button, by template state', () => {
    */
   it('is disabled once a draft has no tasks left, with the stages still drawn', async () => {
     await openDesigner(2)
-    fireEvent.click(within(stepGroup('Attendance Policy Mapping')).getByRole('button', { name: 'Remove Attendance Policy Mapping' }))
+    await confirmRemoveTask('Attendance Policy Mapping')
     await waitFor(() => expect(savedStepNames(2)).toEqual(['Device Rollout']), SLOW)
-    fireEvent.click(within(stepGroup('Device Rollout')).getByRole('button', { name: 'Remove Device Rollout' }))
+    await confirmRemoveTask('Device Rollout')
     await waitFor(() => expect(savedStepNames(2)).toEqual([]), SLOW)
 
     await waitFor(() => expect(displayedStepNames()).toHaveLength(0), SLOW)

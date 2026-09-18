@@ -30,6 +30,7 @@ import {
   type SettableStatus,
 } from './editProjectForm'
 import { useUpdateObProject } from './projectQueries'
+import { useObManagerOptions } from './useObManagerOptions'
 
 /**
  * Edit a project — the fields entered when it was created, corrected later.
@@ -118,7 +119,16 @@ export function EditObProjectDialog({
     )
   }
 
-  const person = (id: number | null) => people.find((u) => u.id === id) ?? null
+  /*
+    Which list to look the person up in matters, and it is not always `people`.
+    The implementor manager is chosen from a narrower set, and resolving their
+    id against the full directory would draw a name the dropdown below cannot
+    offer — a value that looks chosen and disappears the moment it is opened.
+  */
+  const person = (id: number | null, from: readonly UserRef[] = people) =>
+    from.find((u) => u.id === id) ?? null
+
+  const { managers } = useObManagerOptions()
 
   return (
     <Modal open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
@@ -179,12 +189,19 @@ export function EditObProjectDialog({
               onChange={(id) => set({ implementorUserId: id })}
             />
 
+            {/*
+              Managers only, unlike the two fields above it. This person
+              verifies the project's check lists, and the review routes accept
+              `OB_MANAGER` and `OB_ADMIN` alone — offering the directory here
+              is how a project ends up escalating to somebody the platform then
+              refuses. See `useObManagerOptions`.
+            */}
             <PersonField
               id="edit-project-implementor-manager"
               label="Implementor manager"
-              hint="Who this project escalates to. Nothing falls to them, so clearing it costs no task an owner — it costs the project its escalation path."
-              people={people}
-              value={person(values.implementorManagerUserId)}
+              hint="Who this project escalates to, and who verifies its check lists. Onboarding managers and admins only. Nothing falls to them, so clearing it costs no task an owner — it costs the project its escalation path."
+              people={managers}
+              value={person(values.implementorManagerUserId, managers)}
               onChange={(id) => set({ implementorManagerUserId: id })}
             />
 

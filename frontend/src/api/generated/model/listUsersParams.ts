@@ -49,6 +49,7 @@ the database rejects mutation independently via triggers and grants.
 import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
 import type { RoleCode } from './roleCode';
+import type { ObModuleRole } from './obModuleRole';
 
 export type ListUsersParams = {
 /**
@@ -68,4 +69,29 @@ role?: RoleCode;
 projectId?: number;
 managerId?: number;
 isActive?: boolean;
+/**
+ * Only people holding one of these **live** onboarding module grants
+(`user_module_access`), revoked ones excluded.
+
+It exists for the pickers that name somebody into an onboarding
+responsibility the server then gates on that role. A project's
+**Implementor manager** is the case that forced it: the field was
+offering every user in the directory, so a project could be — and
+was — handed to an `OB_STEP_OWNER`, who the review routes then
+refuse with `403`. A screen that can name somebody to a job the
+platform will not let them do is a screen that produces support
+tickets.
+
+More than one, because the question is almost never about a single
+role: `?obModuleRole=OB_MANAGER,OB_ADMIN` is who may review.
+Comma-joined rather than repeated — `explode: false`, the house
+style the client's own serialiser implements.
+
+Not the same thing as `GET /onboarding/module-access`, which
+answers the *audit* question and is OB Admin only. This is the
+directory, filtered, and every role may read it — the same bargain
+the rest of this operation makes.
+
+ */
+obModuleRole?: ObModuleRole[];
 };

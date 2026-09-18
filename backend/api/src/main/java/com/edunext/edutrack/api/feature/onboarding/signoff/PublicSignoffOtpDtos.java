@@ -60,7 +60,7 @@ final class PublicSignoffOtpDtos {
      * does not prove identity, and plan §8 makes the OTP the thing that does".
      */
     @Schema(name = "ObSignoffSession")
-    record Session(
+    record SignoffSession(
             @Schema(description = "Opaque, short-lived, and good for this one sign-off. "
                     + "Not a JWT and not a principal.")
             String sessionToken,
@@ -111,6 +111,6 @@ final class PublicSignoffOtpDtos {
     ) {
     }
 
-    record SessionResponse(Session data) {
+    record SessionResponse(SignoffSession data) {
     }
 }

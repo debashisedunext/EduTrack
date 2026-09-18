@@ -14,7 +14,23 @@ import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import {
+  Modal,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+} from '@/components/ui/modal'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  SlideOver,
+  SlideOverBody,
+  SlideOverContent,
+  SlideOverFooter,
+  SlideOverHeader,
+  SlideOverTitle,
+} from '@/components/ui/slide-over'
 import { toast } from '@/components/ui/use-toast'
 
 import {
@@ -31,7 +47,7 @@ import {
   useUpdateJourneyTemplateStep,
 } from './journeyTemplateQueries'
 import { formatTemplateTotalTatDays, templateTotalTatDays } from './journeyTemplateTat'
-import { buildStepTree, scheduleBar, scheduleLabel, type StepNode } from './journeyTemplateTree'
+import { buildStepTree, scheduleLabel, type StepNode } from './journeyTemplateTree'
 import {
   EXPANDED,
   TREE_LEVELS,
@@ -47,45 +63,49 @@ import {
   type TreeViewState,
 } from './journeyTemplateTreeView'
 import { ModuleServiceAdmin } from './ModuleServiceAdmin'
+import { TaskImportDialog } from './TaskImportDialog'
 
 /**
  * C-102 · OB-07's journey template designer: back link, a two-line head, then
  * the board — one container per implementation stage, holding a card per task
  * with Schedule, TAT (days), Implementor, Sign-off and, on a draft, Order;
- * each card holding its **Checklist**, and each stage closing with an
- * add-task composer.
+ * each card holding its **Checklist**, and each strip and row ending with the
+ * button that writes into it.
  *
- * <h2>Nested containers, not a table — and the dependency is the shape</h2>
+ * <h2>Two grounds, and the dependency is a fact rather than a shape</h2>
  *
  * <p>It was a flat list with a "Service depends on" cell reading
- * {@code ↳ 3. Cleansing & field mapping}. That says what one step waits for
- * and never what the journey *is*: reading a chain of five meant holding five
- * row numbers in your head and walking them backwards. Then it was one table
- * with indentation, which says the same thing in pixels somebody has to count
- * and gets thinner every level down.
+ * {@code ↳ 3. Cleansing & field mapping}, then one table with indentation,
+ * then cards nested inside the card they waited for — each of them trying to
+ * draw the dependency as the shape of the screen.
  *
- * <p>It is now three nested grounds. A stage is a bordered container with a
- * header and a body; a task is a card inside that body; a task that waits on
- * another is a card inside <em>that</em> card; and a checklist is the
- * innermost box of all. Each ground is a step lighter than the one it sits in
- * — {@code bg-subtle}, {@code bg-app}, {@code bg-surface} — so depth is read
- * off enclosure and fill rather than counted. {@code journeyTemplateTree.ts}
- * builds the tree and, from the same walk, the **Schedule** column's day
- * ranges: the earliest a step could begin if nothing slips, in working days
- * relative to journey start, never dates, because a template has no client and
- * therefore no calendar.
+ * <p>Nesting read well for a chain of two and badly for everything else. A
+ * task three deep sat in a box in a box in a box, its own checklist further
+ * in again, and collapsing the head of a chain took work nobody was looking
+ * at off the screen with it. So the tree is two grounds now: a stage is a
+ * bordered container with a header and a body, and every task in it is a card
+ * in that body — held or not, all at one level, in dependency-walk order so a
+ * task still reads directly under the one it waits for. The checklist is the
+ * innermost box, and the only thing a card ever contains.
+ *
+ * <p>The dependency has not gone anywhere; it is simply written down. A card
+ * that waits on another says {@code Dependency: ‹name›}, and one waiting on a
+ * task in a different stage names that stage too. {@code
+ * journeyTemplateTree.ts} still walks the chain and still produces the
+ * **Schedule** column's day ranges from that walk: the earliest a step could
+ * begin if nothing slips, in working days relative to journey start, never
+ * dates, because a template has no client and therefore no calendar.
  *
  * <p>What a {@code <table>} gave for free and this pays for is in
- * {@link MetaCells}: the five right-hand columns hold their line because their
- * widths are fixed and every card body pads on the left only, so a nested card
- * ends on its parent's right edge. And a value's tie to its column heading,
- * which each value now carries as its own {@code sr-only} label.
+ * {@link MetaCells}: the right-hand columns hold their line because their
+ * widths are fixed. And a value's tie to its column heading, which each value
+ * now carries as its own {@code sr-only} label.
  *
- * <p>The one thing enclosure cannot say is "waits for nothing", so a card at a
- * stage's top level says it in words. That is not decoration: {@code
- * dependsOnStepId} being null means the step runs in **parallel** from journey
- * start, not that it is first, and a card sitting inside no other card is
- * otherwise indistinguishable from the head of a chain.
+ * <p>Nothing in the layout can say "waits for nothing" now that nothing is
+ * enclosed, so a card says it in words and in its marker — a filled disc and
+ * the **Parallel** chip against a hollow ring. That is not decoration: {@code
+ * dependsOnStepId} being null means the step runs in parallel from journey
+ * start, not that it is first.
  *
  * <p>Reordering still moves a step in the **flat sequence**, which is what
  * {@code PUT .../steps/order} replaces — so ↑/↓ visibly reorders siblings and
@@ -370,6 +390,9 @@ function Designer({
      screen, which is worth a click on a first visit and worth none of the page
      on every visit after it. */
   const [showHow, setShowHow] = React.useState(false)
+
+  /** OB-07 · the "Import tasks" dialog — download, upload, preview, confirm. */
+  const [importing, setImporting] = React.useState(false)
 
   /*
     Stages and tasks share the one set, prefixed rather than merged, because
@@ -672,6 +695,11 @@ function Designer({
             </Button>
           )}
           {editable && (
+            <Button type="button" variant="secondary" onClick={() => setImporting(true)}>
+              Import tasks
+            </Button>
+          )}
+          {editable && (
             <Button
               type="button"
               disabled={publish.isPending || steps.length === 0}
@@ -683,6 +711,10 @@ function Designer({
           )}
         </div>
       </header>
+
+      {editable && (
+        <TaskImportDialog templateId={templateId} open={importing} onOpenChange={setImporting} />
+      )}
 
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
@@ -696,8 +728,8 @@ function Designer({
           className="m-0 rounded-card border border-dashed border-border px-3 py-2 text-caption text-content-muted"
         >
           Each <b>step</b> groups the tasks that belong to it. A <b>task</b> with no dependency runs in
-          parallel from day 1; a task nested inside another starts the day that one ends, to any
-          depth. A task carries the TAT, the implementor and its <b>checklist</b> — the ticks and
+          parallel from day 1; a task that declares one starts the day that one
+          ends. A task carries the TAT, the implementor and its <b>checklist</b> — the ticks and
           documents that have to be answered before it can complete on a client&rsquo;s journey.
           Required items gate the task; optional ones do not.
           {' '}
@@ -741,33 +773,27 @@ function Designer({
             the strip below is `aria-hidden`, because it lines the columns up
             for the eye and would otherwise be read out before every row.
           */}
-          <div className="overflow-x-auto">
-            <div
-              role="group"
-              aria-label="Steps and tasks"
-              onKeyDown={treeKeyDown}
-              className="flex min-w-[940px] flex-col gap-2.5"
-            >
-              <div
-                aria-hidden
-                className="flex items-end pl-3 pr-[22px] text-caption font-semibold uppercase tracking-wide text-content-muted"
-              >
-                <span className="flex-1">Step / Task</span>
-                <MetaCells
-                  editable={editable}
-                  schedule="Schedule"
-                  tat="TAT"
-                  owner="Implementor"
-                  signoff="Sign-off"
-                  order="Order"
-                />
-              </div>
-
-              {stageGroups.map(({ stage, tasks, tree: stageTree }) => (
+          {/* One card holding the whole rail, rather than a card per stage:
+              the line has to run between the steps, and it cannot cross a
+              border and a gap to do it. No `min-width` and no sideways
+              scroll either — nothing is in fixed columns any more, so the
+              tree reflows instead of forcing the page wide. */}
+          <div
+            role="group"
+            aria-label="Steps and tasks"
+            onKeyDown={treeKeyDown}
+            className="rounded-card border border-border bg-surface px-5 py-1.5 shadow-rest"
+          >
+            {stageGroups.map(({ stage, tasks, tree: stageTree }, index) => (
                 <StageBlock
                   key={stage.id}
                   stage={stage}
-                  roots={stageTree.roots}
+                  index={index}
+                  total={stageGroups.length}
+                  /* `flat`, not `roots`: every task in the stage is drawn at
+                     one level, so this is the whole list in dependency-walk
+                     order rather than the heads of its chains. */
+                  nodes={stageTree.flat}
                   /* A filter opens what it has to in order to show a hit, and
                      leaves the stored collapse alone — clearing the box puts
                      the reader back where they were. */
@@ -791,8 +817,7 @@ function Designer({
                     onRemove: doRemoveStep,
                   }}
                 />
-              ))}
-            </div>
+            ))}
           </div>
         </div>
       )}
@@ -1017,49 +1042,6 @@ function visibleNodes(
 }
 
 /**
- * The five columns to the right of the name, at one fixed set of widths.
- *
- * <h2>Why the columns survive the nesting</h2>
- *
- * <p>A stage is a container and a task is a box inside it, so there is no
- * table to keep Schedule under Schedule any more. These widths are what does
- * it instead, and the other half is that a card's body pads on the **left
- * only** — a nested card's right edge is therefore its parent's right edge,
- * and every card at every depth ends on the same line. Change the padding on
- * one side of a card body and the columns fan out down the page.
- *
- * <p>The column header strip is {@code aria-hidden}: it lines the labels up
- * for the eye, and a screen reader gets each value's label on the value
- * itself, where the old {@code <th>} association used to put it.
- */
-function MetaCells({
-  schedule,
-  tat,
-  owner,
-  signoff,
-  order,
-  editable,
-}: {
-  schedule?: React.ReactNode
-  tat?: React.ReactNode
-  owner?: React.ReactNode
-  signoff?: React.ReactNode
-  order?: React.ReactNode
-  /** The Order column exists only on a draft, exactly as it did as a `<th>`. */
-  editable: boolean
-}) {
-  return (
-    <span className="flex shrink-0 items-start">
-      <span className="w-36 px-2">{schedule}</span>
-      <span className="w-14 px-2 text-right">{tat}</span>
-      <span className="w-44 px-2">{owner}</span>
-      <span className="w-16 px-2 text-center">{signoff}</span>
-      {editable && <span className="w-24 px-2 text-right">{order}</span>}
-    </span>
-  )
-}
-
-/**
  * Step or Task — the level in a word, beside the name that has it. Every card is a
  * Task; a parallel one is told apart by its filled disc and the Parallel chip.
  *
@@ -1115,17 +1097,26 @@ function LevelBadge({ children }: { children: React.ReactNode }) {
 function StageBlock({
   ctx,
   stage,
-  roots,
+  nodes,
   open,
+  index,
+  total,
 }: {
   ctx: TaskContext
   stage: ObJourneyTemplateStage
-  /** This stage's own tree, unfiltered — the filter is applied here. */
-  roots: readonly StepNode<ObJourneyTemplateStep>[]
+  /**
+   * Every task in this stage, unfiltered and at one level — the filter is
+   * applied here. Depth-first order, so a task still reads directly under
+   * the one it waits for; it is simply no longer drawn inside it.
+   */
+  nodes: readonly StepNode<ObJourneyTemplateStep>[]
   /** Whether this stage's tasks are drawn at all. */
   open: boolean
+  /** Its place on the rail — the number in the node, and where the line stops. */
+  index: number
+  total: number
 }) {
-  const { tasks, filter, editable, scheduleOf, spanDays } = ctx
+  const { tasks, filter, editable, scheduleOf } = ctx
   /*
     The stage's own critical path, on the same rule as the template's: two
     tasks in Configuration that wait for nothing take the longer of the two,
@@ -1136,8 +1127,7 @@ function StageBlock({
   */
   const stageTat = templateTotalTatDays(tasks)
   const span = stageSpan(tasks, scheduleOf)
-  const bar = span ? scheduleBar(span, spanDays) : null
-  const shown = visibleNodes(roots, filter)
+  const shown = visibleNodes(nodes, filter)
   /*
     A filter that matched nothing in this stage still draws the stage. A
     silently missing group reads as "this service has two stages", which is a
@@ -1146,14 +1136,44 @@ function StageBlock({
   const filteredOut = filter != null && shown.length === 0 && tasks.length > 0
   const headingId = `ob-stage-${stage.id}`
 
+  /*
+    The rail. One line down the board with a node per step on it, so the six
+    or seven steps of a service read as a sequence rather than as six boxes
+    that happen to be stacked. It stops at the last node instead of running
+    past the end — a line continuing into white space says there is more.
+
+    NODE_CENTRE is the node's own middle: `py-[18px]` plus half of `h-8`.
+  */
+  const NODE_CENTRE = 34
+  const railStyle =
+    total <= 1
+      ? { display: 'none' }
+      : index === 0
+        ? { top: NODE_CENTRE, bottom: 0 }
+        : index === total - 1
+          ? { top: 0, height: NODE_CENTRE }
+          : { top: 0, bottom: 0 }
+
   return (
-    <section
-      aria-labelledby={headingId}
-      className="overflow-hidden rounded-card border border-border bg-subtle"
-    >
-      {/* The stripe marks the container's edge at the one place a reader looks
-          for it — the top-left corner, where the name is. */}
-      <header className="flex items-center gap-2 border-b border-border bg-primary-soft py-2 pl-3 pr-[22px] shadow-[inset_3px_0_0_var(--primary)]">
+    <section aria-labelledby={headingId} className="relative py-[18px] pl-[52px]">
+      <span aria-hidden className="absolute left-[15px] w-0.5 bg-border" style={railStyle} />
+      {/*
+        Filled when the step holds work, an outline when it does not. That is
+        the difference a reader is scanning a new service for — six stages
+        arrive empty and the ones that have been filled in are the answer.
+      */}
+      <span
+        aria-hidden
+        className={`absolute left-0 top-[18px] flex h-8 w-8 items-center justify-center rounded-full border-2 text-caption font-semibold tabular-nums ${
+          tasks.length > 0
+            ? 'border-primary bg-primary text-white'
+            : 'border-border bg-surface text-content-muted'
+        }`}
+      >
+        {index + 1}
+      </span>
+
+      <header className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2">
         {/* A stage with nothing in it has nothing to disclose, and gets a
             spacer instead so the six stages of a new service still line up. */}
         {tasks.length > 0 ? (
@@ -1172,81 +1192,73 @@ function StageBlock({
           <span aria-hidden className="h-5 w-5 shrink-0" />
         )}
         <LevelBadge>Step</LevelBadge>
-        <h2 id={headingId} className="m-0 text-sm font-semibold text-content">
+        <h2 id={headingId} className="m-0 text-h3 text-content">
           {stage.name}
         </h2>
-        <span className="rounded-chip border border-border bg-surface px-2 py-0.5 text-caption text-content-muted">
+        <span className="rounded-chip bg-subtle px-2.5 py-0.5 text-caption text-content-muted">
           {filteredOut ? 'No matches' : countsLabel(tasks)}
         </span>
-        <span className="flex-1" />
-        <MetaCells
-          editable={editable}
-          schedule={
-            span && (
+        {/* The rolled-up span and the stage's own critical path, as one line
+            of text. They were two fixed columns; nothing on this board lines
+            up in columns any more, so they read where they sit. */}
+        {span && (
+          <span className="text-caption tabular-nums text-content-muted">
+            <span className="sr-only">Schedule: </span>
+            {scheduleLabel(span)}
+            {stageTat > 0 && (
               <>
-                <span className="block whitespace-nowrap text-caption text-content-muted">
-                  <span className="sr-only">Schedule: </span>
-                  {scheduleLabel(span)}
-                </span>
-                {/* Paler than a task's bar, because this one is rolled up from
-                    the rows underneath rather than a fact about the stage. */}
-                <span
-                  aria-hidden
-                  className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-surface"
-                >
-                  <span
-                    className="block h-full rounded-full bg-primary/40"
-                    style={{ marginLeft: bar?.left, width: bar?.width }}
-                  />
-                </span>
+                {' · '}
+                <span className="sr-only">Total TAT: </span>
+                {stageTat}d
               </>
-            )
-          }
-          tat={
-            <span className="text-caption tabular-nums text-content-muted">
-              <span className="sr-only">Total TAT: </span>
-              {stageTat === 0 ? '—' : stageTat}
-            </span>
-          }
-        />
+            )}
+          </span>
+        )}
+        <span className="flex-1" />
+        {/* The only way work is written into a Module Service, and it sits at
+            the end of the row of the stage it writes into. A stage closed on
+            an empty group used to hide it entirely. */}
+        {editable && (
+          <AddTaskSlideOver
+            templateId={ctx.templateId}
+            stage={stage}
+            siblings={ctx.allSteps}
+            users={ctx.users}
+          />
+        )}
       </header>
 
       {open && (
-        <div className="flex flex-col gap-2 p-2.5">
-          {shown.map((node) => (
-            <TaskCard key={node.step.id} ctx={ctx} node={node} />
-          ))}
+        <>
+          {shown.length > 0 && (
+            /* Level two, on a rail of its own one step in from the board's.
+               `pl-[26px]` is what the cards' elbows reach back across. */
+            <ul className="m-0 ml-2 mt-3.5 flex list-none flex-col gap-2 p-0 pl-[26px]">
+              {shown.map((node, i) => (
+                <TaskCard
+                  key={node.step.id}
+                  ctx={ctx}
+                  node={node}
+                  last={i === shown.length - 1}
+                />
+              ))}
+            </ul>
+          )}
 
           {tasks.length === 0 && filter == null && (
-            <p className="m-0 px-1 py-0.5 text-caption text-content-muted">
+            <p className="m-0 mt-3 text-caption text-content-muted">
               This step came from the Implementation Stage master with no tasks in it.
             </p>
           )}
-
-          {/* Hidden with the stage it belongs to, and while a filter is
-              narrowing the tree — a composer is not a search result, and one
-              under a stage the filter emptied invites a task nobody was
-              looking at. `pr-3` keeps its right edge on the column line the
-              cards above it end on. */}
-          {editable && filter == null && (
-            <div className="flex pr-3">
-              <AddTaskForm
-                templateId={ctx.templateId}
-                stage={stage}
-                siblings={ctx.allSteps}
-                users={ctx.users}
-              />
-            </div>
-          )}
-        </div>
+        </>
       )}
     </section>
   )
 }
 
 /**
- * "+ Add a task to ‹stage›" — the only way work is written into a Module
- * Service, and the one form on this page that asks for a name.
+ * "+ Add task" — the only way work is written into a Module Service, and the
+ * one form on this page that asks for a name.
  *
  * <p>The name field is back after a spell without one, and the difference is
  * the level it sits at: a <em>stage</em> is an OB-15 value and takes its name
@@ -1256,8 +1268,17 @@ function StageBlock({
  * <p>TAT defaults to one working day — the same default the server applies,
  * restated so the field is never empty and the form can be submitted the
  * moment a name is typed.
+ *
+ * <h2>A panel from the right, not a form in the middle of the board</h2>
+ *
+ * <p>It expanded in place at the foot of its stage, which pushed every stage
+ * below it down the page and moved the row the reader was looking at. The
+ * fields are unchanged and so is what they write; only where they are asked
+ * for is. The trigger names no stage because it sits on that stage's strip —
+ * the panel's own title is what says which one it will write into, and it is
+ * the thing on screen while the form is being filled in.
  */
-function AddTaskForm({
+function AddTaskSlideOver({
   templateId,
   stage,
   siblings,
@@ -1330,32 +1351,43 @@ function AddTaskForm({
     }
   }
 
-  if (!open) {
-    return (
+  return (
+    <SlideOver
+      open={open}
+      onOpenChange={(next) => {
+        /* Closing by any route — Escape, the ✕, the overlay, Cancel — throws
+           the half-typed task away rather than leaving it to reappear the
+           next time the panel is opened against a different stage. */
+        if (!next) reset()
+        setOpen(next)
+      }}
+    >
+      {/* The visible label is the same two words on every strip, because the
+          strip it sits on is what says which stage it writes into. A screen
+          reader has no strip, so the accessible name carries the stage —
+          otherwise this page offers seven buttons called "+ Add task". */}
       <Button
         type="button"
         variant="secondary"
         size="sm"
+        aria-label={`Add a task to ${stage.name}`}
         onClick={() => setOpen(true)}
       >
-        + Add a task to {stage.name}
+        + Add task
       </Button>
-    )
-  }
 
-  return (
-    <form
-      onSubmit={submit}
-      aria-label={`Add a task to ${stage.name}`}
-      className="min-w-0 flex-1 overflow-hidden rounded-card border border-primary bg-surface shadow-rest"
-    >
-      {/* Titled with the stage it will write into. The form is indented under
-          that stage and nowhere else, but a composer that names its target is
-          the difference between adding a task and adding it somewhere. */}
-      <p className="m-0 border-b border-border bg-primary-soft px-3 py-2 text-caption font-semibold text-primary">
-        New task in {stage.name}
-      </p>
-      <div className="grid grid-cols-1 items-end gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Named by its own title — Radix wires `aria-labelledby` to it, so an
+          `aria-label` here would be dead weight the title overrides. */}
+      <SlideOverContent>
+        <SlideOverHeader>
+          {/* Titled with the stage it will write into: the panel covers the
+              right of the board, so the strip it was opened from is no longer
+              necessarily the thing under the reader's eye. */}
+          <SlideOverTitle>New task in {stage.name}</SlideOverTitle>
+        </SlideOverHeader>
+
+        <SlideOverBody>
+          <form id={`add-task-${stage.id}`} onSubmit={submit} className="flex flex-col gap-3">
         <label className="flex min-w-0 flex-col gap-1 text-caption text-content-muted sm:col-span-2">
           Task name
           <Input
@@ -1421,27 +1453,41 @@ function AddTaskForm({
           />
           Sign-off
         </label>
-      </div>
 
-      <div className="flex flex-col gap-1 px-3">
-        {submitted && nameError && <span className="text-xs text-danger">{nameError}</span>}
-        {submitted && tatError && <span className="text-xs text-danger">{tatError}</span>}
-        {serverErrors.name && <span className="text-xs text-danger">{serverErrors.name}</span>}
-        {serverErrors.tatDays && <span className="text-xs text-danger">{serverErrors.tatDays}</span>}
-      </div>
+            <div className="flex flex-col gap-1">
+              {submitted && nameError && <span className="text-xs text-danger">{nameError}</span>}
+              {submitted && tatError && <span className="text-xs text-danger">{tatError}</span>}
+              {serverErrors.name && <span className="text-xs text-danger">{serverErrors.name}</span>}
+              {serverErrors.tatDays && (
+                <span className="text-xs text-danger">{serverErrors.tatDays}</span>
+              )}
+            </div>
+          </form>
+        </SlideOverBody>
 
-      <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-1">
-        <Button type="submit" size="sm" disabled={addTask.isPending}>Add task</Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => { reset(); setOpen(false) }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
+        {/* Outside the scrolling body, so Add task is reachable without
+            scrolling to the bottom of the fields. `form` is what still ties
+            the submit button to the form it sits outside of. */}
+        <SlideOverFooter>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => { reset(); setOpen(false) }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form={`add-task-${stage.id}`}
+            size="sm"
+            disabled={addTask.isPending}
+          >
+            Add task
+          </Button>
+        </SlideOverFooter>
+      </SlideOverContent>
+    </SlideOver>
   )
 }
 
@@ -1449,25 +1495,36 @@ function AddTaskForm({
  * One task, as a box inside its stage — and, when something waits on it, a box
  * holding boxes.
  *
- * <h2>The dependency is the nesting, and now literally so</h2>
+ * <h2>The dependency is written down, not drawn</h2>
  *
- * <p>A dependent task used to be a row further down the same table, drawn one
- * indent in. It is now rendered <em>inside</em> its predecessor's card, which
- * is what "starts the day that one ends" looks like. The card's body pads on
- * the left only, so a child's right edge is its parent's right edge and the
- * five meta columns stay on one line at every depth — the one thing the
- * nesting could have cost.
+ * <p>A dependent task was a card inside its predecessor's card. It is now a
+ * card beside it — every task in a stage at one level, in the order the
+ * dependency walk produces, so a held task still reads directly under what
+ * holds it and says {@code Dependency: ‹name›} rather than sitting in it. A
+ * task held by something in <em>another</em> stage names that stage too,
+ * which is the caption this card has always carried; it is simply the only
+ * form now rather than the exception.
  *
- * <h2>Step or Task is the dependency, never the depth</h2>
+ * <h2>Step or Task is the dependency, never the position</h2>
  *
- * <p>A task held by something in <em>another</em> stage is drawn at its own
- * stage's top level, because a card cannot be nested inside one in a different
- * container — and it is still a Task: something is still holding it. Reading
- * depth here would call it a Step and claim the journey starts in two places
- * at once, which is precisely the misreading the contract warns about.
+ * <p>With nothing enclosed, the marker is what separates the two: a filled
+ * disc and the <b>Parallel</b> chip for a task that waits for nothing, a
+ * hollow ring for one that is held. Reading position instead would call every
+ * card a Step and claim the journey starts in eleven places at once, which is
+ * precisely the misreading the contract warns about.
  */
-function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTemplateStep> }) {
+function TaskCard({
+  ctx,
+  node,
+  last,
+}: {
+  ctx: TaskContext
+  node: StepNode<ObJourneyTemplateStep>
+  /** The last card on this stage's rail — where the line stops. */
+  last: boolean
+}) {
   const [editing, setEditing] = React.useState(false)
+  const [confirmingRemove, setConfirmingRemove] = React.useState(false)
   const { step, depth } = node
   const {
     editable,
@@ -1501,7 +1558,6 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
      not placed this task — it always does; the fallback is so a missing entry
      draws a wrong day rather than crashing. */
   const schedule = scheduleOf.get(step.id) ?? node
-  const bar = scheduleBar(schedule, spanDays)
   const isStep = step.dependsOnStepId == null
   const parent =
     step.dependsOnStepId == null
@@ -1526,8 +1582,8 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
   /* A filter opens the path down to a hit without disturbing what the reader
      had collapsed — clear the box and the tree is as they left it. */
   const collapsed = filter == null && view.collapsed.has(taskKey(step.id))
-  const showChecklist = view.showSubtasks || filter != null
-  const children = visibleNodes(node.children, filter)
+  /** The step this task sits in, for the confirmation to name. */
+  const ownStageName = allStages.find((g) => g.id === ctx.stageId)?.name ?? 'this step'
 
   /*
     Which checklist items this task shows. With no filter, all of them. With
@@ -1543,40 +1599,54 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
     filter == null || filter.matchedTaskIds.has(step.id)
       ? step.docs
       : step.docs.filter((doc) => filter.matchedDocIds.has(doc.id))
-  /* A composer is not a search result — see `StageBlock`. */
-  const showComposer = checklistEditable && showChecklist && filter == null
   /*
-    B-131 · the composer is open but the version is published, so anything
-    added lands on clients who are already onboarding. The composer says so
-    before the admin types, rather than the toast saying it afterwards.
+    B-131 · the checklist can be written one version-state further than
+    everything else: a published ACTIVE version takes a new entry, and the
+    server back-fills it onto the journeys already running. `composerIsLive`
+    is that case, said in the panel before the admin types rather than by the
+    toast afterwards.
   */
-  const composerIsLive = showComposer && !editable
+  const composerIsLive = checklistEditable && !editable
 
   /*
-    An editable task always has a checklist composer to hide, so the chevron is
-    offered whether or not it has children yet — but only while the checklist
-    level is showing at all. Below that level a task with nothing nested under
-    it has genuinely nothing to toggle, and gets a spacer so its name still
-    lines up with its siblings'.
+    Every task carries its own control, at every level. It was offered only
+    while the Checklist level was showing, which meant the one way to see a
+    single task's checklist was to open every checklist on the board and then
+    close the others — and a task drawn with no control at all reads as a
+    task that has nothing under it.
+
+    <p>So the control is unconditional and the body follows the task's own
+    collapsed state. An empty checklist still opens, onto the line that asks
+    what has to be true before the task can complete: that is the prompt to
+    write one, and hiding it hides the prompt.
   */
-  const collapsible =
-    children.length > 0 ||
-    showComposer ||
-    (showChecklist && visibleItems.length + visibleDocs.length > 0)
-  const hasBody = !collapsed && (children.length > 0 || showChecklist)
+  const collapsible = true
+  const hasBody = !collapsed
   const headingId = `ob-task-${step.id}`
 
+  /*
+    This card's own piece of the stage's rail: a vertical run joined to the
+    card by an elbow. The run carries `+0.5rem` so it bridges the `gap-2`
+    between cards and reads as one line rather than a dashed one; on the last
+    card it stops at the elbow, the same way the board's rail stops at its
+    last node. ELBOW is the row's middle — `py-3` plus half a 22px row.
+  */
+  const ELBOW = 23
+
   return (
-    <article
-      aria-labelledby={headingId}
-      className={`rounded-card border border-border bg-app ${
-        /* The rail on a nested card. Enclosure already says "held by the card
-           around it"; this is what makes the edge findable when the parent's
-           own header has scrolled past. */
-        depth > 0 ? 'border-l-2 border-l-primary' : ''
-      }`}
-    >
-      <header className="flex items-start gap-2 px-3 py-2">
+    <li className="list-none">
+      <article
+        aria-labelledby={headingId}
+        className="relative rounded-[10px] border border-border bg-app"
+      >
+        <span
+          aria-hidden
+          className="absolute -left-[26px] w-0.5 bg-border"
+          style={{ top: 0, height: last ? ELBOW : 'calc(100% + 0.5rem)' }}
+        />
+        <span aria-hidden className="absolute -left-[26px] h-0.5 w-[26px] bg-border" style={{ top: ELBOW }} />
+
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-3">
         {collapsible ? (
           <button
             type="button"
@@ -1593,30 +1663,38 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
           <span aria-hidden className="h-5 w-5 shrink-0" />
         )}
 
-        <span className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1">
-          {/* Filled disc for a Step, ring for a Task. The two are the same
-              level of the same table, so the marker is what separates them
-              where the enclosure cannot — a cross-stage Task sits at its
-              stage's top level with nothing around it. */}
-          <span
-            aria-hidden
-            className={`mt-2 h-2.5 w-2.5 shrink-0 rounded-full ${
-              isStep ? 'bg-primary' : 'border-2 border-primary'
-            }`}
-          />
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
           {/* Depth-first, so the badge counts down the tree rather than along
               the flat sequence — the order a reader's eye takes the chain in. */}
           <span
             aria-hidden
-            className="mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-caption font-semibold tabular-nums text-primary"
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-caption font-semibold tabular-nums text-primary"
           >
             {node.number}
           </span>
           <LevelBadge>Task</LevelBadge>
-          <span id={headingId} className="min-w-0 break-words font-medium text-content">
+          {/*
+            Held or parallel, as the first thing on the row. Nothing about the
+            layout can say it now that no card contains another, so the chip
+            carries it: a filled dot for a task that waits for nothing, a ring
+            and the name of what holds it for one that does.
+          */}
+          {isStep ? (
+            <Chip variant="neutral">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />
+              Parallel
+            </Chip>
+          ) : (
+            parent && (
+              <Chip variant="info">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full border border-current" />
+                After {parent.name}
+              </Chip>
+            )
+          )}
+          <span id={headingId} className="min-w-0 break-words font-semibold text-content">
             {step.name}
           </span>
-          {isStep && <Chip variant="neutral">Parallel</Chip>}
           {/* The card the plan's last day falls on. Ties are real — two chains
               can finish together — so every task that ends on it is marked
               rather than one picked arbitrarily. */}
@@ -1631,188 +1709,207 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
           {step.description && (
             <span className="basis-full text-caption text-content-muted">{step.description}</span>
           )}
-          {depth > 0 ? (
-            parent && (
-              <span className="basis-full text-caption text-content-muted">
-                Dependency: {parent.name}
-              </span>
-            )
-          ) : crossStageParent ? (
+          {crossStageParent ? (
             /*
-              A dependency the nesting cannot draw. This card is inside no
-              other card — its predecessor is in another stage entirely — so
-              the fact is said in words rather than dropped, because a task
-              that reads as parallel when it is actually held is the one
-              misreading this line exists to prevent.
+              The chip says what holds this task; this says where that lives,
+              and only when it is somewhere else. A task waiting on one in
+              another step is the case a reader is most likely to misread —
+              the name alone looks like a sibling — so the step is named.
             */
             <span className="basis-full text-caption text-content-muted">
               Dependency: {crossStageParent.name} · {crossStageParent.stageName}
             </span>
           ) : (
-            /* The Parallel chip above is this fact for the eye; this is the
-               same fact spelled out for a screen reader, which has no chip. */
-            <span className="sr-only">No dependency, runs in parallel</span>
+            isStep && (
+              /* The Parallel chip above is this fact for the eye; this is the
+                 same fact spelled out for a screen reader, which has no chip. */
+              <span className="sr-only">No dependency, runs in parallel</span>
+            )
           )}
         </span>
 
-        <MetaCells
-          editable={editable}
-          schedule={
-            <>
-              <span className="block whitespace-nowrap text-caption text-content-muted">
-                <span className="sr-only">Schedule: </span>
-                {scheduleLabel(schedule)}
-              </span>
-              {/* Decorative — the range above it is the accessible form of the
-                  same fact, so a screen reader hears it once. */}
+        <span className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-caption tabular-nums text-content-muted">
+          <span className="whitespace-nowrap">
+            <span className="sr-only">Schedule: </span>
+            {scheduleLabel(schedule)}
+            {" / "}
+            <span className="sr-only">TAT: </span>
+            {step.tatDays}d
+            <span className="sr-only"> working days</span>
+          </span>
+
+          {/* Nobody pinned is the usual state and is spelled out rather than
+              drawn as a dash: the task goes to whoever is running the project
+              it is boarded for. A dash read as missing configuration and sent
+              people hunting for a field. */}
+          <span className="flex min-w-0 items-center gap-2">
+            {implementor != null && (
               <span
                 aria-hidden
-                className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-surface"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary"
               >
-                <span
-                  className="block h-full rounded-full bg-primary"
-                  style={{ marginLeft: bar.left, width: bar.width }}
-                />
+                {initials(implementor)}
               </span>
-            </>
-          }
-          tat={
-            <span className="tabular-nums text-content">
-              <span className="sr-only">TAT: </span>
-              {step.tatDays}
-              <span className="sr-only"> working days</span>
-            </span>
-          }
-          owner={
-            <span className="flex items-start gap-2">
-              {implementor != null && (
-                <span
-                  aria-hidden
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary"
-                >
-                  {initials(implementor)}
+            )}
+            <span className={implementor == null ? "text-content-muted" : "text-content"}>
+              <span className="sr-only">Implementor: </span>
+              {implementor ?? (
+                <span title="Nobody is pinned here, so this task goes to whoever is running the project — set on the project, not on the service">
+                  The project’s implementor
                 </span>
               )}
-              <span className="min-w-0">
-                {/* Nobody pinned is the usual state and is spelled out rather
-                    than drawn as a dash: the task goes to whoever is running
-                    the project it is boarded for. A dash read as missing
-                    configuration and sent people hunting for a field. */}
-                <span
-                  className={`block break-words text-caption ${
-                    implementor == null ? 'text-content-muted' : 'text-content'
-                  }`}
-                >
-                  <span className="sr-only">Implementor: </span>
-                  {implementor ?? (
-                    <span title="Nobody is pinned here, so this task goes to whoever is running the project — set on the project, not on the service">
-                      The project&rsquo;s implementor
-                    </span>
-                  )}
-                </span>
-              </span>
             </span>
-          }
-          signoff={
-            /* Read-only here and editable in the card's own Edit form, rather
-               than a live control: sign-off is saved together with the TAT and
-               the owner under one precondition, and a cell that wrote on each
-               tick would make that form's Cancel a lie about one of its
-               fields. */
-            step.requiresSignoff ? (
-              <Chip variant="success" title="Change it in this task's Edit form">
-                <span className="sr-only">Client sign-off: </span>Yes
-              </Chip>
-            ) : (
-              <span className="text-content-muted">
-                <span className="sr-only">Client sign-off: no</span>
-                <span aria-hidden>—</span>
-              </span>
-            )
-          }
-          order={
-            <span className="inline-flex gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 px-0"
-                disabled={index <= 0}
-                aria-label={`Move ${step.name} up`}
-                onClick={() => ctx.onMove(ctx.stageId, index, index - 1)}
-              >
-                ↑
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 px-0"
-                disabled={index < 0 || index === total - 1}
-                aria-label={`Move ${step.name} down`}
-                onClick={() => ctx.onMove(ctx.stageId, index, index + 1)}
-              >
-                ↓
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 px-0"
-                aria-label={`Edit ${step.name}`}
-                onClick={() => setEditing((open) => !open)}
-              >
-                ✎
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 px-0"
-                aria-label={`Remove ${step.name}`}
-                onClick={() => ctx.onRemove(step)}
-              >
-                ✕
-              </Button>
-            </span>
-          }
-        />
-      </header>
+          </span>
 
-      {editing && editable && (
-        <div className="px-3 pb-3">
-          <EditStepForm
+          {/* Read-only here and editable in the card’s own Edit form, rather
+              than a live control: sign-off is saved together with the TAT and
+              the owner under one precondition, and a cell that wrote on each
+              tick would make that form’s Cancel a lie about one of its
+              fields. */}
+          {step.requiresSignoff ? (
+            <Chip variant="success" title="Change it in this task's Edit form">
+              <span className="sr-only">Client sign-off: </span>Yes
+            </Chip>
+          ) : (
+            <span className="sr-only">Client sign-off: no</span>
+          )}
+        </span>
+
+        {editable && (
+          <span className="inline-flex shrink-0 gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 px-0"
+              disabled={index <= 0}
+              aria-label={`Move ${step.name} up`}
+              onClick={() => ctx.onMove(ctx.stageId, index, index - 1)}
+            >
+              ↑
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 px-0"
+              disabled={index < 0 || index === total - 1}
+              aria-label={`Move ${step.name} down`}
+              onClick={() => ctx.onMove(ctx.stageId, index, index + 1)}
+            >
+              ↓
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 px-0"
+              aria-label={`Edit ${step.name}`}
+              onClick={() => setEditing((open) => !open)}
+            >
+              ✎
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 px-0"
+              aria-label={`Remove ${step.name}`}
+              onClick={() => setConfirmingRemove(true)}
+            >
+              ✕
+            </Button>
+          </span>
+        )}
+
+        {/* The end of the task, mirroring "+ Add task" at the end of its
+            step's row. `checklistEditable` rather than `editable`: B-131
+            opened adding a checklist entry on an ACTIVE version. */}
+        {checklistEditable && (
+          <AddChecklistSlideOver
             templateId={ctx.templateId}
             step={step}
-            siblings={allSteps}
-            users={users}
-            etag={ctx.etag}
-            onClose={() => setEditing(false)}
+            composerIsLive={composerIsLive}
           />
-        </div>
-      )}
+        )}
+      </header>
 
-      {hasBody && (
-        /* Left padding only. See `MetaCells`: this is the half of the column
-           alignment that lives on the cards. */
-        <div className="flex flex-col gap-2 pb-2 pl-6">
-          {children.map((child) => (
-            <TaskCard key={child.step.id} ctx={ctx} node={child} />
-          ))}
-          {showChecklist && (
-            <ChecklistPanel
+      {/*
+        Editing opens on the right, like adding does. It expanded in place
+        under the row, which pushed every task below it down the board and
+        moved the row being edited out from under the cursor — and it put a
+        five-field form inside a card whose own body is the checklist, so a
+        task being edited and a task showing its checklist looked alike.
+      */}
+      {editable && (
+        <SlideOver
+          open={editing}
+          onOpenChange={setEditing}
+        >
+          <SlideOverContent>
+            <SlideOverHeader>
+              <SlideOverTitle>Edit {step.name}</SlideOverTitle>
+            </SlideOverHeader>
+            <EditStepForm
               templateId={ctx.templateId}
               step={step}
-              items={visibleItems}
-              docs={visibleDocs}
-              editable={editable}
-              showComposer={showComposer}
-              composerIsLive={composerIsLive}
+              siblings={allSteps}
+              users={users}
+              etag={ctx.etag}
+              onClose={() => setEditing(false)}
             />
-          )}
-        </div>
+          </SlideOverContent>
+        </SlideOver>
       )}
-    </article>
+
+      {/*
+        Removing a task is a write nothing on this page undoes, so it asks
+        first. The dependents check still happens on the server — this is the
+        "did you mean to" in front of it, not a replacement for it.
+      */}
+      <Modal open={confirmingRemove} onOpenChange={setConfirmingRemove}>
+        <ModalContent>
+          <ModalHeader>
+            <ModalTitle>Remove {step.name}?</ModalTitle>
+            <ModalDescription>
+              This takes the task out of {ownStageName} along with its checklist
+              {step.items.length + step.docs.length > 0
+                ? ` — ${step.items.length + step.docs.length} item${
+                    step.items.length + step.docs.length === 1 ? '' : 's'
+                  }`
+                : ''}
+              . Anything that waits on it has to be re-pointed first. It cannot be undone.
+            </ModalDescription>
+          </ModalHeader>
+          <ModalFooter>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmingRemove(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                setConfirmingRemove(false)
+                ctx.onRemove(step)
+              }}
+            >
+              Remove task
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {hasBody && (
+        <ChecklistPanel
+          templateId={ctx.templateId}
+          step={step}
+          items={visibleItems}
+          docs={visibleDocs}
+          editable={editable}
+        />
+      )}
+      </article>
+    </li>
   )
 }
 
@@ -1843,17 +1940,13 @@ function TaskCard({ ctx, node }: { ctx: TaskContext; node: StepNode<ObJourneyTem
  * and the files together; one ordering across both needs one sequence across
  * both, which is a contract change rather than a screen's decision.
  *
- * <h2>The composer is the last row of the grid</h2>
+ * <h2>The panel reports; it no longer writes</h2>
  *
- * <p>Under the columns it writes into, so the type and the Required tick sit
- * where they will be read back. Enter files the item and returns the cursor to
- * an empty label with the type and the tick <em>unchanged</em>, because a
- * checklist is written eight items at a time and re-picking "Check · Required"
- * eight times is what the old pair of composers charged for.
- *
- * <p>No {@code <form>}: Enter is wired on the label field and the button is a
- * plain click, which is the same two ways in without a form element wrapping
- * table rows.
+ * <p>The composer was the last row of this grid. It is now
+ * {@link AddChecklistSlideOver}, opened from "+ Add checklist" at the end of
+ * the task's own row — the same place "+ Add task" sits at the end of a
+ * stage's strip, one level up. The fields it asks for are the ones that were
+ * in the row, and what they write is unchanged.
  *
  * <p>The tick boxes the mockup drew against each item are gone with the rest
  * of the decorative controls. This screen defines the checklist; the client's
@@ -1866,8 +1959,6 @@ function ChecklistPanel({
   items,
   docs,
   editable,
-  showComposer,
-  composerIsLive,
 }: {
   templateId: number
   step: ObJourneyTemplateStep
@@ -1877,27 +1968,14 @@ function ChecklistPanel({
   docs: readonly ObJourneyTemplateStep['docs'][number][]
   /**
    * The strict rule — a draft. Gates removing a row and nothing else here.
-   * Deliberately narrower than {@link composerIsLive}'s condition: B-131
-   * opened *adding* on a published version, not removing. A row a client has
+   * Deliberately narrower than the condition on adding: B-131 opened
+   * *adding* on a published version, not removing. A row a client has
    * already answered cannot be taken back out from under them.
    */
   editable: boolean
-  showComposer: boolean
-  /**
-   * B-131 · the composer is open on a published (active) version, so a new
-   * entry reaches the clients already onboarding.
-   */
-  composerIsLive: boolean
 }) {
-  const addItem = useAddJourneyTemplateStepItem()
   const removeItem = useRemoveJourneyTemplateStepItem()
-  const addDoc = useAddJourneyTemplateStepDoc()
   const removeDoc = useRemoveJourneyTemplateStepDoc()
-
-  const [label, setLabel] = React.useState('')
-  const [kind, setKind] = React.useState<'check' | 'document'>('check')
-  const [gating, setGating] = React.useState(true)
-  const labelRef = React.useRef<HTMLInputElement>(null)
 
   const rows = [
     ...items.map((item) => ({
@@ -1916,6 +1994,185 @@ function ChecklistPanel({
     })),
   ]
   const gatingCount = rows.filter((row) => row.gating).length
+
+  /* The row the ✕ was pressed on, held while the confirmation is up. */
+  const [confirming, setConfirming] = React.useState<(typeof rows)[number] | null>(null)
+
+  const remove = async (row: (typeof rows)[number]) => {
+    setConfirming(null)
+    try {
+      if (row.kind === 'document') {
+        await removeDoc.mutateAsync({ templateId, docId: row.id })
+      } else {
+        await removeItem.mutateAsync({ templateId, itemId: row.id })
+      }
+      toast({ title: `${row.label} removed` })
+    } catch (error) {
+      toast({
+        title: 'Could not remove that checklist item',
+        description: problemDetail(error),
+        variant: 'danger',
+      })
+    }
+  }
+
+  return (
+    /* The third level, and the innermost. It was a four-column grid; nothing
+       on this board is in columns now, so it is a list on a rail of its own —
+       one step in from the task's, the way the task's is one step in from the
+       board's. */
+    /* The panel carries the name, not the list inside it: a task with an
+       empty checklist has no list to hang it on, and it still has to be
+       findable — that is the state most of a new service is in. */
+    <div role="group" aria-label={`Checklist for ${step.name}`} className="pb-3 pl-[30px] pr-3.5">
+      <div className="flex flex-wrap items-center gap-2 py-2">
+        <span className="text-caption font-semibold uppercase tracking-wide text-content-muted">
+          Checklist
+        </span>
+        {/* What actually gates the task, said in the caption — so a reader
+            knows before opening anything whether this list is six suggestions
+            or six blockers. */}
+        <span className="rounded-chip bg-subtle px-2.5 py-0.5 text-caption text-content-muted">
+          {rows.length === 0
+            ? 'Nothing yet'
+            : `${rows.length} item${rows.length === 1 ? '' : 's'} · ${gatingCount} required`}
+        </span>
+        <span className="ml-auto text-caption text-content-muted">
+          Defined here, answered on the client&rsquo;s journey
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="m-0 text-caption text-content-muted">
+          Nothing on this checklist yet. What has to be true before {step.name} can complete?
+        </p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col p-0 pl-6">
+          {rows.map((row, index) => (
+            <li key={row.key} className="relative flex items-center gap-3 py-1.5 text-caption">
+              <span
+                aria-hidden
+                className="absolute -left-6 w-0.5 bg-border"
+                style={{ top: 0, height: index === rows.length - 1 ? 17 : '100%' }}
+              />
+              <span
+                aria-hidden
+                className="absolute -left-6 h-0.5 w-[18px] bg-border"
+                style={{ top: 17 }}
+              />
+              {/* The order the client's journey page will ask for them in. */}
+              <span className="w-4 shrink-0 text-right tabular-nums text-content-muted">
+                {index + 1}
+              </span>
+              {/* A tick box for something somebody confirms, a dashed one for
+                  a file that has to arrive — the kind, before the words. */}
+              <span
+                aria-hidden
+                className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-[1.5px] border-border text-[9px] leading-none text-content-muted ${
+                  row.kind === 'document' ? 'border-dashed' : ''
+                }`}
+              >
+                {row.kind === 'document' ? '↓' : '✓'}
+              </span>
+              <span className="min-w-0 flex-1 break-words text-content">{row.label}</span>
+              <Chip variant="neutral">{row.kind === 'document' ? 'Document' : 'Check'}</Chip>
+              {row.gating ? (
+                <Chip variant="info">Required</Chip>
+              ) : (
+                <span className="text-content-muted">Optional</span>
+              )}
+              {editable && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${row.label}`}
+                  onClick={() => setConfirming(row)}
+                  className="shrink-0 rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/*
+        A checklist entry is removed for good and, on a live service, out
+        from under clients who may already have answered it — so the ✕ asks
+        before it writes, and says which of the two it is about to take.
+      */}
+      <Modal open={confirming != null} onOpenChange={(next) => !next && setConfirming(null)}>
+        <ModalContent>
+          <ModalHeader>
+            <ModalTitle>
+              Remove this {confirming?.kind === 'document' ? 'document' : 'check'}?
+            </ModalTitle>
+            <ModalDescription>
+              “{confirming?.label}” comes off {step.name}&rsquo;s checklist
+              {confirming?.gating
+                ? ', and the task stops being gated by it'
+                : ''}
+              . It cannot be undone.
+            </ModalDescription>
+          </ModalHeader>
+          <ModalFooter>
+            <Button variant="secondary" size="sm" onClick={() => setConfirming(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => confirming && void remove(confirming)}
+            >
+              Remove
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </div>
+  )
+}
+
+/**
+ * "+ Add checklist" — what the last row of the checklist grid used to be,
+ * asked for in a panel from the right instead.
+ *
+ * <p>The three controls are the composer's three, in its order: the label,
+ * the <b>Type</b> that decides which of the two routes it writes to, and
+ * <b>Required</b>, which decides whether the entry gates its task. Nothing
+ * was added and nothing dropped — {@code items} and {@code docs} are still
+ * two arrays and four routes, and the type is still what picks between them.
+ *
+ * <p>Filing an item leaves the panel open with the type and the tick
+ * <em>unchanged</em> and the cursor back in an empty label, because a
+ * checklist is written eight items at a time and re-picking "Check ·
+ * Required" eight times is what the old pair of composers charged for.
+ * Enter files it too, which is the second way in the composer row had.
+ */
+function AddChecklistSlideOver({
+  templateId,
+  step,
+  composerIsLive,
+}: {
+  templateId: number
+  step: ObJourneyTemplateStep
+  /**
+   * B-131 · this version is published and active, so a new entry reaches the
+   * clients already onboarding. Said before the admin types rather than by
+   * the toast afterwards — the panel looks identical on a draft and on a live
+   * service, and the difference is who sees the result.
+   */
+  composerIsLive: boolean
+}) {
+  const addItem = useAddJourneyTemplateStepItem()
+  const addDoc = useAddJourneyTemplateStepDoc()
+
+  const [open, setOpen] = React.useState(false)
+  const [label, setLabel] = React.useState('')
+  const [kind, setKind] = React.useState<'check' | 'document'>('check')
+  const [gating, setGating] = React.useState(true)
+  const labelRef = React.useRef<HTMLInputElement>(null)
+
   const pending = addItem.isPending || addDoc.isPending
 
   const submit = async () => {
@@ -1968,191 +2225,120 @@ function ChecklistPanel({
     }
   }
 
-  const remove = async (row: (typeof rows)[number]) => {
-    try {
-      if (row.kind === 'document') {
-        await removeDoc.mutateAsync({ templateId, docId: row.id })
-      } else {
-        await removeItem.mutateAsync({ templateId, itemId: row.id })
-      }
-      toast({ title: `${row.label} removed` })
-    } catch (error) {
-      toast({
-        title: 'Could not remove that checklist item',
-        description: problemDetail(error),
-        variant: 'danger',
-      })
-    }
-  }
-
   return (
-    /* `mr-3` puts the panel's right edge on the same line the cards above it
-       end on — the task body pads left only, so this is where the column
-       alignment is paid for at the innermost level. */
-    <div className="mr-3 overflow-hidden rounded-control border border-border bg-surface">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
-        <span className="text-caption font-semibold uppercase tracking-wide text-content">
-          Checklist
-        </span>
-        {/* What actually gates the task, said in the caption — so a reader
-            knows before opening anything whether this list is six suggestions
-            or six blockers. */}
-        <span className="rounded-chip border border-border bg-subtle px-2 py-0.5 text-caption text-content-muted">
-          {rows.length === 0
-            ? 'Nothing yet'
-            : `${rows.length} item${rows.length === 1 ? '' : 's'} · ${gatingCount} required`}
-        </span>
-        <span className="ml-auto text-caption text-content-muted">
-          Defined here, answered on the client&rsquo;s journey
-        </span>
-      </div>
-      <table className="w-full border-collapse text-caption" aria-label={`Checklist for ${step.name}`}>
-        <thead>
-          <tr className="border-b border-border text-left">
-            <th scope="col" className="w-10 px-2 py-1.5 text-right font-semibold text-content-muted">
-              #
-            </th>
-            <th scope="col" className="px-2 py-1.5 font-semibold text-content-muted">Item</th>
-            <th scope="col" className="w-28 px-2 py-1.5 font-semibold text-content-muted">Type</th>
-            <th scope="col" className="w-28 px-2 py-1.5 font-semibold text-content-muted">
-              Required
-            </th>
-            <th scope="col" className="w-10 px-2 py-1.5">
-              <span className="sr-only">Remove</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr className="border-b border-border">
-              <td colSpan={5} className="px-2 py-2 text-content-muted">
-                Nothing on this checklist yet. What has to be true before {step.name} can complete?
-              </td>
-            </tr>
-          )}
-          {rows.map((row, index) => (
-            <tr key={row.key} className="border-b border-border">
-              <td className="px-2 py-1.5 text-right align-top tabular-nums text-content-muted">
-                {index + 1}
-              </td>
-              <td className="px-2 py-1.5 align-top">
-                <span className="min-w-0 break-words text-content">{row.label}</span>
-              </td>
-              <td className="px-2 py-1.5 align-top">
-                <Chip variant="neutral">{row.kind === 'document' ? 'Document' : 'Check'}</Chip>
-              </td>
-              <td className="px-2 py-1.5 align-top">
-                {row.gating ? (
-                  <Chip variant="info">Required</Chip>
-                ) : (
-                  <span className="text-content-muted">Optional</span>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-center align-top">
-                {editable && (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${row.label}`}
-                    onClick={() => remove(row)}
-                    className="rounded-chip leading-none text-content-muted hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    ✕
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {showComposer && (
-            <tr className="bg-app">
-              <td aria-hidden className="px-2 py-2 text-right text-content-muted">
-                +
-              </td>
-              <td className="px-2 py-2">
-                <Input
-                  ref={labelRef}
-                  value={label}
-                  onChange={(event) => setLabel(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      void submit()
-                    }
-                  }}
-                  placeholder="Add a checklist item…"
-                  aria-label={`New checklist item for ${step.name}`}
-                  className="h-8 text-caption"
-                />
-              </td>
-              <td className="px-2 py-2">
-                <select
-                  value={kind}
-                  onChange={(event) => setKind(event.target.value as 'check' | 'document')}
-                  aria-label={`Type of the new checklist item for ${step.name}`}
-                  title={
-                    composerIsLive
-                      ? 'Only a check can be added to a published service. A required document is a new obligation on a client who may already have finished this task, so it stays a revision.'
-                      : undefined
+    <SlideOver
+      open={open}
+      onOpenChange={(next) => {
+        /* Only the label is thrown away on close. The type and the tick are
+           the reader's working setting, exactly as they are between two
+           items filed without closing. */
+        if (!next) setLabel('')
+        setOpen(next)
+      }}
+    >
+      {/* Named for the eye by its position on the task's row, and for a
+          screen reader by the task itself — see the same note on the stage
+          strip's button. */}
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        aria-label={`Add a checklist item to ${step.name}`}
+        onClick={() => setOpen(true)}
+      >
+        + Add checklist
+      </Button>
+
+      {/* Named by its title, exactly as the add-task panel is. */}
+      <SlideOverContent>
+        <SlideOverHeader>
+          <SlideOverTitle>New checklist item for {step.name}</SlideOverTitle>
+        </SlideOverHeader>
+
+        <SlideOverBody>
+          <div className="flex flex-col gap-3">
+            <label className="flex min-w-0 flex-col gap-1 text-caption text-content-muted">
+              Item
+              <Input
+                ref={labelRef}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void submit()
                   }
-                  className="h-8 w-full rounded-control border border-border bg-surface px-2 text-caption text-content"
-                >
-                  <option value="check">Check</option>
-                  {/*
-                    B-131 · disabled on a published version, because the server
-                    refuses it there: `addStepDoc` is still guarded by
-                    `requireEditable`, and only `addStepItem` was opened up.
-                    Offering it would be a 409 the admin could do nothing
-                    about. Disabled rather than removed so the option's absence
-                    does not read as this screen having forgotten documents
-                    exist — and the select's `title` says why.
-                  */}
-                  <option value="document" disabled={composerIsLive}>
-                    Document
-                  </option>
-                </select>
-              </td>
-              <td className="px-2 py-2">
-                <label className="flex items-center gap-2 text-caption text-content">
-                  <input
-                    type="checkbox"
-                    checked={gating}
-                    onChange={(event) => setGating(event.target.checked)}
-                    className="h-4 w-4 rounded border-border"
-                  />
-                  Required
-                </label>
-              </td>
-              <td className="px-2 py-2 text-center">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={pending || !label.trim()}
-                  onClick={() => void submit()}
-                >
-                  Add
-                </Button>
-              </td>
-            </tr>
-          )}
-          {/*
-            B-131 · said before the admin types, not after they have typed.
-            The composer looks identical on a draft and on a live service, and
-            the difference between the two is who sees the result — on a live
-            one it is clients who are mid-journey right now.
-          */}
-          {composerIsLive && (
-            <tr>
-              <td />
-              <td colSpan={4} className="px-2 pb-2 text-caption text-content-muted">
+                }}
+                placeholder="Add a checklist item…"
+                aria-label={`New checklist item for ${step.name}`}
+                className="h-8 text-caption"
+              />
+            </label>
+
+            <label className="flex min-w-0 flex-col gap-1 text-caption text-content-muted">
+              Type
+              <select
+                value={kind}
+                onChange={(event) => setKind(event.target.value as 'check' | 'document')}
+                aria-label={`Type of the new checklist item for ${step.name}`}
+                title={
+                  composerIsLive
+                    ? 'Only a check can be added to a published service. A required document is a new obligation on a client who may already have finished this task, so it stays a revision.'
+                    : undefined
+                }
+                className="h-8 rounded-control border border-border bg-surface px-2 text-caption text-content"
+              >
+                <option value="check">Check</option>
+                {/*
+                  B-131 · disabled on a published version, because the server
+                  refuses it there: `addStepDoc` is still guarded by
+                  `requireEditable`, and only `addStepItem` was opened up.
+                  Offering it would be a 409 the admin could do nothing
+                  about. Disabled rather than removed so the option's absence
+                  does not read as this screen having forgotten documents
+                  exist — and the select's `title` says why.
+                */}
+                <option value="document" disabled={composerIsLive}>
+                  Document
+                </option>
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2 text-caption text-content">
+              <input
+                type="checkbox"
+                checked={gating}
+                onChange={(event) => setGating(event.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              Required
+            </label>
+
+            {composerIsLive && (
+              <p className="m-0 text-caption text-content-muted">
                 This service is live. A check added here appears immediately on the clients already
                 onboarding with this version, and gates their task if it is Required. Clients
                 boarded on an earlier version keep the checklist they started on.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+              </p>
+            )}
+          </div>
+        </SlideOverBody>
+
+        <SlideOverFooter>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={pending || !label.trim()}
+            onClick={() => void submit()}
+          >
+            Add
+          </Button>
+        </SlideOverFooter>
+      </SlideOverContent>
+    </SlideOver>
   )
 }
 
@@ -2299,10 +2485,12 @@ function EditStepForm({
   }
 
   return (
+    /* No card of its own any more: the panel it opens in is the container,
+       and a bordered box inside a bordered panel is one border too many. */
     <form
       onSubmit={submit}
       aria-label={`Edit ${step.name}`}
-      className="flex flex-col gap-3 rounded-control border border-border bg-subtle p-3"
+      className="flex flex-1 flex-col gap-3 overflow-y-auto"
     >
       <p className="m-0 text-caption text-content-muted">
         Editing <b className="text-content">{step.name}</b>. Its name comes from the
@@ -2310,7 +2498,7 @@ function EditStepForm({
         step instead.
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3">
         <div className="flex min-w-0 flex-col gap-1 text-sm">
           <label htmlFor={`edit-step-tat-${step.id}`} className="font-medium text-content">
             TAT (working days)

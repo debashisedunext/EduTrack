@@ -18,16 +18,16 @@ export interface DelayCell {
  * Three states, not two, and the third is the one that matters.
  *
  * `delayedByDays` is null both for "on time" and for "the question does not
- * apply", and folding them would print **On time** against a project whose gate
- * has never opened — which reads as praise for work nobody has started.
- * `gateStatus` is what separates them.
+ * apply", and folding them would print **On time** against a project whose
+ * journeys have never opened — which reads as praise for work nobody has
+ * started. `gateStatus` is what separates them.
  */
 export function delayCell(project: ObProject): DelayCell {
   if (project.gateStatus === 'LOCKED') {
     return {
       label: 'Not started',
       tone: 'unknown',
-      hint: 'No clock is running: this project’s journeys are still behind the prerequisite gate.',
+      hint: 'No clock is running: this project’s journeys have not opened yet.',
     }
   }
   if (project.status === 'ON_HOLD' || project.status === 'DROPPED') {
@@ -52,14 +52,9 @@ export function delayCell(project: ObProject): DelayCell {
 
 /**
  * What the Current stage column prints.
- *
- * A locked project has no running stage and saying "—" would look like missing
- * data; §9's own words for that state are "Prerequisites pending", and this is
- * the column that carries them.
  */
 export function currentStageLabel(project: ObProject): string {
   if (project.currentStage) return project.currentStage
-  if (project.gateStatus === 'LOCKED') return 'Prerequisites pending'
   if (project.status === 'COMPLETED') return 'Complete'
   return '—'
 }

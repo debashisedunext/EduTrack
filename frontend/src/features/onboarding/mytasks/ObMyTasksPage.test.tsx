@@ -10,16 +10,21 @@ import { server } from '@/mocks/server'
 import { ObMyTasksPage } from './ObMyTasksPage'
 
 /**
- * The implementor's queue — the five columns, and the two things that are easy
- * to get wrong about them: the status is a coloured circle that must never be
- * colour alone, and the rows are the caller's because the endpoint says so
- * rather than because the page filtered them.
+ * The implementor's queue — the five columns, the four tabs it is cut into,
+ * and two things that are easy to get wrong: the status is a coloured circle
+ * that must never be colour alone, and the rows are the caller's because the
+ * endpoint says so rather than because the page filtered them.
+ *
+ * `ROWS` below all fall in the default "Work in progress" tab (statuses
+ * `IN_PROGRESS`/`BLOCKED`/`WAITING_ON_CLIENT`), so the general column,
+ * popup and pager tests never have to switch tabs to find their row.
+ * `TAB_ROWS`, further down, is what exercises the four-way split itself.
  */
 const ROWS = [
   {
     taskId: 1841,
     taskName: 'Week off',
-    status: 'PENDING',
+    status: 'IN_PROGRESS',
     dueAt: '2026-09-16T13:00:00Z',
     isOverdue: false,
     projectId: 7,
@@ -103,7 +108,11 @@ function journeyStep(id: number, name: string) {
 }
 
 /** Every query string the page asked for, in order. */
-function stubQueue(rows: unknown[] = ROWS, escalations: unknown[] = []) {
+function stubQueue(
+  rows: unknown[] = ROWS,
+  escalations: unknown[] = [],
+  metaOverrides: Record<string, unknown> = {},
+) {
   const asked: string[] = []
 
   server.use(
@@ -126,7 +135,7 @@ function stubQueue(rows: unknown[] = ROWS, escalations: unknown[] = []) {
 
       return HttpResponse.json({
         data: page,
-        meta: { nextCursor: hasMore ? String(end) : null, hasMore },
+        meta: { nextCursor: hasMore ? String(end) : null, hasMore, ...metaOverrides },
       })
     }),
   )
@@ -134,11 +143,11 @@ function stubQueue(rows: unknown[] = ROWS, escalations: unknown[] = []) {
   return asked
 }
 
-function renderQueue() {
+function renderQueue(initialPath = '/onboarding/my-tasks') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/onboarding/my-tasks']}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <ObMyTasksPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -154,37 +163,42 @@ describe('My Tasks', () => {
     expect(headers.map((h) => h.textContent)).toEqual([
       'Project',
       'Task',
-      'Module service step',
+      'Module',
       'Due date',
       'Status',
     ])
   })
 
-  /** Client with project, service with step — one cell each, and the code kept. */
-  it('lists a task with its client and project, and its service and step', async () => {
+  /**
+   * Project with its client beneath it, step with its module beneath it —
+   * each pair two lines in one cell, the specific value on top and the code
+   * kept with the client.
+   */
+  it('lists a task with its client below the project, and its module below the step', async () => {
     stubQueue()
     renderQueue()
 
     const row = (await screen.findByText('Week off')).closest('tr')!
-    expect(within(row).getByText('DAV School — DAV Proj')).toBeInTheDocument()
+    expect(within(row).getByText('DAV Proj')).toBeInTheDocument()
+    expect(within(row).getByText('DAV School')).toBeInTheDocument()
     expect(within(row).getByText('(DAV-101)')).toBeInTheDocument()
-    expect(within(row).getByText('Student Attendance — Configuration')).toBeInTheDocument()
-    expect(within(row).getByRole('img', { name: 'Pending' })).toBeInTheDocument()
+    expect(within(row).getByText('Configuration')).toBeInTheDocument()
+    expect(within(row).getByText('Student Attendance')).toBeInTheDocument()
+    expect(within(row).getByRole('img', { name: 'In process' })).toBeInTheDocument()
   })
 
   /**
    * Four hues in a fixed column, the task strip's own — scanned rather than
    * read. The six statuses survive as each dot's name, which is what keeps the
-   * column readable without colour (blueprint §12.1).
+   * column readable without colour (blueprint §12.1). The `PENDING` dot is
+   * covered on the "Pending task" tab further down, where a `PENDING` row
+   * actually lives.
    */
   it('shows the status as a coloured circle, named', async () => {
     stubQueue()
     renderQueue()
 
-    const pending = (await screen.findByText('Week off')).closest('tr')!
-    expect(within(pending).getByTestId('ob-task-dot')).toHaveAttribute('data-state', 'PENDING')
-
-    const waiting = screen.getByText('Report card template').closest('tr')!
+    const waiting = (await screen.findByText('Report card template')).closest('tr')!
     const dot = within(waiting).getByTestId('ob-task-dot')
     expect(dot).toHaveAttribute('data-state', 'IN_PROCESS')
     expect(dot).toHaveAccessibleName('In process — waiting on client')
@@ -202,7 +216,8 @@ describe('My Tasks', () => {
     renderQueue()
 
     const row = (await screen.findByText('Fee structure')).closest('tr')!
-    expect(within(row).getByText('DAV School — EDUNEXT-ERP')).toBeInTheDocument()
+    expect(within(row).getByText('EDUNEXT-ERP')).toBeInTheDocument()
+    expect(within(row).getByText('DAV School')).toBeInTheDocument()
   })
 
   /**
@@ -241,7 +256,7 @@ describe('My Tasks', () => {
       'href',
       '/onboarding/my-tasks/1841',
     )
-    expect(screen.getByRole('link', { name: 'DAV School — DAV Proj' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'DAV Proj' })).toHaveAttribute(
       'href',
       '/onboarding/projects/7',
     )
@@ -504,5 +519,254 @@ describe('My Tasks', () => {
     renderQueue()
 
     expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument()
+  })
+
+  /**
+   * One row per tab, plus a fifth that belongs to two at once — an
+   * `IN_PROGRESS` task with a row a manager has already verified, which is
+   * what "Approved by manager" actually shows (see `myTasks.ts` for why: a
+   * task only reaches `DONE`, and leaves this endpoint, once every row is
+   * verified — this is the earlier signal, on a task still being worked).
+   */
+  const TAB_ROWS = [
+    {
+      ...ROWS[0],
+      taskId: 3001,
+      taskName: 'Configure fee heads',
+      status: 'BLOCKED',
+      dueAt: '2026-09-20T10:00:00Z',
+      rowsApproved: 0,
+    },
+    {
+      ...ROWS[0],
+      taskId: 3002,
+      taskName: 'Import gradebook',
+      status: 'IN_PROGRESS',
+      dueAt: '2026-09-18T10:00:00Z',
+      rowsApproved: 2,
+    },
+    {
+      ...ROWS[0],
+      taskId: 3003,
+      taskName: 'Attendance policy',
+      status: 'WAITING_ON_CLIENT',
+      dueAt: null,
+      rowsApproved: 0,
+    },
+    {
+      ...ROWS[0],
+      taskId: 3004,
+      taskName: 'Timetable review',
+      status: 'PENDING_REVIEW',
+      dueAt: '2026-09-19T10:00:00Z',
+      rowsApproved: 0,
+    },
+    {
+      ...ROWS[0],
+      taskId: 3005,
+      taskName: 'Website domain',
+      status: 'PENDING',
+      dueAt: '2026-09-25T10:00:00Z',
+      rowsApproved: 0,
+    },
+  ]
+
+  describe('the tabs', () => {
+    it('opens on Work in progress, showing only the tasks being worked', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      expect(await screen.findByRole('tab', { selected: true })).toHaveAccessibleName(
+        /Work in progress/,
+      )
+      expect(await screen.findByText('Configure fee heads')).toBeInTheDocument()
+      expect(screen.getByText('Import gradebook')).toBeInTheDocument()
+      expect(screen.getByText('Attendance policy')).toBeInTheDocument()
+
+      expect(screen.queryByText('Timetable review')).not.toBeInTheDocument()
+      expect(screen.queryByText('Website domain')).not.toBeInTheDocument()
+    })
+
+    /**
+     * The one tab that reorders its rows — soonest due date first, a task
+     * with no due date yet sorting last, same as the queue's own rule for a
+     * task that has not activated.
+     */
+    it('sorts Work in progress by due date, soonest first', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      const table = await screen.findByRole('table')
+      const names = within(table)
+        .getAllByRole('row')
+        .slice(1) // drop the header row
+        .map((row) => within(row).getByRole('button').textContent)
+
+      expect(names).toEqual(['Import gradebook', 'Configure fee heads', 'Attendance policy'])
+    })
+
+    it('shows only rows a manager has approved under Approved by manager', async () => {
+      const user = userEvent.setup()
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      await user.click(await screen.findByRole('tab', { name: /Approved by manager/ }))
+
+      expect(await screen.findByText('Import gradebook')).toBeInTheDocument()
+      expect(screen.queryByText('Configure fee heads')).not.toBeInTheDocument()
+      expect(screen.queryByText('Attendance policy')).not.toBeInTheDocument()
+      expect(screen.queryByText('Timetable review')).not.toBeInTheDocument()
+      expect(screen.queryByText('Website domain')).not.toBeInTheDocument()
+    })
+
+    it('shows only tasks submitted for review under Pending for approval', async () => {
+      const user = userEvent.setup()
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      await user.click(await screen.findByRole('tab', { name: /Pending for approval/ }))
+
+      expect(await screen.findByText('Timetable review')).toBeInTheDocument()
+      expect(screen.queryByText('Configure fee heads')).not.toBeInTheDocument()
+      expect(screen.queryByText('Import gradebook')).not.toBeInTheDocument()
+    })
+
+    /** Also where the `PENDING` dot itself is covered — see the note above. */
+    it('shows only tasks nobody has started under Pending task', async () => {
+      const user = userEvent.setup()
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      await user.click(await screen.findByRole('tab', { name: /Pending task/ }))
+
+      const row = (await screen.findByText('Website domain')).closest('tr')!
+      expect(within(row).getByTestId('ob-task-dot')).toHaveAttribute('data-state', 'PENDING')
+      expect(screen.queryByText('Timetable review')).not.toBeInTheDocument()
+    })
+
+    it('counts each tab against this page', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      expect(await screen.findByRole('tab', { name: 'Work in progress (3)' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Approved by manager (1)' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Pending for approval (1)' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Pending task (1)' })).toBeInTheDocument()
+    })
+
+    /** A tab is a link a colleague can paste, same as the dashboard's strip. */
+    it('opens directly on the tab named in the URL', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue('/onboarding/my-tasks?tab=not-started')
+
+      expect(await screen.findByText('Website domain')).toBeInTheDocument()
+      expect(screen.queryByText('Configure fee heads')).not.toBeInTheDocument()
+    })
+
+    it('says so, rather than showing an empty grid, when a tab has nothing on this page', async () => {
+      const user = userEvent.setup()
+      stubQueue([TAB_ROWS[0]])
+      renderQueue()
+
+      await user.click(await screen.findByRole('tab', { name: /Pending task/ }))
+
+      expect(
+        await screen.findByText(/nothing still to be started on this page/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * The manager-only fifth tab. `pendingMyVerification` — not a role — is
+   * what a row belongs on it for, and `meta.isReviewerForAnyProject` — not a
+   * role either — is what the tab shows at all. Neither is spelled
+   * "OB_MANAGER" anywhere in this suite, on purpose: the whole point is that
+   * an implementor who also manages one project gets the tab from the same
+   * response an ordinary implementor gets, with nothing on this page having
+   * decided so from who they are.
+   */
+  describe('Pending for verification', () => {
+    const MANAGER_ROWS = [
+      ...TAB_ROWS,
+      {
+        ...ROWS[0],
+        taskId: 3006,
+        taskName: 'Verify onboarding checklist',
+        status: 'PENDING_REVIEW',
+        dueAt: '2026-09-21T10:00:00Z',
+        rowsApproved: 0,
+        pendingMyVerification: true,
+      },
+    ]
+
+    it('is absent for a caller who reviews no project', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue()
+
+      await screen.findByText('Configure fee heads')
+      expect(screen.queryByRole('tab', { name: /Pending for verification/ })).not.toBeInTheDocument()
+    })
+
+    it('is drawn first, ahead of Work in progress, for a caller who reviews at least one project', async () => {
+      stubQueue(MANAGER_ROWS, [], { isReviewerForAnyProject: true })
+      renderQueue()
+
+      const tabs = await screen.findAllByRole('tab')
+      expect(tabs[0]).toHaveAccessibleName(/Pending for verification/)
+      // Position, not default: Work in progress still opens first.
+      expect(screen.getByRole('tab', { selected: true })).toHaveAccessibleName(/Work in progress/)
+    })
+
+    /**
+     * `Timetable review` is `PENDING_REVIEW` too but `pendingMyVerification`
+     * is false on it — the caller's own submission, not a review sitting on
+     * their desk. Only the row the server actually flagged shows here.
+     */
+    it('shows only the rows the server flagged as needing this caller’s verification', async () => {
+      const user = userEvent.setup()
+      stubQueue(MANAGER_ROWS, [], { isReviewerForAnyProject: true })
+      renderQueue()
+
+      await user.click(await screen.findByRole('tab', { name: /Pending for verification/ }))
+
+      expect(await screen.findByText('Verify onboarding checklist')).toBeInTheDocument()
+      expect(screen.queryByText('Timetable review')).not.toBeInTheDocument()
+      expect(screen.queryByText('Configure fee heads')).not.toBeInTheDocument()
+    })
+
+    /** The automatic case: a dual-hat caller keeps their own queue too. */
+    it('leaves the caller’s own Work in progress tab exactly as it was', async () => {
+      stubQueue(MANAGER_ROWS, [], { isReviewerForAnyProject: true })
+      renderQueue()
+
+      expect(await screen.findByText('Configure fee heads')).toBeInTheDocument()
+      expect(screen.getByText('Import gradebook')).toBeInTheDocument()
+      expect(screen.getByText('Attendance policy')).toBeInTheDocument()
+      expect(screen.queryByText('Verify onboarding checklist')).not.toBeInTheDocument()
+    })
+
+    it('opens directly on it from a pasted link', async () => {
+      stubQueue(MANAGER_ROWS, [], { isReviewerForAnyProject: true })
+      renderQueue('/onboarding/my-tasks?tab=pending-verification')
+
+      expect(await screen.findByText('Verify onboarding checklist')).toBeInTheDocument()
+      expect(screen.queryByText('Configure fee heads')).not.toBeInTheDocument()
+    })
+
+    /**
+     * A stale bookmark from when the caller used to review something, or a
+     * link a manager shared with an implementor who does not. The tab is
+     * gone rather than crashing or showing somebody else's queue.
+     */
+    it('falls back to Work in progress when linked for a caller who reviews nothing', async () => {
+      stubQueue(TAB_ROWS)
+      renderQueue('/onboarding/my-tasks?tab=pending-verification')
+
+      expect(await screen.findByRole('tab', { selected: true })).toHaveAccessibleName(
+        /Work in progress/,
+      )
+      expect(screen.getByText('Configure fee heads')).toBeInTheDocument()
+    })
   })
 })

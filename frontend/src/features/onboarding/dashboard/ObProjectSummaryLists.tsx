@@ -45,14 +45,14 @@ export function ObProjectSummaryLists({ rows, today }: ObProjectSummaryListsProp
         detail={(row) => row.currentStage ?? 'no stage running'}
       />
       <ListCard
-        title="At-risk clients"
+        title="Project at Risk"
         colour={bucketLook('AT_RISK').colour}
         rows={atRisk}
         empty="No project is more than 7 working days past its date."
         detail={(row) => `due ${formatDate(row.tentativeCompletion)}`}
       />
       <ListCard
-        title="Overdue clients"
+        title="Project Overdue"
         colour={bucketLook('DELAYED').colour}
         rows={overdue}
         empty="Nothing is overdue. Keep it that way."
@@ -123,7 +123,7 @@ function Row({ row, detail }: { row: ObProjectBoardRow; detail: string }) {
     <button
       type="button"
       onClick={() => navigate(`/onboarding/projects/${row.id}`)}
-      aria-label={`${row.client.name}, ${row.product.name}. ${
+      aria-label={`${row.name}, ${row.client.name}. ${
         row.implementor ? `Implementor ${row.implementor.displayName}.` : 'No implementor assigned.'
       } ${late ?? look.label}. Open the project.`}
       className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-subtle
@@ -131,7 +131,15 @@ function Row({ row, detail }: { row: ObProjectBoardRow; detail: string }) {
                  focus-visible:outline-primary"
     >
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-content">{row.client.name}</span>
+        {/*
+          The project, not the client. These lists are cut from running
+          *projects* and their titles say so — a client with three engagements
+          otherwise put its own name on three rows with nothing to tell them
+          apart. Provisioning names a project after its client, so most rows
+          still read the school first; where a hand-made name does not, the
+          client is in the row's accessible name.
+        */}
+        <span className="block truncate text-sm font-medium text-content">{row.name}</span>
         <span className="mt-0.5 block truncate text-xs text-content-muted">
           {/*
             The implementor is named on every row of every list, which is what

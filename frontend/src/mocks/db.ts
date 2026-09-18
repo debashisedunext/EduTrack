@@ -670,7 +670,13 @@ export interface ObApplication {
  */
 export interface ObStep {
   id: number; sequence: number; name: string;
-  status: 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'WAITING_ON_CLIENT' | 'DONE' | 'SKIPPED';
+  /**
+   * `PENDING_REVIEW` is OB-16's: an implementor marking a task complete no
+   * longer closes it where the task requires review — it lands here while a
+   * manager records a verdict per check-list row.
+   */
+  status: 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'WAITING_ON_CLIENT' | 'PENDING_REVIEW'
+    | 'DONE' | 'SKIPPED';
   /** TAT in working **days** — the v1.2 rename, not hours. */
   tatDays: number;
   /** Working hours consumed. Waiting-on-client time is excluded. */
@@ -734,6 +740,26 @@ export interface ObStepItem {
   /** Why, where there is a why. Optional on either answer — PLAN.md §4, D-17. */
   remark?: string | null;
   doneAt?: string | null; doneById?: number | null;
+  /**
+   * OB-16 · where the row is, as distinct from what the manager thinks of it.
+   *
+   * `rowState` is the row's *position* — on the implementor's desk (`DRAFT`),
+   * on the manager's (`SENT`), or settled (`VERIFIED`/`REJECTED`). `reviewState`
+   * is the *verdict*, which stays changeable while the row is `SENT` and means
+   * nothing until it is. Absent on a fixture row means `DRAFT`/`NOT_REVIEWED`,
+   * so every existing fixture reads as an untouched check list without being
+   * rewritten.
+   */
+  rowState?: 'DRAFT' | 'SENT' | 'VERIFIED' | 'REJECTED';
+  reviewState?: 'NOT_REVIEWED' | 'VERIFIED' | 'REJECTED';
+  submittedAt?: string | null; submittedById?: number | null;
+  reviewedAt?: string | null; reviewedById?: number | null;
+  /**
+   * When the row's owner last looked at a settled outcome. Null with a settled
+   * `rowState` is what `unseenOutcome` is derived from — it is what stops "2
+   * rows came back" either shouting for ever or forgetting on refresh.
+   */
+  outcomeSeenAt?: string | null;
 }
 
 /** `ob_journey_template_step_docs` instantiated — a required document slot. */

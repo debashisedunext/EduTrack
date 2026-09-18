@@ -393,6 +393,140 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/module-access", ADMIN_ONLY);
         put(m, "POST", "/api/v1/onboarding/module-access/{grantId}/revoke", ADMIN_ONLY);
 
+        // -- OB-02 - the dashboard reads that arrived after A-117 ------------
+        //
+        // EVERY_ROLE, like /dashboard/summary and /dashboard/project-board
+        // above and for their reason: each of these is scoped by the caller's
+        // own client predicate, so a narrowed role sees a smaller board rather
+        // than a refused one. Rules 3 makes Viewer "everything, read-only" and
+        // names dashboards and reports as the thing they are for, so a role
+        // gate here would contradict the one role the module exists to serve.
+        put(m, "GET", "/api/v1/onboarding/dashboard/cards/{cardKey}/items", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/dashboard/delayed-projects", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/dashboard/implementor-workload", EVERY_ROLE);
+        // OB-16's four review figures. Every role for the same reason, and
+        // worth saying why a Step Owner reads it rather than only a Manager:
+        // two of the four counts are what THIS caller has out with their own
+        // manager, which is the implementor's own figure and nobody else's.
+        put(m, "GET", "/api/v1/onboarding/dashboard/review-summary", EVERY_ROLE);
+
+        // -- C-126 - escalations the client raised from the portal -----------
+        //
+        // The read is EVERY_ROLE, matching /escalations two blocks up - the
+        // staff ladder and the client's own raise are the same surface read
+        // from two sides, and ObClientEscalationScope narrows the rows.
+        // Resolving is ADMIN_AND_MANAGER, matching the internal ladder's own
+        // acknowledge/resolve: rules 3 gives "escalate" to the Manager, and
+        // resolving one acknowledges back to the client in their name.
+        put(m, "GET", "/api/v1/onboarding/client-escalations", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/client-escalations/{escalationId}/resolve",
+                ADMIN_AND_MANAGER);
+
+        // -- OB-09 - sign-offs, staff side -----------------------------------
+        //
+        // Reads are EVERY_ROLE: a sign-off is evidence about the work, it is
+        // what the engine makes Live-Green depend on, and a Viewer whose whole
+        // job is reporting cannot report on a go-live they may not see. The
+        // certificate is the same row rendered, so it follows its detail read.
+        //
+        // The three writes are ADMIN_AND_MANAGER. Requesting one puts a
+        // question to the customer in the organisation's name; cancelling and
+        // resending both reach the customer's mailbox. Rules 3 gives Sales
+        // "board clients, capture sale details, view progress" - asking a
+        // client to sign is not capture, and a Step Owner's remit is
+        // explicitly "only their own steps".
+        put(m, "GET", "/api/v1/onboarding/signoffs", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/signoffs/{signoffId}", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/signoffs/{signoffId}/certificate", EVERY_ROLE);
+        put(m, "POST", "/api/v1/onboarding/journeys/{journeyId}/signoffs", ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/signoffs/{signoffId}/cancel", ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/signoffs/{signoffId}/resend", ADMIN_AND_MANAGER);
+
+        // -- B-126 - the client's portal login -------------------------------
+        //
+        // ADMIN_AND_MANAGER on all four, the read included. Rules 3 gives
+        // client accounts to the OB Admin and "create/reset client logins" to
+        // the Manager, and names neither for Sales or a Step Owner.
+        //
+        // The read is not a smaller thing than the writes here. It answers
+        // whether a client has a live login and when they last used it, which
+        // is an account-security fact about an external principal rather than
+        // onboarding progress - module-access's argument above, one table
+        // over. It carries no credential either way; that is the panel's
+        // separate rule, not this one.
+        put(m, "GET", "/api/v1/onboarding/clients/{obClientId}/account", ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/account", ADMIN_AND_MANAGER);
+        put(m, "PATCH", "/api/v1/onboarding/clients/{obClientId}/account", ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/clients/{obClientId}/account/reset",
+                ADMIN_AND_MANAGER);
+
+        // -- A-118 - org-wide settings and notification wording --------------
+        //
+        // ADMIN_ONLY throughout, reads included - rules 3 lists the escalation
+        // matrix and notification templates under the OB Admin alone. These
+        // are the two places Viewer's "everything, read-only" deliberately
+        // does not reach, for module-access's reason: they are the module's
+        // own configuration rather than onboarding data, and the ladder in
+        // particular names who gets told when work slips.
+        //
+        // contracts/check-conventions.py already records the matching half of
+        // this in ROWLESS_403 - "Admin-only on the read too, so a 403 tells a
+        // non-Admin exactly what ModuleGuard's 404 already did".
+        put(m, "GET", "/api/v1/onboarding/settings", ADMIN_ONLY);
+        put(m, "PUT", "/api/v1/onboarding/settings", ADMIN_ONLY);
+        put(m, "GET", "/api/v1/onboarding/notification-templates", ADMIN_ONLY);
+        put(m, "GET", "/api/v1/onboarding/notification-templates/vocabulary", ADMIN_ONLY);
+        put(m, "PATCH", "/api/v1/onboarding/notification-templates/{templateId}", ADMIN_ONLY);
+
+        // -- OB-07 - bulk task import into a template ------------------------
+        //
+        // ADMIN_ONLY, following the template writes at the top of this method:
+        // rules 3 gives journey templates to the OB Admin, and importing a
+        // workbook authors steps exactly as the designer does - the difference
+        // is how many arrive at once, which is an argument for MORE care
+        // rather than less. The downloadable blank is Admin-only for the same
+        // reason it is on the write: it describes the shape of a template only
+        // an Admin can fill, and publishing it more widely would be the one
+        // asymmetry in this block that nothing in rules 3 asks for.
+        put(m, "GET", "/api/v1/onboarding/journey-templates/{templateId}/task-import/template",
+                ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import/preview",
+                ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import",
+                ADMIN_ONLY);
+
+        // -- OB-16 - the manager review gate ---------------------------------
+        //
+        // Two halves, and the split is the whole point of the feature.
+        //
+        // The IMPLEMENTOR's half is STEP_ACTORS, like the step transitions
+        // above: submitting a check-list row, sending the whole list, and
+        // stamping that they have read what came back. The row-level rule is
+        // tighter than the role and is applied where it belongs -
+        // requireOwnership answers 422 for a caller who holds the role but
+        // does not own this task.
+        //
+        // The REVIEWER's half is ADMIN_AND_MANAGER, which is exactly
+        // ObJourneyStepLifecycleService.MODERATOR_ROLES. Gated by role rather
+        // than by ownership on purpose: reviewing is by definition an act on
+        // somebody else's work, so an ownership check would refuse the caller
+        // the route exists for. requireReviewer then narrows further to the
+        // project's own implementorManagerUserId, which this class cannot
+        // express - a role set does not know which project it is looking at.
+        // That narrowing is the service's, and it is the reason these routes
+        // answer 403 rather than 404 (see ROWLESS_403).
+        put(m, "POST", "/api/v1/onboarding/journey-step-items/{itemId}/submit", STEP_ACTORS);
+        put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/checklist/submit", STEP_ACTORS);
+        put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/outcomes-seen", STEP_ACTORS);
+        put(m, "PATCH", "/api/v1/onboarding/journey-step-items/{itemId}/review",
+                ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/journey-step-items/{itemId}/send-back",
+                ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/review/complete",
+                ADMIN_AND_MANAGER);
+        put(m, "POST", "/api/v1/onboarding/journey-steps/{stepId}/review/verdict",
+                ADMIN_AND_MANAGER);
+
         return List.copyOf(m);
     }
 

@@ -98,7 +98,7 @@ class PublicSignoffOtpController {
             @Valid @RequestBody PublicSignoffOtpDtos.OtpVerifyRequest request,
             HttpServletRequest http) {
 
-        PublicSignoffOtpDtos.Session session =
+        PublicSignoffOtpDtos.SignoffSession session =
                 service.verify(request.token(), request.otp(), http);
         return ResponseEntity.status(HttpStatus.OK)
                 .body(new PublicSignoffOtpDtos.SessionResponse(session));

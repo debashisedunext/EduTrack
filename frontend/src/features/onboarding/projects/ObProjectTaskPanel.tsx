@@ -9,7 +9,6 @@ import {
   useReviewObJourneyStepItem,
   useMarkObJourneyStepOutcomesSeen,
   useSendBackObJourneyStepItem,
-  useSubmitObJourneyStepItem,
   useUpdateObJourneyStepItem,
 } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { ApiError } from '@/api/http'
@@ -122,24 +121,28 @@ const OUTSTANDING_CLASS = 'text-caption text-danger-text'
  * <b>Mark complete</b> needs the width back, and 186px is what that word, its
  * mark and the ↺ take without wrapping.
  *
- * <p><b>Five columns while a review is on the table</b>, four otherwise. The
- * Review column is not drawn on a task nobody has submitted: an empty column
- * headed "Review" on every check list in the module would be four hundred
- * pixels of nothing on the screens where the feature does not apply. The
- * folded layout is unchanged either way — a phone stacks the cells whatever
- * their number.
+ * <p><b>Neither column is always there, and the reviewer has only one.</b>
+ * Action is the implementor's control and is not drawn for the manager
+ * reviewing the list — it was a greyed button in a column they have no part
+ * in. Review is not drawn on a task nobody has submitted, where it would be a
+ * heading over four hundred pixels of nothing. So the reviewer reads three
+ * columns and a wide one: their verdict is three option buttons rather than
+ * one cycling button and needs 282px to hold them.
+ *
+ * <p>The folded layout is unchanged whatever the count — a phone stacks the
+ * cells under the item they belong to.
  */
-const rowGrid = (withReview: boolean, withSend: boolean) =>
+const rowGrid = (withAction: boolean, withReview: boolean) =>
   cn(
     'grid grid-cols-[26px_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1.5 px-3 py-2.5',
     'sm:items-center sm:py-2',
-    withReview && withSend
-      ? 'sm:grid-cols-[34px_minmax(0,1.1fr)_170px_162px_minmax(0,1fr)_96px]'
-      : withReview
-        ? 'sm:grid-cols-[34px_minmax(0,1.2fr)_186px_178px_minmax(0,1.2fr)]'
-        : withSend
-          ? 'sm:grid-cols-[34px_minmax(0,1.25fr)_186px_minmax(0,1.3fr)_96px]'
-          : 'sm:grid-cols-[34px_minmax(0,1.35fr)_186px_minmax(0,1.5fr)]',
+    withAction && withReview
+      ? 'sm:grid-cols-[34px_minmax(0,1.15fr)_186px_178px_minmax(0,1.2fr)]'
+      : withAction
+        ? 'sm:grid-cols-[34px_minmax(0,1.35fr)_186px_minmax(0,1.5fr)]'
+        : withReview
+          ? 'sm:grid-cols-[34px_minmax(0,1.2fr)_282px_minmax(0,1.2fr)]'
+          : 'sm:grid-cols-[34px_minmax(0,1.4fr)_minmax(0,1.5fr)]',
   )
 
 export function ObProjectTaskPanel({
@@ -153,15 +156,31 @@ export function ObProjectTaskPanel({
   const queryClient = useQueryClient()
   const [drafts, setDrafts] = React.useState<Record<number, string>>({})
   const inputs = React.useRef<Record<number, HTMLInputElement | null>>({})
+  /**
+   * Rows the reviewer has just pressed Rejected on, before the server agrees.
+   *
+   * <p>The reason box opens only on a rejected row, and until this existed
+   * "rejected" meant *the server has told us so* — which arrives a refetch
+   * later. So the press focused a box that was not on the screen yet, and the
+   * manager was left looking at a red row with nowhere to type. Holding the
+   * press locally opens the box in the same render, and the server's answer
+   * then agrees with what the screen already shows.
+   *
+   * <p>Cleared when another verdict is chosen, and when the row leaves.
+   */
+  const [rejecting, setRejecting] = React.useState<Record<number, true>>({})
 
-  const send = useSubmitObJourneyStepItem({
-    mutation: {
-      onSuccess: () => {
-        invalidateAfterTaskWrite(queryClient, task.journeyId, task.id)
-      },
-    },
-  })
+  /*
+    The reviewer's release, with no button of its own any more.
 
+    Rejecting a row *is* sending it back — the manager presses Rejected, types
+    why, and the row goes the moment the reason is saved. The two presses this
+    used to take existed to keep a mis-click reversible, and that argument only
+    ever held for the other verdict: Verified stays reversible for as long as
+    the review is open and is released by the task's own **Verified**, while a
+    rejection is already deliberate by the time somebody has written a sentence
+    explaining it.
+  */
   const sendBack = useSendBackObJourneyStepItem({
     mutation: {
       onSuccess: () => {
@@ -240,9 +259,18 @@ export function ObProjectTaskPanel({
   const showReview =
     reviewing ||
     task.items.some((i) => (i.reviewState && i.reviewState !== 'NOT_REVIEWED') || isOut(i))
-  /** The Send column exists for whoever has something to send on this task. */
-  const showSend = (yours || canReview) && task.items.length > 0
-  const ROW_GRID = rowGrid(showReview, showSend)
+  /**
+   * The Action column is the implementor's, and the reviewer does not get it.
+   *
+   * <p>It holds one control — <b>Mark complete</b> on a row — and a manager
+   * reading the list may not press it in any state: `mayAnswer` is false for
+   * them by the same rule the server enforces. So for as long as the task is
+   * on their desk the column was a greyed button and a heading, which is the
+   * most expensive thing a screen can show. Their reading of the list is the
+   * item, their verdict and the remark.
+   */
+  const showAction = !reviewing
+  const ROW_GRID = rowGrid(showAction, showReview)
 
   /**
    * Shut to everybody — verified by a review that has already closed.
@@ -269,9 +297,14 @@ export function ObProjectTaskPanel({
   ).length
 
   /**
-   * What holds the reviewer's **Mark complete**, in the same shape `blockers`
-   * names for the implementor's — so the bar can say why either one is grey
-   * without knowing which of the two people is reading it.
+   * What holds the reviewer's **Verified**, in the same shape `blockers` names
+   * for the implementor's — so the bar can say why either one is grey without
+   * knowing which of the two people is reading it.
+   *
+   * <p>A rejected row is not usually among them: pressing Rejected sends that
+   * row home as soon as its reason is written, so by the time this is empty
+   * every row still on the desk is verified. The unexplained-rejection clause
+   * stays for the one row caught between the two halves of that press.
    */
   const reviewBlockers = React.useMemo(() => {
     if (!reviewing) return []
@@ -312,8 +345,8 @@ export function ObProjectTaskPanel({
    * way — the manager accepted the whole check list and the server handed it
    * straight back rather than closing it, because closing a task is its
    * implementor's act. So there is nothing left to answer here and nothing
-   * left to wait for: **Mark complete** is enabled, and pressing it is what
-   * finishes the task.
+   * left to wait for: the owner's button turns into **Mark Complete**, and
+   * pressing it is what finishes the task.
    *
    * <p>Read off the rows rather than a flag, for the same reason `reopened`
    * is: the rows are what the rule is about and they are already on screen.
@@ -339,14 +372,8 @@ export function ObProjectTaskPanel({
   const mayAnswer = (item: ObJourneyStepItem) =>
     yours && (stateOf(item) === 'DRAFT' || stateOf(item) === 'REJECTED')
 
-  /** This row is finished and is the caller's to hand over. */
+  /** This row is on the reviewer's desk and the verdict is theirs to set. */
   const mayReview = (item: ObJourneyStepItem) => canReview && isOut(item)
-  const maySend = (item: ObJourneyStepItem) => mayAnswer(item) && item.answer != null
-  const mayRelease = (item: ObJourneyStepItem) =>
-    mayReview(item) &&
-    item.reviewState != null &&
-    item.reviewState !== 'NOT_REVIEWED' &&
-    (item.reviewState !== 'REJECTED' || remarkOf(item).trim() !== '')
 
   /**
    * The remark box, and who owns it right now.
@@ -356,8 +383,11 @@ export function ObProjectTaskPanel({
    * they are verifying, so a verdict cannot quietly rewrite the note it is
    * passing.
    */
+  const isRejectedHere = (item: ObJourneyStepItem) =>
+    item.reviewState === 'REJECTED' || rejecting[item.id] === true
+
   const mayRemark = (item: ObJourneyStepItem) =>
-    mayAnswer(item) || (mayReview(item) && item.reviewState === 'REJECTED')
+    mayAnswer(item) || (mayReview(item) && isRejectedHere(item))
 
   /**
    * The caption over the remark box, where the text in it is the reviewer's.
@@ -417,42 +447,90 @@ export function ObProjectTaskPanel({
   }
 
   /**
-   * The reviewer's press: Not reviewed → Verified → Rejected → Not reviewed.
+   * The reviewer's choice, as one of three rather than the next of three.
    *
-   * <p>Verified first because it is the verdict most rows get, so the common
-   * case is one press. Rejected is second, and deliberately not what a stray
-   * click lands on — it sends work back to somebody.
+   * <p>It was a single button cycling Not reviewed → Verified → Rejected, so
+   * rejecting a verified row took two presses and reaching either verdict
+   * meant reading the button first to find out where the cycle stood. The
+   * column now offers all three at once and this records whichever was
+   * pressed.
    *
-   * <p>A rejection needs a reason, and the row's remark is where it goes —
-   * but the verdict lands first and the reason follows. The row has to *look*
-   * rejected for the reader to know the box is now required, and a reason
-   * cannot be typed into a box that only opens once the row is rejected. The
-   * rule is kept where it can be kept without that deadlock: **Mark complete**
-   * refuses while any rejected row is unexplained.
+   * <h2>Rejected sends the row back by itself</h2>
+   *
+   * <p>There is no Send back beside it any more: a rejection is a decision
+   * somebody else has to act on, and holding it behind a second control only
+   * ever produced rows sitting rejected on a manager's screen that their
+   * implementor could not see.
+   *
+   * <p>But it may not go without a reason — the server refuses a release that
+   * has none, and rightly. So the press does half of it: the verdict lands,
+   * the remark box empties, opens and takes focus, and the row leaves the
+   * moment that reason is saved ({@link releaseWithReason}). The box is
+   * emptied rather than left holding the implementor's own note, which would
+   * otherwise be sent back to them as the reviewer's reason for sending it
+   * back.
+   *
+   * <p>Verified does <em>not</em> release. It stays reversible for as long as
+   * the review is open — pressing Rejected next to it is one click away — and
+   * the task's own <b>Verified</b> is the deliberate press that hands
+   * everything back at once.
    */
-  const cycleVerdict = (item: ObJourneyStepItem) => {
-    const next: ObStepReviewState =
-      item.reviewState === 'VERIFIED'
-        ? 'REJECTED'
-        : item.reviewState === 'REJECTED'
-          ? 'NOT_REVIEWED'
-          : 'VERIFIED'
-    /*
-      The state goes on its own. The reason is typed into the remark box that
-      opens once the row is rejected, and sending an empty one with the verdict
-      is what made this press fail silently before: the server refused the
-      write, the row stayed Verified, and the button looked dead.
-    */
-    const remark = remarkOf(item).trim()
-    review.mutate({
-      itemId: item.id,
-      data: next === 'REJECTED' && remark ? { state: next, remark } : { state: next },
+  /** This row is no longer mid-rejection — the verdict changed, or it left. */
+  const stopRejecting = (id: number) =>
+    setRejecting((r) => {
+      if (!(id in r)) return r
+      const rest: Record<number, true> = {}
+      for (const key of Object.keys(r)) {
+        if (Number(key) !== id) rest[Number(key)] = true
+      }
+      return rest
     })
+
+  const chooseVerdict = (item: ObJourneyStepItem, next: ObStepReviewState) => {
     if (next === 'REJECTED') {
+      setDrafts((d) => ({ ...d, [item.id]: '' }))
+      setRejecting((r) => ({ ...r, [item.id]: true }))
+      review.mutate(
+        { itemId: item.id, data: { state: 'REJECTED' } },
+        /*
+          And put the row back as it was if the server refuses. The optimistic
+          half of this press opens the reason box a refetch early, which is the
+          whole point of it — but left standing over a refusal it draws a
+          rejected-looking row, with a red box to type a reason into, on a row
+          the server still holds as Not Reviewed. One of those two has to be a
+          lie, and it must not be the screen.
+        */
+        { onError: () => stopRejecting(item.id) },
+      )
       // Straight to the box they now have to fill. Without this the required
       // field is a red border somewhere below the press that caused it.
       window.setTimeout(() => inputs.current[item.id]?.focus(), 0)
+      return
     }
+    stopRejecting(item.id)
+    review.mutate({ itemId: item.id, data: { state: next } })
+  }
+
+  /**
+   * The second half of a rejection: the reason, and the row going home.
+   *
+   * <p>One call writes the reason onto the row and a second releases it, in
+   * that order — `releaseItem` refuses a rejection whose remark is blank, so
+   * the reason has to be on the row before the row can move. Chained on
+   * success rather than fired together, because a release that overtook its
+   * reason would be refused and leave the row parked.
+   */
+  const releaseWithReason = (item: ObJourneyStepItem, reason: string) => {
+    review.mutate(
+      { itemId: item.id, data: { state: 'REJECTED', remark: reason } },
+      {
+        onSuccess: () =>
+          sendBack.mutate(
+            { itemId: item.id },
+            { onSuccess: () => stopRejecting(item.id) },
+          ),
+      },
+    )
   }
 
   const owner = ownerName(task.ownerUserId) ?? 'the task owner'
@@ -517,6 +595,39 @@ export function ObProjectTaskPanel({
     return out
   }, [task.items, task.docs])
 
+  /**
+   * Which of its two jobs the owner's one button is doing.
+   *
+   * <p>`SEND` while any row is still short of `VERIFIED` — there is a check
+   * list the manager has not passed, so the button hands it over. `COMPLETE`
+   * once every row is verified, and on a task with no check list at all, where
+   * there was never anything to verify and the button is the plain close it
+   * has always been.
+   *
+   * <p>Read off the rows rather than off the task's status, for the reason
+   * `reopened` gives: the rows are what the rule is about and they are already
+   * on the screen.
+   */
+  const openRows = task.items.filter((i) => stateOf(i) !== 'VERIFIED')
+  const checklistPhase: 'SEND' | 'COMPLETE' = openRows.length === 0 ? 'COMPLETE' : 'SEND'
+
+  /**
+   * What holds **Send for Verification** — and only what holds it.
+   *
+   * <p>`submitChecklist` asks one thing: that every row going out is answered.
+   * Not only the mandatory ones, unlike the completion gate — the list travels
+   * as a unit, so an optional row left blank is a blank line in front of a
+   * reviewer. Required documents are deliberately not counted here; they hold
+   * <b>Mark Complete</b>, which is a later press.
+   */
+  const sendBlockers = React.useMemo(() => {
+    const unanswered = openRows.filter((i) => i.answer == null).length
+    return unanswered > 0
+      ? [`${unanswered} unanswered row${unanswered === 1 ? '' : 's'}`]
+      : []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.items])
+
   return (
     <div className="mt-2 flex flex-col gap-2.5">
       {/* ---- what the review did ----
@@ -538,9 +649,10 @@ export function ObProjectTaskPanel({
                     ? `${owner} sent this check list for verification.`
                     : `${owner} sent ${outRows.length} of ${task.items.length} rows for verification.`}
                 </strong>{' '}
-                Their answers are read-only — set each row to Verified or Rejected in the Review
-                column and press its <b>Send</b>. A rejection needs a line in its remark. Review what
-                you have time for; the rest keeps.
+                Their answers are read-only — set each row to <b>Verified</b> or <b>Rejected</b> in
+                the Review column. A rejection needs a line in its remark and goes back to {owner} as
+                soon as you save it; once every row left here is verified, press <b>Verified</b> on
+                the task to hand it back.
               </>
             ) : (
               <>
@@ -571,8 +683,8 @@ export function ObProjectTaskPanel({
                 : `All ${task.items.length} rows were approved.`}
             </strong>{' '}
             {yours
-              ? 'The check list is closed — press Mark complete to finish the task.'
-              : `The check list is closed — ${owner} presses Mark complete to finish the task.`}
+              ? 'The check list is closed — press Mark Complete to finish the task.'
+              : `The check list is closed — ${owner} presses Mark Complete to finish the task.`}
           </span>
         </div>
       )}
@@ -609,9 +721,9 @@ export function ObProjectTaskPanel({
             <span className="font-medium">
               {yours
                 ? rejectedRows.length === 1
-                  ? 'Fix it, answer it again, then press Send on the row.'
-                  : 'Fix each one, answer it again, then press Send on its row.'
-                : `${owner} answers ${rejectedRows.length === 1 ? 'it' : 'each one'} again and sends it back.`}
+                  ? 'Fix it, answer it again, then press Send for Verification.'
+                  : 'Fix each one, answer them again, then press Send for Verification.'
+                : `${owner} answers ${rejectedRows.length === 1 ? 'it' : 'each one'} again and sends the list back.`}
             </span>
             <ul className="mt-1 mb-0 list-disc pl-5">
               {rejectedRows.map((item) => (
@@ -701,7 +813,7 @@ export function ObProjectTaskPanel({
             >
               <span role="columnheader">#</span>
               <span role="columnheader">Checklist item</span>
-              <span role="columnheader">Action</span>
+              {showAction && <span role="columnheader">Action</span>}
               {showReview && (
                 // Named for whose mark it is. "Review" alone, next to a column
                 // of the implementor's own answers, does not say which of the
@@ -711,23 +823,17 @@ export function ObProjectTaskPanel({
                 </span>
               )}
               <span role="columnheader">Remark</span>
-              {showSend && (
-                // Last, because it is the last thing done to a row: answer it,
-                // let it be reviewed, say why, hand it over.
-                <span role="columnheader">Send</span>
-              )}
             </div>
 
             {task.items.map((item, index) => {
               const busy = update.isPending && update.variables?.itemId === item.id
-              const reviewBusy = review.isPending && review.variables?.itemId === item.id
-              const sendBusy =
-                (send.isPending && send.variables?.itemId === item.id) ||
+              const reviewBusy =
+                (review.isPending && review.variables?.itemId === item.id) ||
                 (sendBack.isPending && sendBack.variables?.itemId === item.id)
               const answeredHere = item.answer === true || item.answer === false
               const canAnswer = mayAnswer(item)
               const canReviewRow = mayReview(item)
-              const rejectedHere = item.reviewState === 'REJECTED'
+              const rejectedHere = isRejectedHere(item)
               return (
                 <div
                   key={item.id}
@@ -787,50 +893,52 @@ export function ObProjectTaskPanel({
                     )}
                   </span>
 
-                  <span role="cell" className="col-start-2 flex min-w-0 items-center gap-1 sm:col-start-auto">
-                    <StatusButton
-                      answer={item.answer ?? null}
-                      label={item.label}
-                      disabled={!canAnswer || busy}
-                      title={
-                        canAnswer
-                          ? undefined
-                          : isLocked(item)
-                            ? 'Verified by the reviewer — this row is closed'
-                            : underReview
-                              ? 'Locked while this task is under review'
-                              : reopened
-                                ? 'Not one of the rows that came back'
-                                : `Only ${owner} can answer this`
-                      }
-                      onClick={() => flip(item)}
-                    />
-                    {/* Rendered only where there is an answer to clear, rather
-                        than hidden with `invisible`: a control nobody can see
-                        is still a tab stop, and tabbing a twenty-item list
-                        through twenty of them is the sort of thing only a
-                        keyboard user ever finds. The gap holds the column
-                        steady so the statuses stay in one line. */}
-                    {answeredHere ? (
-                      <button
-                        type="button"
+                  {showAction && (
+                    <span role="cell" className="col-start-2 flex min-w-0 items-center gap-1 sm:col-start-auto">
+                      <StatusButton
+                        answer={item.answer ?? null}
+                        label={item.label}
                         disabled={!canAnswer || busy}
-                        onClick={() => clear(item)}
-                        aria-label={`Clear the answer for ${item.label}`}
-                        title="Clear this answer"
-                        className={cn(
-                          'shrink-0 rounded-[6px] px-1 py-1.5 text-[13px] leading-none text-content-muted',
-                          'hover:bg-subtle hover:text-content',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                          !canAnswer && 'cursor-not-allowed opacity-55',
-                        )}
-                      >
-                        ↺
-                      </button>
-                    ) : (
-                      <span aria-hidden="true" className="w-[23px] shrink-0" />
-                    )}
-                  </span>
+                        title={
+                          canAnswer
+                            ? undefined
+                            : isLocked(item)
+                              ? 'Verified by the reviewer — this row is closed'
+                              : underReview
+                                ? 'Locked while this task is under review'
+                                : reopened
+                                  ? 'Not one of the rows that came back'
+                                  : `Only ${owner} can answer this`
+                        }
+                        onClick={() => flip(item)}
+                      />
+                      {/* Rendered only where there is an answer to clear, rather
+                          than hidden with `invisible`: a control nobody can see
+                          is still a tab stop, and tabbing a twenty-item list
+                          through twenty of them is the sort of thing only a
+                          keyboard user ever finds. The gap holds the column
+                          steady so the statuses stay in one line. */}
+                      {answeredHere ? (
+                        <button
+                          type="button"
+                          disabled={!canAnswer || busy}
+                          onClick={() => clear(item)}
+                          aria-label={`Clear the answer for ${item.label}`}
+                          title="Clear this answer"
+                          className={cn(
+                            'shrink-0 rounded-[6px] px-1 py-1.5 text-[13px] leading-none text-content-muted',
+                            'hover:bg-subtle hover:text-content',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                            !canAnswer && 'cursor-not-allowed opacity-55',
+                          )}
+                        >
+                          ↺
+                        </button>
+                      ) : (
+                        <span aria-hidden="true" className="w-[23px] shrink-0" />
+                      )}
+                    </span>
+                  )}
 
                   {/* ---- the manager's verdict ----
                       A control for the one person who may record it, and the
@@ -846,11 +954,11 @@ export function ObProjectTaskPanel({
                       className="col-start-2 flex min-w-0 items-center gap-1 sm:col-start-auto"
                     >
                       {canReviewRow ? (
-                        <ReviewButton
+                        <ReviewChoice
                           state={item.reviewState ?? 'NOT_REVIEWED'}
                           label={item.label}
                           disabled={reviewBusy}
-                          onClick={() => cycleVerdict(item)}
+                          onChoose={(next) => chooseVerdict(item, next)}
                         />
                       ) : (
                         <VerdictMark
@@ -934,6 +1042,19 @@ export function ObProjectTaskPanel({
                           : 'Remark (optional)…'
                       }
                       onChange={(e) => setDrafts((d) => ({ ...d, [item.id]: e.target.value }))}
+                      /*
+                        Enter commits, because on a rejected row leaving the box
+                        is what sends the row and "click somewhere else" is not
+                        an instruction anybody reads. `blur` rather than a
+                        second write path, so there is one commit and it cannot
+                        drift from the other.
+                      */
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          e.currentTarget.blur()
+                        }
+                      }}
                       onBlur={() => {
                         const text = remarkOf(item).trim()
                         if (text === (item.remark ?? '')) return
@@ -941,14 +1062,14 @@ export function ObProjectTaskPanel({
                           Two writers, two routes. A manager typing the reason
                           on a rejected row is recording a verdict, not
                           answering a check list — `answerItem` would refuse
-                          them for not owning the task. Sending it as the same
-                          verdict again is what carries the text, and is also
-                          what lets the server settle the review the moment the
-                          reason arrives.
+                          them for not owning the task. It is also the second
+                          half of the rejection itself: the reason lands on the
+                          row and the row goes straight back, which is why
+                          there is no Send back button beside it.
                         */
                         if (rejectedHere && canReviewRow) {
                           if (text === '') return
-                          review.mutate({ itemId: item.id, data: { state: 'REJECTED', remark: text } })
+                          releaseWithReason(item, text)
                           return
                         }
                         if (item.answer != null) {
@@ -967,36 +1088,31 @@ export function ObProjectTaskPanel({
                     )}
                   </span>
 
-                  {/* ---- Send, for whoever the row belongs to ----
-                      One cell, two owners, never both at once: a row is either
-                      with its implementor or with the reviewer. Rendering the
-                      state instead of a dead button where neither applies —
-                      a disabled control on a row nobody can move is an
-                      invitation to work out why, and the answer is never
-                      about this row. */}
-                  {showSend && (
-                    <span role="cell" className="col-start-2 flex min-w-0 sm:col-start-auto">
-                      <RowSendCell
-                        item={item}
-                        state={stateOf(item)}
-                        mine={mayAnswer(item)}
-                        theirs={mayReview(item)}
-                        ready={mayAnswer(item) ? maySend(item) : mayRelease(item)}
-                        busy={sendBusy}
-                        owner={owner}
-                        onSend={() =>
-                          mayAnswer(item)
-                            ? send.mutate({ itemId: item.id })
-                            : sendBack.mutate({ itemId: item.id })
-                        }
-                      />
-                    </span>
-                  )}
                 </div>
               )
             })}
           </div>
         </section>
+      )}
+
+      {/*
+          A refused verdict used to be silent. Only `update` — the implementor's
+          own answer — ever reported a refusal, so a manager whose Rejected was
+          turned down saw the row stay Not Reviewed and nothing else: no
+          message, no reason, and a press that looked broken rather than
+          answered. Both of the reviewer's writes report here now, in the
+          server's own words.
+        */}
+      {(review.isError || sendBack.isError) && (
+        <p className={OUTSTANDING_CLASS} role="alert">
+          {(() => {
+            const failed = sendBack.isError ? sendBack.error : review.error
+            const what = sendBack.isError ? 'That row was not sent back' : 'That verdict was not saved'
+            return failed instanceof ApiError
+              ? `${what} — ${failed.problem.detail ?? failed.problem.title}.`
+              : `${what}. Check your connection and try again.`
+          })()}
+        </p>
       )}
 
       {update.isError && (
@@ -1021,6 +1137,8 @@ export function ObProjectTaskPanel({
         users={users}
         yours={yours}
         blockers={blockers}
+        sendBlockers={sendBlockers}
+        checklistPhase={checklistPhase}
         reviewing={reviewing}
         reviewBlockers={reviewBlockers}
       />
@@ -1173,7 +1291,7 @@ function StatusButton({
 
 /** What each verdict is called, and the mark that carries it for the eye. */
 const VERDICT_WORD: Record<ObStepReviewState, string> = {
-  NOT_REVIEWED: 'Not reviewed',
+  NOT_REVIEWED: 'Not Reviewed',
   VERIFIED: 'Verified',
   REJECTED: 'Rejected',
 }
@@ -1184,114 +1302,6 @@ const VERDICT_MARK: Record<ObStepReviewState, string> = {
   REJECTED: '↻',
 }
 
-const VERDICT_NEXT: Record<ObStepReviewState, ObStepReviewState> = {
-  NOT_REVIEWED: 'VERIFIED',
-  VERIFIED: 'REJECTED',
-  REJECTED: 'NOT_REVIEWED',
-}
-
-/**
- * The row's own Send — the control that makes the row the unit of work.
- *
- * <h2>One cell, two owners, never both</h2>
- *
- * <p>A row is either with its implementor or with the reviewer, so there is
- * never a moment when two people could press this. Which of them is looking
- * decides what it says: *Send for review* on the way out, *Send back* on the
- * way home.
- *
- * <h2>What it costs to press, and why it is a second press</h2>
- *
- * <p>Answering a row does not send it and choosing a verdict does not release
- * one. The first press is a thought and stays reversible; this one is a
- * message somebody else starts acting on. Collapsing them would turn a
- * mis-click into work another person begins doing.
- *
- * <h2>A row nobody can move shows its state, not a dead button</h2>
- *
- * <p>Out with the manager, or approved and shut: there is no press available
- * and there is nothing the reader can do about it. A greyed button there
- * invites somebody to work out why it is grey, and the answer is never about
- * this row.
- */
-function RowSendCell({
-  item,
-  state,
-  mine,
-  theirs,
-  ready,
-  busy,
-  owner,
-  onSend,
-}: {
-  item: ObJourneyStepItem
-  state: ObStepRowState
-  mine: boolean
-  theirs: boolean
-  ready: boolean
-  busy: boolean
-  owner: string
-  onSend: () => void
-}) {
-  if (!mine && !theirs) {
-    const word =
-      state === 'VERIFIED'
-        ? '✓ approved'
-        : state === 'SENT'
-          ? '⌛ with reviewer'
-          : state === 'REJECTED'
-            ? `↻ with ${owner}`
-            : '—'
-    return (
-      <span
-        data-testid="ob-check-list-row-sent"
-        data-state={state}
-        className={cn(
-          'w-full text-center text-[11px] font-semibold',
-          state === 'VERIFIED'
-            ? 'text-success-text'
-            : state === 'REJECTED'
-              ? 'text-danger-text'
-              : 'text-content-muted',
-        )}
-      >
-        {word}
-      </span>
-    )
-  }
-
-  const why = mine
-    ? item.answer == null
-      ? 'Answer this row first'
-      : 'Send this row for verification'
-    : item.reviewState == null || item.reviewState === 'NOT_REVIEWED'
-      ? 'Choose Verified or Rejected first'
-      : !ready
-        ? 'A rejection needs a reason'
-        : `Send this row back to ${owner} now`
-
-  return (
-    <button
-      type="button"
-      data-testid="ob-check-list-row-send"
-      disabled={!ready || busy}
-      title={why}
-      aria-label={`${mine ? 'Send' : 'Send back'} ${item.label}`}
-      onClick={onSend}
-      className={cn(
-        'inline-flex w-full shrink-0 items-center justify-center gap-1 rounded-control border',
-        'px-2 py-1.5 text-[11px] font-semibold',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        ready && !busy
-          ? 'border-primary bg-primary text-white hover:bg-primary/90'
-          : 'cursor-not-allowed border-border bg-subtle text-content-muted',
-      )}
-    >
-      <span aria-hidden="true">↑</span>
-      {mine ? 'Send' : 'Send back'}
-    </button>
-  )
-}
 
 /**
  * The verdict as a fact, for everybody who is not the one recording it.
@@ -1365,75 +1375,101 @@ function VerdictMark({
 }
 
 /**
- * The reviewer's control — {@link StatusButton}'s shape, a second set of words.
+ * The reviewer's verdict — three options, all of them visible.
  *
- * <h2>Why not simply reuse StatusButton</h2>
+ * <h2>Why it is not one button any more</h2>
  *
- * <p>It is the same interaction and deliberately looks like it: one control
- * that states what it holds and sets the next thing when pressed. What differs
- * is what the states mean. An implementor records whether they did the thing —
- * Completed / Not completed. A reviewer judges whether it holds — Verified /
- * Rejected. Sharing one vocabulary across the two columns would make a row read
- * "Completed / Completed" and leave nothing to tell the claim from the
- * judgement of it.
+ * <p>It was {@link StatusButton}'s shape: one control naming its current
+ * verdict, cycling Not reviewed → Verified → Rejected on each press. That
+ * works for the implementor's column, where there are two answers and the
+ * button can always say what pressing it does. It does not work for three: the
+ * reader had to read the button to learn where the cycle stood before they
+ * could aim it, rejecting a row already marked Verified took two presses, and
+ * a press past the verdict somebody wanted took them round again.
  *
- * <p>The colours differ for the same reason. Rejected wears the delayed orange
- * rather than the danger red the answer's False uses, so the two columns are
- * never mistaken for the same mark twice; Not reviewed wears the reviewer's
- * blue rather than the answer's grey, so an unread row is visibly waiting on
- * somebody rather than merely empty.
+ * <p>So the three are laid out side by side and the pressed one is the
+ * verdict. Nothing is hidden behind a state, and the manager aims rather than
+ * counts.
  *
- * <p>`aria-pressed` would be a lie here exactly as it would there — it has two
- * values and this has three — so the accessible name carries the state in
- * words and says what pressing will do.
+ * <h2>A radio group, because that is what it is</h2>
+ *
+ * <p>Three mutually exclusive choices over one value — `role="radiogroup"`
+ * with `aria-checked` on each, so a screen reader announces "Verified,
+ * selected, 2 of 3" rather than three unrelated buttons. Every option stays a
+ * tab stop: the roving-tabindex pattern saves keystrokes on long lists and
+ * costs them here, where there are three and they are the point of the column.
+ *
+ * <p><b>Never colour alone</b> — blueprint §12.1. Each option carries its word
+ * and its mark, and the chosen one is also the only one with a filled
+ * background, so the verdict survives both a greyscale screen and a reader who
+ * hears the page rather than sees it.
+ *
+ * <h2>Rejected is the one that acts</h2>
+ *
+ * <p>Pressing it sends the row back — see `chooseVerdict`. The other two are
+ * marks on a row that stays where it is, which is why only this one is
+ * described as an action in its own hint.
  */
-function ReviewButton({
+const VERDICT_CHOICES: readonly ObStepReviewState[] = ['NOT_REVIEWED', 'VERIFIED', 'REJECTED']
+
+function ReviewChoice({
   state,
   label,
   disabled,
-  onClick,
+  onChoose,
 }: {
   state: ObStepReviewState
   label: string
   disabled: boolean
-  onClick: () => void
+  onChoose: (next: ObStepReviewState) => void
 }) {
-  const next = VERDICT_NEXT[state]
-
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      aria-label={`${label} — ${VERDICT_WORD[state]}. Press to set ${VERDICT_WORD[next]}.`}
-      title={`Press to set ${VERDICT_WORD[next]}`}
-      className={cn(
-        'group flex w-full max-w-[172px] items-center justify-between gap-2',
-        'rounded-control border px-2.5 py-1.5 text-[12.5px] font-semibold',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        state === 'NOT_REVIEWED' && 'border-dashed border-level-medium bg-surface text-level-medium-text',
-        state === 'VERIFIED' && 'border-success bg-level-low-soft text-success-text',
-        // Red, on the reader's own call. It was the delayed orange, to keep a
-        // manager's Rejected distinguishable from an implementor's own Not
-        // completed — but rejection is the one verdict that sends work back,
-        // and it is worth the loudest colour the palette has.
-        state === 'REJECTED' && 'border-danger bg-danger-soft text-danger-text',
-        disabled ? 'cursor-not-allowed opacity-55' : 'hover:border-primary',
-      )}
+    <div
+      role="radiogroup"
+      data-testid="ob-check-list-row-verdict-choice"
+      aria-label={`Review ${label}`}
+      className="flex w-full min-w-0 items-stretch gap-1"
     >
-      <span aria-hidden="true" className="text-[13px] leading-none">
-        {VERDICT_MARK[state]}
-      </span>
-      <span className="flex-1 whitespace-nowrap text-left">{VERDICT_WORD[state]}</span>
-      <span
-        aria-hidden="true"
-        className={cn(
-          'text-[12px] opacity-75 transition-opacity sm:opacity-0',
-          !disabled && 'sm:group-hover:opacity-75 sm:group-focus-visible:opacity-75',
-        )}
-      >
-        ↻
-      </span>
-    </button>
+      {VERDICT_CHOICES.map((choice) => {
+        const chosen = state === choice
+        return (
+          <button
+            key={choice}
+            type="button"
+            role="radio"
+            aria-checked={chosen}
+            data-verdict={choice}
+            disabled={disabled}
+            onClick={() => {
+              if (!chosen) onChoose(choice)
+            }}
+            title={
+              choice === 'REJECTED'
+                ? 'Send this row back with a reason'
+                : choice === 'VERIFIED'
+                  ? 'This row holds'
+                  : 'No verdict yet'
+            }
+            className={cn(
+              'inline-flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap',
+              'rounded-control border px-1.5 py-1.5 text-[11px] font-semibold',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              !chosen && 'border-border bg-surface text-content-muted',
+              chosen &&
+                choice === 'NOT_REVIEWED' &&
+                'border-dashed border-level-medium bg-surface text-level-medium-text',
+              chosen && choice === 'VERIFIED' && 'border-success bg-level-low-soft text-success-text',
+              chosen && choice === 'REJECTED' && 'border-danger bg-danger-soft text-danger-text',
+              disabled ? 'cursor-not-allowed opacity-55' : !chosen && 'hover:border-primary',
+            )}
+          >
+            <span aria-hidden="true" className="text-[12px] leading-none">
+              {VERDICT_MARK[choice]}
+            </span>
+            {VERDICT_WORD[choice]}
+          </button>
+        )
+      })}
+    </div>
   )
 }

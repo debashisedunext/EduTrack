@@ -65,17 +65,11 @@ describe('currentStageLabel', () => {
     expect(currentStageLabel(project())).toBe('Configuration')
   })
 
-  it('says "Prerequisites pending" for a locked project rather than an em dash', () => {
-    // §9's own words. An em dash reads as missing data on a column that is
-    // reporting a real and actionable state.
-    expect(currentStageLabel(project({ currentStage: null, gateStatus: 'LOCKED' }))).toBe(
-      'Prerequisites pending',
-    )
-  })
-
-  it('falls back to an em dash for an open project with nothing running', () => {
-    // Every task blocked, or every one held behind a sibling service.
+  it('falls back to an em dash for a project with nothing running, locked gate or not', () => {
+    // The prerequisite gate is no longer a real dependency — a locked project
+    // reads the same as any other with no running stage.
     expect(currentStageLabel(project({ currentStage: null }))).toBe('—')
+    expect(currentStageLabel(project({ currentStage: null, gateStatus: 'LOCKED' }))).toBe('—')
   })
 })
 

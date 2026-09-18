@@ -173,7 +173,7 @@ public class ObSignoffOtpService {
      *                                      links."
      */
     @Transactional
-    public PublicSignoffOtpDtos.Session verify(String token, String otp, HttpServletRequest request) {
+    public PublicSignoffOtpDtos.SignoffSession verify(String token, String otp, HttpServletRequest request) {
         ObSignoff signoff = access.require(token, request);
         Instant now = clock.instant();
 
@@ -203,7 +203,7 @@ public class ObSignoffOtpService {
         ObSignoffSessions.Minted minted = sessions.mint(signoff.getId());
         ObSignoffPageReader.Page page = pages.read(signoff);
 
-        return new PublicSignoffOtpDtos.Session(
+        return new PublicSignoffOtpDtos.SignoffSession(
                 minted.token(),
                 now.plus(minted.ttl()),
                 signoff.getKind(),

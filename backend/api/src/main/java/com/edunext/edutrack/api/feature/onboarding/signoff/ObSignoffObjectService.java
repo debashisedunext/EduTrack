@@ -154,7 +154,7 @@ public class ObSignoffObjectService {
         }
 
         ObSignoffPageReader.Page page = pages.read(signoff);
-        PublicSignoffAcceptDtos.Contact objector = contacts.find(signoff.getSentToContactId());
+        PublicSignoffAcceptDtos.SignoffContact objector = contacts.find(signoff.getSentToContactId());
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("client_name", page.clientName());
@@ -200,7 +200,7 @@ public class ObSignoffObjectService {
     }
 
     private PublicSignoffObjectDtos.SignoffDetail detailOf(ObSignoff signoff) {
-        PublicSignoffAcceptDtos.Contact contact = contacts.find(signoff.getSentToContactId());
+        PublicSignoffAcceptDtos.SignoffContact contact = contacts.find(signoff.getSentToContactId());
         return new PublicSignoffObjectDtos.SignoffDetail(
                 signoff.getId(),
                 signoff.getObClientId(),

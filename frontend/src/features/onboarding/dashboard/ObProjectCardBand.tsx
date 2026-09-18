@@ -170,7 +170,8 @@ export interface ObProjectCardBandProps {
   board?: ObProjectBoard
   isPending: boolean
   /** Opens the detail behind a card. Absent while nothing is wired — a tile is then a region, never a dead button. */
-  onOpen?: (key: string) => void
+  /** The card's key and the words on it — the panel it opens is headed with its label. */
+  onOpen?: (key: string, label: string) => void
 }
 
 export function ObProjectCardBand({ board, isPending, onOpen }: ObProjectCardBandProps) {
@@ -206,7 +207,8 @@ function Tile({
 }: {
   card: CardSpec
   count: number
-  onOpen?: (key: string) => void
+  /** The card's key and the words on it — the panel it opens is headed with its label. */
+  onOpen?: (key: string, label: string) => void
 }) {
   const tone = TONE[card.tone]
   const Icon = card.icon
@@ -247,7 +249,7 @@ function Tile({
   return (
     <button
       type="button"
-      onClick={() => onOpen(card.key)}
+      onClick={() => onOpen(card.key, card.label)}
       aria-label={`${name} Open the matching projects.`}
       className={`${shell} transition-shadow hover:shadow-modal focus-visible:outline
                   focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary`}
