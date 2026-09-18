@@ -46,6 +46,7 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObJourneyDetailAllOfImplementorManagerUserId } from './obJourneyDetailAllOfImplementorManagerUserId';
 import type { ObJourneyStepView } from './obJourneyStepView';
 
 export type ObJourneyDetailAllOf = {
@@ -57,6 +58,23 @@ references, and why a TAT report years later still means what
 it meant on the day.
  */
   templateVersion: number;
+  /** Who may review this journey's submitted tasks — the project's
+own `implementor_manager_user_id`, the person accountable for
+the engagement above the implementor.
+
+Carried on the journey rather than per task because it is a
+fact about the engagement, and because a screen has to know it
+before it decides whether to draw the Review column. Compare it
+with the signed-in user's id: equal means this reader records
+the verdicts here.
+
+**Not a role.** Holding `OB_MANAGER` says you manage something,
+not that you manage *this*, and the server agrees —
+`requireReviewer` checks this same column. `null` where the
+project names nobody, in which case only an `OB_ADMIN` can
+close a review on it.
+ */
+  implementorManagerUserId?: ObJourneyDetailAllOfImplementorManagerUserId;
   /** Every service in sequence, unpaginated. See `ObJourneyStrip`
 for why: the ribbon needs all of them to draw any of them.
  */

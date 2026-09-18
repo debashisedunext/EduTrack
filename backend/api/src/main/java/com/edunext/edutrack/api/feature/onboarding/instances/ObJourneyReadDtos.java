@@ -62,6 +62,14 @@ final class ObJourneyReadDtos {
      * several at once, each its own journey, so the product alone no longer
      * identifies which ribbon a reader is looking at.
      */
+    /**
+     * @param implementorManagerUserId who may review this journey's submitted
+     *        tasks — the project's own manager. Carried on the journey rather
+     *        than per task because it is a fact about the engagement, and the
+     *        screen needs it before it decides whether to draw the Review
+     *        column. Null where the project names nobody; only an
+     *        {@code OB_ADMIN} can close a review there.
+     */
     record ObJourneyDetail(
             long id, long obClientId, String clientName, ObProductRef product, String serviceName,
             ObGateStatus gateStatus, ObRag rag, int percentComplete,
@@ -70,7 +78,8 @@ final class ObJourneyReadDtos {
             Instant startedAt, Instant completedAt, Instant archivedAt,
             long templateId, int templateVersion,
             List<ObJourneyStepLifecycleDtos.ObJourneyStepDetail> steps,
-            List<List<Long>> parallelGroups) {
+            List<List<Long>> parallelGroups,
+            Long implementorManagerUserId) {
     }
 
     record ObJourneyDetailResponse(ObJourneyDetail data) {

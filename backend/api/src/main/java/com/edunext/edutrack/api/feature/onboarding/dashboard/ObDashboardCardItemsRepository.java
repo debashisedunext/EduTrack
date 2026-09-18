@@ -142,6 +142,7 @@ class ObDashboardCardItemsRepository {
                    cl.id              AS ob_client_id,
                    cl.name            AS ob_client_name,
                    jr.id              AS journey_id,
+                   jr.project_id      AS project_id,
                    pr.id              AS product_id,
                    pr.code            AS product_code,
                    pr.name            AS product_name,
@@ -172,6 +173,8 @@ class ObDashboardCardItemsRepository {
                    cl.id              AS ob_client_id,
                    cl.name            AS ob_client_name,
                    NULL               AS journey_id,
+                   (SELECT CASE WHEN COUNT(*) = 1 THEN MIN(p2.id) END
+                      FROM ob_projects p2 WHERE p2.ob_client_id = cl.id) AS project_id,
                    NULL               AS product_id,
                    NULL               AS product_code,
                    NULL               AS product_name,
@@ -316,8 +319,8 @@ class ObDashboardCardItemsRepository {
      *                 reads it, to name the next page's cursor.
      */
     record ItemRow(String itemType, long itemId, long obClientId, String obClientName, Long journeyId,
-                   Long productId, String productCode, String productName, String title, Long ownerUserId,
-                   String ownerName, String status, Instant dueAt, boolean isOverdue,
+                   Long projectId, Long productId, String productCode, String productName, String title,
+                   Long ownerUserId, String ownerName, String status, Instant dueAt, boolean isOverdue,
                    Instant cursorAt, long sortKeySigned) {
     }
 
@@ -327,6 +330,7 @@ class ObDashboardCardItemsRepository {
             rs.getLong("ob_client_id"),
             rs.getString("ob_client_name"),
             nullableLong(rs, "journey_id"),
+            nullableLong(rs, "project_id"),
             nullableLong(rs, "product_id"),
             rs.getString("product_code"),
             rs.getString("product_name"),

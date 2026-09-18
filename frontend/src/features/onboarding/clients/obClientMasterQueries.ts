@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import http, { ApiError, BASE, getAccessToken, newIdempotencyKey } from '@/api/http'
 import type { ObClient } from '@/api/generated/model/obClient'
@@ -53,6 +53,12 @@ export interface ClientWithEtag {
  *
  * `q` matches the name or the code — both are on the server's filter, and the
  * master's search box is the only place either is typed.
+ *
+ * <p>The page on screen is kept while the next one is fetched, for the reason
+ * `useObProjects` gives: dropping to the skeleton mid-page removes the pager
+ * from under the cursor of the person still clicking Next. It also stops the
+ * list flickering to grey on every keystroke in the search box, which is the
+ * same query changing.
  */
 export function useObClients(params: { q?: string; cursor?: string; limit?: number }) {
   const search = new URLSearchParams()
@@ -69,6 +75,7 @@ export function useObClients(params: { q?: string; cursor?: string; limit?: numb
         method: 'GET',
         signal,
       }),
+    placeholderData: keepPreviousData,
   })
 }
 

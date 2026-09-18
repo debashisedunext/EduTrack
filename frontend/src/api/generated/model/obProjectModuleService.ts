@@ -47,9 +47,12 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ObGateStatus } from './obGateStatus';
+import type { ObProjectStage } from './obProjectStage';
 
 /**
- * One Module Service this project was boarded through — the journey, named.
+ * One Module Service this project was boarded through — the journey,
+named, and its own stage roll-up.
+
  */
 export interface ObProjectModuleService {
   journeyId: number;
@@ -61,4 +64,26 @@ export interface ObProjectModuleService {
   serviceName: string;
   gateStatus: ObGateStatus;
   isComplete: boolean;
+  /** Every implementation stage **this service's** template publishes, in
+sequence, stages it scheduled nothing into included.
+
+`ObProjectDetail.stages` is the same roll-up folded across every
+journey of the project, which is what the header's "Stages 2/7"
+needs and exactly what makes it useless to the project page's tree:
+folded, there is no answer to "how far is *SIS* through
+Configuration", because both services' Configuration tasks are in
+one bucket.
+
+So the tree reads this list and the header reads the folded one.
+Both come from a single `STAGE_ROLLUP` at journey grain — the
+project-level figures are summed from these rows rather than queried
+again, so the two cannot disagree.
+
+`taskCount: 0` here is a sharper statement than the folded list can
+make: Reports can be empty for Attendance and busy for SIS, and only
+this shape can say so. It still means a misconfigured Module Service
+rather than a finished stage — `isComplete` requires a task to have
+been completed, the same rule the folded list follows.
+ */
+  stages: ObProjectStage[];
 }

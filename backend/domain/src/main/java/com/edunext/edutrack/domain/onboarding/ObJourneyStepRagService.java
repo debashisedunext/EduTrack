@@ -86,7 +86,16 @@ public class ObJourneyStepRagService {
 
     private Instant referenceTimeFor(ObJourneyStep step, ObJourneyStepStatus status) {
         return switch (status) {
-            case WAITING_ON_CLIENT -> lastPauseOccurredAt(step.getId());
+            /*
+              Both are paused clocks, and a paused clock is read at the moment
+              it stopped rather than now. PENDING_REVIEW joins WAITING_ON_CLIENT
+              here because the manager review gate writes the same PAUSED event
+              at submit — see ObJourneyStepStatus.PENDING_REVIEW. Were it to
+              fall through to Instant.now() instead, an implementor's TAT would
+              keep climbing while their work sat in somebody else's inbox, which
+              is the one thing pausing it exists to prevent.
+            */
+            case WAITING_ON_CLIENT, PENDING_REVIEW -> lastPauseOccurredAt(step.getId());
             case DONE -> step.getFinishedAt();
             case IN_PROGRESS, BLOCKED -> Instant.now();
             case PENDING, SKIPPED -> throw new IllegalStateException(

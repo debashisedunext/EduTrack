@@ -107,6 +107,12 @@ public class ObProjectProvisioning {
                         derivedName(obClientId, productId),
                         LocalDate.now(clock.withZone(ZoneOffset.UTC)),
                         clients.findById(obClientId).map(c -> c.getSalesPersonId()).orElse(null),
+                        // Neither the implementor nor their manager is knowable
+                        // here. This path has no form and no caller choosing
+                        // people — it backfills the project a purchase implies —
+                        // and inventing either would put a name on an
+                        // engagement nobody assigned them to.
+                        null,
                         null,
                         createdBy)));
     }

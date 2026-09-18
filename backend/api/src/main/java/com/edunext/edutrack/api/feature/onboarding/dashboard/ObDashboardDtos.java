@@ -110,6 +110,16 @@ final class ObDashboardDtos {
 
     /** {@code UserRef}, restated locally — see {@link ObProductRef}'s own note. */
     record UserRef(long id, String displayName) {
+
+        /**
+         * Null in, null out — an unassigned implementor is an ordinary state
+         * and must reach the wire as {@code null} rather than as a user whose
+         * id is zero. {@code ObProjectDtos.UserRef} carries the identical
+         * factory for the identical reason.
+         */
+        static UserRef of(Long id, String displayName) {
+            return id == null ? null : new UserRef(id, displayName);
+        }
     }
 
     /**
@@ -120,6 +130,14 @@ final class ObDashboardDtos {
      *                  when it is {@code PREREQUISITE}. Two id spaces behind
      *                  one field, exactly as the contract states.
      * @param journeyId null on a prerequisite.
+     * @param obProjectId the project this row opens onto — {@code jr.project_id}
+     *                  on a service row, always present. On a prerequisite it
+     *                  is the client's project <em>only when they have exactly
+     *                  one</em>, and null otherwise: a prerequisite is the
+     *                  client-level gate and names no single project, so a
+     *                  client running several cannot be resolved to one here.
+     *                  The drill-down opens the project page when this is set
+     *                  and the client's project grid when it is not.
      * @param product   null on a prerequisite.
      * @param owner     null on a prerequisite, whose counterparty is the
      *                  client rather than an implementor.
@@ -131,8 +149,8 @@ final class ObDashboardDtos {
      *                  render a chip.
      */
     record ObDashboardItem(ObDashboardItemType itemType, long itemId, long obClientId, String obClientName,
-                           Long journeyId, ObProductRef product, String title, UserRef owner, String status,
-                           Instant dueAt, boolean isOverdue) {
+                           Long journeyId, Long obProjectId, ObProductRef product, String title, UserRef owner,
+                           String status, Instant dueAt, boolean isOverdue) {
 
         static ObDashboardItem of(ObDashboardCardItemsRepository.ItemRow row) {
             ObProductRef product = row.productId() == null ? null
@@ -141,7 +159,8 @@ final class ObDashboardDtos {
                     : new UserRef(row.ownerUserId(), row.ownerName());
             return new ObDashboardItem(
                     ObDashboardItemType.valueOf(row.itemType()), row.itemId(), row.obClientId(), row.obClientName(),
-                    row.journeyId(), product, row.title(), owner, row.status(), row.dueAt(), row.isOverdue());
+                    row.journeyId(), row.projectId(), product, row.title(), owner, row.status(), row.dueAt(),
+                    row.isOverdue());
         }
     }
 
@@ -229,6 +248,112 @@ final class ObDashboardDtos {
                                  int blockedWaiting, int aheadOfSchedule,
                                  int completedOnTime, int completedEarly, int completedLate,
                                  int blockedHours, BigDecimal performanceScore, LocalDate statDate) {
+    }
+
+    /**
+     * C-141 · the caller's own review figures — the manager's queue card and
+     * the implementor's three-figure card, in one answer.
+     *
+     * <p>Both roles in one record because plenty of people are both, and a
+     * client cannot know in advance which figures it will need. A zero is a
+     * real answer meaning "nothing", so the screen draws a card only where
+     * there is something to say.
+     *
+     * @param reviewsPending  rows waiting on this caller <em>as a manager</em>
+     * @param sentForReview   rows this caller has out with their own manager
+     * @param reviewsApproved rows of theirs approved on the stat day
+     * @param reviewsRejected rows of theirs sent back on the stat day
+     * @param computedAt      when the worker last wrote these — <b>null means
+     *                        never</b>, and the screen says so rather than
+     *                        presenting four zeroes as fact
+     */
+    record ObReviewSummary(int reviewsPending, int sentForReview,
+                           int reviewsApproved, int reviewsRejected,
+                           Instant computedAt) {
+    }
+
+    record ObReviewSummaryResponse(ObReviewSummary data) {
+    }
+
+    // ── OB-02's project board ──────────────────────────────────────────────
+
+    /**
+     * {@code ObProjectClientRef} — the client as the board's rows name it.
+     *
+     * <p>Restated here rather than imported from the projects feature, per
+     * {@link ObProductRef}'s own note: a change to that feature's response
+     * shape must never be a silent change to this one's.
+     */
+    record ObProjectBoardClientRef(long id, String name, String clientCode, String city) {
+    }
+
+    /**
+     * One running project, as OB-02's donuts and lists read it — mirrors
+     * {@code ObProjectBoardRow}.
+     *
+     * @param bucket             one of {@code ON_TIME}, {@code AHEAD},
+     *                           {@code DELAYED}, {@code AT_RISK},
+     *                           {@code NOT_SCHEDULED}. A plain string on the
+     *                           same reasoning {@code ObDashboardItem.status}
+     *                           gives: the contract closes the vocabulary and
+     *                           the screen draws a slice from it
+     * @param daysPastCompletion ceiling working days past the <b>project's</b>
+     *                           completion date, or null while it is not past
+     *                           — never zero, which would claim the project is
+     *                           on time today rather than that the question
+     *                           does not apply
+     * @param delayedByDays      ceiling working days past the earliest overdue
+     *                           <b>task</b>'s due date. A different fact, and
+     *                           deliberately not folded into {@code bucket}: a
+     *                           project inside its completion date with a late
+     *                           task is not a late project
+     * @param budgetUsedPercent  working hours since the project opened as a
+     *                           share of its TAT budget. Uncapped, so a project
+     *                           well past its budget says how far
+     */
+    record ObProjectBoardRow(long id, String name, ObProjectBoardClientRef client, ObProductRef product,
+                             LocalDate startDate, UserRef salesPerson, UserRef implementor,
+                             String gateStatus, String currentStage, String bucket,
+                             LocalDate tentativeCompletion, Integer daysPastCompletion,
+                             Integer delayedByDays, int tasksTotal, int tasksDone,
+                             Integer budgetUsedPercent, int openEscalations) {
+    }
+
+    /** The six counters on the card band — every one on the project's completion date. */
+    record ObProjectBoardCards(int ongoingProjects, int thisWeeksDeadlines, int todaysDelivery,
+                               int overdueProjects, int atRiskProjects, int clientEscalations) {
+    }
+
+    /**
+     * The schedule donut's five slices.
+     *
+     * <p>They sum to {@code cards.ongoingProjects}, because every row falls in
+     * exactly one bucket — an arithmetic contract the schema states and
+     * {@code ObProjectBoardServiceTest} asserts, since nothing at runtime
+     * enforces it.
+     */
+    record ObProjectBoardSchedule(int onTime, int ahead, int delayed, int atRisk, int notScheduled) {
+    }
+
+    /**
+     * OB-02's project board — mirrors {@code ObProjectBoard}.
+     *
+     * @param today     the date every "today" and "this week" figure was
+     *                  measured on, in the <b>working calendar's</b> timezone
+     *                  rather than the server's. Echoed so a screen cannot
+     *                  mislabel the board it is drawing
+     * @param truncated whether the row list hit
+     *                  {@code ObRunningProjectReader.CEILING} and the counts
+     *                  may therefore be short of the truth. False on every
+     *                  deployment that has not outgrown a single-screen board
+     */
+    record ObProjectBoard(Instant asOf, LocalDate today, LocalDate weekStart, LocalDate weekEnd,
+                          String appliedScope, ObProjectBoardCards cards,
+                          ObProjectBoardSchedule schedule, List<ObProjectBoardRow> projects,
+                          boolean truncated) {
+    }
+
+    record ObProjectBoardResponse(ObProjectBoard data) {
     }
 
     record ObImplementorWorkloadListResponse(List<ObImplementorWorkload> data, PageMeta meta) {

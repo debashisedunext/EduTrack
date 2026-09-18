@@ -69,20 +69,31 @@ const LOOK: Record<ObDashboardCardKey, CardLook> = {
 }
 
 /**
- * Cards the board receives and does not draw.
+ * Cards the board receives and draws for a platform Admin alone.
  *
- * `live` is a count of clients who have *finished* onboarding — the one card on
- * the board that is not a call to action, and the one nobody was opening. The
- * board is read to find what needs work today, and the row now fits on a single
- * line without it.
+ * `at-risk` and `client-escalations` are the two figures the module is
+ * *managed* by rather than worked from: one is the amber/red pipeline somebody
+ * triages across every implementor, the other is what a client has escalated
+ * past the team handling them. Neither is a number the person doing the
+ * onboarding acts on, and both invite a reading of somebody else's work.
  *
  * Filtered here rather than asked for differently: `GET /onboarding/dashboard/
  * summary` sends all seven in `ObDashboardCardKey` order, that shape is the
- * contract, and the drill-over still resolves `live` through {@link cardLook}
- * if anything links to it. This is a display decision and it stays on the
- * display side.
+ * contract, and the drill-over still resolves either key through {@link cardLook}
+ * if anything links to one. **This is a display decision and it stays on the
+ * display side** — `ObModuleRoleFilter` and the module's own scoping are what
+ * refuse data a caller may not have, exactly as `Sidebar`'s `adminOnly` rows
+ * decide what is easy to find and never what is permitted.
+ *
+ * `live` used to be filtered here too, on the argument that a count of finished
+ * clients is not a call to action. It is drawn again for everybody: it is the
+ * one card that answers "how much of this has actually landed", and the row
+ * holds it now that two cards come off it for most readers.
  */
-const HIDDEN_KEYS: ReadonlySet<string> = new Set<ObDashboardCardKey>(['live'])
+const ADMIN_ONLY_KEYS: ReadonlySet<string> = new Set<ObDashboardCardKey>([
+  'at-risk',
+  'client-escalations',
+])
 
 /**
  * The cards the board draws, in the order the server sent them.
@@ -91,17 +102,26 @@ const HIDDEN_KEYS: ReadonlySet<string> = new Set<ObDashboardCardKey>(['live'])
  * server newer than this bundle should add a card to the row, not have it
  * silently dropped by a filter that only knows last month's enum.
  */
-export function visibleCards<T extends { key: string }>(cards: readonly T[]): T[] {
-  return cards.filter((card) => !HIDDEN_KEYS.has(card.key))
+export function visibleCards<T extends { key: string }>(
+  cards: readonly T[],
+  isAdmin: boolean,
+): T[] {
+  return cards.filter((card) => isAdmin || !ADMIN_ONLY_KEYS.has(card.key))
 }
 
 /**
  * How many tiles the row is expected to hold — what the loading skeleton draws,
- * so nothing reflows when the real numbers land. Derived from the two maps
- * above rather than typed as a literal: hiding a second card would otherwise
- * leave a skeleton one tile too wide until somebody noticed.
+ * so nothing reflows when the real numbers land. Derived from the maps above
+ * rather than typed as a literal: hiding a card would otherwise leave a
+ * skeleton a tile too wide until somebody noticed.
+ *
+ * It takes `isAdmin` for the same reason {@link visibleCards} does. A
+ * non-admin's skeleton drawing seven tiles would reflow to five the moment the
+ * figures arrived, which is the single thing the fixed count exists to prevent.
  */
-export const VISIBLE_CARD_COUNT = Object.keys(LOOK).filter((key) => !HIDDEN_KEYS.has(key)).length
+export function visibleCardCount(isAdmin: boolean): number {
+  return Object.keys(LOOK).filter((key) => isAdmin || !ADMIN_ONLY_KEYS.has(key)).length
+}
 
 /**
  * How one card is labelled.

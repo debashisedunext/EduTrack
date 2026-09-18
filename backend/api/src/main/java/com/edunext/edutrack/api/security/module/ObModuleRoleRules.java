@@ -255,6 +255,22 @@ public class ObModuleRoleRules {
         // own typo somebody else's errand.
         put(m, "DELETE", "/api/v1/onboarding/clients/{obClientId}", ADMIN_AND_SALES);
 
+        // My Tasks — the caller's own open work, across every project.
+        //
+        // EVERY_ROLE, and that is not a widening. This route has no parameter
+        // naming whose tasks to list: it answers for the caller and nobody
+        // else, so a Viewer's page is their own tasks, which for a Viewer is
+        // empty. Narrowing it to OB_STEP_OWNER would refuse a Manager who
+        // happens to own a task — a real case, since a moderator can be
+        // assigned one — and refuse it with a 404 they could not explain.
+        //
+        // The navigation is what decides whose screen this is: the sidebar
+        // draws the row for OB_STEP_OWNER alone. That is a question about what
+        // is easy to find, and this is a question about what may be read; they
+        // are allowed to differ, and the safe direction is exactly this one.
+        put(m, "GET", "/api/v1/onboarding/my-tasks", EVERY_ROLE);
+        put(m, "GET", "/api/v1/onboarding/my-tasks/{taskId}", EVERY_ROLE);
+
         // The Projects grid. A project is scoped by its client, so the reads
         // are every role's for the reason the client reads are, and the writes
         // take the client's own pair: a project is what Sales sells, and
@@ -348,6 +364,10 @@ public class ObModuleRoleRules {
         put(m, "POST", "/api/v1/onboarding/escalations/{escalationId}/resolve", ADMIN_AND_MANAGER);
 
         put(m, "GET", "/api/v1/onboarding/dashboard/summary", EVERY_ROLE);
+        // OB-02's project board. Every role, like the card board beside it:
+        // the rows are scoped by the caller's own client predicate, so a
+        // narrowed role sees a smaller board rather than a refused one.
+        put(m, "GET", "/api/v1/onboarding/dashboard/project-board", EVERY_ROLE);
         put(m, "GET", "/api/v1/onboarding/reports", EVERY_ROLE);
         put(m, "GET", "/api/v1/onboarding/reports/{reportKey}", EVERY_ROLE);
 

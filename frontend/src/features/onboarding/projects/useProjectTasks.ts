@@ -10,16 +10,17 @@ import type { ObProjectDetail } from '@/api/generated/model/obProjectDetail'
 /**
  * Every task of a project, flattened across its module services.
  *
- * <h2>Why flattened</h2>
+ * <h2>Why flattened, when the page draws a tree</h2>
  *
- * <p>A project is boarded through one journey per module service, and the
- * stage roll-up in the header already folds those together — "Data Migration"
- * on a project with two services means both services' Data Migration tasks. The
- * stage body underneath has to agree with the ribbon above it, so it reads the
- * same way: one list per stage, with each row naming the service it came from.
+ * <p>Flat is the shape the responses arrive in — one journey read per module
+ * service — and regrouping them is `projectTree.ts`'s job rather than this
+ * hook's. Keeping the fetching and the grouping apart is what lets the tree be
+ * a pure function over data somebody else fetched, and therefore what lets it
+ * be tested without a query client.
  *
- * <p>That name is the only thing lost by flattening, so it is carried on every
- * task rather than implied by a grouping — {@link ProjectTask.serviceName}.
+ * <p>No grouping is implied by position: every task carries the journey it came
+ * from and that service's pinned name, so {@link ProjectTask.journeyId} is what
+ * the tree files on and {@link ProjectTask.serviceName} is what it prints.
  *
  * <h2>One request per module service, in parallel</h2>
  *
@@ -43,9 +44,27 @@ export interface ProjectTask {
   name: string
   status: ObJourneyStepStatus
   ownerUserId?: number | null
+  /**
+   * `ownerUserId` was resolved from the project's implementor rather than from
+   * the module service — the task pinned nobody, and the read filled it in. The
+   * strip labels it, because an inherited owner read as a deliberate one makes
+   * somebody accountable for a task nobody assigned them.
+   */
+  ownerIsInherited: boolean
   backupOwnerUserId?: number | null
   tatDays: number
   requiresSignoff: boolean
+  /**
+   * When work on this task actually began — null while it is still pending.
+   *
+   * <p>The Module strip folds the earliest of these into the service's **Start
+   * date**: a service starts when the first thing in it does, and there is no
+   * separate column that says so. `ObJourneySummary.startedAt` is the journey's
+   * own answer to the same question, and it is deliberately not used here —
+   * reading it would mean plumbing the journey summary down beside the tasks
+   * for one field that the tasks already carry.
+   */
+  startedAt?: string | null
   dueAt?: string | null
   /** Working hours consumed over budget, server-computed — see the contract. */
   tatUsedPercent?: number | null
@@ -98,9 +117,11 @@ export function useProjectTasks(project: ObProjectDetail | undefined): ProjectTa
           name: step.name,
           status: step.status,
           ownerUserId: step.ownerUserId,
+          ownerIsInherited: step.ownerIsInherited ?? false,
           backupOwnerUserId: step.backupOwnerUserId,
           tatDays: step.tatDays ?? 0,
           requiresSignoff: step.requiresSignoff ?? false,
+          startedAt: step.startedAt,
           dueAt: step.dueAt,
           tatUsedPercent: step.tatUsedPercent ?? null,
           stageKey: step.stageKey ?? null,
@@ -125,12 +146,6 @@ export function useProjectTasks(project: ObProjectDetail | undefined): ProjectTa
   return { tasks, isPending, isError }
 }
 
-/** The tasks of one stage, in the order {@link useProjectTasks} settled on. */
-export function tasksOfStage(tasks: readonly ProjectTask[], stageKey: number | null): ProjectTask[] {
-  if (stageKey == null) return []
-  return tasks.filter((t) => t.stageKey === stageKey)
-}
-
 /**
  * Whether a task is the signed-in user's.
  *
@@ -142,16 +157,4 @@ export function tasksOfStage(tasks: readonly ProjectTask[], stageKey: number | n
 export function isMine(task: ProjectTask, meId: number | null | undefined): boolean {
   if (meId == null) return false
   return task.ownerUserId === meId || task.backupOwnerUserId === meId
-}
-
-/** The stage keys holding at least one of the signed-in user's tasks. */
-export function myStageKeys(
-  tasks: readonly ProjectTask[],
-  meId: number | null | undefined,
-): Set<number> {
-  const keys = new Set<number>()
-  tasks.forEach((t) => {
-    if (t.stageKey != null && isMine(t, meId)) keys.add(t.stageKey)
-  })
-  return keys
 }

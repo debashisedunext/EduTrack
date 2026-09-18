@@ -1003,6 +1003,100 @@ public class ObDashboardStatsRepository {
     }
 
     /**
+     * C-141 · the four review counters, for both cards.
+     *
+     * <h2>Two of the four are stock and two are flow</h2>
+     *
+     * <p>{@code reviews_pending} and {@code sent_for_review} are counts of
+     * what is on a desk <em>now</em> — the same figure at any hour of the
+     * day, and the reason the cards read "3 rows waiting on you" rather than
+     * "3 rows arrived today". {@code reviews_approved} and
+     * {@code reviews_rejected} are events, and are counted <b>on the stat
+     * day</b>: what became of this person's work today.
+     *
+     * <p>Mixing the two on one card is a real risk and is the screen's
+     * problem, not this method's — flagged here because the column names do
+     * not say which is which, and somebody summing all four would get a number
+     * that means nothing.
+     *
+     * <h2>Upsert, not insert</h2>
+     *
+     * <p>{@code refreshImplementorStock} has already written this day's rows
+     * for everybody holding an {@code OB_STEP_OWNER} grant, but a manager who
+     * owns no steps of their own has no row there — and they are precisely
+     * the person {@code reviews_pending} is for. So this creates a row where
+     * the stock pass did not, on the blocked-hours idiom immediately above.
+     *
+     * <p>Every counter is written for every user in the union, zeros included.
+     * A stale three from yesterday sitting on a queue that has since been
+     * cleared is the one failure mode a dashboard cannot recover from by
+     * itself, because it looks exactly like a real three.
+     *
+     * @return rows written
+     */
+    @Transactional
+    public int refreshReviewCounters(ObStatsDay day, Instant computedAt) {
+        return jdbc.sql("""
+                INSERT INTO ob_implementor_daily_stats (
+                    stat_date, user_id,
+                    reviews_pending, sent_for_review, reviews_approved, reviews_rejected,
+                    computed_at)
+                SELECT :day, pop.user_id,
+                       COALESCE(mgr.pending, 0),
+                       COALESCE(own.sent, 0),
+                       COALESCE(own.approved, 0),
+                       COALESCE(own.rejected, 0),
+                       :computedAt
+                  FROM (
+                        SELECT DISTINCT p.implementor_manager_user_id AS user_id
+                          FROM ob_projects p
+                         WHERE p.implementor_manager_user_id IS NOT NULL
+                         UNION
+                        SELECT DISTINCT js.owner_user_id AS user_id
+                          FROM ob_journey_steps js
+                         WHERE js.owner_user_id IS NOT NULL
+                       ) pop
+                  LEFT JOIN (
+                        SELECT p.implementor_manager_user_id AS user_id,
+                               COUNT(*)                      AS pending
+                          FROM ob_journey_step_items i
+                          JOIN ob_journey_steps js ON js.id = i.step_id
+                          JOIN ob_journeys jr      ON jr.id = js.journey_id
+                                                  AND jr.archived_at IS NULL
+                          JOIN ob_projects p       ON p.id = jr.project_id
+                         WHERE i.row_state = 'SENT'
+                           AND p.implementor_manager_user_id IS NOT NULL
+                           AND p.status NOT IN ('ON_HOLD', 'DROPPED')
+                         GROUP BY p.implementor_manager_user_id
+                       ) mgr ON mgr.user_id = pop.user_id
+                  LEFT JOIN (
+                        SELECT js.owner_user_id AS user_id,
+                               SUM(i.row_state = 'SENT')                                AS sent,
+                               SUM(i.row_state = 'VERIFIED'
+                                   AND DATE(i.reviewed_at) = :day)                      AS approved,
+                               SUM(i.row_state = 'REJECTED'
+                                   AND DATE(i.reviewed_at) = :day)                      AS rejected
+                          FROM ob_journey_step_items i
+                          JOIN ob_journey_steps js ON js.id = i.step_id
+                          JOIN ob_journeys jr      ON jr.id = js.journey_id
+                                                  AND jr.archived_at IS NULL
+                         WHERE js.owner_user_id IS NOT NULL
+                         GROUP BY js.owner_user_id
+                       ) own ON own.user_id = pop.user_id
+                 WHERE pop.user_id IS NOT NULL
+                ON DUPLICATE KEY UPDATE
+                    reviews_pending  = VALUES(reviews_pending),
+                    sent_for_review  = VALUES(sent_for_review),
+                    reviews_approved = VALUES(reviews_approved),
+                    reviews_rejected = VALUES(reviews_rejected),
+                    computed_at      = VALUES(computed_at)
+                """)
+                .param("day", day.date())
+                .param("computedAt", computedAt)
+                .update();
+    }
+
+    /**
      * A step in a blocked or waiting status from {@code from} until {@code to},
      * where a null {@code to} means it has not left that status yet.
      *

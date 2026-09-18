@@ -58,12 +58,11 @@ describe('stepAndTaskCounts', () => {
 })
 
 describe('countsLabel', () => {
-  it('names both kinds when a stage holds both', () => {
-    expect(countsLabel([task(1), task(2, { dependsOnStepId: 1 })])).toBe('1 step · 1 task')
-  })
-
-  it('names only the kind that is there', () => {
-    expect(countsLabel([task(1), task(2)])).toBe('2 steps')
+  it('counts every card as a task, held or not', () => {
+    // The container is captioned Step, so the chip cannot also call a
+    // parallel card a "step" without saying one word about two things.
+    expect(countsLabel([task(1), task(2, { dependsOnStepId: 1 })])).toBe('2 tasks')
+    expect(countsLabel([task(1), task(2)])).toBe('2 tasks')
     expect(countsLabel([task(2, { dependsOnStepId: 1 })])).toBe('1 task')
   })
 
@@ -81,10 +80,10 @@ describe('presetFor and levelOf', () => {
     }
   })
 
-  it('offers three segments, and Step is not one of them', () => {
-    // The strip is Stage / Task / Checklist. "Step" was a fourth segment
-    // whose name collided with the Step badge on the cards below it.
-    expect(TREE_LEVELS.map((l) => l.label)).toEqual(['Stage', 'Task', 'Checklist'])
+  it('offers three segments, and Stage is not one of them', () => {
+    // The strip is Step / Task / Checklist. "Stage" was the container's old
+    // caption; the segment that closes to it now says what the badge says.
+    expect(TREE_LEVELS.map((l) => l.label)).toEqual(['Step', 'Task', 'Checklist'])
   })
 
   it('closes the stages themselves at the stage level', () => {

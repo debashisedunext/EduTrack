@@ -111,7 +111,16 @@ class FixtureLoader implements ApplicationRunner {
 
     private void loadOnboardingCorpus() {
         if (onboarding.alreadyLoaded()) {
-            log.info("B-101 onboarding corpus already present (product ERP exists) — skipping.");
+            log.info("B-101 onboarding corpus already present — skipping.");
+
+            // Before the prerequisites top-up, not after: that one seeds a
+            // checklist against the client's contacts, and every sign-off route
+            // needs one to exist at all. See clientsMissingContacts.
+            int noContacts = onboarding.clientsMissingContacts();
+            if (noContacts > 0) {
+                log.info("B-101: {} client(s) have no active SPOC — seeding those.", noContacts);
+                onboarding.loadMissingContacts();
+            }
             // ...except for pieces the corpus did not used to write. A
             // database seeded by an earlier build has clients whose
             // gate_status says LOCKED with no checklist behind it, and

@@ -8212,6 +8212,83 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ObCompletionGateProblem' }
 
+  /onboarding/journey-steps/{stepId}/outcomes-seen:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      operationId: markObJourneyStepOutcomesSeen
+      tags: [onboarding-journeys]
+      summary: Mark this task's review outcomes as read
+      description: |
+        Stamps every approved or returned row of this task that its owner has
+        not yet looked at. **The task's owner only** — seen-ness is about the
+        person the outcome is addressed to, so a manager or an admin opening
+        the task does not mark it read on their behalf.
+
+        This is what stops "2 rows came back" either shouting for ever or
+        forgetting on refresh. Call it whenever the owner opens the task: it is
+        idempotent, and a task with nothing new answers `0` having written
+        nothing.
+      responses:
+        '200':
+          description: How many rows this press cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObStepOutcomesSeenResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /onboarding/journey-steps/{stepId}/review/complete:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: closeObJourneyStepReview
+      summary: Close a review as accepted (manager review gate)
+      description: |
+        `PENDING_REVIEW` → `DONE`, once every check-list row is `VERIFIED`.
+
+        **The reviewer's deliberate press, and the only way an accepted
+        review closes.**
+
+        A rejection needs no equivalent: pressing Rejected and typing a
+        reason is already explicit, so the task returns to its implementor
+        on its own. Accepting is one press of a button whose *next* position
+        is also one press away — `Not reviewed → Verified → Rejected` — so
+        closing on the verdict itself would lock the row and release this
+        task's dependants in the same instant a reviewer might have meant to
+        press again. A verdict stays changeable for as long as the review is
+        open; this ends it.
+
+        **Who may call it:** the project's own `implementorManagerUserId`, or
+        an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+        and a caller with no onboarding role answers `404`.
+      responses:
+        '200':
+          description: Review closed; the task is `DONE`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            `step-moderator-required` — the caller does not manage this
+            project and is not an `OB_ADMIN`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            The step is not `PENDING_REVIEW`, or a row is still unreviewed or
+            rejected. Outstanding rows are named in
+            `unansweredMandatoryItems` — the same shape the owner's own
+            completion gate answers with, so a client that understands one
+            understands both. A rejected task is already on its way back and
+            has nothing to close.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ObCompletionGateProblem' }
+
   /onboarding/journey-steps/{stepId}/block:
     parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
     post:
@@ -8300,6 +8377,97 @@ paths:
   # was a row, so it could carry no name, no start date, no implementor and no
   # status. `V20260911_1800` gives it one; these two operations are its surface.
 
+  /onboarding/my-tasks:
+    get:
+      tags: [onboarding]
+      operationId: listObMyTasks
+      summary: The implementor's open tasks, across every project
+      description: |
+        Every task still open against the **calling user**, whichever project or
+        client it belongs to, soonest due first.
+
+        **There is no `ownerUserId` parameter, by design.** The caller is the
+        filter. One that existed would let an implementor read a colleague's
+        queue by guessing a user id, and adding it later behind a role check
+        would put an authorisation decision on a query parameter — the shape
+        `runReport` already refuses for the same reason.
+
+        **Three ways a task is yours.** Owner, backup owner, or *inherited* — a
+        task nobody was pinned to, on a project you are the implementor of. The
+        third is not a convenience: it is the rule `ObJourneyStepLifecycle`
+        already authorises by, so a task listed here is one the five transitions
+        will accept from you. A queue listing work the server would then refuse
+        is worse than no queue. The backup owner counts for the reason
+        `OnboardingScopeResolver.hasStepOwnedBy` counts them — a stand-in asked
+        to cover a task needs to see it.
+
+        **Blocked and Waiting on client are included.** They are still open and
+        still yours; `status` says which, and a queue that hid them would hide
+        the work that has been stuck longest. Tasks behind a locked prerequisite
+        gate are included too — the checklist reports, it does not hold.
+
+        **Excluded is work nobody expects:** a project that is `ON_HOLD` or
+        `DROPPED` has had its clock stopped on purpose, so listing its tasks
+        would ask somebody to do what the organisation decided to stop.
+
+        Ordered by due date with nulls last, then by task id. The keyset cursor
+        carries the coalesced sort key, so a page boundary in a run of tasks
+        sharing a due date neither skips nor repeats.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: One page of the caller's open tasks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObMyTaskListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /onboarding/my-tasks/{taskId}:
+    get:
+      tags: [onboarding]
+      operationId: getObMyTask
+      summary: One of the caller's own tasks
+      description: |
+        The header of the focused task page — project, client, module service,
+        step, due date and status for a single task **belonging to the caller**.
+
+        **404 for a task that is somebody else's, and for one that does not
+        exist.** Deliberately the same answer: a `403` would confirm the task
+        exists, and `ob_journey_steps` ids are sequential, so the difference
+        between the two statuses is an enumeration oracle over every onboarding
+        task in the organisation.
+
+        **Neither the status nor the project-status filter of the list applies.**
+        The list leaves out settled tasks because a queue is work still to do;
+        this answers "show me this one", and a task just completed — or one on a
+        project since put on hold — is still the caller's to look at. Following
+        a link and getting a 404 because the work is finished would read as the
+        record having been deleted.
+
+        This carries the labels and **not the check list**. The focused page
+        reads `GET /onboarding/journey-steps/{stepId}` for that, which already
+        owns it and returns the documents and the effective owner beside it.
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - { $ref: '#/components/parameters/IfNoneMatch' }
+      responses:
+        '200':
+          description: The task.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties: { data: { $ref: '#/components/schemas/ObMyTask' } }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /onboarding/projects:
     get:
       tags: [onboarding]
@@ -9782,6 +9950,161 @@ paths:
           description: |
             `ob-step-terminal` — the service is closed; its checklist is the
             record of what was done, not a live document.
+
+            `ob-step-under-review` — the task is with an OB Manager. Open, not
+            closed: the refusal lasts as long as the review does, because an
+            answer that changed while somebody was reading it would make their
+            verdict describe something they never saw.
+
+            `ob-step-item-verified` — this row has been verified and is shut
+            for good.
+
+            `ob-step-reject-reason-required` — the row is rejected, so its
+            remark cannot be blanked.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /onboarding/journey-step-items/{itemId}/submit:
+    post:
+      operationId: submitObJourneyStepItem
+      tags: [onboarding-journeys]
+      summary: Send one Task List entry for verification
+      description: |
+        Puts one check-list row on the implementor manager's desk. **The row's
+        owner only** — anybody else answers `403`.
+
+        The row must be answered (`422` `completion-gate-not-satisfied`
+        otherwise — there is nothing to verify about a blank line), must not
+        already be out (`422` `ob-step-under-review`) and must not be approved
+        (`422` `ob-step-item-verified`).
+
+        While it is out, **that row alone is frozen**: its neighbours stay
+        writable, which is what lets somebody carry on with rows three to five
+        while one and two are being read. The task shows as `PENDING_REVIEW`
+        for as long as any row is out.
+
+        The task's own **Mark complete** is unchanged and still sends
+        everything that is ready in one press — it is this call, once per
+        ready row.
+      parameters: [{ $ref: '#/components/parameters/ObJourneyStepItemId' }]
+      responses:
+        '200':
+          description: The row, now out for review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObJourneyStepItemResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+  /onboarding/journey-step-items/{itemId}/send-back:
+    post:
+      operationId: sendBackObJourneyStepItem
+      tags: [onboarding-journeys]
+      summary: Release one verdict to the implementor
+      description: |
+        Sends one reviewed row back to whoever it belongs to, carrying the
+        verdict recorded on it. **OB Manager named on the project, or OB
+        Admin**; anybody else answers `403` `step-moderator-required`, and a
+        caller with no onboarding role at all answers `404`.
+
+        **Recording a verdict is not sending one.** `PATCH .../review` cycles
+        the verdict and keeps it reversible; this releases it. Two presses
+        deliberately: the first is a thought, the second is a message somebody
+        else starts acting on.
+
+        The row must be out for review (`422` `invalid-step-transition`) and
+        must carry a verdict (`422` `completion-gate-not-satisfied`). A
+        `REJECTED` row must say why (`422` `ob-step-reject-reason-required`).
+
+        **A rejection returns the row unanswered** — the claim it carried is
+        withdrawn with the verdict. The reviewer's reason survives on the
+        row's `remark`, which is what the implementor opens the row to read.
+
+        The task itself moves only when the **last** row comes back, so a
+        manager may release two now and read the rest later.
+      parameters: [{ $ref: '#/components/parameters/ObJourneyStepItemId' }]
+      responses:
+        '200':
+          description: The row, now back with its implementor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObJourneyStepItemResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+  /onboarding/journey-step-items/{itemId}/review:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepItemId' }]
+    patch:
+      tags: [onboarding-journeys]
+      operationId: reviewObJourneyStepItem
+      summary: Record an OB Manager's verdict on one checklist entry
+      description: |
+        The manager review gate. An implementor marking a task complete no
+        longer closes it — where the task's `requiresReview` is set it lands in
+        `PENDING_REVIEW`, and this is how it leaves.
+
+        **OB Manager or OB Admin only.** Anybody else answers `403`
+        `step-moderator-required`; a caller with no onboarding role at all
+        answers `404`, so the route discloses nothing about which items exist.
+        Gated by role rather than by ownership on purpose: reviewing is by
+        definition an act on somebody else's work, so an ownership check would
+        refuse exactly the caller this route exists for.
+
+        **A rejection must say why.** `remark` is mandatory on `REJECTED` and
+        is written to the row's own remark; on the other two states it is
+        ignored, so verifying can never overwrite the implementor's note.
+
+        **There is no separate call to close the review.** The task moves by
+        itself when the last undecided row is given a verdict: to `DONE` if
+        every row is `VERIFIED`, or back to `IN_PROGRESS` with its own owner if
+        any is `REJECTED`. A confirm step after a set of per-row decisions is a
+        place for a review to sit half-finished, and a half-reviewed task is in
+        no state anybody can describe.
+
+        **On a return, only the rejected rows reopen.** The verified ones are
+        locked for good and are not put in front of the manager again when the
+        implementor resubmits. There is nothing to reassign: the task goes back
+        to the owner it already has, because `ob_journey_step_items` has no
+        assignee of its own.
+
+        The response is the row. A caller who needs the task's new status
+        re-reads the step — which is what the screen does anyway to redraw the
+        check list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObStepItemReviewRequest' }
+      responses:
+        '200':
+          description: Verdict recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObJourneyStepItemResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            `step-moderator-required` — the caller holds an onboarding role,
+            but not `OB_MANAGER` or `OB_ADMIN`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '422':
+          description: |
+            `invalid-step-transition` — the task is not `PENDING_REVIEW`, so
+            there is no review open to record a verdict against.
+
+            `ob-step-item-verified` — this row was verified in an earlier
+            round. A verdict is recorded once.
+
+            `ob-step-reject-reason-required` — `REJECTED` with no `remark`.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -11046,6 +11369,38 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
+  /onboarding/dashboard/review-summary:
+    get:
+      operationId: getObReviewSummary
+      tags: [onboarding]
+      summary: The caller's own review counters (C-141)
+      description: |
+        Two cards in one answer: **Pending your verification** for a manager,
+        and **Sent / Approved / Rejected** as one card for an implementor.
+
+        Both roles together because plenty of people are both — a manager who
+        still carries tasks of their own — and a client cannot know in advance
+        which figures it will need. A zero is a real answer meaning "nothing",
+        so draw a card only where there is something to say.
+
+        Read from `ob_implementor_daily_stats`, never counted live
+        (CLAUDE.md). **A card is therefore as fresh as the last worker run** —
+        `PT5M` committed — so "3 rows pending your verification" can be
+        minutes behind the queue it describes. The My Tasks highlight beside it
+        is computed live for the opposite reason: the count invites, the
+        highlight directs, and only a stale highlight would send somebody to an
+        empty task.
+
+        `computedAt` is **null when the worker has never run**, and the screen
+        should say so rather than present four zeroes as fact.
+      responses:
+        '200':
+          description: The caller's figures.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObReviewSummaryResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /onboarding/dashboard/implementor-workload:
     get:
       tags: [onboarding]
@@ -11103,6 +11458,79 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ObImplementorWorkloadListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+
+  /onboarding/dashboard/project-board:
+    get:
+      tags: [onboarding]
+      operationId: getObProjectBoard
+      summary: The project-level board — schedule health, cards and rows (OB-02)
+      description: |
+        Everything OB-02's redesigned first screen draws, in one round trip:
+        six project-level counters, the schedule-health split behind the
+        first donut, and **one row per running project** for the two
+        people-donuts and the three Summary lists.
+
+        ## One pass, one answer
+
+        The counters and the split are computed **from the same rows this
+        response carries**, in the same request, and the rows are what the
+        screen groups by salesperson and by implementor. So a card, a slice
+        and the list it opens can never disagree — which is the property the
+        card board built on `ob_dashboard_summary` could not offer, because
+        its numbers were pre-aggregated at a different grain (journeys per
+        product) from the list behind them (steps and prerequisite tasks).
+
+        ## Every figure is on the project's completion date
+
+        `tentativeCompletion` is `listObProjects`'s own column — the start
+        date plus the project's critical-path TAT, walked through the working
+        calendar — and it is the one date every bucket and card on this route
+        is measured against:
+
+        | Figure | Rule |
+        |---|---|
+        | `ON_TIME` | the completion date is today or later |
+        | `AHEAD` | on time, nothing overdue, and task progress runs ahead of the budget used |
+        | `DELAYED` | 1–7 **working** days past the completion date |
+        | `AT_RISK` | more than 7 working days past it |
+        | `NOT_SCHEDULED` | no completion date — the project has no instantiated task to budget from |
+
+        Working days, not calendar days, through `WorkingHoursService` —
+        CLAUDE.md's rule. A project due Friday and still running on Saturday
+        morning is not late; on Monday it is one day late, not three.
+
+        `daysPastCompletion` is the number those two buckets are read from,
+        and it is **null, not zero**, while the project is not past its date.
+        `delayedByDays` (the earliest overdue *task*, as `listObProjects`
+        reports it) rides along unchanged because it is a different fact: a
+        project can be inside its completion date with a task already late,
+        and the screen says so beside the row rather than moving it to a
+        redder bucket the definition does not put it in.
+
+        ## Not a `COUNT(*)`
+
+        A bounded row fetch of the projects currently `RUNNING` in the
+        caller's scope, then arithmetic in Java — the line
+        `listObDelayedProjects` draws, and for the same reason: the bucket
+        boundaries are working-calendar maths SQL cannot do, and the set is a
+        fraction of the project table on any real deployment. There is no
+        `computedAt` because nothing here is pre-aggregated; `asOf` is when
+        this request ran.
+
+        Scoped by the project's client through the same predicate
+        `listObProjects` applies, so an OB_SALES caller's board is their own
+        clients' projects and nothing else. A caller whose module role can see
+        no project gets an empty board with every count at zero and
+        `appliedScope` saying so — not a `404`, because the route is theirs;
+        they simply have nothing in it.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObProjectBoardResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
@@ -13765,6 +14193,33 @@ components:
               type: array
               items: { type: string, enum: [TICKETING, ONBOARDING] }
               examples: [['TICKETING', 'ONBOARDING']]
+            # The role held *inside* each module, keyed by module code. The
+            # onboarding roles are not §2's six platform roles, so until this
+            # field the session had no way to tell an OB Admin from a Step
+            # Owner — the sidebar said so in its own comment and gated its
+            # administration rows on the platform role as an approximation.
+            #
+            # `AccessTokenIssuer` has minted the claim since A-112; this stops
+            # dropping it on the way out. Advisory in exactly the sense
+            # `permissions` and `modules` are: `ObModuleRoleFilter` decides
+            # what a caller may reach per request and answers 404, so a client
+            # that drew a link for a screen it does not hold gets a not-found
+            # rather than a leak. What it buys is My Tasks appearing for the
+            # people whose screen it is on first paint, instead of being
+            # discovered by firing a request and watching it come back empty.
+            moduleRoles:
+              type: object
+              additionalProperties: { type: string }
+              examples: [{ ONBOARDING: 'OB_STEP_OWNER' }]
+              description: |
+                The onboarding vocabulary is `OB_ADMIN`, `OB_MANAGER`,
+                `OB_SALES`, `OB_STEP_OWNER`, `OB_VIEWER`. Open rather than an
+                enum: a module added later brings its own roles, and an enum
+                here would make each arrival a breaking client change.
+
+                Same staleness bargain as `modules` — a grant changed
+                mid-session stays visible until the access token expires, at
+                most fifteen minutes.
     MeResponse:
       type: object
       required: [data]
@@ -19617,12 +20072,26 @@ components:
     # ── C-104 · step lifecycle ───────────────────────────────────────────────
     ObJourneyStepStatus:
       type: string
-      enum: [PENDING, IN_PROGRESS, BLOCKED, WAITING_ON_CLIENT, DONE, SKIPPED]
+      enum: [PENDING, IN_PROGRESS, BLOCKED, WAITING_ON_CLIENT, PENDING_REVIEW, DONE, SKIPPED]
       description: |
         `ob_journey_steps.status`. `PENDING` covers both "gate still locked"
         and "dependency not met" — C-104 only ever writes
         `IN_PROGRESS`/`BLOCKED`/`WAITING_ON_CLIENT`/`DONE`; `SKIPPED` is
         C-107's own transition.
+
+        `PENDING_REVIEW` is the manager review gate. The owner has marked the
+        task complete and an OB Manager has not finished reading it.
+
+        **Open, not terminal.** It still counts against its Step and still
+        appears in its owner's queue; what it is not is *theirs* any more —
+        every write to the task and to its check-list rows is refused while it
+        sits here. Anything treating "not open" and "terminal" as one question
+        will either let an answer through during a review or report a Step done
+        while a task under it is unread.
+
+        It leaves in one of two directions, neither of them an implementor's to
+        make: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the
+        moment any row is `REJECTED`. The TAT clock is paused throughout.
     ObJourneyStep:
       type: object
       required: [id, journeyId, sequence, name, status]
@@ -20771,8 +21240,10 @@ components:
             locked or every task is blocked.
     ObProjectModuleService:
       type: object
-      required: [journeyId, templateId, serviceName, gateStatus, isComplete]
-      description: One Module Service this project was boarded through — the journey, named.
+      required: [journeyId, templateId, serviceName, gateStatus, isComplete, stages]
+      description: |
+        One Module Service this project was boarded through — the journey,
+        named, and its own stage roll-up.
       properties:
         journeyId: { type: integer, format: int64 }
         templateId: { type: integer, format: int64 }
@@ -20782,6 +21253,30 @@ components:
           description: The **pinned** name, from the journey's own column rather than a join to whatever the catalogue is called today.
         gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
         isComplete: { type: boolean }
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/ObProjectStage' }
+          description: |
+            Every implementation stage **this service's** template publishes, in
+            sequence, stages it scheduled nothing into included.
+
+            `ObProjectDetail.stages` is the same roll-up folded across every
+            journey of the project, which is what the header's "Stages 2/7"
+            needs and exactly what makes it useless to the project page's tree:
+            folded, there is no answer to "how far is *SIS* through
+            Configuration", because both services' Configuration tasks are in
+            one bucket.
+
+            So the tree reads this list and the header reads the folded one.
+            Both come from a single `STAGE_ROLLUP` at journey grain — the
+            project-level figures are summed from these rows rather than queried
+            again, so the two cannot disagree.
+
+            `taskCount: 0` here is a sharper statement than the folded list can
+            make: Reports can be empty for Attendance and busy for SIS, and only
+            this shape can say so. It still means a misconfigured Module Service
+            rather than a finished stage — `isComplete` requires a task to have
+            been completed, the same rule the folded list follows.
     ObProject:
       type: object
       required: [id, name, client, product, startDate, status, gateStatus, stagesComplete, stagesTotal, journeyCount, totalTatDays]
@@ -20815,6 +21310,25 @@ components:
             - { $ref: '#/components/schemas/UserRef' }
             - { type: 'null' }
           description: Null until somebody is assigned — a project is routinely created before one is.
+        implementorManager:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: |
+            Who is accountable for this engagement above the implementor.
+
+            **Not the implementor's reporting manager.** That is an org chart
+            and this is an engagement: a senior implementor may report to a
+            head of delivery and still have a different manager overseeing one
+            strategic client. Deriving it would also be retroactive — editing
+            one reporting line would change who is recorded as having managed
+            every project that person ever ran, finished ones included — which
+            is why `salesPerson` sits on the project rather than being read off
+            the client, and why this follows it.
+
+            Nothing falls back to this person: an ownerless task goes to
+            `implementor`, not to their manager. Null on every project created
+            before 16 Sep 2026, and null wherever somebody has cleared it.
         status: { $ref: '#/components/schemas/ObProjectStatus' }
         gateStatus:
           $ref: '#/components/schemas/ObGateStatus'
@@ -20865,16 +21379,33 @@ components:
         totalTatDays:
           type: integer
           description: |
-            Σ of the pinned per-task TATs across this project's journeys — the
-            **pinned** figure, so republishing a Module Service does not move a
-            running project's date.
+            How long this project **takes**, in working days: the critical path
+            through it, on the **pinned** per-task TATs so republishing a Module
+            Service does not move a running project's date.
 
-            It is a sum including across tasks that run in parallel, which
-            overstates elapsed time wherever the dependency graph lets two run
-            at once. That is plan §5.10's own convention for a journey total,
-            followed here rather than quietly improved on; a critical-path
-            figure would be a different number on every screen that prints this
-            one and is a decision for the plan.
+            Two levels, both of them "a dependency adds, a parallel branch does
+            not":
+
+            - Inside a Module Service, the critical path through its tasks,
+              walking `depends_on_step_id` — the same walk
+              `ObJourneyTemplateSummary.totalTatDays` and the designer's own
+              Schedule column make, so a project and the product it was boarded
+              from cannot report different numbers for the same service.
+            - Across Module Services, the heaviest chain through
+              `ob_journey_template_dependencies` — the same edges that decide
+              when a journey's tasks may start. Two services that wait on
+              nothing run side by side and the project takes as long as the
+              longer of them, not as long as both.
+
+            **This was a plain Σ until 15 Sep 2026**, on plan §5.10's convention
+            for a journey total, with the critical path left as "a decision for
+            the plan". The decision was taken: summing reported 8 days for a
+            project of two 4-day parallel services and put its tentative
+            completion a week late, which is a promise made to a client rather
+            than an internal rounding.
+
+            A dependency on a service the client did not buy holds nothing up
+            and adds nothing. A project with no journeys is `0`.
     ObProjectDetail:
       allOf:
         - { $ref: '#/components/schemas/ObProject' }
@@ -20893,6 +21424,119 @@ components:
                 - { $ref: '#/components/schemas/UserRef' }
                 - { type: 'null' }
             createdAt: { type: string, format: date-time }
+    ObMyTask:
+      type: object
+      required: [taskId, taskName, status, isOverdue, projectId, projectName, obClientId,
+                 obClientName, journeyId, serviceName, stepKey, stepName, stepSequence,
+                 rowsOut, rowsReturned, rowsApproved]
+      description: |
+        One open task belonging to the calling implementor — a row of My Tasks.
+
+        Every field here exists somewhere already: the task on
+        `ob_journey_steps`, the service on `ob_journeys`, the step on the
+        template's stage group, the project and the client on their own tables.
+        None of them is on one response, and the journey read is per journey —
+        so building this grid from what exists would be one request per project
+        the implementor touches, which is exactly what a screen that spans
+        projects cannot do.
+      properties:
+        taskId:
+          type: integer
+          format: int64
+          description: |
+            The `ob_journey_steps` row. The word "step" in that table name is
+            the API's own and means a **task** — see `stepName` for the
+            collision, which is deliberate and documented rather than fixed.
+        taskName: { type: string, maxLength: 200 }
+        status: { $ref: '#/components/schemas/ObJourneyStepStatus' }
+        dueAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Null until the task activates. Those sort **last**, not first: a
+            queue that opened on every task nobody has started, above the one
+            that is late today, would be ordered by the wrong question.
+        isOverdue:
+          type: boolean
+          description: |
+            `dueAt` is in the past. A plain comparison, deliberately — the
+            working calendar decides *how many days* late something is, which
+            is what OB-02 prints and why `delayedByDays` routes through
+            `WorkingHoursService`. Whether a deadline has passed is the same
+            answer in every calendar, and running it through one would only
+            invite the two figures to disagree at a weekend boundary.
+
+            A task can be In progress and overdue at once, which is why this is
+            beside `status` rather than a value of it.
+        projectId: { type: integer, format: int64 }
+        projectName: { type: string, maxLength: 200 }
+        obClientId: { type: integer, format: int64 }
+        obClientName: { type: string, maxLength: 200 }
+        obClientCode: { type: [string, 'null'], maxLength: 40 }
+        journeyId: { type: integer, format: int64 }
+        serviceName:
+          type: string
+          maxLength: 160
+          description: The **pinned** module-service name, from the journey's own column.
+        stepKey:
+          type: integer
+          format: int64
+          description: |
+            The implementation stage the task sits in, folded exactly as
+            `ObProjectStage.stageKey` and `ObJourneyStepView.stageKey` are.
+            Four schemas now carry this key and all four fold the same way.
+        stepName:
+          type: string
+          maxLength: 120
+          description: |
+            **The screen calls this a Step; the API calls its level a stage.**
+
+            That is a collision worth stating rather than discovering:
+            `ob_journey_steps` is the *task* table, `/onboarding/journey-steps/{stepId}`
+            fetches a *task*, and `OB_STEP_OWNER` owns *tasks*. The product
+            vocabulary moved to Module Service → Step → Task → Check list; the
+            data model did not follow, because renaming it would mean a
+            migration across the append-only history for a word.
+
+            So: `stepName` here is the stage's name as the template published
+            it, and `taskName` is the `ob_journey_steps` row. Read that
+            sentence twice before changing either.
+        stepSequence:
+          type: integer
+          description: The step's position on the master. `9999` for the Ungrouped bucket.
+        rowsOut:
+          type: integer
+          description: |
+            Check-list rows of this task sitting on the reviewer's desk.
+
+            **Reads two ways, and that is deliberate.** To a manager it is a
+            queue — *3 rows to read*. To the task's implementor it is a wait —
+            *3 rows out*. One number, because it is one fact; the screen knows
+            which of the two people is looking.
+        rowsReturned:
+          type: integer
+          description: |
+            Rows sent back that this task's owner has not opened yet — the
+            count behind the danger-tone highlight on My Tasks.
+
+            Goes to zero when the owner opens the task
+            (`POST .../outcomes-seen`), which is what makes it a signal rather
+            than a permanent label. Always `0` for a reader who is not the
+            owner: it is about what *they* have seen.
+        rowsApproved:
+          type: integer
+          description: |
+            Rows approved that this task's owner has not opened yet. Fades the
+            same way `rowsReturned` does.
+
+            Counted separately because the two want different tones and
+            different words: one is work to do, the other is news.
+    ObMyTaskListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/ObMyTask' } }
+        meta: { $ref: '#/components/schemas/Meta' }
     ObProjectResponse:
       type: object
       required: [data]
@@ -20905,14 +21549,52 @@ components:
         meta: { $ref: '#/components/schemas/Meta' }
     ObProjectCreateRequest:
       type: object
-      required: [name, clientId, productId, startDate, moduleServiceIds]
+      required: [name, clientId, productId, startDate, salesPersonId, implementorUserId,
+                 implementorManagerUserId, moduleServiceIds]
       properties:
         name: { type: string, maxLength: 200 }
         clientId: { type: integer, format: int64 }
         productId: { type: integer, format: int64 }
         startDate: { type: string, format: date }
-        salesPersonId: { type: [integer, 'null'], format: int64 }
-        implementorUserId: { type: [integer, 'null'], format: int64 }
+        salesPersonId:
+          type: integer
+          format: int64
+          description: |
+            Required on create, and nullable on the update — see
+            `implementorUserId` for why the two differ.
+        implementorUserId:
+          type: integer
+          format: int64
+          description: |
+            Who runs this project, and **what an ownerless task falls to**.
+
+            A module service that pins nobody to a task instantiates it onto
+            this person (`ObJourneyInstantiationService`), and a task that
+            predates that rule is resolved onto them on the read — see
+            `ObJourneyStepView.ownerIsInherited`. So a project created without
+            an implementor produces journeys whose unpinned tasks belong to
+            nobody and a fallback with nothing to fall back to.
+
+            **Required here, nullable on `ObProjectUpdateRequest`.** Clearing an
+            implementor is a real thing to do — somebody leaves, the project is
+            between owners. The rule is that a project cannot be *born* without
+            one, not that it can never be without one.
+        implementorManagerUserId:
+          type: integer
+          format: int64
+          description: |
+            Who is accountable for this engagement above the implementor — see
+            `ObProject.implementorManager` for what it is and what it is not.
+
+            Required here on `salesPersonId`'s reasoning rather than
+            `implementorUserId`'s: nothing falls back to the manager and no
+            task is instantiated onto them. They are captured because every
+            engagement has somebody accountable above the person running it,
+            and the moment to ask is while somebody is already choosing the
+            other two — not a fortnight later when a project needs escalating
+            and nobody knows to whom.
+
+            Nullable on the update, for the same reason the other two are.
         moduleServiceIds:
           type: array
           minItems: 1
@@ -20938,7 +21620,7 @@ components:
       required: [name, startDate]
       description: |
         **The whole representation, not a sparse patch.** The form always sends
-        both people, so an absent `implementorUserId` means *cleared* —
+        all three people, so an absent `implementorUserId` means *cleared* —
         unassigning somebody is possible rather than a gap worked around by
         assigning a placeholder user.
       properties:
@@ -20946,6 +21628,7 @@ components:
         startDate: { type: string, format: date }
         salesPersonId: { type: [integer, 'null'], format: int64 }
         implementorUserId: { type: [integer, 'null'], format: int64 }
+        implementorManagerUserId: { type: [integer, 'null'], format: int64 }
         status:
           $ref: '#/components/schemas/ObProjectStatus'
           description: '`COMPLETED` is refused with `422` — it is earned, not set.'
@@ -21057,6 +21740,25 @@ components:
                 change it — which is why the step rows are copies rather than
                 references, and why a TAT report years later still means what
                 it meant on the day.
+            implementorManagerUserId:
+              type: [integer, 'null']
+              format: int64
+              description: |
+                Who may review this journey's submitted tasks — the project's
+                own `implementor_manager_user_id`, the person accountable for
+                the engagement above the implementor.
+
+                Carried on the journey rather than per task because it is a
+                fact about the engagement, and because a screen has to know it
+                before it decides whether to draw the Review column. Compare it
+                with the signed-in user's id: equal means this reader records
+                the verdicts here.
+
+                **Not a role.** Holding `OB_MANAGER` says you manage something,
+                not that you manage *this*, and the server agrees —
+                `requireReviewer` checks this same column. `null` where the
+                project names nobody, in which case only an `OB_ADMIN` can
+                close a review on it.
             steps:
               type: array
               items: { $ref: '#/components/schemas/ObJourneyStepView' }
@@ -21110,6 +21812,36 @@ components:
               format: int64
             skipReason: { type: [string, 'null'] }
             skippedByUserId: { type: [integer, 'null'], format: int64 }
+            ownerIsInherited:
+              type: boolean
+              description: |
+                `ownerUserId` on this view came from the **project's
+                implementor** rather than from the module service, because the
+                template pinned nobody to this task and no backup owner is set.
+
+                The fallback itself is not new — `ObJourneyInstantiationService`
+                has written the project's implementor onto an ownerless step
+                since instantiation. What this field covers is every step that
+                predates it or was later reassigned to nobody: those rows carry
+                `owner_user_id = NULL` and would otherwise read as unassigned
+                on a project that does have an implementor.
+
+                So the resolution happens on the read, and this flag says it
+                did. The distinction is worth a field because an inherited owner
+                read as a deliberate one makes somebody accountable for a task
+                nobody assigned them — OB-06 labels it rather than printing the
+                name flat.
+
+                `false` when the task carries its own owner, and also when
+                nothing could be resolved: an ownerless task on a project with
+                no implementor reports `ownerUserId: null` and `false`, which is
+                the genuinely unassigned state the Manager's list still shows.
+
+                Authorisation agrees with this field. `ObJourneyStepLifecycle`
+                admits the project's implementor on a step with neither owner
+                nor backup, so a task shown as theirs here is one the five
+                transitions will accept from them — a display-only fallback
+                would have offered Complete to a caller the server refuses.
             stageKey:
               type: integer
               format: int64
@@ -21275,14 +22007,194 @@ components:
           type: [string, 'null']
           maxLength: 500
           description: |
-            Why. **Required when `answer` is false** and optional otherwise:
-            an exception nobody explained is an exception the next reader has
-            to go and ask about.
+            Why — **one field with two authors**, depending on who the row
+            currently belongs to.
+
+            The implementor's note while they are working it, **optional on
+            either answer** (PLAN.md §4, D-17; it was once mandatory on a
+            `false` and is not any more). The OB Manager's reason once they
+            have rejected the row, where it is **mandatory** —
+            `ck_ob_journey_step_items_reject_reason`, and the service refuses
+            a `REJECTED` without one.
+
+            A manager may write here only on a row they are rejecting, never
+            on one they are verifying, so a verdict cannot overwrite the note
+            it is passing. An implementor reworking a rejected row may replace
+            the text but not blank it, since the row is still rejected.
         doneAt: { type: [string, 'null'], format: date-time }
         doneBy:
           oneOf:
             - { $ref: '#/components/schemas/UserRef' }
             - { type: 'null' }
+        reviewState:
+          $ref: '#/components/schemas/ObStepReviewState'
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the verdict was recorded; null while there is none.
+        reviewedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        reviewLocked:
+          type: boolean
+          description: |
+            The row was verified by a review that has already **closed**, and is
+            shut to everybody: the implementor may not revise an answer that was
+            accepted, and the reviewer is not shown it again.
+
+            **Do not derive this from `reviewState` alone.** "Verified" and
+            "locked" are different moments. A verdict recorded against the
+            current submission is still the reviewer's to change — that is what
+            makes the three-state control usable, since Rejected sits one press
+            past Verified — and only a review that has ended makes it permanent.
+            A screen treating `reviewState == VERIFIED` as locked would disable
+            the control on the very press that set it.
+        rowState:
+          $ref: '#/components/schemas/ObStepRowState'
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When **this row** last went out for review. Per row, not per task —
+            a check list may hold rows sent at three different times.
+
+            Null on a row that has never been sent, and on rows backfilled by
+            `V20260917_1210`, which deliberately did not copy the task's own
+            submission stamp on to every row: that would have read as a per-row
+            fact nobody ever recorded.
+        submittedBy:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        outcomeSeenAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When the row's owner last opened the outcome sitting on it. Set by
+            `POST /onboarding/journey-steps/{stepId}/outcomes-seen`.
+
+            This is what makes "2 rows came back" a signal rather than a
+            permanent label: without it the banner either shouts for ever or
+            forgets on refresh.
+        unseenOutcome:
+          type: boolean
+          description: |
+            A verdict has come back on this row and nobody has looked at it —
+            `rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.
+
+            Server-computed so every screen counts it the same way. It is what
+            the My Tasks highlight and the task banner are counting.
+    ObStepOutcomesSeen:
+      type: object
+      required: [stepId, cleared]
+      properties:
+        stepId: { type: integer, format: int64 }
+        cleared:
+          type: integer
+          description: |
+            How many rows this press stamped. A count rather than a `204`, so a
+            client can tell "there were three and now there are none" from
+            "there was nothing to clear" without re-reading the task.
+    ObStepOutcomesSeenResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObStepOutcomesSeen' }
+    ObReviewSummary:
+      type: object
+      required: [reviewsPending, sentForReview, reviewsApproved, reviewsRejected]
+      properties:
+        reviewsPending:
+          type: integer
+          description: |
+            Rows waiting on this caller **as a manager** — their queue.
+            Stock: what is on the desk now, not what arrived today.
+        sentForReview:
+          type: integer
+          description: |
+            Rows this caller has out with their own manager. Stock, and the
+            same underlying fact as `reviewsPending` seen from the other side.
+        reviewsApproved:
+          type: integer
+          description: |
+            Rows of theirs approved **on the stat day**. Flow, not stock — this
+            resets each day, and summing it with the two stock figures above
+            produces a number that means nothing.
+        reviewsRejected:
+          type: integer
+          description: Rows of theirs sent back on the stat day. Flow, as above.
+        computedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When the stats worker last wrote these. **Null means never** — say
+            so rather than presenting four zeroes as fact.
+    ObReviewSummaryResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObReviewSummary' }
+    ObStepRowState:
+      type: string
+      enum: [DRAFT, SENT, VERIFIED, REJECTED]
+      description: |
+        **Whose desk this row is on** — `ob_journey_step_items.row_state`,
+        `V20260917_1210`. The unit of work is the row, not the task.
+
+        A review used to be a property of the whole task: a complete check
+        list was submitted and a complete check list was read, and the task's
+        status froze everything in between. That could not express either of
+        the two things people actually do — finishing two rows of five and
+        wanting those two looked at now, or reading three of five and leaving
+        the rest until later. So one task may hold a row being worked, a row
+        waiting on the manager and a row already approved, all at once, and
+        none of that is a conflict.
+
+        **Two fields, two questions.** This says where the row *is*;
+        `reviewState` says what the reviewer *decided* — a draft while the row
+        is `SENT`, final once it has been sent back. One field could not say
+        "rejected, reason still being typed", which is the state a reviewer is
+        in for as long as they are writing it.
+
+        - `DRAFT` — with its implementor, never yet sent.
+        - `SENT` — with the manager. Frozen to the implementor, so a verdict
+          describes what the reviewer actually saw. **Its neighbours are not
+          frozen**, which is the whole point.
+        - `VERIFIED` — approved and terminal; shut to both people.
+        - `REJECTED` — sent back with a reason, and **unanswered**: the claim
+          the row carried is withdrawn with the verdict, so its implementor
+          asserts the work again rather than resubmitting what was refused.
+
+        The task's `status` is materialised from these: any row `SENT` and the
+        task reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,
+        `BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about
+        the task that no row can contradict and are left alone.
+    ObStepReviewState:
+      type: string
+      enum: [NOT_REVIEWED, VERIFIED, REJECTED]
+      description: |
+        The OB Manager's verdict on one check-list row — the second ledger
+        beside the implementor's own `answer`.
+
+        `answer` is *did I do the thing*; this is *does it hold*. Separate
+        fields for the same reason they are separate columns: one field would
+        mean the verdict overwrites the claim it is judging, and nothing would
+        record what was asserted before it was rejected. The words differ too
+        — Completed/Not completed against Verified/Rejected — because a row
+        reading "Completed / Completed" says nothing about which of the two
+        people said it.
+
+        Never null, unlike `answer`: a row always holds a verdict position,
+        even when that position is "none yet".
+
+        - `NOT_REVIEWED` — what a row is created with, and what a rejected row
+          returns to when the implementor resubmits.
+        - `VERIFIED` — **terminal for the row.** Every later write is refused,
+          from either person, which is what makes "only the rejected rows
+          reopen" a fact about the data rather than a claim the screen makes.
+        - `REJECTED` — sent back, never without a reason in `remark`. The one
+          row an implementor may edit on a returned task.
     ObJourneyStepItemResponse:
       type: object
       required: [data]
@@ -21306,10 +22218,36 @@ components:
           type: [string, 'null']
           maxLength: 500
           description: |
-            Mandatory when `answer` is `false` — the server answers
-            `ob-step-item-remark-required` without one. Cleared by sending
-            `null`, and ignored on an item being cleared to unanswered, since a
-            reason for an answer nobody gave is not a thing.
+            Optional on either answer. It was mandatory on a `false` and
+            refused as `ob-step-item-remark-required`; that rule is gone —
+            PLAN.md §4, D-17 — along with the CHECK constraint that held it,
+            so an implementor records a reason where there is one rather than
+            being held at a text box to state the obvious.
+
+            Cleared by sending `null`, and ignored on an item being cleared to
+            unanswered, since a reason for an answer nobody gave is not a thing.
+
+            **Except on a rejected row.** There the remark is the manager's
+            reason, not the answer's, so it outlives the answer being taken
+            back and cannot be blanked — `ob-step-reject-reason-required`.
+    ObStepItemReviewRequest:
+      type: object
+      required: [state]
+      properties:
+        state:
+          $ref: '#/components/schemas/ObStepReviewState'
+        remark:
+          type: [string, 'null']
+          maxLength: 500
+          description: |
+            The reason, written to the row's own `remark`.
+
+            **Mandatory on `REJECTED`** — `ob-step-reject-reason-required`.
+            Ignored on `VERIFIED` and `NOT_REVIEWED` rather than refused: a
+            client that sends the box's contents with every verdict is doing
+            something reasonable, and silently not writing it is kinder than a
+            400 it cannot act on. That is also what stops a verdict of
+            Verified overwriting the implementor's own note.
     ObJourneyStepDoc:
       type: object
       required: [id, stepId, label, isRequired, isSatisfied]
@@ -22247,6 +23185,21 @@ components:
           type: [integer, 'null']
           format: int64
           description: Null on a prerequisite — the gate sits in front of every journey, not inside one.
+        obProjectId:
+          type: [integer, 'null']
+          format: int64
+          description: |
+            The project this row opens onto — `jr.project_id` on a service row,
+            always present. On a prerequisite it is the client's project **only
+            when they have exactly one**, and null otherwise: a prerequisite is
+            the client-level gate and names no single project, so a client
+            running several cannot be resolved to one.
+
+            The drill-down's "Open" opens `/onboarding/projects/{obProjectId}`
+            when this is set, and the client-filtered project grid
+            (`/onboarding/projects?clientId=`) when it is not — the older
+            `/onboarding/clients/{id}` journey overview is no longer where a row
+            opens. Added as an optional field — CONVENTIONS.md §1, not breaking.
         product:
           oneOf:
             - { $ref: '#/components/schemas/ObProductRef' }
@@ -22440,6 +23393,156 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ObImplementorWorkload' }
         meta: { $ref: '#/components/schemas/Meta' }
+
+    ObProjectBoardBucket:
+      type: string
+      enum: [ON_TIME, AHEAD, DELAYED, AT_RISK, NOT_SCHEDULED]
+      description: |
+        Where one running project sits against its own completion date — see
+        `getObProjectBoard` for the five rules. Closed, like
+        `ObDashboardCardKey`, because the first donut is a fixed drawing and
+        a sixth slice is a design change.
+    ObProjectBoardCards:
+      type: object
+      required:
+        [ongoingProjects, thisWeeksDeadlines, todaysDelivery, overdueProjects,
+         atRiskProjects, clientEscalations]
+      properties:
+        ongoingProjects:
+          type: integer
+          description: Projects whose status is `RUNNING` in the caller's scope — exactly `projects.length`.
+        thisWeeksDeadlines:
+          type: integer
+          description: |
+            Running projects whose completion date falls in the calendar week
+            that holds `today` (Monday to Sunday, `weekStart`–`weekEnd`),
+            **including the days already gone** — a Monday deadline is still
+            this week's on Thursday, it is just also overdue.
+        todaysDelivery:
+          type: integer
+          description: Running projects whose completion date is `today`.
+        overdueProjects:
+          type: integer
+          description: Rows in the `DELAYED` bucket — 1–7 working days past the completion date.
+        atRiskProjects:
+          type: integer
+          description: Rows in the `AT_RISK` bucket — more than 7 working days past it.
+        clientEscalations:
+          type: integer
+          description: |
+            Running projects carrying at least one **open** portal escalation
+            (`ob_client_escalations.resolved_at IS NULL` on any of the
+            project's journeys). Projects, not escalations: a client who
+            escalated two services of one project is one project to answer.
+      description: The six counters on OB-02's card band, every one on the project's completion date.
+    ObProjectBoardSchedule:
+      type: object
+      required: [onTime, ahead, delayed, atRisk, notScheduled]
+      properties:
+        onTime: { type: integer }
+        ahead: { type: integer }
+        delayed: { type: integer }
+        atRisk: { type: integer }
+        notScheduled: { type: integer }
+      description: |
+        How many `projects` sit in each `ObProjectBoardBucket`. The five sum to
+        `cards.ongoingProjects` — an arithmetic contract, stated because it is
+        what the donut assumes.
+    ObProjectBoardRow:
+      type: object
+      required:
+        [id, name, client, product, startDate, gateStatus, bucket, tasksTotal,
+         tasksDone, openEscalations]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        client: { $ref: '#/components/schemas/ObProjectClientRef' }
+        product: { $ref: '#/components/schemas/ObProductRef' }
+        startDate: { type: string, format: date }
+        salesPerson:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+        implementor:
+          oneOf:
+            - { $ref: '#/components/schemas/UserRef' }
+            - { type: 'null' }
+          description: Null until somebody is assigned; the screen groups such rows under "Unassigned" rather than dropping them.
+        gateStatus: { $ref: '#/components/schemas/ObGateStatus' }
+        currentStage:
+          type: [string, 'null']
+          description: As `ObProject.currentStage` — the stage holding the lowest-sequence running task, or null.
+        bucket: { $ref: '#/components/schemas/ObProjectBoardBucket' }
+        tentativeCompletion:
+          type: [string, 'null']
+          format: date
+          description: As `ObProject.tentativeCompletion`. Null puts the row in `NOT_SCHEDULED`.
+        daysPastCompletion:
+          type: [integer, 'null']
+          minimum: 1
+          description: |
+            Ceiling working days between the end of the working day on
+            `tentativeCompletion` and now. **Null while the project is not
+            past its date**, and null when the ceiling lands on zero — a
+            project due Friday is not "0 days late" on Saturday, it is on time.
+        delayedByDays:
+          type: [integer, 'null']
+          minimum: 1
+          description: As `ObProject.delayedByDays` — the earliest overdue **task**, a different fact from the completion date and reported beside it, never folded into the bucket.
+        tasksTotal: { type: integer }
+        tasksDone:
+          type: integer
+          description: Tasks `DONE` or `SKIPPED`, folded across every module service of the project.
+        budgetUsedPercent:
+          type: [integer, 'null']
+          minimum: 0
+          description: |
+            Working hours elapsed since the start of the working day on
+            `startDate`, as a percentage of the critical-path TAT. Over 100
+            once the completion date has passed. Null when the project has no
+            TAT to budget from. With `tasksDone / tasksTotal` it is the whole
+            arithmetic behind `AHEAD`, so a reader can check the claim.
+        openEscalations:
+          type: integer
+          description: Open portal escalations across the project's journeys.
+      description: One running project, as OB-02's donuts and lists read it.
+    ObProjectBoard:
+      type: object
+      required: [asOf, today, weekStart, weekEnd, appliedScope, cards, schedule, projects]
+      properties:
+        asOf:
+          type: string
+          format: date-time
+          description: When this request ran. Live, so there is no `computedAt`.
+        today:
+          type: string
+          format: date
+          description: The calendar date in the working calendar's timezone that every "today" and "this week" figure was measured on.
+        weekStart: { type: string, format: date, description: 'The Monday of the week holding `today`.' }
+        weekEnd: { type: string, format: date, description: 'The Sunday of that week.' }
+        appliedScope:
+          type: string
+          description: What the caller's module role narrowed the rows to, in a sentence — `ObDashboardSummary.appliedScope`'s own honesty.
+        cards: { $ref: '#/components/schemas/ObProjectBoardCards' }
+        schedule: { $ref: '#/components/schemas/ObProjectBoardSchedule' }
+        projects:
+          type: array
+          items: { $ref: '#/components/schemas/ObProjectBoardRow' }
+          description: Every running project in scope, newest first. The rows `cards` and `schedule` were counted from.
+        truncated:
+          type: boolean
+          default: false
+          description: |
+            True when the row list hit the server's ceiling and the counts may
+            therefore be short of the truth. False on any deployment that has
+            not outgrown a single-screen board; a screen that sees it true
+            should say so rather than present the figures as totals.
+      description: OB-02's project-level board — see `getObProjectBoard`.
+    ObProjectBoardResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ObProjectBoard' }
 
     ObReportCategory:
       type: string

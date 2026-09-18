@@ -100,6 +100,7 @@ final class ObProjectDtos {
      */
     record ObProjectSummary(long id, String name, ObClientRef client, ObProductRef product,
                             LocalDate startDate, UserRef salesPerson, UserRef implementor,
+                            UserRef implementorManager,
                             String status, String gateStatus, String currentStage,
                             int stagesComplete, int stagesTotal, int journeyCount,
                             Integer delayedByDays, LocalDate tentativeCompletion,
@@ -118,6 +119,7 @@ final class ObProjectDtos {
      */
     record ObProjectDetail(long id, String name, ObClientRef client, ObProductRef product,
                            LocalDate startDate, UserRef salesPerson, UserRef implementor,
+                           UserRef implementorManager,
                            String status, String statusReason, String gateStatus,
                            String currentStage, int stagesComplete, int stagesTotal,
                            int journeyCount, Integer delayedByDays, LocalDate tentativeCompletion,
@@ -126,9 +128,34 @@ final class ObProjectDtos {
                            UserRef createdBy, Instant createdAt) {
     }
 
-    /** One Module Service this project was boarded through — the journey, named. */
+    /**
+     * One Module Service this project was boarded through — the journey, named,
+     * and its own stage roll-up.
+     *
+     * <h2>Why {@code stages} is repeated here</h2>
+     *
+     * <p>{@code ObProjectDetail.stages} is the same roll-up folded across every
+     * journey, and that fold is what the header's "Stages 2/7" needs. It is
+     * also what makes it useless to the project page's tree: folded, there is
+     * no answer to "how far is <em>SIS</em> through Configuration", because
+     * both services' Configuration tasks are in one bucket.
+     *
+     * <p>So the tree reads this list and the header reads the folded one. Both
+     * are built from a single {@code STAGE_ROLLUP} at journey grain — the
+     * project-level figures are summed from these rows rather than queried
+     * again, so the two cannot disagree.
+     *
+     * <p>A stage with {@code taskCount = 0} here means <b>this service</b>
+     * scheduled nothing into it, which is a sharper statement than the folded
+     * list can make: Reports can be empty for Attendance and busy for SIS, and
+     * only this shape can say so.
+     *
+     * @param stages every stage this service's template publishes, in sequence,
+     *               empty ones included
+     */
     record ObProjectServiceRef(long journeyId, long templateId, String serviceName,
-                            String gateStatus, boolean isComplete) {
+                            String gateStatus, boolean isComplete,
+                            List<ObProjectStage> stages) {
     }
 
     record ObProjectDetailResponse(ObProjectDetail data) {
@@ -156,13 +183,47 @@ final class ObProjectDtos {
      * {@code PATCH}, where {@code ObProjectStatus.requiresReason} can insist on
      * an explanation. {@code COMPLETED} is never accepted from either.
      */
+    /**
+     * <h2>The three people are required here and optional on the update</h2>
+     *
+     * <p>The implementor is what an ownerless task falls to — see
+     * {@code ObJourneyInstantiationService#defaultImplementorOf}, which writes
+     * them onto every step the module service pinned nobody to, and
+     * {@code ObJourneyReadService#inheritedOwner}, which resolves the rows that
+     * predate it. A project created without one produces journeys whose
+     * unpinned tasks belong to nobody, and the fallback has nothing to fall
+     * back to. Requiring it at the one moment somebody is choosing who runs the
+     * project is cheaper than discovering it on the Manager's unassigned list a
+     * fortnight later.
+     *
+     * <p>The sales person is required on the same occasion for a different
+     * reason: every project has one commercially, and the field was optional
+     * only because the form had nowhere to get it from before OB-02.
+     *
+     * <p>{@code implementorManagerUserId} is required on the sales person's
+     * reasoning rather than the implementor's. Nothing falls back to the
+     * manager and no task is instantiated onto them — they are recorded
+     * because every engagement has somebody accountable above the person
+     * running it, and the moment to capture that is while somebody is already
+     * choosing the other two. <b>It is not the implementor's reporting
+     * manager</b>; see {@code ObProject#getImplementorManagerUserId()} for why
+     * deriving it from the org chart would be both a different fact and a
+     * retroactive one.
+     *
+     * <p><b>The update deliberately still accepts null for all three.</b>
+     * Clearing an implementor is a real thing to do — somebody leaves, the
+     * project is between owners — and {@code ObProjectUpdateRequest}'s own
+     * javadoc turns on being able to. The rule is that a project cannot be
+     * <em>born</em> without one, not that it can never be without one.
+     */
     record ObProjectCreateRequest(
             @NotBlank @Size(max = 200) String name,
             @NotNull Long clientId,
             @NotNull Long productId,
             @NotNull LocalDate startDate,
-            Long salesPersonId,
-            Long implementorUserId,
+            @NotNull Long salesPersonId,
+            @NotNull Long implementorUserId,
+            @NotNull Long implementorManagerUserId,
             @NotEmpty List<Long> moduleServiceIds) {
     }
 
@@ -170,12 +231,11 @@ final class ObProjectDtos {
      * {@code ObProjectUpdateRequest} — partial by field, so an absent key means
      * "leave it alone" and an explicit null means "clear it".
      *
-     * <p>Java erases that distinction on a record: both arrive as null. The two
-     * fields where it would matter are {@code salesPersonId} and
-     * {@code implementorUserId}, and the resolution is the one
-     * {@code ObContactUpsertRequest} already took — <b>this is the whole
-     * representation, not a sparse patch</b>. The form always sends both,
-     * absent means cleared, and unassigning an implementor is therefore
+     * <p>Java erases that distinction on a record: both arrive as null. The
+     * fields where it would matter are the three people, and the resolution is
+     * the one {@code ObContactUpsertRequest} already took — <b>this is the
+     * whole representation, not a sparse patch</b>. The form always sends all
+     * three, absent means cleared, and unassigning an implementor is therefore
      * possible rather than a gap somebody works around by assigning a
      * placeholder user.
      *
@@ -190,6 +250,7 @@ final class ObProjectDtos {
             @NotNull LocalDate startDate,
             Long salesPersonId,
             Long implementorUserId,
+            Long implementorManagerUserId,
             @Size(max = 20) String status,
             @Size(max = 500) String statusReason) {
     }

@@ -34,7 +34,7 @@ import { focusStepId, toRibbonSteps, type ResolveUser } from './ribbonSteps'
  * ## Two reads, and the second one only when it is asked for
  *
  * The strip comes from `ObJourneyStrip`, which arrives inside the client
- * document `ObClientDetailPage` already has. The ribbon comes from
+ * document `ObClientProductPage` already has. The ribbon comes from
  * `GET /onboarding/journeys/{journeyId}`, fired on expand and not before —
  * the contract's own reason for splitting them ("a client with six journeys
  * does not pay for six ribbons on first paint"), and the reason this component

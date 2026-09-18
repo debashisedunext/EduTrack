@@ -2,10 +2,10 @@ import type { ObDashboardCard } from '@/api/generated/model'
 import { EmptyState } from '@/components/ui/empty-state'
 
 import { ObDashboardCardTile, ObDashboardCardTileSkeleton } from './ObDashboardCardTile'
-import { VISIBLE_CARD_COUNT, visibleCards } from './obDashboardCards'
+import { visibleCardCount, visibleCards } from './obDashboardCards'
 
 /**
- * B-121/B-128 · the six counters, as the board's first row.
+ * B-121/B-128 · the board's first row of counters.
  *
  * <h2>Above the tabs, not inside one</h2>
  *
@@ -20,23 +20,35 @@ import { VISIBLE_CARD_COUNT, visibleCards } from './obDashboardCards'
  * It costs nothing to keep them there: the counts are
  * `ObDashboardPage`'s single `GET /onboarding/dashboard/summary`, passed down
  * as props, so this component fetches nothing of its own.
+ *
+ * <h2>Seven tiles for an Admin, five for everybody else</h2>
+ *
+ * `isAdmin` is a prop rather than a store read, for the reason the rest of this
+ * component is propped: it draws what it is given. The page owns the one
+ * `useAuthStore` read on this screen, so there is a single place to look for
+ * why a tile is or is not on the board — and a test can render either row
+ * without standing up an auth store. Which two tiles it removes, and why that
+ * is a display decision rather than a permission, is `obDashboardCards.ts`.
  */
 export function ObDashboardCardRow({
   cards,
   isPending,
   isError,
+  isAdmin,
   onOpen,
 }: {
   cards: ObDashboardCard[]
   isPending: boolean
   isError: boolean
+  isAdmin: boolean
   onOpen: (card: ObDashboardCard) => void
 }) {
-  const shown = visibleCards(cards)
+  const shown = visibleCards(cards, isAdmin)
+  const expected = visibleCardCount(isAdmin)
   // The row is always one row, so the track count follows the number of tiles
   // actually drawn. A Tailwind class cannot carry a runtime count, and rounding
   // it to a fixed `grid-cols-6` would wrap the moment the server adds a card.
-  const columns = Math.max(shown.length || VISIBLE_CARD_COUNT, 1)
+  const columns = Math.max(shown.length || expected, 1)
 
   if (isError) {
     return (
@@ -70,7 +82,7 @@ export function ObDashboardCardRow({
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {isPending
-        ? Array.from({ length: VISIBLE_CARD_COUNT }, (_, index) => (
+        ? Array.from({ length: expected }, (_, index) => (
             <div role="listitem" key={index}>
               <ObDashboardCardTileSkeleton />
             </div>

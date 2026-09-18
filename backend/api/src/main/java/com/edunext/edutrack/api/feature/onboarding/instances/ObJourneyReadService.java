@@ -76,26 +76,38 @@ public class ObJourneyReadService {
           underneath, so fetching them per task would be a request per row on
           first paint.
 
-          Documents are deliberately *not* fetched here. `docsFor` counts clean
-          attachments per step and walks the template's document list to decide
-          satisfaction, which is two more reads per task, and the stage body
-          shows no documents — they stay on the step panel, which asks for one
-          task at a time and can afford it.
+          Documents likewise, and for the same reason. `docsFor` answers this
+          for a single task with two reads — the template's document list and a
+          count of the task's clean attachments — so a stage drawing every task
+          at once would pay 2N. `docsOfJourney` folds both into one statement;
+          satisfaction is still decided in Java, because nothing links a file to
+          a checklist entry and the rule is "required entries first, in
+          sequence".
         */
         Map<Long, List<ObJourneyReadRepository.ItemRow>> items = reads.itemsOfJourney(row.id());
         Map<Long, List<ObJourneyReadRepository.DocRow>> docs = reads.docsOfJourney(row.id());
 
+        /*
+          Who an ownerless task falls to — one lookup for the journey, since
+          every task of it belongs to the same project. See
+          `implementorOfJourney`, and `inheritedOwner` below for when it applies.
+        */
+        Long projectImplementor = reads.implementorOfJourney(row.id()).orElse(null);
+
         List<ObJourneyStepLifecycleDtos.ObJourneyStepDetail> views = rows.stream()
                 .map(step -> {
                     ObJourneyReadRepository.StageRef stage = stages.get(step.getId());
-                    return ObJourneyStepLifecycleDtos.ObJourneyStepDetail
-                            .of(step, rag.ragFor(step),
-                                    itemDtos(items.get(step.getId())),
-                                    docDtos(docs.get(step.getId())),
-                                    backupOwners.effectiveOwnerUserId(step))
-                            .withStage(stage == null ? null : stage.stageKey(),
-                                    stage == null ? null : stage.stageName())
-                            .withTatUsed(tatUsedPercent(step));
+                    ObJourneyStepLifecycleDtos.ObJourneyStepDetail view =
+                            ObJourneyStepLifecycleDtos.ObJourneyStepDetail
+                                    .of(step, rag.ragFor(step),
+                                            itemDtos(items.get(step.getId())),
+                                            docDtos(docs.get(step.getId())),
+                                            backupOwners.effectiveOwnerUserId(step))
+                                    .withStage(stage == null ? null : stage.stageKey(),
+                                            stage == null ? null : stage.stageName())
+                                    .withTatUsed(tatUsedPercent(step));
+                    Long inherited = inheritedOwner(step, projectImplementor);
+                    return inherited == null ? view : view.withInheritedOwner(inherited);
                 })
                 .toList();
 
@@ -130,7 +142,47 @@ public class ObJourneyReadService {
                 row.templateId(),
                 row.templateVersion(),
                 views,
-                parallelGroups(rows));
+                parallelGroups(rows),
+                // Asked once for the whole journey, like the implementor above:
+                // every task of a journey belongs to one project, so this is
+                // one read rather than one per row.
+                reads.implementorManagerOfJourney(row.id()).orElse(null));
+    }
+
+    /**
+     * The project implementor this task falls to, or {@code null} where the
+     * question does not arise.
+     *
+     * <h2>Last in the chain, not first</h2>
+     *
+     * <p>Owner, then backup owner, then the project's implementor. A task with
+     * a named owner is untouched, and so is one whose owner is absent but whose
+     * backup is set — {@link ObBackupOwnerResolver} already answers that case,
+     * and overriding it here would hand a leave-covered task to somebody the
+     * template never mentioned.
+     *
+     * <p>So this fires only where both are null: a task the module service
+     * pinned nobody to, on a journey created before instantiation learned to
+     * apply this default, or one later reassigned to nobody. Those are exactly
+     * the rows that would otherwise read as unassigned on a project that does
+     * have an implementor.
+     *
+     * <h2>The server agrees with what this makes the page show</h2>
+     *
+     * <p>{@code ObJourneyStepLifecycleService#requireOwnership} admits the
+     * project's implementor on a step with neither owner nor backup, resolved
+     * the same way. Without that, this would paint a task as somebody's and the
+     * five transitions would refuse them — a page offering Complete to a caller
+     * the server 403s.
+     */
+    private static Long inheritedOwner(ObJourneyStep step, Long projectImplementor) {
+        if (projectImplementor == null) {
+            return null;
+        }
+        if (step.getOwnerUserId() != null || step.getBackupOwnerUserId() != null) {
+            return null;
+        }
+        return projectImplementor;
     }
 
     /**
@@ -180,6 +232,18 @@ public class ObJourneyReadService {
      * a task that has not started and whose clock has therefore said nothing.
      */
     private Double tatUsedPercent(ObJourneyStep step) {
+        /*
+          A task nobody has started reports **null**, not 0%.
+
+          `hoursConsumed` answers zero for it rather than null — its clock has
+          simply never run — and printing "TAT used 0%" beside that is a claim
+          about elapsed time on a task whose clock has said nothing. The header
+          omits the figure instead, which is the honest shape: there is nothing
+          to report yet.
+        */
+        if (step.getStartedAt() == null) {
+            return null;
+        }
         java.math.BigDecimal consumed = rag.hoursConsumed(step);
         if (consumed == null) {
             return null;
@@ -211,7 +275,15 @@ public class ObJourneyReadService {
                         i.id(), i.stepId(), i.sequence(), i.label(),
                         i.isMandatory(), i.isDone(), i.answer(), i.remark(), i.answeredAt(),
                         i.answeredBy() == null ? null
-                                : new ObJourneyStepLifecycleDtos.UserRef(i.answeredBy(), null)))
+                                : new ObJourneyStepLifecycleDtos.UserRef(i.answeredBy(), null),
+                        i.reviewState(), i.reviewedAt(),
+                        i.reviewedBy() == null ? null
+                                : new ObJourneyStepLifecycleDtos.UserRef(i.reviewedBy(), null),
+                        i.reviewLocked(),
+                        i.rowState(), i.submittedAt(),
+                        i.submittedBy() == null ? null
+                                : new ObJourneyStepLifecycleDtos.UserRef(i.submittedBy(), null),
+                        i.outcomeSeenAt(), i.unseenOutcome()))
                 .toList();
     }
 

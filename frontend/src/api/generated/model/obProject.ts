@@ -50,6 +50,7 @@ import type { ObProjectClientRef } from './obProjectClientRef';
 import type { ObProductRef } from './obProductRef';
 import type { ObProjectSalesPerson } from './obProjectSalesPerson';
 import type { ObProjectImplementor } from './obProjectImplementor';
+import type { ObProjectImplementorManager } from './obProjectImplementorManager';
 import type { ObProjectStatus } from './obProjectStatus';
 import type { ObGateStatus } from './obGateStatus';
 import type { ObProjectCurrentStage } from './obProjectCurrentStage';
@@ -79,6 +80,22 @@ this column exists to make visible.
   salesPerson?: ObProjectSalesPerson;
   /** Null until somebody is assigned — a project is routinely created before one is. */
   implementor?: ObProjectImplementor;
+  /** Who is accountable for this engagement above the implementor.
+
+**Not the implementor's reporting manager.** That is an org chart
+and this is an engagement: a senior implementor may report to a
+head of delivery and still have a different manager overseeing one
+strategic client. Deriving it would also be retroactive — editing
+one reporting line would change who is recorded as having managed
+every project that person ever ran, finished ones included — which
+is why `salesPerson` sits on the project rather than being read off
+the client, and why this follows it.
+
+Nothing falls back to this person: an ownerless task goes to
+`implementor`, not to their manager. Null on every project created
+before 16 Sep 2026, and null wherever somebody has cleared it.
+ */
+  implementorManager?: ObProjectImplementorManager;
   status: ObProjectStatus;
   /** Read off this project's own journeys, so a project whose journeys
 are all still locked reads `LOCKED` even where a sibling project of
@@ -121,16 +138,33 @@ where there is no budget and a date would be a guess presented as a
 commitment.
  */
   tentativeCompletion?: ObProjectTentativeCompletion;
-  /** Σ of the pinned per-task TATs across this project's journeys — the
-**pinned** figure, so republishing a Module Service does not move a
-running project's date.
+  /** How long this project **takes**, in working days: the critical path
+through it, on the **pinned** per-task TATs so republishing a Module
+Service does not move a running project's date.
 
-It is a sum including across tasks that run in parallel, which
-overstates elapsed time wherever the dependency graph lets two run
-at once. That is plan §5.10's own convention for a journey total,
-followed here rather than quietly improved on; a critical-path
-figure would be a different number on every screen that prints this
-one and is a decision for the plan.
+Two levels, both of them "a dependency adds, a parallel branch does
+not":
+
+- Inside a Module Service, the critical path through its tasks,
+  walking `depends_on_step_id` — the same walk
+  `ObJourneyTemplateSummary.totalTatDays` and the designer's own
+  Schedule column make, so a project and the product it was boarded
+  from cannot report different numbers for the same service.
+- Across Module Services, the heaviest chain through
+  `ob_journey_template_dependencies` — the same edges that decide
+  when a journey's tasks may start. Two services that wait on
+  nothing run side by side and the project takes as long as the
+  longer of them, not as long as both.
+
+**This was a plain Σ until 15 Sep 2026**, on plan §5.10's convention
+for a journey total, with the critical path left as "a decision for
+the plan". The decision was taken: summing reported 8 days for a
+project of two 4-day parallel services and put its tentative
+completion a week late, which is a promise made to a client rather
+than an internal rounding.
+
+A dependency on a service the client did not buy holds nothing up
+and adds nothing. A project with no journeys is `0`.
  */
   totalTatDays: number;
 }

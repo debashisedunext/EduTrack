@@ -120,6 +120,28 @@ public class ObSignoff {
     @Column(name = "objection_note", length = 2000)
     private String objectionNote;
 
+    /**
+     * The withdrawal record — when staff pulled the request back, who did it,
+     * and why. {@code ck_ob_signoffs_cancelled} binds the timestamp and the
+     * reason: both null, or both set.
+     *
+     * <p>Kept on the row rather than inferred from {@code status = 'CANCELLED'},
+     * because the status says only that it happened. {@code updated_at} moves on
+     * any write and cannot stand in for the moment of withdrawal.
+     *
+     * <p><b>On no response.</b> The contract's {@code ObSignoff} and
+     * {@code ObSignoffDetail} do not carry these, and serialising them would be
+     * a contract change made by a field rather than by a review.
+     */
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "cancelled_by")
+    private Long cancelledBy;
+
+    @Column(name = "cancellation_reason", length = 2000)
+    private String cancellationReason;
+
     /** B-116's archived PDF. Object-storage key, never the bytes. */
     @Column(name = "pdf_storage_key", length = 400)
     private String pdfStorageKey;
@@ -338,6 +360,30 @@ public class ObSignoff {
 
     public void setObjectionNote(String objectionNote) {
         this.objectionNote = objectionNote;
+    }
+
+    public Instant getCancelledAt() {
+        return cancelledAt;
+    }
+
+    public void setCancelledAt(Instant cancelledAt) {
+        this.cancelledAt = cancelledAt;
+    }
+
+    public Long getCancelledBy() {
+        return cancelledBy;
+    }
+
+    public void setCancelledBy(Long cancelledBy) {
+        this.cancelledBy = cancelledBy;
+    }
+
+    public String getCancellationReason() {
+        return cancellationReason;
+    }
+
+    public void setCancellationReason(String cancellationReason) {
+        this.cancellationReason = cancellationReason;
     }
 
     public String getPdfStorageKey() {

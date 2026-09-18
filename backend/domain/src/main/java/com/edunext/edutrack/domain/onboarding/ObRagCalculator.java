@@ -79,7 +79,17 @@ public final class ObRagCalculator {
     public static ObRag forStep(double tatConsumedPercent, ObJourneyStepStatus status, int amberThresholdPercent) {
         return switch (status) {
             case PENDING, SKIPPED -> null;
-            case IN_PROGRESS, WAITING_ON_CLIENT, BLOCKED, DONE -> {
+            /*
+              PENDING_REVIEW keeps a colour rather than going null, and keeps
+              the one its consumed time earns. A task whose TAT was already
+              breached when it was submitted is still breached while a manager
+              reads it — hiding that would let the Step's roll-up go green the
+              moment work left the implementor's hands, which is precisely when
+              somebody should be looking at it. The percentage it is judged on
+              stops climbing, because the clock is paused; the colour it had
+              stands.
+            */
+            case IN_PROGRESS, WAITING_ON_CLIENT, BLOCKED, PENDING_REVIEW, DONE -> {
                 if (tatConsumedPercent >= 100) {
                     yield ObRag.RED;
                 }

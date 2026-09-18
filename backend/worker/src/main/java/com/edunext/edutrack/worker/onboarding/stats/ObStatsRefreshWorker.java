@@ -130,6 +130,11 @@ public class ObStatsRefreshWorker {
         // unrestricted role reads standing rather than roll it back with it.
         stats.refreshScopeSummaryStock(currentDay, now, computedAt, props.amberShare());
         stats.refreshImplementorStock(currentDay, now, computedAt, props.amberShare());
+        // After the stock pass, never before: it upserts on to the rows that
+        // pass has just written, and it also creates rows for managers who own
+        // no steps of their own — who are exactly the people `reviews_pending`
+        // exists for.
+        stats.refreshReviewCounters(currentDay, computedAt);
 
         int days = 0;
         // Oldest first, so a partially caught-up board fills from the left. A gap

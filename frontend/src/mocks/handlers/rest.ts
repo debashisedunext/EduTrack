@@ -30,6 +30,25 @@ const modulesOf = (userId: number): ('TICKETING' | 'ONBOARDING')[] => {
   return modules;
 };
 
+/**
+ * The role held inside each module, keyed by module code.
+ *
+ * Read off the same `obModuleAccess` grants `modulesOf` reads, from the live
+ * rows rather than a constant, so revoking a grant on OB-08 changes what the
+ * session reports — which is the behaviour the real `AuthUserRepository` has
+ * and the reason the two are worth keeping in step.
+ */
+const moduleRolesOf = (userId: number): Record<string, string> => {
+  const db = getDb();
+  const roles: Record<string, string> = {};
+  db.obModuleAccess
+    .filter((g) => g.userId === userId && g.revokedAt == null)
+    .forEach((g) => {
+      roles[g.module] = g.moduleRole;
+    });
+  return roles;
+};
+
 const me = () => {
   const db = getDb();
   const u = currentUser(db);
@@ -41,6 +60,7 @@ const me = () => {
     reporteeIds: db.users.filter((x) => x.reportingManagerId === u.id).map((x) => x.id),
     timezone: u.timezone,
     modules: modulesOf(u.id),
+    moduleRoles: moduleRolesOf(u.id),
   };
 };
 

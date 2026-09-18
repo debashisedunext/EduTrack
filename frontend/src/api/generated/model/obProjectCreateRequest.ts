@@ -46,8 +46,6 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { ObProjectCreateRequestSalesPersonId } from './obProjectCreateRequestSalesPersonId';
-import type { ObProjectCreateRequestImplementorUserId } from './obProjectCreateRequestImplementorUserId';
 
 export interface ObProjectCreateRequest {
   /** @maxLength 200 */
@@ -55,8 +53,39 @@ export interface ObProjectCreateRequest {
   clientId: number;
   productId: number;
   startDate: string;
-  salesPersonId?: ObProjectCreateRequestSalesPersonId;
-  implementorUserId?: ObProjectCreateRequestImplementorUserId;
+  /** Required on create, and nullable on the update — see
+`implementorUserId` for why the two differ.
+ */
+  salesPersonId: number;
+  /** Who runs this project, and **what an ownerless task falls to**.
+
+A module service that pins nobody to a task instantiates it onto
+this person (`ObJourneyInstantiationService`), and a task that
+predates that rule is resolved onto them on the read — see
+`ObJourneyStepView.ownerIsInherited`. So a project created without
+an implementor produces journeys whose unpinned tasks belong to
+nobody and a fallback with nothing to fall back to.
+
+**Required here, nullable on `ObProjectUpdateRequest`.** Clearing an
+implementor is a real thing to do — somebody leaves, the project is
+between owners. The rule is that a project cannot be *born* without
+one, not that it can never be without one.
+ */
+  implementorUserId: number;
+  /** Who is accountable for this engagement above the implementor — see
+`ObProject.implementorManager` for what it is and what it is not.
+
+Required here on `salesPersonId`'s reasoning rather than
+`implementorUserId`'s: nothing falls back to the manager and no
+task is instantiated onto them. They are captured because every
+engagement has somebody accountable above the person running it,
+and the moment to ask is while somebody is already choosing the
+other two — not a fortnight later when a project needs escalating
+and nobody knows to whom.
+
+Nullable on the update, for the same reason the other two are.
+ */
+  implementorManagerUserId: number;
   /**
    * The active Module Services of `productId` left checked on the form,
 each of which instantiates one journey. Order is ignored — catalogue

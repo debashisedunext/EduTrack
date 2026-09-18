@@ -47,6 +47,7 @@ the database rejects mutation independently via triggers and grants.
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { MeAllOfModulesItem } from './meAllOfModulesItem';
+import type { MeAllOfModuleRoles } from './meAllOfModuleRoles';
 
 export type MeAllOf = {
   username?: string;
@@ -56,4 +57,14 @@ export type MeAllOf = {
   reporteeIds?: number[];
   timezone?: string;
   modules?: MeAllOfModulesItem[];
+  /** The onboarding vocabulary is `OB_ADMIN`, `OB_MANAGER`,
+`OB_SALES`, `OB_STEP_OWNER`, `OB_VIEWER`. Open rather than an
+enum: a module added later brings its own roles, and an enum
+here would make each arrival a breaking client change.
+
+Same staleness bargain as `modules` — a grant changed
+mid-session stays visible until the access token expires, at
+most fifteen minutes.
+ */
+  moduleRoles?: MeAllOfModuleRoles;
 };

@@ -155,9 +155,26 @@ export function ObDashboardDrillPanel({
                 <DrillRow
                   key={`${item.itemType}-${item.itemId}`}
                   item={item}
-                  onOpenClient={() => {
+                  onOpen={() => {
                     onClose()
-                    navigate(`/onboarding/clients/${item.obClientId}`)
+                    /*
+                      Open lands on the project, not the client journey overview
+                      it used to.
+
+                      A service row names its project (`obProjectId`), so it
+                      opens that project's page directly. A prerequisite is the
+                      client-level gate and names one only when the client runs
+                      a single project — so where the server could not resolve
+                      one, this falls back to the projects grid scoped to the
+                      client (`?clientId=`, the same filter the Clients master
+                      links in with), which is a pick when they have several.
+                      Neither path is the older `/onboarding/clients/{id}`.
+                    */
+                    navigate(
+                      item.obProjectId != null
+                        ? `/onboarding/projects/${item.obProjectId}`
+                        : `/onboarding/projects?clientId=${item.obClientId}`,
+                    )
                   }}
                 />
               ))}
@@ -187,12 +204,12 @@ export function ObDashboardDrillPanel({
  * the thing that needed aligning in the first place: the meta line never has
  * to match a sibling row's column widths, because nothing reads it as a column.
  */
-function DrillRow({ item, onOpenClient }: { item: ObDashboardItem; onOpenClient: () => void }) {
+function DrillRow({ item, onOpen }: { item: ObDashboardItem; onOpen: () => void }) {
   return (
     <div className="border-b border-subtle py-3 hover:bg-subtle">
       <div className="flex items-center justify-between gap-3">
         <span className="min-w-0 truncate font-semibold text-content">{item.obClientName}</span>
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={onOpenClient}>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={onOpen}>
           Open →
         </Button>
       </div>

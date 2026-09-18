@@ -147,6 +147,7 @@ class ObProjectWriteService {
                 request.startDate(),
                 request.salesPersonId(),
                 request.implementorUserId(),
+                request.implementorManagerUserId(),
                 scope.userId()));
 
         if (!clientHasChecklist) {
@@ -164,7 +165,7 @@ class ObProjectWriteService {
     // ------------------------------------------------------------------
 
     /**
-     * The header edit: name, start date, the two people, and the status.
+     * The header edit: name, start date, the three people, and the status.
      *
      * <p>{@code clientId} and {@code productId} are not editable and are not on
      * the request — see {@code ObProjectUpdateRequest}. The scoped read has
@@ -211,6 +212,7 @@ class ObProjectWriteService {
         project.setStartDate(request.startDate());
         project.setSalesPersonId(request.salesPersonId());
         project.setImplementorUserId(request.implementorUserId());
+        project.setImplementorManagerUserId(request.implementorManagerUserId());
         if (status != null && status != project.getStatus()) {
             project.recordStatus(status, status.requiresReason() ? request.statusReason().trim() : null);
         }

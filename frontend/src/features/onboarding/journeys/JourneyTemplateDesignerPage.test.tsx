@@ -55,7 +55,7 @@ const SLOW = { timeout: 5000 }
 
 async function openDesigner(templateId = 2) {
   renderDesigner(templateId)
-  await screen.findByRole('group', { name: 'Stages and tasks' }, SLOW)
+  await screen.findByRole('group', { name: 'Steps and tasks' }, SLOW)
 }
 
 /**
@@ -77,7 +77,7 @@ async function openService(templateId: number, name: string) {
  * `<article>` inside *that* one. So the helpers below reach for regions and
  * articles rather than rowgroups and cells.
  */
-const board = () => screen.getByRole('group', { name: 'Stages and tasks' })
+const board = () => screen.getByRole('group', { name: 'Steps and tasks' })
 
 /**
  * A task's own card.
@@ -146,10 +146,9 @@ describe('the step list renders a draft template', () => {
     // Both tasks live in Configuration; the other five stages are empty and
     // still draw, which is what the add-task control hangs off.
     expect(displayedStageNames()[0]).toContain('Configuration')
-    // Counted by kind, not by row: Device Rollout waits for nothing and is a
-    // Step, Attendance Policy Mapping waits for it and is a Task.
-    expect(displayedStageNames()[0]).toContain('1 step')
-    expect(displayedStageNames()[0]).toContain('1 task')
+    // One count for both cards: the container is captioned Step, so the chip
+    // no longer splits its tasks into "steps" and "tasks".
+    expect(displayedStageNames()[0]).toContain('2 tasks')
   })
 
   it('shows the draft state and the back link', async () => {
@@ -164,7 +163,7 @@ describe('the step list renders a draft template', () => {
     // of the rule, where they are not.
     await openDesigner(2)
     expect(screen.getByText('Total TAT: 9d')).toBeInTheDocument()
-    expect(screen.getByText(/across 2 tasks in 6 stages/)).toBeInTheDocument()
+    expect(screen.getByText(/across 2 tasks in 6 steps/)).toBeInTheDocument()
   })
 
   /*
@@ -239,12 +238,12 @@ describe('the step list renders a draft template', () => {
 })
 
 /**
- * The five levels the screen now draws — Module Service, stage, Step, Task,
- * sub-task — and the three controls that decide how much of them is on it.
+ * The levels the screen now draws — Module Service, Step (the container), Task,
+ * checklist — and the three controls that decide how much of them is on it.
  *
  * <p>Fixture: template 2's Configuration holds Device Rollout (waits for
- * nothing, so a **Step**, Day 1–6) and, under it, Attendance Policy Mapping
- * (a **Task**, Day 7–9). Device Rollout carries two task list items and one
+ * nothing, so **Parallel**, Day 1–6) and, under it, Attendance Policy Mapping
+ * (Day 7–9). Device Rollout carries two task list items and one
  * required document; the other five stages are empty.
  */
 describe('the tree shows every level', () => {
@@ -308,7 +307,7 @@ describe('the tree shows every level', () => {
   it('opens the tree to each level in turn', async () => {
     await openDesigner(2)
 
-    showTo('Stage')
+    showTo('Step')
     expect(displayedStepNames()).toHaveLength(0)
 
     showTo('Task')
@@ -329,23 +328,31 @@ describe('the tree shows every level', () => {
 
     // The tree is now at no level at all, and no segment should claim it is.
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Device Rollout' }))
-    for (const level of ['Stage', 'Task', 'Checklist']) {
+    for (const level of ['Step', 'Task', 'Checklist']) {
       expect(screen.getByRole('button', { name: level })).toHaveAttribute('aria-pressed', 'false')
     }
   })
 
   /*
-    The strip is Stage / Task / Checklist. A fourth segment called "Step" sat a
-    row above the Step badge on the cards, one of them a filter and the other a
-    label, both saying "Step" about different things.
+    The strip is Step / Task / Checklist — the container is captioned Step, so
+    the preset that closes to it says the same. "Stage" is gone from the
+    screen; the word only survives in the master's own name.
   */
-  it('offers three levels, and Step is not one of them', async () => {
+  it('offers three levels, and Stage is not one of them', async () => {
     await openDesigner(2)
 
-    expect(screen.queryByRole('button', { name: 'Step' })).not.toBeInTheDocument()
-    for (const level of ['Stage', 'Task', 'Checklist']) {
+    expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument()
+    for (const level of ['Step', 'Task', 'Checklist']) {
       expect(screen.getByRole('button', { name: level })).toBeInTheDocument()
     }
+  })
+
+  it('captions every card Task, and the container Step', async () => {
+    await openDesigner(2)
+    expect(within(taskHeader('Device Rollout')).getByText('Task')).toBeInTheDocument()
+    expect(within(taskHeader('Attendance Policy Mapping')).getByText('Task')).toBeInTheDocument()
+    expect(within(stageRow('Configuration')).getByText('Step')).toBeInTheDocument()
+    expect(screen.queryByText('Stage')).not.toBeInTheDocument()
   })
 
   it('expands and collapses everything from the toolbar', async () => {
@@ -1520,5 +1527,79 @@ describe('editing a module service — position and dependency', () => {
         .map((t) => t.id)
       expect(active).toEqual([3, 1, 4])
     }, SLOW)
+  })
+})
+
+/**
+ * The Client sign-off panel — which tasks the client is asked to approve, and
+ * the one place all of them are set.
+ *
+ * <p>Fixture: template 2's two tasks both start with `requiresSignoff` false,
+ * so the panel opens at "0 of 2" and every case here is about moving it.
+ */
+describe('the Client sign-off panel', () => {
+  const panel = () => screen.getByRole('region', { name: 'Client sign-off' })
+  const box = (task: string) =>
+    within(panel()).getByRole('checkbox', { name: `Client sign-off for ${task}` })
+  const saved = (name: string) =>
+    getDb().obJourneyTemplateSteps.find((st) => st.templateId === 2 && st.name === name)
+
+  it('lists every task under its stage, not only the ones that gate', async () => {
+    await openDesigner(2)
+    // A list of what already needs sign-off could not be used to ask for it on
+    // anything else, which is most of what this panel is opened for.
+    expect(box('Device Rollout')).not.toBeChecked()
+    expect(box('Attendance Policy Mapping')).not.toBeChecked()
+    expect(within(panel()).getByText('Configuration')).toBeInTheDocument()
+    expect(within(panel()).getByText('0 of 2 tasks')).toBeInTheDocument()
+  })
+
+  it('ticks a task and saves it on its own', async () => {
+    await openDesigner(2)
+    fireEvent.click(box('Device Rollout'))
+
+    await screen.findByText('Device Rollout now needs client sign-off', undefined, SLOW)
+    expect(saved('Device Rollout')?.requiresSignoff).toBe(true)
+    // Only that field: the panel's PATCH carries nothing else, so a TAT
+    // somebody set a moment ago in the Edit form is not written back over.
+    expect(saved('Device Rollout')?.tatDays).toBe(6)
+    // And the other task is untouched — one tick, one task.
+    expect(saved('Attendance Policy Mapping')?.requiresSignoff).toBe(false)
+
+    await waitFor(() => expect(box('Device Rollout')).toBeChecked(), SLOW)
+    await waitFor(
+      () => expect(within(panel()).getByText('1 of 2 tasks')).toBeInTheDocument(),
+      SLOW,
+    )
+  })
+
+  it('unticks one that gates', async () => {
+    const step = getDb().obJourneyTemplateSteps.find(
+      (st) => st.templateId === 2 && st.name === 'Attendance Policy Mapping',
+    )!
+    step.requiresSignoff = true
+
+    await openDesigner(2)
+    expect(box('Attendance Policy Mapping')).toBeChecked()
+    fireEvent.click(box('Attendance Policy Mapping'))
+
+    await screen.findByText(
+      'Attendance Policy Mapping no longer needs client sign-off',
+      undefined,
+      SLOW,
+    )
+    expect(saved('Attendance Policy Mapping')?.requiresSignoff).toBe(false)
+  })
+
+  /*
+    A published version is frozen everywhere else on this screen, and a panel
+    that writes is exactly where that would be easiest to forget. The boxes are
+    drawn — the list is worth reading on a live service — and disabled.
+  */
+  it('is read-only on a published version', async () => {
+    await openDesigner(1)
+    const boxes = within(panel()).getAllByRole('checkbox')
+    expect(boxes.length).toBeGreaterThan(0)
+    for (const one of boxes) expect(one).toBeDisabled()
   })
 })

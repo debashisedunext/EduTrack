@@ -27,7 +27,10 @@ package com.edunext.edutrack.api.feature.onboarding.instances;
 class NotAnOnboardingModeratorException extends RuntimeException {
 
     NotAnOnboardingModeratorException(String moduleRole) {
-        super("skipping a step needs the onboarding module role OB_MANAGER or OB_ADMIN, caller holds "
+        // Names no particular action. Two routes raise this now — skip and
+        // review — and a message that said "skipping" was read by somebody
+        // who had pressed Verify.
+        super("this action needs the onboarding module role OB_MANAGER or OB_ADMIN, caller holds "
                 + (moduleRole == null || moduleRole.isBlank() ? "none" : moduleRole));
     }
 }

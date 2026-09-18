@@ -89,6 +89,17 @@ public class ObJourneyStep {
     @Column(name = "requires_signoff", nullable = false)
     private boolean requiresSignoff;
 
+    /**
+     * Completing this task submits it for OB Manager review rather than
+     * closing it — {@code V20260916_1700}.
+     *
+     * <p>Snapshotted from the template step at instantiation, exactly like
+     * {@link #requiresSignoff} and for the same reason: an admin editing a
+     * template must not change what a journey already running requires.
+     */
+    @Column(name = "requires_review", nullable = false)
+    private boolean requiresReview = true;
+
     /** {@code null} = parallel (plan §5.6), not "first". */
     @Column(name = "depends_on_step_id")
     private Long dependsOnStepId;
@@ -114,6 +125,30 @@ public class ObJourneyStep {
 
     @Column(name = "finished_at")
     private Instant finishedAt;
+
+    /** When the owner last sent this task for review. */
+    @Column(name = "submitted_at")
+    private Instant submittedAt;
+
+    @Column(name = "submitted_by")
+    private Long submittedBy;
+
+    /** When a manager last closed a review on it — approved or returned. */
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
+    @Column(name = "reviewed_by")
+    private Long reviewedBy;
+
+    /**
+     * Times this task has been sent back. {@code 0} means never.
+     *
+     * <p>Counts <em>returns</em>, not submissions, so the screen shows
+     * {@code reviewRound + 1} as "round" — a person counts the attempt they
+     * are on, not the number of times they have been rejected.
+     */
+    @Column(name = "review_round", nullable = false)
+    private int reviewRound;
 
     /** Working-calendar aware, computed by C-105 when the step activates. */
     @Column(name = "due_at")
@@ -217,6 +252,54 @@ public class ObJourneyStep {
 
     public void setRequiresSignoff(boolean requiresSignoff) {
         this.requiresSignoff = requiresSignoff;
+    }
+
+    public boolean isRequiresReview() {
+        return requiresReview;
+    }
+
+    public void setRequiresReview(boolean requiresReview) {
+        this.requiresReview = requiresReview;
+    }
+
+    public Instant getSubmittedAt() {
+        return submittedAt;
+    }
+
+    public void setSubmittedAt(Instant submittedAt) {
+        this.submittedAt = submittedAt;
+    }
+
+    public Long getSubmittedBy() {
+        return submittedBy;
+    }
+
+    public void setSubmittedBy(Long submittedBy) {
+        this.submittedBy = submittedBy;
+    }
+
+    public Instant getReviewedAt() {
+        return reviewedAt;
+    }
+
+    public void setReviewedAt(Instant reviewedAt) {
+        this.reviewedAt = reviewedAt;
+    }
+
+    public Long getReviewedBy() {
+        return reviewedBy;
+    }
+
+    public void setReviewedBy(Long reviewedBy) {
+        this.reviewedBy = reviewedBy;
+    }
+
+    public int getReviewRound() {
+        return reviewRound;
+    }
+
+    public void setReviewRound(int reviewRound) {
+        this.reviewRound = reviewRound;
     }
 
     public Long getDependsOnStepId() {

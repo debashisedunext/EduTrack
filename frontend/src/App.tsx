@@ -60,8 +60,8 @@ const MyTasksPage = lazy(() =>
 const NotificationTemplateListPage = lazy(() =>
   import('./features/masters/notificationTemplates/NotificationTemplateListPage').then((m) => ({ default: m.NotificationTemplateListPage })),
 )
-const ObClientDetailPage = lazy(() =>
-  import('./features/onboarding/journey/clientDetail/ObClientDetailPage').then((m) => ({ default: m.ObClientDetailPage })),
+const ObClientRedirect = lazy(() =>
+  import('./features/onboarding/journey/clientDetail/ObClientRedirect').then((m) => ({ default: m.ObClientRedirect })),
 )
 const ObClientProductPage = lazy(() =>
   import('./features/onboarding/journey/clientDetail/ObClientProductPage').then((m) => ({ default: m.ObClientProductPage })),
@@ -74,6 +74,12 @@ const ObProjectListPage = lazy(() =>
 )
 const NewObProjectPage = lazy(() =>
   import('./features/onboarding/projects/NewObProjectPage').then((m) => ({ default: m.NewObProjectPage })),
+)
+const ObMyTasksPage = lazy(() =>
+  import('./features/onboarding/mytasks/ObMyTasksPage').then((m) => ({ default: m.ObMyTasksPage })),
+)
+const ObMyTaskFocusPage = lazy(() =>
+  import('./features/onboarding/mytasks/ObMyTaskFocusPage').then((m) => ({ default: m.ObMyTaskFocusPage })),
 )
 const ObProjectDetailPage = lazy(() =>
   import('./features/onboarding/projects/ObProjectDetailPage').then((m) => ({ default: m.ObProjectDetailPage })),
@@ -676,24 +682,21 @@ export default function App() {
             */}
             <Route path="/onboarding/dashboard" element={withSuspense(<ObDashboardPage />)} />
             {/*
-              C-110 · OB-05, the onboarding client detail page. Beside the other
-              `/onboarding/**` routes and outside `/masters/**` for the reason
-              they all state — the module's screens are disjoint from the
-              ticketing masters (plan §1.2), and this page is emphatically not
-              S-09's client profile: a different client table with no foreign
-              key to that one (plan §1.2 again), a different vocabulary, and
-              A-115's ArchUnit rule refusing the import between them.
+              OB-05's client page is **removed**, and this path is a forwarder.
 
-              The path is `/onboarding/clients/:obClientId` because B-108's
-              `ObMailLinks` already sends every onboarding mail there — the
-              route arriving after the mail pointing at it was the exact
-              situation B-112 flagged, and this is the destination those links
-              have been missing. The page's own code lives under
-              `features/onboarding/journey/` rather than `.../clients/`; see its
-              docstring for why the directory and the URL differ.
+              Everything on that page a reader could act on — the prerequisites
+              gate, the portal-login panel, the client info card and the
+              stitched communications panel — is on `ObClientProductPage` now,
+              beside the ribbons it gates. What was left above them was a header
+              and a scroll on the way to the same controls.
 
-              Reached from a mail link, the OB-03 list (B-108) or the sidebar
-              (B-109) — this page has no route of its own to link out to.
+              The *path* outlives the page because it is not ours to retire:
+              B-108's `ObMailLinks` has been sending every onboarding mail to
+              `/onboarding/clients/{id}` for weeks, and mail already delivered
+              cannot be rewritten. The dashboard's RAG board, stuck panel and
+              delayed grid point here too, each holding a client id and no
+              product. `ObClientRedirect` resolves what none of them can — first
+              product bought, or the list when there is none.
             */}
             {/*
               B-108 · OB-03, the onboarding client list. Registered *before*
@@ -719,6 +722,18 @@ export default function App() {
               parameterised one regardless of order, but readability wants the
               concrete route beside the id-bearing one it resembles.
             */}
+            {/*
+              B-133 · the implementor's own queue, and the one task it opens.
+              The focused route is a child of the grid rather than of the
+              project, because the queue is what it belongs to: a reader who
+              finishes a task goes back to the next one, not to the project.
+            */}
+            <Route path="/onboarding/my-tasks" element={withSuspense(<ObMyTasksPage />)} />
+            <Route
+              path="/onboarding/my-tasks/:taskId"
+              element={withSuspense(<ObMyTaskFocusPage />)}
+            />
+
             <Route path="/onboarding/projects" element={withSuspense(<ObProjectListPage />)} />
             <Route path="/onboarding/projects/new" element={withSuspense(<NewObProjectPage />)} />
             <Route
@@ -737,11 +752,12 @@ export default function App() {
             */}
             <Route
               path="/onboarding/clients/:obClientId"
-              element={withSuspense(<ObClientDetailPage />)}
+              element={withSuspense(<ObClientRedirect />)}
             />
             {/*
-              OB-05's second half — one purchased product of one client, with
-              that product's journey ribbons and nothing else's.
+              OB-05 itself now — one purchased product of one client, with that
+              product's journey ribbons, the client's prerequisite gate above
+              them and the client record below.
 
               A route rather than state on the page above, because a product is
               a place people send each other: "look at KV Varanasi's biometric

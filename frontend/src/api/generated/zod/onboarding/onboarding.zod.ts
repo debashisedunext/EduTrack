@@ -50,6 +50,160 @@ import * as zod from 'zod';
 
 
 /**
+ * Every task still open against the **calling user**, whichever project or
+client it belongs to, soonest due first.
+
+**There is no `ownerUserId` parameter, by design.** The caller is the
+filter. One that existed would let an implementor read a colleague's
+queue by guessing a user id, and adding it later behind a role check
+would put an authorisation decision on a query parameter — the shape
+`runReport` already refuses for the same reason.
+
+**Three ways a task is yours.** Owner, backup owner, or *inherited* — a
+task nobody was pinned to, on a project you are the implementor of. The
+third is not a convenience: it is the rule `ObJourneyStepLifecycle`
+already authorises by, so a task listed here is one the five transitions
+will accept from you. A queue listing work the server would then refuse
+is worse than no queue. The backup owner counts for the reason
+`OnboardingScopeResolver.hasStepOwnedBy` counts them — a stand-in asked
+to cover a task needs to see it.
+
+**Blocked and Waiting on client are included.** They are still open and
+still yours; `status` says which, and a queue that hid them would hide
+the work that has been stuck longest. Tasks behind a locked prerequisite
+gate are included too — the checklist reports, it does not hold.
+
+**Excluded is work nobody expects:** a project that is `ON_HOLD` or
+`DROPPED` has had its clock stopped on purpose, so listing its tasks
+would ask somebody to do what the organisation decided to stop.
+
+Ordered by due date with nulls last, then by task id. The keyset cursor
+carries the coalesced sort key, so a page boundary in a run of tasks
+sharing a due date neither skips nor repeats.
+
+ * @summary The implementor's open tasks, across every project
+ */
+export const listObMyTasksQueryLimitDefault = 50;
+export const listObMyTasksQueryLimitMax = 200;
+
+
+
+export const listObMyTasksQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('Opaque cursor from `meta.nextCursor`. Never an offset.'),
+  "limit": zod.number().min(1).max(listObMyTasksQueryLimitMax).default(listObMyTasksQueryLimitDefault)
+})
+
+export const listObMyTasksResponseDataItemTaskNameMax = 200;
+
+export const listObMyTasksResponseDataItemProjectNameMax = 200;
+
+export const listObMyTasksResponseDataItemObClientNameMax = 200;
+
+export const listObMyTasksResponseDataItemObClientCodeMax = 40;
+
+export const listObMyTasksResponseDataItemServiceNameMax = 160;
+
+export const listObMyTasksResponseDataItemStepNameMax = 120;
+
+
+
+export const listObMyTasksResponse = zod.object({
+  "data": zod.array(zod.object({
+  "taskId": zod.number().describe('The `ob_journey_steps` row. The word \"step\" in that table name is\nthe API\'s own and means a \*\*task\*\* — see `stepName` for the\ncollision, which is deliberate and documented rather than fixed.\n'),
+  "taskName": zod.string().max(listObMyTasksResponseDataItemTaskNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
+  "dueAt": zod.string().datetime({}).nullish().describe('Null until the task activates. Those sort \*\*last\*\*, not first: a\nqueue that opened on every task nobody has started, above the one\nthat is late today, would be ordered by the wrong question.\n'),
+  "isOverdue": zod.boolean().describe('`dueAt` is in the past. A plain comparison, deliberately — the\nworking calendar decides \*how many days\* late something is, which\nis what OB-02 prints and why `delayedByDays` routes through\n`WorkingHoursService`. Whether a deadline has passed is the same\nanswer in every calendar, and running it through one would only\ninvite the two figures to disagree at a weekend boundary.\n\nA task can be In progress and overdue at once, which is why this is\nbeside `status` rather than a value of it.\n'),
+  "projectId": zod.number(),
+  "projectName": zod.string().max(listObMyTasksResponseDataItemProjectNameMax),
+  "obClientId": zod.number(),
+  "obClientName": zod.string().max(listObMyTasksResponseDataItemObClientNameMax),
+  "obClientCode": zod.string().max(listObMyTasksResponseDataItemObClientCodeMax).nullish(),
+  "journeyId": zod.number(),
+  "serviceName": zod.string().max(listObMyTasksResponseDataItemServiceNameMax).describe('The \*\*pinned\*\* module-service name, from the journey\'s own column.'),
+  "stepKey": zod.number().describe('The implementation stage the task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObJourneyStepView.stageKey` are.\nFour schemas now carry this key and all four fold the same way.\n'),
+  "stepName": zod.string().max(listObMyTasksResponseDataItemStepNameMax).describe('\*\*The screen calls this a Step; the API calls its level a stage.\*\*\n\nThat is a collision worth stating rather than discovering:\n`ob_journey_steps` is the \*task\* table, `\/onboarding\/journey-steps\/{stepId}`\nfetches a \*task\*, and `OB_STEP_OWNER` owns \*tasks\*. The product\nvocabulary moved to Module Service → Step → Task → Check list; the\ndata model did not follow, because renaming it would mean a\nmigration across the append-only history for a word.\n\nSo: `stepName` here is the stage\'s name as the template published\nit, and `taskName` is the `ob_journey_steps` row. Read that\nsentence twice before changing either.\n'),
+  "stepSequence": zod.number().describe('The step\'s position on the master. `9999` for the Ungrouped bucket.'),
+  "rowsOut": zod.number().describe('Check-list rows of this task sitting on the reviewer\'s desk.\n\n\*\*Reads two ways, and that is deliberate.\*\* To a manager it is a\nqueue — \*3 rows to read\*. To the task\'s implementor it is a wait —\n\*3 rows out\*. One number, because it is one fact; the screen knows\nwhich of the two people is looking.\n'),
+  "rowsReturned": zod.number().describe('Rows sent back that this task\'s owner has not opened yet — the\ncount behind the danger-tone highlight on My Tasks.\n\nGoes to zero when the owner opens the task\n(`POST ...\/outcomes-seen`), which is what makes it a signal rather\nthan a permanent label. Always `0` for a reader who is not the\nowner: it is about what \*they\* have seen.\n'),
+  "rowsApproved": zod.number().describe('Rows approved that this task\'s owner has not opened yet. Fades the\nsame way `rowsReturned` does.\n\nCounted separately because the two want different tones and\ndifferent words: one is work to do, the other is news.\n')
+}).describe('One open task belonging to the calling implementor — a row of My Tasks.\n\nEvery field here exists somewhere already: the task on\n`ob_journey_steps`, the service on `ob_journeys`, the step on the\ntemplate\'s stage group, the project and the client on their own tables.\nNone of them is on one response, and the journey read is per journey —\nso building this grid from what exists would be one request per project\nthe implementor touches, which is exactly what a screen that spans\nprojects cannot do.\n')),
+  "meta": zod.object({
+  "nextCursor": zod.string().nullish(),
+  "hasMore": zod.boolean().optional(),
+  "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
+}).optional()
+})
+
+/**
+ * The header of the focused task page — project, client, module service,
+step, due date and status for a single task **belonging to the caller**.
+
+**404 for a task that is somebody else's, and for one that does not
+exist.** Deliberately the same answer: a `403` would confirm the task
+exists, and `ob_journey_steps` ids are sequential, so the difference
+between the two statuses is an enumeration oracle over every onboarding
+task in the organisation.
+
+**Neither the status nor the project-status filter of the list applies.**
+The list leaves out settled tasks because a queue is work still to do;
+this answers "show me this one", and a task just completed — or one on a
+project since put on hold — is still the caller's to look at. Following
+a link and getting a 404 because the work is finished would read as the
+record having been deleted.
+
+This carries the labels and **not the check list**. The focused page
+reads `GET /onboarding/journey-steps/{stepId}` for that, which already
+owns it and returns the documents and the effective owner beside it.
+
+ * @summary One of the caller's own tasks
+ */
+export const getObMyTaskParams = zod.object({
+  "taskId": zod.number()
+})
+
+export const getObMyTaskHeader = zod.object({
+  "If-None-Match": zod.string().optional()
+})
+
+export const getObMyTaskResponseDataTaskNameMax = 200;
+
+export const getObMyTaskResponseDataProjectNameMax = 200;
+
+export const getObMyTaskResponseDataObClientNameMax = 200;
+
+export const getObMyTaskResponseDataObClientCodeMax = 40;
+
+export const getObMyTaskResponseDataServiceNameMax = 160;
+
+export const getObMyTaskResponseDataStepNameMax = 120;
+
+
+
+export const getObMyTaskResponse = zod.object({
+  "data": zod.object({
+  "taskId": zod.number().describe('The `ob_journey_steps` row. The word \"step\" in that table name is\nthe API\'s own and means a \*\*task\*\* — see `stepName` for the\ncollision, which is deliberate and documented rather than fixed.\n'),
+  "taskName": zod.string().max(getObMyTaskResponseDataTaskNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
+  "dueAt": zod.string().datetime({}).nullish().describe('Null until the task activates. Those sort \*\*last\*\*, not first: a\nqueue that opened on every task nobody has started, above the one\nthat is late today, would be ordered by the wrong question.\n'),
+  "isOverdue": zod.boolean().describe('`dueAt` is in the past. A plain comparison, deliberately — the\nworking calendar decides \*how many days\* late something is, which\nis what OB-02 prints and why `delayedByDays` routes through\n`WorkingHoursService`. Whether a deadline has passed is the same\nanswer in every calendar, and running it through one would only\ninvite the two figures to disagree at a weekend boundary.\n\nA task can be In progress and overdue at once, which is why this is\nbeside `status` rather than a value of it.\n'),
+  "projectId": zod.number(),
+  "projectName": zod.string().max(getObMyTaskResponseDataProjectNameMax),
+  "obClientId": zod.number(),
+  "obClientName": zod.string().max(getObMyTaskResponseDataObClientNameMax),
+  "obClientCode": zod.string().max(getObMyTaskResponseDataObClientCodeMax).nullish(),
+  "journeyId": zod.number(),
+  "serviceName": zod.string().max(getObMyTaskResponseDataServiceNameMax).describe('The \*\*pinned\*\* module-service name, from the journey\'s own column.'),
+  "stepKey": zod.number().describe('The implementation stage the task sits in, folded exactly as\n`ObProjectStage.stageKey` and `ObJourneyStepView.stageKey` are.\nFour schemas now carry this key and all four fold the same way.\n'),
+  "stepName": zod.string().max(getObMyTaskResponseDataStepNameMax).describe('\*\*The screen calls this a Step; the API calls its level a stage.\*\*\n\nThat is a collision worth stating rather than discovering:\n`ob_journey_steps` is the \*task\* table, `\/onboarding\/journey-steps\/{stepId}`\nfetches a \*task\*, and `OB_STEP_OWNER` owns \*tasks\*. The product\nvocabulary moved to Module Service → Step → Task → Check list; the\ndata model did not follow, because renaming it would mean a\nmigration across the append-only history for a word.\n\nSo: `stepName` here is the stage\'s name as the template published\nit, and `taskName` is the `ob_journey_steps` row. Read that\nsentence twice before changing either.\n'),
+  "stepSequence": zod.number().describe('The step\'s position on the master. `9999` for the Ungrouped bucket.'),
+  "rowsOut": zod.number().describe('Check-list rows of this task sitting on the reviewer\'s desk.\n\n\*\*Reads two ways, and that is deliberate.\*\* To a manager it is a\nqueue — \*3 rows to read\*. To the task\'s implementor it is a wait —\n\*3 rows out\*. One number, because it is one fact; the screen knows\nwhich of the two people is looking.\n'),
+  "rowsReturned": zod.number().describe('Rows sent back that this task\'s owner has not opened yet — the\ncount behind the danger-tone highlight on My Tasks.\n\nGoes to zero when the owner opens the task\n(`POST ...\/outcomes-seen`), which is what makes it a signal rather\nthan a permanent label. Always `0` for a reader who is not the\nowner: it is about what \*they\* have seen.\n'),
+  "rowsApproved": zod.number().describe('Rows approved that this task\'s owner has not opened yet. Fades the\nsame way `rowsReturned` does.\n\nCounted separately because the two want different tones and\ndifferent words: one is work to do, the other is news.\n')
+}).describe('One open task belonging to the calling implementor — a row of My Tasks.\n\nEvery field here exists somewhere already: the task on\n`ob_journey_steps`, the service on `ob_journeys`, the step on the\ntemplate\'s stage group, the project and the client on their own tables.\nNone of them is on one response, and the journey read is per journey —\nso building this grid from what exists would be one request per project\nthe implementor touches, which is exactly what a screen that spans\nprojects cannot do.\n')
+})
+
+/**
  * One row per engagement, with the figures the grid is read for: the
 current stage, stages completed of total, days delayed and the
 tentative completion date.
@@ -130,6 +284,13 @@ export const listObProjectsResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }),zod.null()]).optional().describe('Null until somebody is assigned — a project is routinely created before one is.'),
+  "implementorManager": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Who is accountable for this engagement above the implementor.\n\n\*\*Not the implementor\'s reporting manager.\*\* That is an org chart\nand this is an engagement: a senior implementor may report to a\nhead of delivery and still have a different manager overseeing one\nstrategic client. Deriving it would also be retroactive — editing\none reporting line would change who is recorded as having managed\nevery project that person ever ran, finished ones included — which\nis why `salesPerson` sits on the project rather than being read off\nthe client, and why this follows it.\n\nNothing falls back to this person: an ownerless task goes to\n`implementor`, not to their manager. Null on every project created\nbefore 16 Sep 2026, and null wherever somebody has cleared it.\n'),
   "status": zod.enum(['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED']).describe('Deliberately close to `ObClientStatus` without being it, and the\ndifference is the point of having a project table at all: a client is\n`LIVE` when \*every\* engagement it has is finished, while a project is\n`COMPLETED` when its own journeys are. A client running two products\ncan have one completed project and one still in configuration, which\nthe old single-status client could not express.\n\n`COMPLETED` is \*\*earned, never set\*\* — stamped when the last of the\nproject\'s journeys completes, and `422` if a request asks for it.\n`ON_HOLD` and `DROPPED` each require a reason: a project that stopped\nmoving is a fact somebody has to explain months later, and the\nexplanation is worth nothing if it was optional at the moment it was\nknown.\n\nOnly `RUNNING` accrues delay. A completed project that overran must not\nkeep counting, and a held or dropped one has a clock somebody stopped\non purpose.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "currentStage": zod.string().nullish().describe('The stage holding the lowest-sequence task that is actually\nrunning. \*\*Not \"the first incomplete stage\"\*\*, which would name a\nstage whose tasks are all still pending behind a dependency and\nreport a project as being at a stage nobody has started.\n\nNull is ordinary rather than exceptional — a locked gate, a project\nheld behind a sibling service, every task blocked — and\n`gateStatus` is beside it so the grid can say which.\n'),
@@ -138,7 +299,7 @@ export const listObProjectsResponse = zod.object({
   "journeyCount": zod.number().describe('One per module service it was boarded through.'),
   "delayedByDays": zod.number().nullish().describe('Ceiling working days between the earliest overdue task\'s due date\nand now, through the working calendar — weekends, org holidays and\nresource leave. Ceiling rather than floor: a task due Friday and\nstill open a minute into Monday has accrued a fraction of a working\nday, and reporting zero until a whole one elapses would agree with\na naive calendar subtraction for the exact case that subtraction\ngets wrong.\n\n\*\*Null, not zero, when the project is not late\*\*, and null whenever\nthe status does not accrue delay. See `ObProjectStatus`.\n'),
   "tentativeCompletion": zod.string().date().nullish().describe('`startDate` walked forward by the project\'s total TAT through the\nworking calendar. Null for a project with no instantiated task,\nwhere there is no budget and a date would be a guess presented as a\ncommitment.\n'),
-  "totalTatDays": zod.number().describe('Σ of the pinned per-task TATs across this project\'s journeys — the\n\*\*pinned\*\* figure, so republishing a Module Service does not move a\nrunning project\'s date.\n\nIt is a sum including across tasks that run in parallel, which\noverstates elapsed time wherever the dependency graph lets two run\nat once. That is plan §5.10\'s own convention for a journey total,\nfollowed here rather than quietly improved on; a critical-path\nfigure would be a different number on every screen that prints this\none and is a decision for the plan.\n')
+  "totalTatDays": zod.number().describe('How long this project \*\*takes\*\*, in working days: the critical path\nthrough it, on the \*\*pinned\*\* per-task TATs so republishing a Module\nService does not move a running project\'s date.\n\nTwo levels, both of them \"a dependency adds, a parallel branch does\nnot\":\n\n- Inside a Module Service, the critical path through its tasks,\n  walking `depends_on_step_id` — the same walk\n  `ObJourneyTemplateSummary.totalTatDays` and the designer\'s own\n  Schedule column make, so a project and the product it was boarded\n  from cannot report different numbers for the same service.\n- Across Module Services, the heaviest chain through\n  `ob_journey_template_dependencies` — the same edges that decide\n  when a journey\'s tasks may start. Two services that wait on\n  nothing run side by side and the project takes as long as the\n  longer of them, not as long as both.\n\n\*\*This was a plain Σ until 15 Sep 2026\*\*, on plan §5.10\'s convention\nfor a journey total, with the critical path left as \"a decision for\nthe plan\". The decision was taken: summing reported 8 days for a\nproject of two 4-day parallel services and put its tentative\ncompletion a week late, which is a promise made to a client rather\nthan an internal rounding.\n\nA dependency on a service the client did not buy holds nothing up\nand adds nothing. A project with no journeys is `0`.\n')
 })),
   "meta": zod.object({
   "nextCursor": zod.string().nullish(),
@@ -185,8 +346,9 @@ export const createObProjectBody = zod.object({
   "clientId": zod.number(),
   "productId": zod.number(),
   "startDate": zod.string().date(),
-  "salesPersonId": zod.number().nullish(),
-  "implementorUserId": zod.number().nullish(),
+  "salesPersonId": zod.number().describe('Required on create, and nullable on the update — see\n`implementorUserId` for why the two differ.\n'),
+  "implementorUserId": zod.number().describe('Who runs this project, and \*\*what an ownerless task falls to\*\*.\n\nA module service that pins nobody to a task instantiates it onto\nthis person (`ObJourneyInstantiationService`), and a task that\npredates that rule is resolved onto them on the read — see\n`ObJourneyStepView.ownerIsInherited`. So a project created without\nan implementor produces journeys whose unpinned tasks belong to\nnobody and a fallback with nothing to fall back to.\n\n\*\*Required here, nullable on `ObProjectUpdateRequest`.\*\* Clearing an\nimplementor is a real thing to do — somebody leaves, the project is\nbetween owners. The rule is that a project cannot be \*born\* without\none, not that it can never be without one.\n'),
+  "implementorManagerUserId": zod.number().describe('Who is accountable for this engagement above the implementor — see\n`ObProject.implementorManager` for what it is and what it is not.\n\nRequired here on `salesPersonId`\'s reasoning rather than\n`implementorUserId`\'s: nothing falls back to the manager and no\ntask is instantiated onto them. They are captured because every\nengagement has somebody accountable above the person running it,\nand the moment to ask is while somebody is already choosing the\nother two — not a fortnight later when a project needs escalating\nand nobody knows to whom.\n\nNullable on the update, for the same reason the other two are.\n'),
   "moduleServiceIds": zod.array(zod.number()).min(1).describe('The active Module Services of `productId` left checked on the form,\neach of which instantiates one journey. Order is ignored — catalogue\nsequence is re-imposed server-side, so a dependency journey always\nexists before the one held behind it.\n\n\*\*`minItems: 1` is a product decision, not a technical one.\*\* The\nform arrives with every service checked and lets somebody unpick\nthe ones this client did not buy; unpicking all of them would\ncreate a project with no journey, no ribbon and nothing to report —\nwhich is a purchase record, and this module already has a table for\nthose.\n\nThere is no `status` field. A project is born `RUNNING`, and the\nother values are recorded later through the `PATCH`, where the\nmandatory reason can be insisted on.\n')
 })
 
@@ -223,6 +385,8 @@ export const getObProjectResponseDataStagesItemNameMax = 120;
 
 export const getObProjectResponseDataModuleServicesItemServiceNameMax = 160;
 
+export const getObProjectResponseDataModuleServicesItemStagesItemNameMax = 120;
+
 
 
 export const getObProjectResponse = zod.object({
@@ -255,6 +419,13 @@ export const getObProjectResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }),zod.null()]).optional().describe('Null until somebody is assigned — a project is routinely created before one is.'),
+  "implementorManager": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Who is accountable for this engagement above the implementor.\n\n\*\*Not the implementor\'s reporting manager.\*\* That is an org chart\nand this is an engagement: a senior implementor may report to a\nhead of delivery and still have a different manager overseeing one\nstrategic client. Deriving it would also be retroactive — editing\none reporting line would change who is recorded as having managed\nevery project that person ever ran, finished ones included — which\nis why `salesPerson` sits on the project rather than being read off\nthe client, and why this follows it.\n\nNothing falls back to this person: an ownerless task goes to\n`implementor`, not to their manager. Null on every project created\nbefore 16 Sep 2026, and null wherever somebody has cleared it.\n'),
   "status": zod.enum(['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED']).describe('Deliberately close to `ObClientStatus` without being it, and the\ndifference is the point of having a project table at all: a client is\n`LIVE` when \*every\* engagement it has is finished, while a project is\n`COMPLETED` when its own journeys are. A client running two products\ncan have one completed project and one still in configuration, which\nthe old single-status client could not express.\n\n`COMPLETED` is \*\*earned, never set\*\* — stamped when the last of the\nproject\'s journeys completes, and `422` if a request asks for it.\n`ON_HOLD` and `DROPPED` each require a reason: a project that stopped\nmoving is a fact somebody has to explain months later, and the\nexplanation is worth nothing if it was optional at the moment it was\nknown.\n\nOnly `RUNNING` accrues delay. A completed project that overran must not\nkeep counting, and a held or dropped one has a clock somebody stopped\non purpose.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "currentStage": zod.string().nullish().describe('The stage holding the lowest-sequence task that is actually\nrunning. \*\*Not \"the first incomplete stage\"\*\*, which would name a\nstage whose tasks are all still pending behind a dependency and\nreport a project as being at a stage nobody has started.\n\nNull is ordinary rather than exceptional — a locked gate, a project\nheld behind a sibling service, every task blocked — and\n`gateStatus` is beside it so the grid can say which.\n'),
@@ -263,7 +434,7 @@ export const getObProjectResponse = zod.object({
   "journeyCount": zod.number().describe('One per module service it was boarded through.'),
   "delayedByDays": zod.number().nullish().describe('Ceiling working days between the earliest overdue task\'s due date\nand now, through the working calendar — weekends, org holidays and\nresource leave. Ceiling rather than floor: a task due Friday and\nstill open a minute into Monday has accrued a fraction of a working\nday, and reporting zero until a whole one elapses would agree with\na naive calendar subtraction for the exact case that subtraction\ngets wrong.\n\n\*\*Null, not zero, when the project is not late\*\*, and null whenever\nthe status does not accrue delay. See `ObProjectStatus`.\n'),
   "tentativeCompletion": zod.string().date().nullish().describe('`startDate` walked forward by the project\'s total TAT through the\nworking calendar. Null for a project with no instantiated task,\nwhere there is no budget and a date would be a guess presented as a\ncommitment.\n'),
-  "totalTatDays": zod.number().describe('Σ of the pinned per-task TATs across this project\'s journeys — the\n\*\*pinned\*\* figure, so republishing a Module Service does not move a\nrunning project\'s date.\n\nIt is a sum including across tasks that run in parallel, which\noverstates elapsed time wherever the dependency graph lets two run\nat once. That is plan §5.10\'s own convention for a journey total,\nfollowed here rather than quietly improved on; a critical-path\nfigure would be a different number on every screen that prints this\none and is a decision for the plan.\n')
+  "totalTatDays": zod.number().describe('How long this project \*\*takes\*\*, in working days: the critical path\nthrough it, on the \*\*pinned\*\* per-task TATs so republishing a Module\nService does not move a running project\'s date.\n\nTwo levels, both of them \"a dependency adds, a parallel branch does\nnot\":\n\n- Inside a Module Service, the critical path through its tasks,\n  walking `depends_on_step_id` — the same walk\n  `ObJourneyTemplateSummary.totalTatDays` and the designer\'s own\n  Schedule column make, so a project and the product it was boarded\n  from cannot report different numbers for the same service.\n- Across Module Services, the heaviest chain through\n  `ob_journey_template_dependencies` — the same edges that decide\n  when a journey\'s tasks may start. Two services that wait on\n  nothing run side by side and the project takes as long as the\n  longer of them, not as long as both.\n\n\*\*This was a plain Σ until 15 Sep 2026\*\*, on plan §5.10\'s convention\nfor a journey total, with the critical path left as \"a decision for\nthe plan\". The decision was taken: summing reported 8 days for a\nproject of two 4-day parallel services and put its tentative\ncompletion a week late, which is a promise made to a client rather\nthan an internal rounding.\n\nA dependency on a service the client did not buy holds nothing up\nand adds nothing. A project with no journeys is `0`.\n')
 }).and(zod.object({
   "statusReason": zod.string().max(getObProjectResponseDataStatusReasonMax).nullish(),
   "stages": zod.array(zod.object({
@@ -280,8 +451,17 @@ export const getObProjectResponse = zod.object({
   "templateId": zod.number(),
   "serviceName": zod.string().max(getObProjectResponseDataModuleServicesItemServiceNameMax).describe('The \*\*pinned\*\* name, from the journey\'s own column rather than a join to whatever the catalogue is called today.'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
-  "isComplete": zod.boolean()
-}).describe('One Module Service this project was boarded through — the journey, named.')).optional(),
+  "isComplete": zod.boolean(),
+  "stages": zod.array(zod.object({
+  "stageKey": zod.number().describe('The implementation stage id where there is one. Negative for a\nstage group that belongs to no stage — the \"Ungrouped\" bucket — and\n`0` for tasks whose template row has gone, which are counted rather\nthan silently dropped out of both numerator and denominator.\n'),
+  "name": zod.string().max(getObProjectResponseDataModuleServicesItemStagesItemNameMax),
+  "sequence": zod.number(),
+  "taskCount": zod.number(),
+  "tasksOutstanding": zod.number().describe('Tasks that are neither `DONE` nor `SKIPPED`. A waived task counts\nas settled, which is how the ribbon reads it too.\n'),
+  "isComplete": zod.boolean(),
+  "isCurrent": zod.boolean().describe('This stage holds the lowest-sequence task that is actually running.\nAt most one stage per project, and none at all while the gate is\nlocked or every task is blocked.\n')
+}).describe('One implementation stage of this project, as \"stages completed out of\ntotal\" counts it.\n\n\*\*Keyed by the implementation stage, not by the stage group.\*\* A\nproject boarded through two Module Services has two \"Configuration\"\ngroups, one per service; counted separately, a six-stage master would\nreport twelve stages and \"3 of 12\" where a person sees three of six. So\nthe roll-up folds them onto\n`ob_journey_template_stages.implementationStageId`, and Configuration\nis one stage that is complete when both services\' Configuration tasks\nare.\n')).describe('Every implementation stage \*\*this service\'s\*\* template publishes, in\nsequence, stages it scheduled nothing into included.\n\n`ObProjectDetail.stages` is the same roll-up folded across every\njourney of the project, which is what the header\'s \"Stages 2\/7\"\nneeds and exactly what makes it useless to the project page\'s tree:\nfolded, there is no answer to \"how far is \*SIS\* through\nConfiguration\", because both services\' Configuration tasks are in\none bucket.\n\nSo the tree reads this list and the header reads the folded one.\nBoth come from a single `STAGE_ROLLUP` at journey grain — the\nproject-level figures are summed from these rows rather than queried\nagain, so the two cannot disagree.\n\n`taskCount: 0` here is a sharper statement than the folded list can\nmake: Reports can be empty for Attendance and busy for SIS, and only\nthis shape can say so. It still means a misconfigured Module Service\nrather than a finished stage — `isComplete` requires a task to have\nbeen completed, the same rule the folded list follows.\n')
+}).describe('One Module Service this project was boarded through — the journey,\nnamed, and its own stage roll-up.\n')).optional(),
   "createdBy": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -333,9 +513,10 @@ export const updateObProjectBody = zod.object({
   "startDate": zod.string().date(),
   "salesPersonId": zod.number().nullish(),
   "implementorUserId": zod.number().nullish(),
+  "implementorManagerUserId": zod.number().nullish(),
   "status": zod.enum(['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED']).optional().describe('Deliberately close to `ObClientStatus` without being it, and the\ndifference is the point of having a project table at all: a client is\n`LIVE` when \*every\* engagement it has is finished, while a project is\n`COMPLETED` when its own journeys are. A client running two products\ncan have one completed project and one still in configuration, which\nthe old single-status client could not express.\n\n`COMPLETED` is \*\*earned, never set\*\* — stamped when the last of the\nproject\'s journeys completes, and `422` if a request asks for it.\n`ON_HOLD` and `DROPPED` each require a reason: a project that stopped\nmoving is a fact somebody has to explain months later, and the\nexplanation is worth nothing if it was optional at the moment it was\nknown.\n\nOnly `RUNNING` accrues delay. A completed project that overran must not\nkeep counting, and a held or dropped one has a clock somebody stopped\non purpose.\n'),
   "statusReason": zod.string().max(updateObProjectBodyStatusReasonMax).nullish().describe('Required when `status` moves to `ON_HOLD` or `DROPPED`.')
-}).describe('\*\*The whole representation, not a sparse patch.\*\* The form always sends\nboth people, so an absent `implementorUserId` means \*cleared\* —\nunassigning somebody is possible rather than a gap worked around by\nassigning a placeholder user.\n')
+}).describe('\*\*The whole representation, not a sparse patch.\*\* The form always sends\nall three people, so an absent `implementorUserId` means \*cleared\* —\nunassigning somebody is possible rather than a gap worked around by\nassigning a placeholder user.\n')
 
 export const updateObProjectResponseDataNameMax = 200;
 
@@ -350,6 +531,8 @@ export const updateObProjectResponseDataStatusReasonMax = 500;
 export const updateObProjectResponseDataStagesItemNameMax = 120;
 
 export const updateObProjectResponseDataModuleServicesItemServiceNameMax = 160;
+
+export const updateObProjectResponseDataModuleServicesItemStagesItemNameMax = 120;
 
 
 
@@ -383,6 +566,13 @@ export const updateObProjectResponse = zod.object({
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
 }),zod.null()]).optional().describe('Null until somebody is assigned — a project is routinely created before one is.'),
+  "implementorManager": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Who is accountable for this engagement above the implementor.\n\n\*\*Not the implementor\'s reporting manager.\*\* That is an org chart\nand this is an engagement: a senior implementor may report to a\nhead of delivery and still have a different manager overseeing one\nstrategic client. Deriving it would also be retroactive — editing\none reporting line would change who is recorded as having managed\nevery project that person ever ran, finished ones included — which\nis why `salesPerson` sits on the project rather than being read off\nthe client, and why this follows it.\n\nNothing falls back to this person: an ownerless task goes to\n`implementor`, not to their manager. Null on every project created\nbefore 16 Sep 2026, and null wherever somebody has cleared it.\n'),
   "status": zod.enum(['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED']).describe('Deliberately close to `ObClientStatus` without being it, and the\ndifference is the point of having a project table at all: a client is\n`LIVE` when \*every\* engagement it has is finished, while a project is\n`COMPLETED` when its own journeys are. A client running two products\ncan have one completed project and one still in configuration, which\nthe old single-status client could not express.\n\n`COMPLETED` is \*\*earned, never set\*\* — stamped when the last of the\nproject\'s journeys completes, and `422` if a request asks for it.\n`ON_HOLD` and `DROPPED` each require a reason: a project that stopped\nmoving is a fact somebody has to explain months later, and the\nexplanation is worth nothing if it was optional at the moment it was\nknown.\n\nOnly `RUNNING` accrues delay. A completed project that overran must not\nkeep counting, and a held or dropped one has a clock somebody stopped\non purpose.\n'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
   "currentStage": zod.string().nullish().describe('The stage holding the lowest-sequence task that is actually\nrunning. \*\*Not \"the first incomplete stage\"\*\*, which would name a\nstage whose tasks are all still pending behind a dependency and\nreport a project as being at a stage nobody has started.\n\nNull is ordinary rather than exceptional — a locked gate, a project\nheld behind a sibling service, every task blocked — and\n`gateStatus` is beside it so the grid can say which.\n'),
@@ -391,7 +581,7 @@ export const updateObProjectResponse = zod.object({
   "journeyCount": zod.number().describe('One per module service it was boarded through.'),
   "delayedByDays": zod.number().nullish().describe('Ceiling working days between the earliest overdue task\'s due date\nand now, through the working calendar — weekends, org holidays and\nresource leave. Ceiling rather than floor: a task due Friday and\nstill open a minute into Monday has accrued a fraction of a working\nday, and reporting zero until a whole one elapses would agree with\na naive calendar subtraction for the exact case that subtraction\ngets wrong.\n\n\*\*Null, not zero, when the project is not late\*\*, and null whenever\nthe status does not accrue delay. See `ObProjectStatus`.\n'),
   "tentativeCompletion": zod.string().date().nullish().describe('`startDate` walked forward by the project\'s total TAT through the\nworking calendar. Null for a project with no instantiated task,\nwhere there is no budget and a date would be a guess presented as a\ncommitment.\n'),
-  "totalTatDays": zod.number().describe('Σ of the pinned per-task TATs across this project\'s journeys — the\n\*\*pinned\*\* figure, so republishing a Module Service does not move a\nrunning project\'s date.\n\nIt is a sum including across tasks that run in parallel, which\noverstates elapsed time wherever the dependency graph lets two run\nat once. That is plan §5.10\'s own convention for a journey total,\nfollowed here rather than quietly improved on; a critical-path\nfigure would be a different number on every screen that prints this\none and is a decision for the plan.\n')
+  "totalTatDays": zod.number().describe('How long this project \*\*takes\*\*, in working days: the critical path\nthrough it, on the \*\*pinned\*\* per-task TATs so republishing a Module\nService does not move a running project\'s date.\n\nTwo levels, both of them \"a dependency adds, a parallel branch does\nnot\":\n\n- Inside a Module Service, the critical path through its tasks,\n  walking `depends_on_step_id` — the same walk\n  `ObJourneyTemplateSummary.totalTatDays` and the designer\'s own\n  Schedule column make, so a project and the product it was boarded\n  from cannot report different numbers for the same service.\n- Across Module Services, the heaviest chain through\n  `ob_journey_template_dependencies` — the same edges that decide\n  when a journey\'s tasks may start. Two services that wait on\n  nothing run side by side and the project takes as long as the\n  longer of them, not as long as both.\n\n\*\*This was a plain Σ until 15 Sep 2026\*\*, on plan §5.10\'s convention\nfor a journey total, with the critical path left as \"a decision for\nthe plan\". The decision was taken: summing reported 8 days for a\nproject of two 4-day parallel services and put its tentative\ncompletion a week late, which is a promise made to a client rather\nthan an internal rounding.\n\nA dependency on a service the client did not buy holds nothing up\nand adds nothing. A project with no journeys is `0`.\n')
 }).and(zod.object({
   "statusReason": zod.string().max(updateObProjectResponseDataStatusReasonMax).nullish(),
   "stages": zod.array(zod.object({
@@ -408,8 +598,17 @@ export const updateObProjectResponse = zod.object({
   "templateId": zod.number(),
   "serviceName": zod.string().max(updateObProjectResponseDataModuleServicesItemServiceNameMax).describe('The \*\*pinned\*\* name, from the journey\'s own column rather than a join to whatever the catalogue is called today.'),
   "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
-  "isComplete": zod.boolean()
-}).describe('One Module Service this project was boarded through — the journey, named.')).optional(),
+  "isComplete": zod.boolean(),
+  "stages": zod.array(zod.object({
+  "stageKey": zod.number().describe('The implementation stage id where there is one. Negative for a\nstage group that belongs to no stage — the \"Ungrouped\" bucket — and\n`0` for tasks whose template row has gone, which are counted rather\nthan silently dropped out of both numerator and denominator.\n'),
+  "name": zod.string().max(updateObProjectResponseDataModuleServicesItemStagesItemNameMax),
+  "sequence": zod.number(),
+  "taskCount": zod.number(),
+  "tasksOutstanding": zod.number().describe('Tasks that are neither `DONE` nor `SKIPPED`. A waived task counts\nas settled, which is how the ribbon reads it too.\n'),
+  "isComplete": zod.boolean(),
+  "isCurrent": zod.boolean().describe('This stage holds the lowest-sequence task that is actually running.\nAt most one stage per project, and none at all while the gate is\nlocked or every task is blocked.\n')
+}).describe('One implementation stage of this project, as \"stages completed out of\ntotal\" counts it.\n\n\*\*Keyed by the implementation stage, not by the stage group.\*\* A\nproject boarded through two Module Services has two \"Configuration\"\ngroups, one per service; counted separately, a six-stage master would\nreport twelve stages and \"3 of 12\" where a person sees three of six. So\nthe roll-up folds them onto\n`ob_journey_template_stages.implementationStageId`, and Configuration\nis one stage that is complete when both services\' Configuration tasks\nare.\n')).describe('Every implementation stage \*\*this service\'s\*\* template publishes, in\nsequence, stages it scheduled nothing into included.\n\n`ObProjectDetail.stages` is the same roll-up folded across every\njourney of the project, which is what the header\'s \"Stages 2\/7\"\nneeds and exactly what makes it useless to the project page\'s tree:\nfolded, there is no answer to \"how far is \*SIS\* through\nConfiguration\", because both services\' Configuration tasks are in\none bucket.\n\nSo the tree reads this list and the header reads the folded one.\nBoth come from a single `STAGE_ROLLUP` at journey grain — the\nproject-level figures are summed from these rows rather than queried\nagain, so the two cannot disagree.\n\n`taskCount: 0` here is a sharper statement than the folded list can\nmake: Reports can be empty for Attendance and busy for SIS, and only\nthis shape can say so. It still means a misconfigured Module Service\nrather than a finished stage — `isComplete` requires a task to have\nbeen completed, the same rule the folded list follows.\n')
+}).describe('One Module Service this project was boarded through — the journey,\nnamed, and its own stage roll-up.\n')).optional(),
   "createdBy": zod.union([zod.object({
   "id": zod.number(),
   "displayName": zod.string(),
@@ -3777,6 +3976,7 @@ export const listObDashboardCardItemsResponse = zod.object({
   "obClientId": zod.number(),
   "obClientName": zod.string(),
   "journeyId": zod.number().nullish().describe('Null on a prerequisite — the gate sits in front of every journey, not inside one.'),
+  "obProjectId": zod.number().nullish().describe('The project this row opens onto — `jr.project_id` on a service row,\nalways present. On a prerequisite it is the client\'s project \*\*only\nwhen they have exactly one\*\*, and null otherwise: a prerequisite is\nthe client-level gate and names no single project, so a client\nrunning several cannot be resolved to one.\n\nThe drill-down\'s \"Open\" opens `\/onboarding\/projects\/{obProjectId}`\nwhen this is set, and the client-filtered project grid\n(`\/onboarding\/projects?clientId=`) when it is not — the older\n`\/onboarding\/clients\/{id}` journey overview is no longer where a row\nopens. Added as an optional field — CONVENTIONS.md §1, not breaking.\n'),
   "product": zod.union([zod.object({
   "id": zod.number(),
   "code": zod.string(),
@@ -3884,6 +4084,38 @@ export const listObDelayedProjectsResponse = zod.object({
 })
 
 /**
+ * Two cards in one answer: **Pending your verification** for a manager,
+and **Sent / Approved / Rejected** as one card for an implementor.
+
+Both roles together because plenty of people are both — a manager who
+still carries tasks of their own — and a client cannot know in advance
+which figures it will need. A zero is a real answer meaning "nothing",
+so draw a card only where there is something to say.
+
+Read from `ob_implementor_daily_stats`, never counted live
+(CLAUDE.md). **A card is therefore as fresh as the last worker run** —
+`PT5M` committed — so "3 rows pending your verification" can be
+minutes behind the queue it describes. The My Tasks highlight beside it
+is computed live for the opposite reason: the count invites, the
+highlight directs, and only a stale highlight would send somebody to an
+empty task.
+
+`computedAt` is **null when the worker has never run**, and the screen
+should say so rather than present four zeroes as fact.
+
+ * @summary The caller's own review counters (C-141)
+ */
+export const getObReviewSummaryResponse = zod.object({
+  "data": zod.object({
+  "reviewsPending": zod.number().describe('Rows waiting on this caller \*\*as a manager\*\* — their queue.\nStock: what is on the desk now, not what arrived today.\n'),
+  "sentForReview": zod.number().describe('Rows this caller has out with their own manager. Stock, and the\nsame underlying fact as `reviewsPending` seen from the other side.\n'),
+  "reviewsApproved": zod.number().describe('Rows of theirs approved \*\*on the stat day\*\*. Flow, not stock — this\nresets each day, and summing it with the two stock figures above\nproduces a number that means nothing.\n'),
+  "reviewsRejected": zod.number().describe('Rows of theirs sent back on the stat day. Flow, as above.'),
+  "computedAt": zod.string().datetime({}).nullish().describe('When the stats worker last wrote these. \*\*Null means never\*\* — say\nso rather than presenting four zeroes as fact.\n')
+})
+})
+
+/**
  * Plan §9's second grid, reading `ob_implementor_daily_stats`.
 
 ## Two things this route must do that its schema cannot enforce
@@ -3955,6 +4187,146 @@ export const listObImplementorWorkloadResponse = zod.object({
   "hasMore": zod.boolean().optional(),
   "totalCount": zod.number().nullish().describe('Present only where a count is cheap. Never computed live over tickets.')
 })
+})
+
+/**
+ * Everything OB-02's redesigned first screen draws, in one round trip:
+six project-level counters, the schedule-health split behind the
+first donut, and **one row per running project** for the two
+people-donuts and the three Summary lists.
+
+## One pass, one answer
+
+The counters and the split are computed **from the same rows this
+response carries**, in the same request, and the rows are what the
+screen groups by salesperson and by implementor. So a card, a slice
+and the list it opens can never disagree — which is the property the
+card board built on `ob_dashboard_summary` could not offer, because
+its numbers were pre-aggregated at a different grain (journeys per
+product) from the list behind them (steps and prerequisite tasks).
+
+## Every figure is on the project's completion date
+
+`tentativeCompletion` is `listObProjects`'s own column — the start
+date plus the project's critical-path TAT, walked through the working
+calendar — and it is the one date every bucket and card on this route
+is measured against:
+
+| Figure | Rule |
+|---|---|
+| `ON_TIME` | the completion date is today or later |
+| `AHEAD` | on time, nothing overdue, and task progress runs ahead of the budget used |
+| `DELAYED` | 1–7 **working** days past the completion date |
+| `AT_RISK` | more than 7 working days past it |
+| `NOT_SCHEDULED` | no completion date — the project has no instantiated task to budget from |
+
+Working days, not calendar days, through `WorkingHoursService` —
+CLAUDE.md's rule. A project due Friday and still running on Saturday
+morning is not late; on Monday it is one day late, not three.
+
+`daysPastCompletion` is the number those two buckets are read from,
+and it is **null, not zero**, while the project is not past its date.
+`delayedByDays` (the earliest overdue *task*, as `listObProjects`
+reports it) rides along unchanged because it is a different fact: a
+project can be inside its completion date with a task already late,
+and the screen says so beside the row rather than moving it to a
+redder bucket the definition does not put it in.
+
+## Not a `COUNT(*)`
+
+A bounded row fetch of the projects currently `RUNNING` in the
+caller's scope, then arithmetic in Java — the line
+`listObDelayedProjects` draws, and for the same reason: the bucket
+boundaries are working-calendar maths SQL cannot do, and the set is a
+fraction of the project table on any real deployment. There is no
+`computedAt` because nothing here is pre-aggregated; `asOf` is when
+this request ran.
+
+Scoped by the project's client through the same predicate
+`listObProjects` applies, so an OB_SALES caller's board is their own
+clients' projects and nothing else. A caller whose module role can see
+no project gets an empty board with every count at zero and
+`appliedScope` saying so — not a `404`, because the route is theirs;
+they simply have nothing in it.
+
+ * @summary The project-level board — schedule health, cards and rows (OB-02)
+ */
+export const getObProjectBoardResponseDataProjectsItemClientNameMax = 200;
+
+export const getObProjectBoardResponseDataProjectsItemClientClientCodeMax = 32;
+
+export const getObProjectBoardResponseDataProjectsItemClientCityMax = 120;
+
+
+
+export const getObProjectBoardResponseDataProjectsItemBudgetUsedPercentMin = 0;
+
+export const getObProjectBoardResponseDataTruncatedDefault = false;
+
+export const getObProjectBoardResponse = zod.object({
+  "data": zod.object({
+  "asOf": zod.string().datetime({}).describe('When this request ran. Live, so there is no `computedAt`.'),
+  "today": zod.string().date().describe('The calendar date in the working calendar\'s timezone that every \"today\" and \"this week\" figure was measured on.'),
+  "weekStart": zod.string().date().describe('The Monday of the week holding `today`.'),
+  "weekEnd": zod.string().date().describe('The Sunday of that week.'),
+  "appliedScope": zod.string().describe('What the caller\'s module role narrowed the rows to, in a sentence — `ObDashboardSummary.appliedScope`\'s own honesty.'),
+  "cards": zod.object({
+  "ongoingProjects": zod.number().describe('Projects whose status is `RUNNING` in the caller\'s scope — exactly `projects.length`.'),
+  "thisWeeksDeadlines": zod.number().describe('Running projects whose completion date falls in the calendar week\nthat holds `today` (Monday to Sunday, `weekStart`–`weekEnd`),\n\*\*including the days already gone\*\* — a Monday deadline is still\nthis week\'s on Thursday, it is just also overdue.\n'),
+  "todaysDelivery": zod.number().describe('Running projects whose completion date is `today`.'),
+  "overdueProjects": zod.number().describe('Rows in the `DELAYED` bucket — 1–7 working days past the completion date.'),
+  "atRiskProjects": zod.number().describe('Rows in the `AT_RISK` bucket — more than 7 working days past it.'),
+  "clientEscalations": zod.number().describe('Running projects carrying at least one \*\*open\*\* portal escalation\n(`ob_client_escalations.resolved_at IS NULL` on any of the\nproject\'s journeys). Projects, not escalations: a client who\nescalated two services of one project is one project to answer.\n')
+}).describe('The six counters on OB-02\'s card band, every one on the project\'s completion date.'),
+  "schedule": zod.object({
+  "onTime": zod.number(),
+  "ahead": zod.number(),
+  "delayed": zod.number(),
+  "atRisk": zod.number(),
+  "notScheduled": zod.number()
+}).describe('How many `projects` sit in each `ObProjectBoardBucket`. The five sum to\n`cards.ongoingProjects` — an arithmetic contract, stated because it is\nwhat the donut assumes.\n'),
+  "projects": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "client": zod.object({
+  "id": zod.number(),
+  "name": zod.string().max(getObProjectBoardResponseDataProjectsItemClientNameMax),
+  "clientCode": zod.string().max(getObProjectBoardResponseDataProjectsItemClientClientCodeMax).nullish(),
+  "city": zod.string().max(getObProjectBoardResponseDataProjectsItemClientCityMax).nullish()
+}).describe('The whole client, which is the point of having shrunk it: the grid\nneeds the name, and a reader looking at two projects for similarly\nnamed trusts needs the code and the city to tell them apart.\n'),
+  "product": zod.object({
+  "id": zod.number(),
+  "code": zod.string(),
+  "name": zod.string()
+}).describe('Kept to three fields: inlined into every journey and every purchase, so\na field here is a field in a dozen generated types.\n'),
+  "startDate": zod.string().date(),
+  "salesPerson": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "implementor": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional().describe('Null until somebody is assigned; the screen groups such rows under \"Unassigned\" rather than dropping them.'),
+  "gateStatus": zod.enum(['LOCKED', 'OPEN']).describe('The prerequisite gate (plan §5.3). A journey instantiates `LOCKED`:\nfully visible — steps, owners, TATs, dots — with \*\*no step active and\nno clock running\*\*, and the TAT scanner skipping it entirely.\n\nIt flips to `OPEN` when every mandatory prerequisite task is `VERIFIED`\nand every non-mandatory one is `VERIFIED` or `SKIPPED`. There is no\noverride, and no endpoint that sets this directly: the only valve is\nskipping a non-mandatory task, which is an OB Admin action with a\nlogged reason. A gate an impatient manager can open is a gate that\ndoes not hold.\n'),
+  "currentStage": zod.string().nullish().describe('As `ObProject.currentStage` — the stage holding the lowest-sequence running task, or null.'),
+  "bucket": zod.enum(['ON_TIME', 'AHEAD', 'DELAYED', 'AT_RISK', 'NOT_SCHEDULED']).describe('Where one running project sits against its own completion date — see\n`getObProjectBoard` for the five rules. Closed, like\n`ObDashboardCardKey`, because the first donut is a fixed drawing and\na sixth slice is a design change.\n'),
+  "tentativeCompletion": zod.string().date().nullish().describe('As `ObProject.tentativeCompletion`. Null puts the row in `NOT_SCHEDULED`.'),
+  "daysPastCompletion": zod.number().min(1).nullish().describe('Ceiling working days between the end of the working day on\n`tentativeCompletion` and now. \*\*Null while the project is not\npast its date\*\*, and null when the ceiling lands on zero — a\nproject due Friday is not \"0 days late\" on Saturday, it is on time.\n'),
+  "delayedByDays": zod.number().min(1).nullish().describe('As `ObProject.delayedByDays` — the earliest overdue \*\*task\*\*, a different fact from the completion date and reported beside it, never folded into the bucket.'),
+  "tasksTotal": zod.number(),
+  "tasksDone": zod.number().describe('Tasks `DONE` or `SKIPPED`, folded across every module service of the project.'),
+  "budgetUsedPercent": zod.number().min(getObProjectBoardResponseDataProjectsItemBudgetUsedPercentMin).nullish().describe('Working hours elapsed since the start of the working day on\n`startDate`, as a percentage of the critical-path TAT. Over 100\nonce the completion date has passed. Null when the project has no\nTAT to budget from. With `tasksDone \/ tasksTotal` it is the whole\narithmetic behind `AHEAD`, so a reader can check the claim.\n'),
+  "openEscalations": zod.number().describe('Open portal escalations across the project\'s journeys.')
+}).describe('One running project, as OB-02\'s donuts and lists read it.')).describe('Every running project in scope, newest first. The rows `cards` and `schedule` were counted from.'),
+  "truncated": zod.boolean().optional().describe('True when the row list hit the server\'s ceiling and the counts may\ntherefore be short of the truth. False on any deployment that has\nnot outgrown a single-screen board; a screen that sees it true\nshould say so rather than present the figures as totals.\n')
+}).describe('OB-02\'s project-level board — see `getObProjectBoard`.')
 })
 
 /**
@@ -4474,7 +4846,7 @@ export const verifyObSignoffOtpResponse = zod.object({
   "isMandatory": zod.boolean().describe('A mandatory item unticked refuses `finish` with `ob-step-items-outstanding`.'),
   "isDone": zod.boolean().describe('\*\*Answered, not answered yes.\*\* True whenever `answer` is set\neither way — an item answered \*False, and here is why\* satisfies\nthe completion gate exactly as a True does. The server computes it\nas `answer IS NOT NULL`; anything that \"fixes\" it to mean \"answered\nTrue\" makes the screen refuse completions the server allows.\n'),
   "answer": zod.boolean().nullish().describe('The three states `ob_journey_step_items.answer` actually has: `true`,\n`false`, and `null` for not yet answered.\n\n`isDone` cannot express the middle one, which is why this field\nexists. A task list entry is a question — \*was the source data\nreceived?\* — and \"no, because the client has not sent it\" is an\nanswer, not an absence of one.\n'),
-  "remark": zod.string().max(verifyObSignoffOtpResponseDataChecklistItemRemarkMax).nullish().describe('Why. \*\*Required when `answer` is false\*\* and optional otherwise:\nan exception nobody explained is an exception the next reader has\nto go and ask about.\n'),
+  "remark": zod.string().max(verifyObSignoffOtpResponseDataChecklistItemRemarkMax).nullish().describe('Why — \*\*one field with two authors\*\*, depending on who the row\ncurrently belongs to.\n\nThe implementor\'s note while they are working it, \*\*optional on\neither answer\*\* (PLAN.md §4, D-17; it was once mandatory on a\n`false` and is not any more). The OB Manager\'s reason once they\nhave rejected the row, where it is \*\*mandatory\*\* —\n`ck_ob_journey_step_items_reject_reason`, and the service refuses\na `REJECTED` without one.\n\nA manager may write here only on a row they are rejecting, never\non one they are verifying, so a verdict cannot overwrite the note\nit is passing. An implementor reworking a rejected row may replace\nthe text but not blank it, since the row is still rejected.\n'),
   "doneAt": zod.string().datetime({}).nullish(),
   "doneBy": zod.union([zod.object({
   "id": zod.number(),
@@ -4482,7 +4854,28 @@ export const verifyObSignoffOtpResponse = zod.object({
   "avatarUrl": zod.string().nullish(),
   "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
   "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
-}),zod.null()]).optional()
+}),zod.null()]).optional(),
+  "reviewState": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).optional().describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "reviewedAt": zod.string().datetime({}).nullish().describe('When the verdict was recorded; null while there is none.'),
+  "reviewedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "reviewLocked": zod.boolean().optional().describe('The row was verified by a review that has already \*\*closed\*\*, and is\nshut to everybody: the implementor may not revise an answer that was\naccepted, and the reviewer is not shown it again.\n\n\*\*Do not derive this from `reviewState` alone.\*\* \"Verified\" and\n\"locked\" are different moments. A verdict recorded against the\ncurrent submission is still the reviewer\'s to change — that is what\nmakes the three-state control usable, since Rejected sits one press\npast Verified — and only a review that has ended makes it permanent.\nA screen treating `reviewState == VERIFIED` as locked would disable\nthe control on the very press that set it.\n'),
+  "rowState": zod.enum(['DRAFT', 'SENT', 'VERIFIED', 'REJECTED']).optional().describe('\*\*Whose desk this row is on\*\* — `ob_journey_step_items.row_state`,\n`V20260917_1210`. The unit of work is the row, not the task.\n\nA review used to be a property of the whole task: a complete check\nlist was submitted and a complete check list was read, and the task\'s\nstatus froze everything in between. That could not express either of\nthe two things people actually do — finishing two rows of five and\nwanting those two looked at now, or reading three of five and leaving\nthe rest until later. So one task may hold a row being worked, a row\nwaiting on the manager and a row already approved, all at once, and\nnone of that is a conflict.\n\n\*\*Two fields, two questions.\*\* This says where the row \*is\*;\n`reviewState` says what the reviewer \*decided\* — a draft while the row\nis `SENT`, final once it has been sent back. One field could not say\n\"rejected, reason still being typed\", which is the state a reviewer is\nin for as long as they are writing it.\n\n- `DRAFT` — with its implementor, never yet sent.\n- `SENT` — with the manager. Frozen to the implementor, so a verdict\n  describes what the reviewer actually saw. \*\*Its neighbours are not\n  frozen\*\*, which is the whole point.\n- `VERIFIED` — approved and terminal; shut to both people.\n- `REJECTED` — sent back with a reason, and \*\*unanswered\*\*: the claim\n  the row carried is withdrawn with the verdict, so its implementor\n  asserts the work again rather than resubmitting what was refused.\n\nThe task\'s `status` is materialised from these: any row `SENT` and the\ntask reads `PENDING_REVIEW`, otherwise `IN_PROGRESS`. `PENDING`,\n`BLOCKED`, `WAITING_ON_CLIENT`, `DONE` and `SKIPPED` are facts about\nthe task that no row can contradict and are left alone.\n'),
+  "submittedAt": zod.string().datetime({}).nullish().describe('When \*\*this row\*\* last went out for review. Per row, not per task —\na check list may hold rows sent at three different times.\n\nNull on a row that has never been sent, and on rows backfilled by\n`V20260917_1210`, which deliberately did not copy the task\'s own\nsubmission stamp on to every row: that would have read as a per-row\nfact nobody ever recorded.\n'),
+  "submittedBy": zod.union([zod.object({
+  "id": zod.number(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish(),
+  "role": zod.enum(['ADMIN', 'PM', 'DEVELOPER', 'QA', 'DEPLOYMENT', 'SUPPORT']).optional(),
+  "handle": zod.string().nullish().describe('`@mention` handle (`users.username`). Populated only where a mention is composed or resolved — see `ChatMessage.mentions`.\n')
+}),zod.null()]).optional(),
+  "outcomeSeenAt": zod.string().datetime({}).nullish().describe('When the row\'s owner last opened the outcome sitting on it. Set by\n`POST \/onboarding\/journey-steps\/{stepId}\/outcomes-seen`.\n\nThis is what makes \"2 rows came back\" a signal rather than a\npermanent label: without it the banner either shouts for ever or\nforgets on refresh.\n'),
+  "unseenOutcome": zod.boolean().optional().describe('A verdict has come back on this row and nobody has looked at it —\n`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.\n\nServer-computed so every screen counts it the same way. It is what\nthe My Tasks highlight and the task banner are counting.\n')
 })).optional().describe('What the client is being asked to accept. Empty for a `GO_LIVE`\nsign-off, which is about the journey rather than one service.\n'),
   "csatOffered": zod.boolean().describe('Whether `submitObCsat` will be accepted after acceptance — true\nonly on a `GO_LIVE` session that has not already been surveyed.\nOn the session rather than discovered by a `422`, so OB-09 knows\nwhether to render the question before the client clicks.\n')
 }).describe('What OB-09 renders, returned only after the OTP is proved. Nothing\nhere is available from the link alone — see point 4 of the block\ncomment above the public routes.\n')

@@ -124,20 +124,53 @@ public record ObClientScope(String moduleRole, long userId) {
         return OB_SALES.equals(moduleRole) && createdBy != null && createdBy == userId;
     }
 
+    /**
+     * The clients whose <em>projects this caller manages</em>.
+     *
+     * <h2>Why the scope had to learn about managing at all</h2>
+     *
+     * <p>The manager review gate ({@code V20260916_1700}) puts somebody else's
+     * finished work in your queue because you are the project's
+     * {@code implementor_manager_user_id}. Before this clause, that queue
+     * listed tasks whose journey then answered <b>404</b> — the row rule said
+     * "a client is yours if you own a step on one of their journeys", and a
+     * manager typically owns none. The popup opened on "This task's check list
+     * could not be loaded", which is a 404 wearing a reassuring sentence.
+     *
+     * <p><b>This widens visibility, so it is worth being exact about how far.</b>
+     * It admits precisely the clients whose projects name this caller as
+     * manager — no role is consulted, and somebody who manages nothing gains
+     * nothing. It is the same column {@code ObJourneyStepLifecycleService#requireReviewer}
+     * authorises the verdict by, so a task a manager can act on is now a task
+     * they can read, and the two rules cannot drift apart.
+     *
+     * <p>Composed into both restricted branches rather than written at a call
+     * site — CLAUDE.md's rule about one spelling of a scope, and this file's
+     * own note on why {@code ObReportScope} exists.
+     */
+    private static String managedProjects(String alias) {
+        return alias + ".id IN ("
+                + "SELECT mj.ob_client_id FROM ob_journeys mj"
+                + " JOIN ob_projects mp ON mp.id = mj.project_id"
+                + " WHERE mp.implementor_manager_user_id = :" + USER_PARAM + ")";
+    }
+
     /** The scope as a SQL predicate over the query's own {@code ob_clients} alias. */
     public String predicate(String alias) {
         if (unrestricted()) {
             return "1 = 1";
         }
         if (OB_SALES.equals(moduleRole)) {
-            return alias + ".created_by = :" + USER_PARAM;
+            return "(" + alias + ".created_by = :" + USER_PARAM
+                    + " OR " + managedProjects(alias) + ")";
         }
         if (OB_STEP_OWNER.equals(moduleRole)) {
-            return alias + ".id IN ("
+            return "(" + alias + ".id IN ("
                     + "SELECT sj.ob_client_id FROM ob_journeys sj"
                     + " JOIN ob_journey_steps ss ON ss.journey_id = sj.id"
                     + " WHERE ss.owner_user_id = :" + USER_PARAM
-                    + " OR ss.backup_owner_user_id = :" + USER_PARAM + ")";
+                    + " OR ss.backup_owner_user_id = :" + USER_PARAM + ")"
+                    + " OR " + managedProjects(alias) + ")";
         }
         return "1 = 0";
     }

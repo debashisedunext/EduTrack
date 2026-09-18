@@ -2504,6 +2504,20 @@ final class PermissionMatrix {
             */
             everyRole("DELETE", "/api/v1/onboarding/clients/{obClientId}"),
 
+            // ── My Tasks ──────────────────────────────────────────────────────
+            //
+            // Every role, and the widest possible rule is also the tightest
+            // answer here: the route has no parameter naming whose tasks to
+            // list. It answers for the caller, so a platform role with no
+            // onboarding grant gets an empty page and a 404 by id — never
+            // somebody else's work, whatever the role.
+            //
+            // Which is why the by-id read is a 404 rather than a 403 for a task
+            // belonging to another person: a 403 would confirm the task exists,
+            // and ob_journey_steps ids are sequential.
+            everyRole("GET", "/api/v1/onboarding/my-tasks"),
+            everyRole("GET", "/api/v1/onboarding/my-tasks/{taskId}"),
+
             // ── The Projects grid ─────────────────────────────────────────────
             //
             // Every role, and for the same reason as the client block above: a
@@ -2763,6 +2777,7 @@ final class PermissionMatrix {
             // entitlement a 404 before any of this is A-111's, still unwired,
             // exactly as above.
             everyRole("GET", "/api/v1/onboarding/dashboard/summary"),
+            everyRole("GET", "/api/v1/onboarding/dashboard/project-board"),
 
             // ── B-127 · the S-06 slide-over behind one card ───────────────────
             //

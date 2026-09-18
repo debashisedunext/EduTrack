@@ -1,0 +1,53 @@
+-- =====================================================================
+-- The rejection reason is required to *finish* a review, not to record
+-- one verdict inside it.
+--
+-- Table: ob_journey_step_items
+--
+-- WHAT THIS DROPS, AND WHY IT HAS TO GO
+--
+-- V20260916_1700 added `ck_ob_journey_step_items_reject_reason`:
+--
+--     CHECK (review_state <> 'REJECTED' OR (remark IS NOT NULL AND remark <> ''))
+--
+-- The rule it encodes is right and is not being abandoned. What was
+-- wrong is *when* it is checked.
+--
+-- The reviewer's control is one button cycling
+-- `Not reviewed → Verified → Rejected`, and the remark box for a row
+-- only becomes writable once that row is rejected. So the constraint
+-- made the second press impossible: pressing Rejected wrote a row with
+-- no reason yet, the CHECK refused it, the row stayed Verified, and the
+-- screen looked as though the button had done nothing at all. There was
+-- no order of operations that worked — the reason could not be typed
+-- before the state it explains, and the state could not be saved before
+-- the reason.
+--
+-- WHERE THE RULE LIVES NOW
+--
+-- `ObJourneyStepLifecycleService#closeReview` — the manager's single
+-- **Mark complete** press. A review does not finish while any rejected
+-- row has an empty remark, so nothing reaches an implementor
+-- unexplained, which is the guarantee the constraint was bought for.
+-- The difference is that a half-made verdict is now allowed to sit on
+-- the row while the reviewer is still working, and only the committed
+-- result has to be coherent.
+--
+-- That is a genuine weakening: between the two presses the database
+-- will hold a REJECTED row with no reason. It is not reachable by any
+-- other writer — `reviewItem` is the only route that sets the column,
+-- it is moderator-gated, and the row is inside an open review the whole
+-- time — and it cannot outlive the review, because the review cannot
+-- close over it.
+--
+-- STILL NOT D-17. The implementor's own remark on a `false` answer
+-- remains optional and unconstrained (V20260916_1520, PLAN.md §4). Two
+-- rules, one column; this file moves the second one and leaves the
+-- first exactly where it was.
+--
+-- Nothing is rewritten: every existing REJECTED row already carries a
+-- reason, because the constraint being dropped is what made sure of it.
+-- =====================================================================
+
+ALTER TABLE ob_journey_step_items
+  DROP CHECK ck_ob_journey_step_items_reject_reason;

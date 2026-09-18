@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import http, { ApiError, BASE, getAccessToken, newIdempotencyKey } from '@/api/http'
 import type { Meta } from '@/api/generated/model/meta'
@@ -65,6 +65,17 @@ export function projectQueryString(filters: ProjectFilters): string {
   return search.toString()
 }
 
+/**
+ * One page of projects.
+ *
+ * <p>The page on screen is kept while the next one is fetched. Paging is the
+ * one interaction where the default — drop to `isPending`, render the skeleton,
+ * paint the new rows — is actively worse: the grid collapses to a grey block
+ * and the pager under it disappears at the moment somebody is clicking Next
+ * twice. `ClientListPage` and `TicketListPage` made the same call for the same
+ * reason. The cost is that `data.meta` describes the page being left until the
+ * new one lands, which is why the pager holds both buttons while `isFetching`.
+ */
 export function useObProjects(filters: ProjectFilters) {
   const query = projectQueryString(filters)
   return useQuery<ProjectPage, ApiError>({
@@ -75,6 +86,7 @@ export function useObProjects(filters: ProjectFilters) {
         method: 'GET',
         signal,
       }),
+    placeholderData: keepPreviousData,
   })
 }
 

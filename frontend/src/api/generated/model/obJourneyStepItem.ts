@@ -50,6 +50,13 @@ import type { ObJourneyStepItemAnswer } from './obJourneyStepItemAnswer';
 import type { ObJourneyStepItemRemark } from './obJourneyStepItemRemark';
 import type { ObJourneyStepItemDoneAt } from './obJourneyStepItemDoneAt';
 import type { ObJourneyStepItemDoneBy } from './obJourneyStepItemDoneBy';
+import type { ObStepReviewState } from './obStepReviewState';
+import type { ObJourneyStepItemReviewedAt } from './obJourneyStepItemReviewedAt';
+import type { ObJourneyStepItemReviewedBy } from './obJourneyStepItemReviewedBy';
+import type { ObStepRowState } from './obStepRowState';
+import type { ObJourneyStepItemSubmittedAt } from './obJourneyStepItemSubmittedAt';
+import type { ObJourneyStepItemSubmittedBy } from './obJourneyStepItemSubmittedBy';
+import type { ObJourneyStepItemOutcomeSeenAt } from './obJourneyStepItemOutcomeSeenAt';
 
 export interface ObJourneyStepItem {
   id: number;
@@ -75,13 +82,67 @@ answer, not an absence of one.
  */
   answer?: ObJourneyStepItemAnswer;
   /**
-   * Why. **Required when `answer` is false** and optional otherwise:
-an exception nobody explained is an exception the next reader has
-to go and ask about.
+   * Why — **one field with two authors**, depending on who the row
+currently belongs to.
+
+The implementor's note while they are working it, **optional on
+either answer** (PLAN.md §4, D-17; it was once mandatory on a
+`false` and is not any more). The OB Manager's reason once they
+have rejected the row, where it is **mandatory** —
+`ck_ob_journey_step_items_reject_reason`, and the service refuses
+a `REJECTED` without one.
+
+A manager may write here only on a row they are rejecting, never
+on one they are verifying, so a verdict cannot overwrite the note
+it is passing. An implementor reworking a rejected row may replace
+the text but not blank it, since the row is still rejected.
 
    * @maxLength 500
    */
   remark?: ObJourneyStepItemRemark;
   doneAt?: ObJourneyStepItemDoneAt;
   doneBy?: ObJourneyStepItemDoneBy;
+  reviewState?: ObStepReviewState;
+  /** When the verdict was recorded; null while there is none. */
+  reviewedAt?: ObJourneyStepItemReviewedAt;
+  reviewedBy?: ObJourneyStepItemReviewedBy;
+  /** The row was verified by a review that has already **closed**, and is
+shut to everybody: the implementor may not revise an answer that was
+accepted, and the reviewer is not shown it again.
+
+**Do not derive this from `reviewState` alone.** "Verified" and
+"locked" are different moments. A verdict recorded against the
+current submission is still the reviewer's to change — that is what
+makes the three-state control usable, since Rejected sits one press
+past Verified — and only a review that has ended makes it permanent.
+A screen treating `reviewState == VERIFIED` as locked would disable
+the control on the very press that set it.
+ */
+  reviewLocked?: boolean;
+  rowState?: ObStepRowState;
+  /** When **this row** last went out for review. Per row, not per task —
+a check list may hold rows sent at three different times.
+
+Null on a row that has never been sent, and on rows backfilled by
+`V20260917_1210`, which deliberately did not copy the task's own
+submission stamp on to every row: that would have read as a per-row
+fact nobody ever recorded.
+ */
+  submittedAt?: ObJourneyStepItemSubmittedAt;
+  submittedBy?: ObJourneyStepItemSubmittedBy;
+  /** When the row's owner last opened the outcome sitting on it. Set by
+`POST /onboarding/journey-steps/{stepId}/outcomes-seen`.
+
+This is what makes "2 rows came back" a signal rather than a
+permanent label: without it the banner either shouts for ever or
+forgets on refresh.
+ */
+  outcomeSeenAt?: ObJourneyStepItemOutcomeSeenAt;
+  /** A verdict has come back on this row and nobody has looked at it —
+`rowState` is `VERIFIED` or `REJECTED` and `outcomeSeenAt` is null.
+
+Server-computed so every screen counts it the same way. It is what
+the My Tasks highlight and the task banner are counting.
+ */
+  unseenOutcome?: boolean;
 }

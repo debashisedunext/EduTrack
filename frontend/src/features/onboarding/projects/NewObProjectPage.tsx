@@ -12,21 +12,14 @@ import { Chip } from '@/components/ui/chip'
 import { Input } from '@/components/ui/input'
 import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { toast } from '@/components/ui/use-toast'
+import { cn } from '@/lib/utils'
 
 import { FormField } from '@/features/masters/resources/FormField'
 import { useObClients } from '@/features/onboarding/clients/obClientMasterQueries'
 
 import { activeServicesOf, categoryOf } from './moduleServicePicker'
+import { validateNewProject } from './newProjectForm'
 import { existingProjectIdFrom, useCreateObProject } from './projectQueries'
 
 /**
@@ -72,6 +65,7 @@ export function NewObProjectPage() {
   const [startDate, setStartDate] = React.useState(today())
   const [salesPersonId, setSalesPersonId] = React.useState<number | null>(null)
   const [implementorUserId, setImplementorUserId] = React.useState<number | null>(null)
+  const [implementorManagerUserId, setImplementorManagerUserId] = React.useState<number | null>(null)
   const [unchecked, setUnchecked] = React.useState<Set<number>>(new Set())
   const [errors, setErrors] = React.useState<Record<string, string>>({})
   const [duplicateProjectId, setDuplicateProjectId] = React.useState<number | null>(null)
@@ -108,6 +102,14 @@ export function NewObProjectPage() {
     setDuplicateProjectId(null)
   }, [productId])
 
+  /*
+    The client's name, which the project falls back to when the name box is left
+    blank — "leave blank to name it after the client" on the field, resolved
+    here so the submit and the placeholder cannot disagree about what that name
+    would be.
+  */
+  const clientName = clients.find((c) => c.id === clientId)?.name ?? null
+
   const selectedIds = services.filter((s) => !unchecked.has(s.id)).map((s) => s.id)
   const selectedTat = services
     .filter((s) => !unchecked.has(s.id))
@@ -123,29 +125,30 @@ export function NewObProjectPage() {
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    const found: Record<string, string> = {}
-    if (!name.trim()) found.name = 'Give the project a name.'
-    if (clientId == null) found.clientId = 'Choose a client.'
-    if (productId == null) found.productId = 'Choose the product bought.'
-    if (!startDate) found.startDate = 'Give the project a start date.'
-    if (productId != null && services.length === 0 && !servicesPending) {
-      found.productId =
-        'This product publishes no active module service, so there is nothing to board the client through.'
-    }
-    if (productId != null && services.length > 0 && selectedIds.length === 0) {
-      found.moduleServiceIds = 'Keep at least one module service — a project with none has nothing to run.'
-    }
+    const found = validateNewProject({
+      name,
+      clientId,
+      productId,
+      startDate,
+      salesPersonId,
+      implementorUserId,
+      implementorManagerUserId,
+      serviceCount: services.length,
+      selectedCount: selectedIds.length,
+      servicesPending,
+    })
     setErrors(found)
     if (Object.keys(found).length > 0) return
 
     create.mutate(
       {
-        name: name.trim(),
+        name: name.trim() || (clientName ?? ''),
         clientId: clientId!,
         productId: productId!,
         startDate,
-        salesPersonId,
-        implementorUserId,
+        salesPersonId: salesPersonId!,
+        implementorUserId: implementorUserId!,
+        implementorManagerUserId: implementorManagerUserId!,
         moduleServiceIds: selectedIds,
       },
       {
@@ -187,207 +190,304 @@ export function NewObProjectPage() {
   }
 
   return (
-    <form className="mx-auto flex max-w-4xl flex-col gap-6 p-6" onSubmit={onSubmit}>
+    <form className="mx-auto flex w-full max-w-[74rem] flex-col gap-5 p-6" onSubmit={onSubmit}>
       <header>
-        <h1 className="text-2xl font-semibold text-content">New project</h1>
+        <h1 className="text-2xl font-semibold text-content">Start a project</h1>
         <p className="mt-1 max-w-2xl text-sm text-content-muted">
-          One journey is created for each module service you keep checked. They stay locked until
-          the client&rsquo;s prerequisites clear — everyone can see the plan from day one without a
-          clock running against it.
+          Choosing the product copies its module services, their steps, tasks and check lists into
+          this project. Uncheck any the client is not taking — one journey is created for each you
+          keep.
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 rounded-card border border-default bg-surface p-4 sm:grid-cols-2">
-        <FormField id="project-name" label="Project name" required error={errors.name}>
-          {(aria) => (
-            <Input
-              {...aria}
-              value={name}
-              maxLength={200}
-              autoFocus
-              onChange={(e) => setName(e.target.value)}
-            />
-          )}
-        </FormField>
+      {/*
+        Two columns: what has to be decided on the left, when it happens — and
+        the button that commits it — on the right. The rail is where the form is
+        submitted from because that is where its last unanswered question is;
+        a submit at the foot of a three-card column is a scroll away from the
+        card somebody is still filling in.
+      */}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="flex flex-col gap-5">
+          <Card title="Client">
+            <FormField
+              id="project-client"
+              label="Which client is this for?"
+              required
+              error={errors.clientId}
+            >
+              {(aria) => (
+                <SearchableDropdown
+                  {...aria}
+                  options={clients}
+                  value={clients.find((c) => c.id === clientId) ?? null}
+                  onChange={(c) => setClientId(c.id)}
+                  getKey={(c) => String(c.id)}
+                  getLabel={(c) => c.name}
+                  // The code and the city are how two similarly named trusts
+                  // are told apart, and both are typed into this box as often
+                  // as the name is.
+                  getSearchable={(c) => [c.clientCode ?? '', c.city ?? '']}
+                  placeholder="Choose a client…"
+                />
+              )}
+            </FormField>
 
-        <FormField id="project-client" label="Client name" required error={errors.clientId}>
-          {(aria) => (
-            <SearchableDropdown
-              {...aria}
-              options={clients}
-              value={clients.find((c) => c.id === clientId) ?? null}
-              onChange={(c) => setClientId(c.id)}
-              getKey={(c) => String(c.id)}
-              getLabel={(c) => c.name}
-              // The code and the city are how two similarly named trusts are
-              // told apart, and both are typed into this box as often as the
-              // name is.
-              getSearchable={(c) => [c.clientCode ?? '', c.city ?? '']}
-              placeholder="Search clients…"
-            />
-          )}
-        </FormField>
+            <FormField
+              id="project-name"
+              label="Project name"
+              hint="Leave blank to name it after the client."
+              error={errors.name}
+            >
+              {(aria) => (
+                <Input
+                  {...aria}
+                  value={name}
+                  maxLength={200}
+                  placeholder={clientName ?? ''}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              )}
+            </FormField>
+          </Card>
 
-        <FormField id="project-start" label="Project start date" required error={errors.startDate}>
-          {(aria) => (
-            <Input
-              {...aria}
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          )}
-        </FormField>
+          <Card
+            title="Products to implement"
+            aside={
+              productId != null && services.length > 0 ? (
+                <p className="text-caption tabular-nums text-content-muted">
+                  {selectedIds.length} of {services.length} selected · {selectedTat} working days of
+                  standard effort
+                </p>
+              ) : null
+            }
+          >
+            <FormField id="project-product" label="Product bought" required error={errors.productId}>
+              {(aria) => (
+                <SearchableDropdown
+                  {...aria}
+                  options={productList}
+                  value={productList.find((p) => p.id === productId) ?? null}
+                  onChange={(p) => setProductId(p.id)}
+                  getKey={(p) => String(p.id)}
+                  getLabel={(p) => p.name}
+                  getSearchable={(p) => [p.code]}
+                  placeholder="Choose a product…"
+                />
+              )}
+            </FormField>
 
-        <FormField id="project-sales" label="Sales person" error={errors.salesPersonId}>
-          {(aria) => (
-            <SearchableDropdown
-              {...aria}
-              options={people}
-              value={people.find((u) => u.id === salesPersonId) ?? null}
-              onChange={(u) => setSalesPersonId(u.id)}
-              getKey={(u) => String(u.id)}
-              getLabel={(u) => u.displayName}
-              getSearchable={(u) => [u.email ?? '']}
-              placeholder="Search people…"
-            />
-          )}
-        </FormField>
-
-        <FormField
-          id="project-implementor"
-          label="Implementor"
-          hint="Can be assigned later — the grid shows an em dash until then."
-          error={errors.implementorUserId}
-        >
-          {(aria) => (
-            <SearchableDropdown
-              {...aria}
-              options={people}
-              value={people.find((u) => u.id === implementorUserId) ?? null}
-              onChange={(u) => setImplementorUserId(u.id)}
-              getKey={(u) => String(u.id)}
-              getLabel={(u) => u.displayName}
-              getSearchable={(u) => [u.email ?? '']}
-              placeholder="Search people…"
-            />
-          )}
-        </FormField>
-
-        <FormField id="project-product" label="Product bought" required error={errors.productId}>
-          {(aria) => (
-            <SearchableDropdown
-              {...aria}
-              options={productList}
-              value={productList.find((p) => p.id === productId) ?? null}
-              onChange={(p) => setProductId(p.id)}
-              getKey={(p) => String(p.id)}
-              getLabel={(p) => p.name}
-              getSearchable={(p) => [p.code]}
-              placeholder="Search products…"
-            />
-          )}
-        </FormField>
-      </section>
-
-      <section className="flex flex-col gap-3 rounded-card border border-default bg-surface p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-base font-semibold text-content">Module services</h2>
-          {productId != null && services.length > 0 ? (
-            <p className="text-sm text-content-muted">
-              {selectedIds.length} of {services.length} selected · total TAT {selectedTat} working
-              days
-            </p>
-          ) : null}
-        </div>
-
-        {productId == null ? (
-          <p className="text-sm text-content-muted">
-            Choose a product and its module services appear here, every one checked.
-          </p>
-        ) : servicesPending ? (
-          <Skeleton className="h-32 w-full" />
-        ) : services.length === 0 ? (
-          <p className="text-sm text-warning-text">
-            This product has no published module service yet, so there is nothing to board a client
-            through.{' '}
-            <Link to="/onboarding/journey-templates" className="text-primary hover:underline">
-              Publish one first
-            </Link>
-            .
-          </p>
-        ) : (
-          <>
-            <TableContainer>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead scope="col" className="w-12">
-                      <span className="sr-only">Include</span>
-                    </TableHead>
-                    <TableHead scope="col">Module service</TableHead>
-                    <TableHead scope="col">Category</TableHead>
-                    <TableHead scope="col" className="w-20 text-right">
-                      Tasks
-                    </TableHead>
-                    <TableHead scope="col" className="w-20 text-right">
-                      TAT
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+            {productId == null ? (
+              <p className="text-sm text-content-muted">
+                Choose a product and its module services appear here, every one checked.
+              </p>
+            ) : servicesPending ? (
+              <Skeleton className="h-28 w-full" />
+            ) : services.length === 0 ? (
+              <p className="text-sm text-warning-text">
+                This product has no published module service yet, so there is nothing to board a
+                client through.{' '}
+                <Link to="/onboarding/journey-templates" className="text-primary hover:underline">
+                  Publish one first
+                </Link>
+                .
+              </p>
+            ) : (
+              <>
+                <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
                   {services.map((service) => (
-                    <ServiceRow
+                    <ServiceOption
                       key={service.id}
                       service={service}
                       checked={!unchecked.has(service.id)}
                       onToggle={() => toggle(service.id)}
                     />
                   ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            <p className="text-caption text-content-muted">
-              Unchecking a service creates no journey for it. Nothing is lost — the service stays in
-              the catalogue, and a client who buys it later gets a project of their own.
-            </p>
-            {errors.moduleServiceIds ? (
-              <p role="alert" className="text-caption text-danger-text">
-                {errors.moduleServiceIds}
+                </ul>
+                <p className="text-caption text-content-muted">
+                  Unchecking a service creates no journey for it. Nothing is lost — the service
+                  stays in the catalogue, and a client who buys it later gets a project of their
+                  own.
+                </p>
+                {errors.moduleServiceIds ? (
+                  <p role="alert" className="text-caption text-danger-text">
+                    {errors.moduleServiceIds}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </Card>
+
+          <Card title="Team">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField
+                id="project-implementor"
+                label="Implementor"
+                required
+                hint="Every task with no responsible on its module service falls to this person."
+                error={errors.implementorUserId}
+              >
+                {(aria) => (
+                  <SearchableDropdown
+                    {...aria}
+                    options={people}
+                    value={people.find((u) => u.id === implementorUserId) ?? null}
+                    onChange={(u) => setImplementorUserId(u.id)}
+                    getKey={(u) => String(u.id)}
+                    getLabel={(u) => u.displayName}
+                    getSearchable={(u) => [u.email ?? '']}
+                    placeholder="Choose…"
+                  />
+                )}
+              </FormField>
+
+              <FormField
+                id="project-implementor-manager"
+                label="Implementor manager"
+                required
+                hint="Who this project escalates to. Not read from the implementor's reporting line — a project can be overseen by somebody they do not report to."
+                error={errors.implementorManagerUserId}
+              >
+                {(aria) => (
+                  <SearchableDropdown
+                    {...aria}
+                    options={people}
+                    value={people.find((u) => u.id === implementorManagerUserId) ?? null}
+                    onChange={(u) => setImplementorManagerUserId(u.id)}
+                    getKey={(u) => String(u.id)}
+                    getLabel={(u) => u.displayName}
+                    getSearchable={(u) => [u.email ?? '']}
+                    placeholder="Choose…"
+                  />
+                )}
+              </FormField>
+
+              <FormField
+                id="project-sales"
+                label="Sales person"
+                required
+                error={errors.salesPersonId}
+              >
+                {(aria) => (
+                  <SearchableDropdown
+                    {...aria}
+                    options={people}
+                    value={people.find((u) => u.id === salesPersonId) ?? null}
+                    onChange={(u) => setSalesPersonId(u.id)}
+                    getKey={(u) => String(u.id)}
+                    getLabel={(u) => u.displayName}
+                    getSearchable={(u) => [u.email ?? '']}
+                    placeholder="Choose…"
+                  />
+                )}
+              </FormField>
+            </div>
+          </Card>
+
+          {duplicateProjectId != null ? (
+            <div className="rounded-card border border-warning bg-warning-soft p-3 text-sm">
+              <p className="font-medium text-warning-text">
+                This client already has a project for that product
               </p>
-            ) : null}
-          </>
-        )}
-      </section>
-
-      {duplicateProjectId != null ? (
-        <div className="rounded-card border border-warning bg-warning-soft p-3 text-sm">
-          <p className="font-medium text-warning-text">
-            This client already has a project for that product
-          </p>
-          <p className="mt-1 text-content-muted">
-            A client runs one project per product. Open the existing one, or choose a different
-            product.
-          </p>
-          <Button asChild variant="secondary" className="mt-2">
-            <Link to={`/onboarding/projects/${duplicateProjectId}`}>Open the existing project</Link>
-          </Button>
+              <p className="mt-1 text-content-muted">
+                A client runs one project per product. Open the existing one, or choose a different
+                product.
+              </p>
+              <Button asChild variant="secondary" className="mt-2">
+                <Link to={`/onboarding/projects/${duplicateProjectId}`}>
+                  Open the existing project
+                </Link>
+              </Button>
+            </div>
+          ) : null}
         </div>
-      ) : null}
 
-      <div className="flex justify-end gap-2">
-        <Button asChild variant="secondary">
-          <Link to="/onboarding/projects">Cancel</Link>
-        </Button>
-        <Button type="submit" disabled={create.isPending}>
-          {create.isPending ? 'Creating…' : 'Create project'}
-        </Button>
+        <Card title="Dates">
+          <FormField id="project-start" label="Planned start" required error={errors.startDate}>
+            {(aria) => (
+              <Input
+                {...aria}
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            )}
+          </FormField>
+
+          {/*
+            Target go-live is read, not typed. The server pins it from the
+            working calendar — weekends, org holidays and resource leave — so a
+            date box here would let somebody enter a day the calendar will not
+            agree with, and the project would then carry two answers. What the
+            form can say before it is created is the budget it is derived from.
+          */}
+          <div>
+            <p className="text-sm font-medium text-content">Target go-live</p>
+            <p className="mt-1 text-caption text-content-muted">
+              {productId != null && selectedIds.length > 0
+                ? `Set on creation — ${selectedTat} working days of TAT from the planned start, across the working calendar.`
+                : 'Set on creation, from the TAT of the module services you keep.'}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-default pt-4">
+            <Button type="submit" disabled={create.isPending} className="w-full justify-center">
+              {create.isPending ? 'Creating…' : 'Create project'}
+            </Button>
+            <Button asChild variant="secondary" className="w-full justify-center">
+              <Link to="/onboarding/projects">Cancel</Link>
+            </Button>
+            <p className="text-caption text-content-muted">
+              Every journey is created at once and stays locked until the client&rsquo;s
+              prerequisites clear — so the plan is visible from day one without a clock running
+              against it.
+            </p>
+          </div>
+        </Card>
       </div>
     </form>
   )
 }
 
-function ServiceRow({
+/**
+ * One titled block of the form.
+ *
+ * <p>Local to this page rather than shared: it is a heading, a rule and a
+ * padded body, and the moment it becomes a component in `components/ui` it
+ * grows variants for every other screen's idea of a card.
+ */
+function Card({
+  title,
+  aside,
+  children,
+}: {
+  title: string
+  /** A figure or note on the heading line — the selected-services count. */
+  aside?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section className="rounded-card border border-default bg-surface">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-default px-4 py-3">
+        <h2 className="text-base font-semibold text-content">{title}</h2>
+        {aside}
+      </div>
+      <div className="flex flex-col gap-4 p-4">{children}</div>
+    </section>
+  )
+}
+
+/**
+ * One module service, as a row somebody ticks.
+ *
+ * <p>It was a five-column table — include, service, category, tasks, TAT —
+ * which is the right shape for comparing forty rows and the wrong one for a
+ * list of three you are choosing between: the header row alone was as tall as
+ * the rows it described. The figures that mattered are now a caption under the
+ * name, and the whole row is the label, so the click target is the line rather
+ * than a 13px box at the left of it.
+ */
+function ServiceOption({
   service,
   checked,
   onToggle,
@@ -399,37 +499,38 @@ function ServiceRow({
   const categories = categoryOf(service)
   const id = `service-${service.id}`
   return (
-    <TableRow className={checked ? undefined : 'opacity-60'}>
-      <TableCell>
+    <li>
+      <label
+        htmlFor={id}
+        className={cn(
+          'flex cursor-pointer items-start gap-3 rounded-control px-2 py-2 hover:bg-subtle',
+          !checked && 'opacity-65',
+        )}
+      >
         <input
           id={id}
           type="checkbox"
           checked={checked}
           onChange={onToggle}
+          className="mt-[3px]"
           aria-label={`Include ${service.name}`}
         />
-      </TableCell>
-      <TableCell className="font-medium text-content">
-        <label htmlFor={id}>{service.name}</label>
-      </TableCell>
-      <TableCell>
-        {categories.length === 0 ? (
-          <span className="text-caption text-content-muted">No stages defined</span>
-        ) : (
-          <div className="flex flex-wrap gap-1">
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-sm font-semibold text-content">{service.name}</span>
             {categories.map((category) => (
               <Chip key={category}>{category}</Chip>
             ))}
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-content-muted">
-        {service.stepCount}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-content-muted">
-        {service.totalTatDays} d
-      </TableCell>
-    </TableRow>
+          </span>
+          <span className="mt-0.5 block text-caption tabular-nums text-content-muted">
+            {service.stepCount} {service.stepCount === 1 ? 'task' : 'tasks'} ·{' '}
+            {service.totalTatDays} working {service.totalTatDays === 1 ? 'day' : 'days'} of standard
+            effort
+            {categories.length === 0 ? ' · no stages defined' : ''}
+          </span>
+        </span>
+      </label>
+    </li>
   )
 }
 

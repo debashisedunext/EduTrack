@@ -1,0 +1,27 @@
+-- ---------------------------------------------------------------------
+-- The check list remark becomes optional on both answers.
+--
+-- PLAN.md §4, D-17 — an intentional, recorded deviation from blueprint
+-- §5.8, whose second half reads "**False requires a remark**".
+--
+-- `ck_ob_journey_step_items_remark` held that half, and it held it well:
+-- a same-row rule is one of the few things a CHECK can actually enforce,
+-- which is why V20260903_1600 put it there rather than in a service.
+-- What it could not do is tell a considered "not completed — client has
+-- not sent the file" from a routine one, so in practice it charged every
+-- Not completed the same sentence, and the sentence it got was whatever
+-- cleared the box.
+--
+-- Dropping it is one-way in the sense that matters: rows written after
+-- this migration may hold answer = 0 with a NULL remark, so restoring the
+-- constraint later would need those rows backfilled first. Nothing is
+-- lost — no existing row violates it, and every remark already recorded
+-- stays exactly where it is.
+--
+-- `ck_ob_journey_step_items_answer` is untouched: answer is still NULL,
+-- 0 or 1, and "every item answered" is still the completion gate's, in
+-- ObJourneyStepLifecycleService#requireCompletionGate. Only the reason
+-- stops being compulsory.
+-- ---------------------------------------------------------------------
+ALTER TABLE ob_journey_step_items
+  DROP CHECK ck_ob_journey_step_items_remark;

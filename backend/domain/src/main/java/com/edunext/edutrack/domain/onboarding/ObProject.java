@@ -86,6 +86,22 @@ public class ObProject {
     @Column(name = "implementor_user_id")
     private Long implementorUserId;
 
+    /**
+     * Who is accountable for this engagement above the implementor.
+     *
+     * <p><b>Not the implementor's reporting manager read off {@code users}.</b>
+     * That is a different fact — an org chart, not an engagement — and it would
+     * be retroactive: editing one reporting line would change who is recorded
+     * as having managed every project that person ever ran, finished ones
+     * included. {@code salesPersonId} sits on this table rather than being read
+     * off the client for the same reason.
+     *
+     * <p>Null on every row that predates the column, and nullable after — see
+     * the field's own migration for why no backfill was attempted.
+     */
+    @Column(name = "implementor_manager_user_id")
+    private Long implementorManagerUserId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ObProjectStatus status = ObProjectStatus.RUNNING;
@@ -112,21 +128,24 @@ public class ObProject {
      * A new project, with the five facts the table refuses to be without plus
      * the two it will not let a caller forget.
      *
-     * <p>{@code salesPersonId} and {@code implementorUserId} are nullable
-     * columns and are still constructor parameters rather than setters, on
-     * {@link ObClient}'s own reasoning for {@code createdBy}: they are asked for
-     * on the create form, so a project built without them is a form somebody
-     * dropped on the floor rather than a project that genuinely has none. A
-     * caller with nothing to pass passes null and has said so.
+     * <p>{@code salesPersonId}, {@code implementorUserId} and
+     * {@code implementorManagerUserId} are nullable columns and are still
+     * constructor parameters rather than setters, on {@link ObClient}'s own
+     * reasoning for {@code createdBy}: they are asked for on the create form,
+     * so a project built without them is a form somebody dropped on the floor
+     * rather than a project that genuinely has none. A caller with nothing to
+     * pass passes null and has said so.
      */
     public ObProject(Long obClientId, Long productId, String name, LocalDate startDate,
-                     Long salesPersonId, Long implementorUserId, Long createdBy) {
+                     Long salesPersonId, Long implementorUserId,
+                     Long implementorManagerUserId, Long createdBy) {
         this.obClientId = obClientId;
         this.productId = productId;
         this.name = name;
         this.startDate = startDate;
         this.salesPersonId = salesPersonId;
         this.implementorUserId = implementorUserId;
+        this.implementorManagerUserId = implementorManagerUserId;
         this.createdBy = createdBy;
     }
 
@@ -182,6 +201,14 @@ public class ObProject {
 
     public void setImplementorUserId(Long implementorUserId) {
         this.implementorUserId = implementorUserId;
+    }
+
+    public Long getImplementorManagerUserId() {
+        return implementorManagerUserId;
+    }
+
+    public void setImplementorManagerUserId(Long implementorManagerUserId) {
+        this.implementorManagerUserId = implementorManagerUserId;
     }
 
     public ObProjectStatus getStatus() {

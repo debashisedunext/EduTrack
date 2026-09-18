@@ -731,7 +731,7 @@ export interface ObStepItem {
    * completion gate is satisfied by a False exactly as by a True.
    */
   answer?: boolean | null;
-  /** Why, on a False. Mandatory there — `ck_ob_journey_step_items_remark`. */
+  /** Why, where there is a why. Optional on either answer — PLAN.md §4, D-17. */
   remark?: string | null;
   doneAt?: string | null; doneById?: number | null;
 }
@@ -890,6 +890,7 @@ export interface ObProjectRow {
   startDate: string;
   salesPersonId: number | null;
   implementorUserId: number | null;
+  implementorManagerUserId: number | null;
   status: 'RUNNING' | 'COMPLETED' | 'ON_HOLD' | 'DROPPED';
   statusReason: string | null;
   createdById: number | null;
@@ -922,6 +923,11 @@ function deriveObProjects(clients: ObClient[], products: ObProduct[]): ObProject
         salesPersonId: client.salesPersonId,
         implementorUserId:
           live.flatMap((j) => j.steps).find((s) => s.ownerUserId != null)?.ownerUserId ?? null,
+        // Left null, as the real migration leaves it. There is nothing in the
+        // fixture corpus that means "manager of this engagement" — the step
+        // owner guess above works because a step owner *is* an implementor,
+        // and there is no equivalent to guess from one level up.
+        implementorManagerUserId: null,
         // The client's own hold or drop outranks anything derived from journeys,
         // exactly as the migration's second UPDATE has it.
         status:

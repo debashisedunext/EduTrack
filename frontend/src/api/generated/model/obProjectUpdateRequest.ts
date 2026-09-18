@@ -48,12 +48,13 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ObProjectUpdateRequestSalesPersonId } from './obProjectUpdateRequestSalesPersonId';
 import type { ObProjectUpdateRequestImplementorUserId } from './obProjectUpdateRequestImplementorUserId';
+import type { ObProjectUpdateRequestImplementorManagerUserId } from './obProjectUpdateRequestImplementorManagerUserId';
 import type { ObProjectStatus } from './obProjectStatus';
 import type { ObProjectUpdateRequestStatusReason } from './obProjectUpdateRequestStatusReason';
 
 /**
  * **The whole representation, not a sparse patch.** The form always sends
-both people, so an absent `implementorUserId` means *cleared* —
+all three people, so an absent `implementorUserId` means *cleared* —
 unassigning somebody is possible rather than a gap worked around by
 assigning a placeholder user.
 
@@ -64,6 +65,7 @@ export interface ObProjectUpdateRequest {
   startDate: string;
   salesPersonId?: ObProjectUpdateRequestSalesPersonId;
   implementorUserId?: ObProjectUpdateRequestImplementorUserId;
+  implementorManagerUserId?: ObProjectUpdateRequestImplementorManagerUserId;
   /** `COMPLETED` is refused with `422` — it is earned, not set. */
   status?: ObProjectStatus;
   /**
