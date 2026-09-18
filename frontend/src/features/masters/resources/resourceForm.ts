@@ -67,6 +67,17 @@ export const resourceFormSchema = z.object({
   username: z.string().trim().min(3, 'At least 3 characters').max(50),
   role: z.string().min(1, 'Role is required'),
   isActive: z.boolean(),
+  /**
+   * `''` is "don't touch onboarding access" — the create-time convenience
+   * this form adds on top of `POST /users`. It is never sent in
+   * {@link toWriteRequest}; the page issues a second call, to
+   * `POST /onboarding/module-access`, once the account exists and has an id
+   * to grant against. Left out of `toFormValues` for the same reason
+   * `TemporaryPasswordDialog`'s password is create-only: an edit has no
+   * access token to read this back from, and the Module Access screen is
+   * already where an existing grant is seen or changed.
+   */
+  onboardingRole: z.string(),
 
   // ── Org ───────────────────────────────────────────────────────────────────
   department: z.string().trim().max(80),
@@ -105,6 +116,7 @@ export const emptyResourceForm: ResourceFormValues = {
   username: '',
   role: '',
   isActive: true,
+  onboardingRole: '',
   department: '',
   designation: '',
   reportingManagerId: null,
@@ -133,6 +145,11 @@ export function toFormValues(resource: UserDetail): ResourceFormValues {
     username: resource.username ?? '',
     role: resource.role ?? '',
     isActive: resource.isActive ?? true,
+    // Edit-only reads never see this: `POST /users` and
+    // `POST /onboarding/module-access` are two grants with two histories, and
+    // an existing one is seen and changed on the Module Access screen, not
+    // reissued from here.
+    onboardingRole: '',
     department: resource.department ?? '',
     designation: resource.designation ?? '',
     reportingManagerId: resource.reportingManager?.id ?? null,
