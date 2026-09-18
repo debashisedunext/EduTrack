@@ -54,11 +54,11 @@ class ObGoLiveHandoverRenderer {
         rows.add(new String[]{"Products / journeys",
                 data.productNames() == null || data.productNames().isEmpty()
                         ? "—" : String.join(", ", data.productNames())});
-        List<ObGoLiveHandoverReader.Contact> contacts = data.contacts() == null ? List.of() : data.contacts();
+        List<ObGoLiveHandoverReader.HandoverContact> contacts = data.contacts() == null ? List.of() : data.contacts();
         if (contacts.isEmpty()) {
             rows.add(new String[]{"Contacts", "—"});
         }
-        for (ObGoLiveHandoverReader.Contact contact : contacts) {
+        for (ObGoLiveHandoverReader.HandoverContact contact : contacts) {
             rows.add(new String[]{
                     contact.primary() ? "Primary contact" : "Contact",
                     contactLine(contact)});
@@ -87,7 +87,7 @@ class ObGoLiveHandoverRenderer {
         return out.toByteArray();
     }
 
-    private static String contactLine(ObGoLiveHandoverReader.Contact contact) {
+    private static String contactLine(ObGoLiveHandoverReader.HandoverContact contact) {
         StringBuilder line = new StringBuilder(orDash(contact.name()));
         if (contact.designation() != null && !contact.designation().isBlank()) {
             line.append(" — ").append(contact.designation());

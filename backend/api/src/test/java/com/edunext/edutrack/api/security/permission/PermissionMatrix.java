@@ -901,6 +901,88 @@ final class PermissionMatrix {
             {"isDone":true}""";
 
     /** C-115 · {@code resolveObEscalation}'s mandatory {@code note} — an allowed role is entitled to reach the service, not this fixture. */
+    /**
+     * OB-16 · a whole-list verdict and a single row's verdict take the same
+     * body. {@code VERIFIED} rather than {@code REJECTED} deliberately: a
+     * rejection additionally requires a reason, and a fixture that has to
+     * satisfy two rules tells you less when one of them breaks.
+     */
+    private static final String OB_STEP_REVIEW_VERDICT = """
+            {"state":"VERIFIED"}""";
+
+    /** OB-07 · {@code updateObJourneyTemplate} — the name is the only required field. */
+    private static final String OB_JOURNEY_TEMPLATE_PATCH = """
+            {"name":"Matrix fixture service"}""";
+
+    /**
+     * OB-14 · the PATCH has no required field at all; the handler still takes a
+     * {@code @RequestBody}, so an empty object is what makes the six cases
+     * reach {@code @PreAuthorize} rather than stop at argument resolution.
+     */
+    private static final String OB_PREREQ_TASK_PATCH = """
+            {}""";
+
+    /** OB-14 · an ad-hoc per-client task: title, TAT and the mandatory flag. */
+    private static final String OB_PREREQ_TASK_CREATE = """
+            {"title":"Matrix fixture task","tatDays":3,"isMandatory":false}""";
+
+    /** OB-14 · the three per-task writes that each carry one required string. */
+    private static final String OB_PREREQ_COMMENT = """
+            {"body":"Matrix fixture — comment"}""";
+
+    private static final String OB_PREREQ_RETURN = """
+            {"comment":"Matrix fixture — returned"}""";
+
+    private static final String OB_PREREQ_SKIP = """
+            {"reason":"Matrix fixture — waived"}""";
+
+    /**
+     * OB-09 · requesting a sign-off. {@code sentToContactId} is a contact id
+     * that need not exist — the route is refused on the role long before the
+     * row is resolved, and a real id would tie this fixture to the corpus.
+     */
+    private static final String OB_SIGNOFF_REQUEST = """
+            {"kind":"GO_LIVE","sentToContactId":1}""";
+
+    /** OB-09 · the withdrawal reason `cancelObSignoff` makes mandatory. */
+    private static final String OB_SIGNOFF_CANCEL = """
+            {"reason":"Matrix fixture — withdrawn"}""";
+
+    /**
+     * CP-02/CP-04 · the client portal's own writes. These carry no
+     * {@code sessionToken}: the portal routes authenticate with a CLIENT
+     * bearer token, where the {@code /public/**} pair below spends an OTP
+     * session in the body instead.
+     */
+    private static final String PORTAL_SIGNOFF_ACCEPT = """
+            {"acceptedName":"Matrix Fixture"}""";
+
+    private static final String PORTAL_SIGNOFF_OBJECT = """
+            {"note":"Matrix fixture — objection"}""";
+
+    private static final String PORTAL_SIGNOFF_CSAT = """
+            {"score":5}""";
+
+    private static final String PORTAL_PREREQ_COMMENT = """
+            {"body":"Matrix fixture — client comment"}""";
+
+    private static final String PORTAL_ESCALATE = """
+            {"comment":"Matrix fixture — client escalation"}""";
+
+    /** The unauthenticated pair, which spend the OTP session the accept above mints. */
+    private static final String PUBLIC_SIGNOFF_CSAT = """
+            {"sessionToken":"matrix-fixture-session","score":5}""";
+
+    private static final String PUBLIC_SIGNOFF_OBJECT = """
+            {"sessionToken":"matrix-fixture-session","note":"Matrix fixture — objection"}""";
+
+    /** OB-07 · both catalogue PUTs take one array of ids and nothing else. */
+    private static final String OB_TEMPLATE_ORDER = """
+            {"templateIds":[1,2]}""";
+
+    private static final String OB_TEMPLATE_DEPENDS_ON = """
+            {"dependsOnTemplateIds":[1]}""";
+
     private static final String RESOLVE_ESCALATION = """
             {"note":"Matrix fixture — resolved"}""";
 
@@ -2875,7 +2957,78 @@ final class PermissionMatrix {
             // subject, not this file's.
             everyRole("POST", "/api/v1/portal/auth/login", PORTAL_LOGIN),
             everyRole("GET", "/api/v1/portal/auth/credential/{token}"),
-            everyRole("POST", "/api/v1/portal/auth/credential/{token}", PORTAL_REDEEM));
+            everyRole("POST", "/api/v1/portal/auth/credential/{token}", PORTAL_REDEEM),
+
+            // == The onboarding routes that reached develop without an entry ==
+            //
+            // everyRole throughout, exactly as every /onboarding/** block above
+            // is, and for the same reason: the six TICKETING roles this matrix
+            // is keyed by are not what gates this module. ObModuleRoleRules
+            // holds the real rule -- keyed by the five ONBOARDING module roles
+            // -- and ObPermissionMatrixTest asserts it separately. Restating a
+            // narrower rule here would be a second, quieter answer to a
+            // question that already has one, and the two would drift.
+            //
+            // Row scope is likewise not here. It is enforced inside each
+            // service's own scope object, and an out-of-scope id answers 404
+            // rather than 403 on every one of these -- ObModuleGated's
+            // "indistinguishable from not found" rule, which the blocks above
+            // record at length for the escalation ladder and the notification
+            // centre.
+            //
+            // The /portal/** rows are the CLIENT principal's, not a staff
+            // role's: PortalRouteFilter 404s a staff token on them, which is
+            // PortalRouteFilterTest's subject rather than this file's. The
+            // /public/** pair carries no principal at all and is guarded by
+            // the OTP session the two rows above them mint.
+            everyRole("GET", "/api/v1/onboarding/journeys/{journeyId}"),
+            everyRole("GET", "/api/v1/onboarding/clients/{obClientId}/prereqs"),
+            everyRole("GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}"),
+            everyRole("GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/comments"),
+            everyRole("GET", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/history"),
+            everyRole("GET", "/api/v1/onboarding/client-escalations"),
+            everyRole("GET", "/api/v1/onboarding/signoffs"),
+            everyRole("GET", "/api/v1/onboarding/signoffs/{signoffId}"),
+            everyRole("GET", "/api/v1/onboarding/dashboard/review-summary"),
+            everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}/task-import/template"),
+            everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/prereq-tasks", OB_PREREQ_TASK_CREATE),
+            everyRole("PATCH", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}", OB_PREREQ_TASK_PATCH),
+            everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/submit"),
+            everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/verify"),
+            everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/return", OB_PREREQ_RETURN),
+            everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/skip", OB_PREREQ_SKIP),
+            everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/comments", OB_PREREQ_COMMENT),
+            everyRole("PATCH", "/api/v1/onboarding/journey-templates/{templateId}", OB_JOURNEY_TEMPLATE_PATCH),
+            everyRole("DELETE", "/api/v1/onboarding/journey-templates/{templateId}"),
+            everyRole("PUT", "/api/v1/onboarding/journey-templates/order", OB_TEMPLATE_ORDER),
+            everyRole("PUT", "/api/v1/onboarding/journey-templates/{templateId}/depends-on", OB_TEMPLATE_DEPENDS_ON),
+            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import/preview"),
+            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import"),
+            everyRole("POST", "/api/v1/onboarding/journey-step-items/{itemId}/submit"),
+            everyRole("POST", "/api/v1/onboarding/journey-step-items/{itemId}/send-back"),
+            everyRole("PATCH", "/api/v1/onboarding/journey-step-items/{itemId}/review", OB_STEP_REVIEW_VERDICT),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/checklist/submit"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/review/verdict", OB_STEP_REVIEW_VERDICT),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/review/complete"),
+            everyRole("POST", "/api/v1/onboarding/journey-steps/{stepId}/outcomes-seen"),
+            everyRole("POST", "/api/v1/onboarding/journeys/{journeyId}/signoffs", OB_SIGNOFF_REQUEST),
+            everyRole("POST", "/api/v1/onboarding/signoffs/{signoffId}/cancel", OB_SIGNOFF_CANCEL),
+            everyRole("POST", "/api/v1/onboarding/signoffs/{signoffId}/resend"),
+            everyRole("POST", "/api/v1/onboarding/client-escalations/{escalationId}/resolve", RESOLVE_ESCALATION),
+            everyRole("GET", "/api/v1/portal/onboarding/home"),
+            everyRole("GET", "/api/v1/portal/onboarding/prereq-tasks/{prereqTaskId}"),
+            everyRole("GET", "/api/v1/portal/onboarding/prereq-tasks/{prereqTaskId}/comments"),
+            everyRole("GET", "/api/v1/portal/onboarding/signoffs"),
+            everyRole("GET", "/api/v1/portal/onboarding/signoffs/{signoffId}"),
+            everyRole("POST", "/api/v1/portal/onboarding/prereq-tasks/{prereqTaskId}/submit"),
+            everyRole("POST", "/api/v1/portal/onboarding/prereq-tasks/{prereqTaskId}/comments", PORTAL_PREREQ_COMMENT),
+            everyRole("POST", "/api/v1/portal/onboarding/prereq-tasks/{prereqTaskId}/attachments"),
+            everyRole("POST", "/api/v1/portal/onboarding/signoffs/{signoffId}/accept", PORTAL_SIGNOFF_ACCEPT),
+            everyRole("POST", "/api/v1/portal/onboarding/signoffs/{signoffId}/object", PORTAL_SIGNOFF_OBJECT),
+            everyRole("POST", "/api/v1/portal/onboarding/signoffs/{signoffId}/csat", PORTAL_SIGNOFF_CSAT),
+            everyRole("POST", "/api/v1/portal/onboarding/steps/{stepId}/escalate", PORTAL_ESCALATE),
+            everyRole("POST", "/api/v1/public/onboarding/signoff/object", PUBLIC_SIGNOFF_OBJECT),
+            everyRole("POST", "/api/v1/public/onboarding/signoff/csat", PUBLIC_SIGNOFF_CSAT));
 
     /**
      * One route and what each role may do with it.

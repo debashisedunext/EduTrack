@@ -52,7 +52,7 @@ final class ObImplementationStageDtos {
     }
 
     @Schema(name = "ObImplementationStage")
-    record Stage(
+    record ImplementationStage(
             Long id,
             String name,
 
@@ -67,9 +67,9 @@ final class ObImplementationStageDtos {
     ) {
     }
 
-    record ObImplementationStageListResponse(List<Stage> data) {
+    record ObImplementationStageListResponse(List<ImplementationStage> data) {
     }
 
-    record ObImplementationStageResponse(Stage data) {
+    record ObImplementationStageResponse(ImplementationStage data) {
     }
 }

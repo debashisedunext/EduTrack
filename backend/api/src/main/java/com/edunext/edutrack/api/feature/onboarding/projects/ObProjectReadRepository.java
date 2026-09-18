@@ -329,6 +329,9 @@ class ObProjectReadRepository {
                    COUNT(js.id)                                     AS taskCount,
                    COALESCE(SUM(js.status NOT IN ('DONE', 'SKIPPED')), 0) AS tasksOutstanding,
                    MIN(CASE WHEN js.status IN ('IN_PROGRESS', 'WAITING_ON_CLIENT')
+                              OR (js.status = 'PENDING' AND EXISTS (
+                                    SELECT 1 FROM ob_journey_step_items i
+                                     WHERE i.step_id = js.id AND i.answer IS NOT NULL))
                             THEN js.sequence END)                   AS minActiveSequence
               FROM ob_journeys j
               JOIN ob_journey_template_stages g ON g.template_id = j.template_id
@@ -347,6 +350,9 @@ class ObProjectReadRepository {
                    COUNT(*)                                         AS taskCount,
                    SUM(js.status NOT IN ('DONE', 'SKIPPED'))        AS tasksOutstanding,
                    MIN(CASE WHEN js.status IN ('IN_PROGRESS', 'WAITING_ON_CLIENT')
+                              OR (js.status = 'PENDING' AND EXISTS (
+                                    SELECT 1 FROM ob_journey_step_items i
+                                     WHERE i.step_id = js.id AND i.answer IS NOT NULL))
                             THEN js.sequence END)                   AS minActiveSequence
               FROM ob_journeys j
               JOIN ob_journey_steps js ON js.journey_id = j.id
@@ -540,7 +546,11 @@ class ObProjectReadRepository {
     /**
      * One implementation stage of <b>one journey</b> — the grain
      * {@code STAGE_ROLLUP} returns. {@code minActiveSequence} is null where
-     * nothing runs.
+     * nothing runs — a task counts as running on {@code IN_PROGRESS} /
+     * {@code WAITING_ON_CLIENT}, or on {@code PENDING} with any answered check
+     * list item, the same "partial" reading {@code moduleStripStats.ts}'
+     * {@code taskProgress} takes: a task somebody has been ticking through all
+     * morning without moving off {@code PENDING} is running, not untouched.
      *
      * <p>Project-level figures come from folding these, never from a second
      * query — see {@code ObProjectService.foldToProject}.

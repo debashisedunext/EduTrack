@@ -150,6 +150,15 @@ function projectSuffix(project: string, client: string): string {
 }
 
 /**
+ * The project half of {@link projectLabel} alone — for a column that prints
+ * the client on its own line instead of joining the two into one string.
+ */
+export function projectOnlyLabel(row: Pick<ObMyTask, 'obClientName' | 'projectName'>): string {
+  const client = (row.obClientName ?? '').trim()
+  return projectSuffix((row.projectName ?? '').trim(), client)
+}
+
+/**
  * `SIS — Configuration`: the module service and the step within it.
  *
  * <p>Same bargain as {@link projectLabel}. A step name is a stage label reused
@@ -161,6 +170,140 @@ export function serviceStepLabel(row: Pick<ObMyTask, 'serviceName' | 'stepName'>
   const step = (row.stepName ?? '').trim()
   if (!service) return step
   return step ? `${service}${JOIN}${step}` : service
+}
+
+/**
+ * The five ways this queue is cut, and the `?tab=` value each is.
+ *
+ * <h2>Why these five, and not the seven statuses</h2>
+ *
+ * <p>`SKIPPED` never reaches this screen at all — the endpoint drops it with
+ * `DONE`, on the same reasoning: a queue is work still to do, and a waived
+ * task is neither. `DONE` is left out for the same reason, which is what
+ * makes "Approved by manager" a cut of {@link ObMyTask.rowsApproved} rather
+ * than of `status`: a task only reaches `DONE` once every row on it has been
+ * verified, and by then it has already left this endpoint. What this tab
+ * shows instead is the more useful — and earlier — signal: rows a manager
+ * has already verified on a task that is still open, before the task itself
+ * gets there.
+ *
+ * <p>`IN_PROGRESS`, `BLOCKED` and `WAITING_ON_CLIENT` share a tab because
+ * all three are work already started and not yet handed to a reviewer — the
+ * status column still says which of the three, same as it always has; the
+ * tab only answers "is this one of the ones being worked".
+ *
+ * <h2>Pending for verification is the odd one out, twice over</h2>
+ *
+ * <p>It sits in front of the other four — {@link visibleMyTasksTabs} always
+ * puts it first, when it shows at all — and it is the only tab {@link
+ * matchesMyTasksTab} does not decide from `status`: a `PENDING_REVIEW` task
+ * is either the caller's own submission waiting on somebody else, or a
+ * review sitting on the caller's desk, and {@link ObMyTask.pendingMyVerification}
+ * is what tells the two apart. "Pending for approval" stays the first
+ * reading for everyone; this tab is the second, and only for whoever the
+ * server says needs to act on it.
+ */
+export const MY_TASKS_TAB_IDS = [
+  'pending-verification',
+  'in-progress',
+  'approved',
+  'pending-approval',
+  'not-started',
+] as const
+
+export type MyTasksTabId = (typeof MY_TASKS_TAB_IDS)[number]
+
+/** Which tab is active with no `?tab=` in the URL, or an unrecognised one. */
+export const DEFAULT_MY_TASKS_TAB: MyTasksTabId = 'in-progress'
+
+export const MY_TASKS_TAB_LABEL: Record<MyTasksTabId, string> = {
+  'pending-verification': 'Pending for verification',
+  'in-progress': 'Work in progress',
+  approved: 'Approved by manager',
+  'pending-approval': 'Pending for approval',
+  'not-started': 'Pending task',
+}
+
+/** What each tab says when this page has nothing that belongs on it. */
+export const MY_TASKS_TAB_EMPTY: Record<MyTasksTabId, string> = {
+  'pending-verification': 'Nothing waiting on your verification on this page.',
+  'in-progress': 'Nothing in progress on this page.',
+  approved: 'No rows approved by a manager are waiting to be seen on this page.',
+  'pending-approval': 'Nothing waiting on a manager’s approval on this page.',
+  'not-started': 'Nothing still to be started on this page.',
+}
+
+/**
+ * The tabs to draw, in order — "Pending for verification" dropped for
+ * whoever the server says reviews no project.
+ *
+ * <p>Keyed off {@code ObMyTaskListResponse.meta.isReviewerForAnyProject}
+ * rather than the caller's `OB_MANAGER` module role, because who reviews
+ * what is named on the *project* (`implementor_manager_user_id`), same as
+ * the endpoint's own scoping — see `ObMyTaskReadRepository`'s javadoc on the
+ * backend. An implementor named manager of one project the server has never
+ * heard of as `OB_MANAGER` still gets the tab; an `OB_MANAGER` who reviews
+ * nothing today does not. Page-independent, deliberately: it reads the
+ * caller's standing, not whether this particular ten rows happens to hold a
+ * review, so the tab does not flicker as somebody pages through their own
+ * queue.
+ */
+export function visibleMyTasksTabs(isReviewerForAnyProject: boolean): readonly MyTasksTabId[] {
+  return isReviewerForAnyProject
+    ? MY_TASKS_TAB_IDS
+    : MY_TASKS_TAB_IDS.filter((id) => id !== 'pending-verification')
+}
+
+const IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set([
+  'IN_PROGRESS',
+  'BLOCKED',
+  'WAITING_ON_CLIENT',
+])
+
+type TabRow = Pick<ObMyTask, 'status' | 'rowsApproved' | 'dueAt' | 'pendingMyVerification'>
+
+function matchesMyTasksTab(
+  task: Pick<TabRow, 'status' | 'rowsApproved' | 'pendingMyVerification'>,
+  tab: MyTasksTabId,
+): boolean {
+  switch (tab) {
+    case 'pending-verification':
+      return task.pendingMyVerification
+    case 'in-progress':
+      return IN_PROGRESS_STATUSES.has(task.status)
+    case 'approved':
+      return task.rowsApproved > 0
+    case 'pending-approval':
+      return task.status === 'PENDING_REVIEW'
+    case 'not-started':
+      return task.status === 'PENDING'
+  }
+}
+
+/** Soonest due date first; a task that has not activated sorts last. */
+function byDueDateSoonestFirst(a: Pick<TabRow, 'dueAt'>, b: Pick<TabRow, 'dueAt'>): number {
+  const at = a.dueAt ? Date.parse(a.dueAt) : Number.POSITIVE_INFINITY
+  const bt = b.dueAt ? Date.parse(b.dueAt) : Number.POSITIVE_INFINITY
+  return at - bt
+}
+
+/**
+ * This page's rows, narrowed to one tab.
+ *
+ * <p>Filtered and sorted over what the page already has rather than a second
+ * request: the endpoint pages by `created_at` across every open task, and
+ * narrowing that to "what's in progress" is a question about the twenty rows
+ * already in hand, not a different query.
+ *
+ * <p>Only Work in progress reorders its rows — by due date, soonest first,
+ * because that tab is where "which of these is closest to late" is the
+ * question being asked. The other four keep the page's own newest-first
+ * order: each is already grouped by what put it there, and re-sorting a
+ * small, already-explained list would answer a question nobody asked it.
+ */
+export function tasksForMyTasksTab<T extends TabRow>(tasks: readonly T[], tab: MyTasksTabId): T[] {
+  const rows = tasks.filter((task) => matchesMyTasksTab(task, tab))
+  return tab === 'in-progress' ? rows.sort(byDueDateSoonestFirst) : rows
 }
 
 /** `16 Sep 2026`, or an em dash for a task that has not activated. */

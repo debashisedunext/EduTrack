@@ -60,13 +60,13 @@ class ObSignoffContactReader {
      * has already committed an acceptance, which would tell the client their
      * signature failed when it did not.
      */
-    PublicSignoffAcceptDtos.Contact find(Long contactId) {
+    PublicSignoffAcceptDtos.SignoffContact find(Long contactId) {
         if (contactId == null) {
             return null;
         }
         return jdbc.sql(BY_ID)
                 .param(contactId)
-                .query((rs, row) -> new PublicSignoffAcceptDtos.Contact(
+                .query((rs, row) -> new PublicSignoffAcceptDtos.SignoffContact(
                         rs.getLong("id"),
                         rs.getString("name"),
                         rs.getString("designation"),

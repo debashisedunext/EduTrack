@@ -338,7 +338,7 @@ public class ObSignoffAcceptService {
     }
 
     private PublicSignoffAcceptDtos.SignoffDetail detailOf(ObSignoff signoff) {
-        PublicSignoffAcceptDtos.Contact contact = contacts.find(signoff.getSentToContactId());
+        PublicSignoffAcceptDtos.SignoffContact contact = contacts.find(signoff.getSentToContactId());
         return new PublicSignoffAcceptDtos.SignoffDetail(
                 signoff.getId(),
                 signoff.getObClientId(),

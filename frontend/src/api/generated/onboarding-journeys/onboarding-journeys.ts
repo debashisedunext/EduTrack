@@ -66,6 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CommitObJourneyTaskImportBody,
   ConflictResponse,
   ForbiddenResponse,
   ListObClientCommunicationsParams,
@@ -86,6 +87,9 @@ import type {
   ObJourneyStepItemUpdateRequest,
   ObJourneyStepResponse,
   ObJourneyStepUpdateRequest,
+  ObJourneyTaskImportInvalidProblem,
+  ObJourneyTaskImportPreviewResponse,
+  ObJourneyTaskImportResultResponse,
   ObJourneyTemplateCatalogueOrderRequest,
   ObJourneyTemplateCreateRequest,
   ObJourneyTemplateDependsOnRequest,
@@ -110,6 +114,7 @@ import type {
   ObStepOutcomesSeenResponse,
   ObStepSkipRequest,
   PreconditionFailedResponse,
+  PreviewObJourneyTaskImportBody,
   Problem,
   UnauthorizedResponse,
   UnprocessableTransitionResponse,
@@ -741,6 +746,251 @@ export const usePublishObJourneyTemplate = <TError = ObModuleGatedResponse | Pro
       > => {
 
       const mutationOptions = getPublishObJourneyTemplateMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Three sheets — Tasks, Task List, Document Checklist — plus
+Instructions. The Stage dropdown and the Instructions sheet's stage
+list are drawn live from this template's own stage groups, so the
+file always names stages the import will actually accept.
+
+ * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+ */
+export const downloadObJourneyTaskImportTemplate = (
+    templateId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<Blob>(
+      {url: `/onboarding/journey-templates/${templateId}/task-import/template`, method: 'GET',
+        responseType: 'blob', signal
+    },
+      );
+    }
+  
+
+
+
+export const getDownloadObJourneyTaskImportTemplateQueryKey = (templateId?: number,) => {
+    return [
+    `/onboarding/journey-templates/${templateId}/task-import/template`
+    ] as const;
+    }
+
+    
+export const getDownloadObJourneyTaskImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadObJourneyTaskImportTemplateQueryKey(templateId);
+
+  
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>> = ({ signal }) => downloadObJourneyTaskImportTemplate(templateId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(templateId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadObJourneyTaskImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>>
+export type DownloadObJourneyTaskImportTemplateQueryError = ObModuleGatedResponse
+
+
+export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
+ templateId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+ */
+
+export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
+ templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDownloadObJourneyTaskImportTemplateQueryOptions(templateId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
+/**
+ * Every row in the workbook, checked against the same rules `POST
+task-import` commits with. Writes nothing regardless of the outcome:
+`valid: false` with the row errors, or `valid: true` with the task
+tree the file describes, for the confirm screen to render before
+anything is saved.
+
+ * @summary Validate a task-import file without writing anything (OB-07)
+ */
+export const previewObJourneyTaskImport = (
+    templateId: number,
+    previewObJourneyTaskImportBody: PreviewObJourneyTaskImportBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, previewObJourneyTaskImportBody.file)
+
+      return http<ObJourneyTaskImportPreviewResponse>(
+      {url: `/onboarding/journey-templates/${templateId}/task-import/preview`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getPreviewObJourneyTaskImportMutationOptions = <TError = ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext> => {
+
+const mutationKey = ['previewObJourneyTaskImport'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, {templateId: number;data: PreviewObJourneyTaskImportBody}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  previewObJourneyTaskImport(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewObJourneyTaskImportMutationResult = NonNullable<Awaited<ReturnType<typeof previewObJourneyTaskImport>>>
+    export type PreviewObJourneyTaskImportMutationBody = PreviewObJourneyTaskImportBody
+    export type PreviewObJourneyTaskImportMutationError = ObModuleGatedResponse
+
+    /**
+ * @summary Validate a task-import file without writing anything (OB-07)
+ */
+export const usePreviewObJourneyTaskImport = <TError = ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof previewObJourneyTaskImport>>,
+        TError,
+        {templateId: number;data: PreviewObJourneyTaskImportBody},
+        TContext
+      > => {
+
+      const mutationOptions = getPreviewObJourneyTaskImportMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Every existing task, Task List entry and Document Checklist entry on
+this draft is removed and re-created from the file, in one
+transaction — nothing is left half-applied. There is no natural key a
+checklist row could upsert on, so re-running this import replaces the
+tree rather than merging into it; safe only because the target is
+always a draft nothing has been instantiated from yet.
+
+ * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+ */
+export const commitObJourneyTaskImport = (
+    templateId: number,
+    commitObJourneyTaskImportBody: CommitObJourneyTaskImportBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, commitObJourneyTaskImportBody.file)
+
+      return http<ObJourneyTaskImportResultResponse>(
+      {url: `/onboarding/journey-templates/${templateId}/task-import`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getCommitObJourneyTaskImportMutationOptions = <TError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext> => {
+
+const mutationKey = ['commitObJourneyTaskImport'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, {templateId: number;data: CommitObJourneyTaskImportBody}> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  commitObJourneyTaskImport(templateId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitObJourneyTaskImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitObJourneyTaskImport>>>
+    export type CommitObJourneyTaskImportMutationBody = CommitObJourneyTaskImportBody
+    export type CommitObJourneyTaskImportMutationError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem
+
+    /**
+ * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+ */
+export const useCommitObJourneyTaskImport = <TError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof commitObJourneyTaskImport>>,
+        TError,
+        {templateId: number;data: CommitObJourneyTaskImportBody},
+        TContext
+      > => {
+
+      const mutationOptions = getCommitObJourneyTaskImportMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -1657,7 +1907,7 @@ export const markObJourneyStepOutcomesSeen = (
   
 
 
-export const getMarkObJourneyStepOutcomesSeenMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse,
+export const getMarkObJourneyStepOutcomesSeenMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext> => {
 
@@ -1684,12 +1934,12 @@ const {mutation: mutationOptions} = options ?
 
     export type MarkObJourneyStepOutcomesSeenMutationResult = NonNullable<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>>
     
-    export type MarkObJourneyStepOutcomesSeenMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse
+    export type MarkObJourneyStepOutcomesSeenMutationError = UnauthorizedResponse | NotFoundResponse | Problem
 
     /**
  * @summary Mark this task's review outcomes as read
  */
-export const useMarkObJourneyStepOutcomesSeen = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse,
+export const useMarkObJourneyStepOutcomesSeen = <TError = UnauthorizedResponse | NotFoundResponse | Problem,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>, TError,{stepId: number}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof markObJourneyStepOutcomesSeen>>,
@@ -1699,6 +1949,187 @@ export const useMarkObJourneyStepOutcomesSeen = <TError = UnauthorizedResponse |
       > => {
 
       const mutationOptions = getMarkObJourneyStepOutcomesSeenMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Puts every open check-list row on the implementor manager's desk in
+**one transaction** — the task's *Send for verification*.
+
+The screen sends the list as a unit: there is no per-row Send, and the
+manager gives one verdict for the whole thing, so a half-sent list is
+a state neither side has a control for. Looping
+`submitObJourneyStepItem` from a client produced exactly that whenever
+one call of five failed — some rows on the reviewer's desk, the rest
+still with their implementor, and a task whose `PENDING_REVIEW` was
+true of most of it.
+
+**Every open row must be answered.** `422`
+`completion-gate-not-satisfied` names the blank ones in
+`unansweredMandatoryItems`. Sending the list as a unit means the unit
+has to be complete — unlike the per-row route, which lets two of five
+go now and the rest keep.
+
+Rows already `VERIFIED` in an earlier round are left alone and are not
+counted against that gate: they are shut for good, and a rejection
+that brought their neighbours back must not ask for them again.
+
+**Who may call it:** the task's owner. Anybody else answers `403`.
+
+ * @summary Send the whole Task List for verification
+ */
+export const submitObJourneyStepChecklist = (
+    stepId: number,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/checklist/submit`, method: 'POST', signal
+    },
+      );
+    }
+  
+
+
+export const getSubmitObJourneyStepChecklistMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepChecklist>>, TError,{stepId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepChecklist>>, TError,{stepId: number}, TContext> => {
+
+const mutationKey = ['submitObJourneyStepChecklist'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitObJourneyStepChecklist>>, {stepId: number}> = (props) => {
+          const {stepId} = props ?? {};
+
+          return  submitObJourneyStepChecklist(stepId,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitObJourneyStepChecklistMutationResult = NonNullable<Awaited<ReturnType<typeof submitObJourneyStepChecklist>>>
+    
+    export type SubmitObJourneyStepChecklistMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem
+
+    /**
+ * @summary Send the whole Task List for verification
+ */
+export const useSubmitObJourneyStepChecklist = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepChecklist>>, TError,{stepId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitObJourneyStepChecklist>>,
+        TError,
+        {stepId: number},
+        TContext
+      > => {
+
+      const mutationOptions = getSubmitObJourneyStepChecklistMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Sets every row that is out to `VERIFIED` or `REJECTED` and releases
+them together — the reviewer's *Verification done*.
+
+**One decision, not one per row.** A manager decides about the task,
+not about line four: they read the list and either it is right or it
+goes back. Per-row verdicts asked for five decisions to express one,
+and let a list return half-approved for its implementor to reconcile
+row by row.
+
+Only while the task is `PENDING_REVIEW` (`422`
+`invalid-step-transition`). `NOT_REVIEWED` is refused the same way —
+it was how a per-row verdict was taken back, and there is no row to
+take it back on.
+
+**A rejection must say why** (`422` `ob-step-reject-reason-required`)
+and returns the *whole* list unanswered, carrying that reason on every
+row it is about. The claim each row held is withdrawn with the
+verdict, so its implementor asserts the work again rather than
+resubmitting what was refused. Rows already `VERIFIED` in an earlier
+round stay shut.
+
+**An acceptance does not close the task.** Every row becomes
+`VERIFIED` and the task comes back to its owner;
+`POST /onboarding/journey-steps/{stepId}/review/complete` is still the
+deliberate press that ends it, so a manager who pressed Verified
+meaning Reject has not already released this task's dependants.
+
+**Who may call it:** the project's own `implementorManagerUserId`, or
+an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+and a caller with no onboarding role answers `404`.
+
+ * @summary Record one verdict for the whole Task List
+ */
+export const recordObJourneyStepChecklistVerdict = (
+    stepId: number,
+    obStepItemReviewRequest: ObStepItemReviewRequest,
+ signal?: AbortSignal
+) => {
+      
+      
+      return http<ObJourneyStepResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/review/verdict`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: obStepItemReviewRequest, signal
+    },
+      );
+    }
+  
+
+
+export const getRecordObJourneyStepChecklistVerdictMutationOptions = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>, TError,{stepId: number;data: ObStepItemReviewRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>, TError,{stepId: number;data: ObStepItemReviewRequest}, TContext> => {
+
+const mutationKey = ['recordObJourneyStepChecklistVerdict'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>, {stepId: number;data: ObStepItemReviewRequest}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  recordObJourneyStepChecklistVerdict(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordObJourneyStepChecklistVerdictMutationResult = NonNullable<Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>>
+    export type RecordObJourneyStepChecklistVerdictMutationBody = ObStepItemReviewRequest
+    export type RecordObJourneyStepChecklistVerdictMutationError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem
+
+    /**
+ * @summary Record one verdict for the whole Task List
+ */
+export const useRecordObJourneyStepChecklistVerdict = <TError = UnauthorizedResponse | Problem | ObModuleGatedResponse | ObCompletionGateProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>, TError,{stepId: number;data: ObStepItemReviewRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordObJourneyStepChecklistVerdict>>,
+        TError,
+        {stepId: number;data: ObStepItemReviewRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getRecordObJourneyStepChecklistVerdictMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -2615,7 +3046,7 @@ export const submitObJourneyStepItem = (
   
 
 
-export const getSubmitObJourneyStepItemMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+export const getSubmitObJourneyStepItemMutationOptions = <TError = UnauthorizedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
 ): UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext> => {
 
@@ -2642,12 +3073,12 @@ const {mutation: mutationOptions} = options ?
 
     export type SubmitObJourneyStepItemMutationResult = NonNullable<Awaited<ReturnType<typeof submitObJourneyStepItem>>>
     
-    export type SubmitObJourneyStepItemMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse
+    export type SubmitObJourneyStepItemMutationError = UnauthorizedResponse | NotFoundResponse | UnprocessableTransitionResponse
 
     /**
  * @summary Send one Task List entry for verification
  */
-export const useSubmitObJourneyStepItem = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableTransitionResponse,
+export const useSubmitObJourneyStepItem = <TError = UnauthorizedResponse | NotFoundResponse | UnprocessableTransitionResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitObJourneyStepItem>>, TError,{itemId: number}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof submitObJourneyStepItem>>,

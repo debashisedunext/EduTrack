@@ -72,10 +72,41 @@ interface ObMyTaskDtos {
             /** Returned rows this task's owner has not opened yet. */
             int rowsReturned,
             /** Approved rows this task's owner has not opened yet. */
-            int rowsApproved) {
+            int rowsApproved,
+            /**
+             * Whether the caller must verify this task rather than merely own
+             * it: {@code status} is {@code PENDING_REVIEW} and the caller is
+             * the project's named manager, or holds {@code OB_ADMIN}.
+             *
+             * <p>The other three ways a task reaches this page put it there
+             * because the caller owns it; this is the fourth, and the only one
+             * that means a review rather than a wait. My Tasks' "Pending for
+             * verification" tab is this field, and nothing else — see
+             * {@code ObMyTaskReadRepository.MINE}'s own javadoc for why the
+             * same {@code PENDING_REVIEW} status reads oppositely for the two
+             * people it can belong to.
+             */
+            boolean pendingMyVerification) {
     }
 
-    record ObMyTaskListResponse(List<ObMyTask> data, PageMeta meta) {
+    /**
+     * {@code meta.isReviewerForAnyProject} — not {@link PageMeta} alone,
+     * which deliberately carries no third field (see its own javadoc).
+     *
+     * <p>Page-independent, unlike {@code ObMyTask.pendingMyVerification}: a
+     * caller who reviews at least one project must see the "Pending for
+     * verification" tab even on a page whose ten rows happen to be their own
+     * work rather than anybody's review — see
+     * {@code ObMyTaskReadRepository.reviewsAnyProject}.
+     */
+    record ObMyTaskListMeta(String nextCursor, boolean hasMore, boolean isReviewerForAnyProject) {
+
+        static ObMyTaskListMeta of(PageMeta page, boolean isReviewerForAnyProject) {
+            return new ObMyTaskListMeta(page.nextCursor(), page.hasMore(), isReviewerForAnyProject);
+        }
+    }
+
+    record ObMyTaskListResponse(List<ObMyTask> data, ObMyTaskListMeta meta) {
     }
 
     record ObMyTaskResponse(ObMyTask data) {

@@ -63,7 +63,7 @@ class ObImplementationStageController {
     ObImplementationStageDtos.ObImplementationStageListResponse list(
             @RequestParam(name = "isActive", required = false) Boolean isActive) {
 
-        List<ObImplementationStageDtos.Stage> data = service.list(isActive);
+        List<ObImplementationStageDtos.ImplementationStage> data = service.list(isActive);
         return new ObImplementationStageDtos.ObImplementationStageListResponse(data);
     }
 
@@ -93,7 +93,7 @@ class ObImplementationStageController {
         // call, for its reason: the column is nullable, CallerIdentity is the
         // only honest source, and the audit interceptor already records who
         // made this request.
-        ObImplementationStageDtos.Stage created = service.create(request, null);
+        ObImplementationStageDtos.ImplementationStage created = service.create(request, null);
         return ResponseEntity
                 .created(URI.create("/api/v1/onboarding/implementation-stages/" + created.id()))
                 .eTag(etagOf(created))
@@ -132,7 +132,7 @@ class ObImplementationStageController {
      * {@code ObProductController} repeats.
      */
     private void requirePrecondition(long id, String ifMatch) {
-        ObImplementationStageDtos.Stage current = service.find(id)
+        ObImplementationStageDtos.ImplementationStage current = service.find(id)
                 .orElseThrow(ObImplementationStageController::notFound);
 
         if (ifMatch == null || ifMatch.isBlank()) {
@@ -146,7 +146,7 @@ class ObImplementationStageController {
     }
 
     private static ResponseEntity<ObImplementationStageDtos.ObImplementationStageResponse> ok(
-            ObImplementationStageDtos.Stage stage) {
+            ObImplementationStageDtos.ImplementationStage stage) {
 
         return ResponseEntity.ok()
                 .eTag(etagOf(stage))
@@ -164,7 +164,7 @@ class ObImplementationStageController {
      * about to send means something different from what its author intended.
      * That is precisely the save worth refusing with a 412.
      */
-    private static String etagOf(ObImplementationStageDtos.Stage stage) {
+    private static String etagOf(ObImplementationStageDtos.ImplementationStage stage) {
         return Integer.toHexString(stage.hashCode());
     }
 

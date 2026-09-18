@@ -586,6 +586,58 @@ export const obAdminHandlers = [
   }),
 
   /**
+   * OB-16 · the four review figures on the caller's own dashboard.
+   *
+   * **Two stocks and two flows, and they must not be added together.**
+   * `reviewsPending` and `sentForReview` are the same rows seen from the two
+   * ends — what is on this caller's desk as a manager, and what they have out
+   * with theirs. `reviewsApproved` and `reviewsRejected` are the stat *day*'s
+   * traffic, so they reset; summing the four produces a number that means
+   * nothing, which is why they are named rather than totalled.
+   *
+   * Counted live here because the fixture db has no stats worker. The server
+   * reads `ob_implementor_daily_stats` — CLAUDE.md forbids a live `COUNT(*)`
+   * for a real dashboard, and this is a mock rather than the dashboard.
+   */
+  http.get(url('/onboarding/dashboard/review-summary'), () => {
+    const db = getDb();
+    const me = currentUser(db).id;
+    const today = COMPUTED_AT.slice(0, 10);
+
+    let reviewsPending = 0;
+    let sentForReview = 0;
+    let reviewsApproved = 0;
+    let reviewsRejected = 0;
+
+    for (const client of db.obClients) {
+      for (const journey of client.journeys) {
+        for (const step of journey.steps) {
+          const mine = step.ownerUserId === me || step.backupOwnerUserId === me;
+          for (const item of step.items ?? []) {
+            const rowState = item.rowState ?? 'DRAFT';
+            if (rowState === 'SENT') {
+              // The same row, counted once on each side — never on both for
+              // one caller, because a reviewer does not review their own work.
+              if (mine) sentForReview++;
+              else reviewsPending++;
+              continue;
+            }
+            if (!mine || item.reviewedAt == null) continue;
+            if (!item.reviewedAt.startsWith(today)) continue;
+            if (rowState === 'VERIFIED') reviewsApproved++;
+            if (rowState === 'REJECTED') reviewsRejected++;
+          }
+        }
+      }
+    }
+
+    return ok({
+      reviewsPending, sentForReview, reviewsApproved, reviewsRejected,
+      computedAt: COMPUTED_AT,
+    });
+  }),
+
+  /**
    * The project board — six counters, the schedule split and one row per
    * running project, all counted from the same rows. See `projectBoardRows`.
    */

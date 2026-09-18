@@ -117,7 +117,7 @@ final class PublicSignoffAcceptDtos {
             Object requestedBy,
 
             Instant requestedAt,
-            Contact sentToContact,
+            SignoffContact sentToContact,
             Instant tokenExpiresAt,
             Instant signedAt,
             Instant objectedAt,
@@ -126,7 +126,7 @@ final class PublicSignoffAcceptDtos {
                     + "Derived from pdf_storage_key being set; the key itself is never on the wire.")
             boolean hasCertificate,
 
-            Contact signedByContact,
+            SignoffContact signedByContact,
             String signedIp,
             String signedUserAgent,
             String objectionNote
@@ -143,7 +143,17 @@ final class PublicSignoffAcceptDtos {
      * two companions, which are consent facts staff record about a contact and
      * have no business on a page the contact themselves is reading.
      */
-    record Contact(
+    /*
+     * Named for the schema rather than left to collide. springdoc keys by
+     * simple class name, and ClientDtos.Contact is also `Contact` -- with
+     * this record registering last, GET /clients/{clientId}/contacts served
+     * THIS narrower shape, and its `notificationOptIn` and `portalAccess`
+     * went missing from the served document while the Java DTO still had
+     * them. A silent one: both sides compiled, and only
+     * ContractConformanceTest could see it.
+     */
+    @Schema(name = "ObSignoffContact")
+    record SignoffContact(
             long id,
             String name,
             String designation,

@@ -11,6 +11,7 @@ import {
   useMarkObJourneyStepWaitingOnClient,
   useResumeObJourneyStep,
   useStartObJourneyStep,
+  useSubmitObJourneyStepChecklist,
   useUpdateObJourneyStep,
 } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import { cn } from '@/lib/utils'
@@ -81,18 +82,25 @@ export interface ObTaskActionBarProps {
   /**
    * This reader is the reviewer and the task is waiting on them.
    *
-   * <p>**Mark complete** then means something different without looking
-   * different: it closes the review rather than submitting the work — and
-   * what it never does is close the task, which stays the implementor's press
-   * whichever way the verdicts went. One button because it is one idea — *I
-   * am finished with this task* — and a second one beside it would have been
-   * two ways to say so, one of them always wrong for whoever is reading.
+   * <p>The task's one button then reads **Verified** and does the reviewer's
+   * act: it hands the task back to its owner. What it never does is close the
+   * task, which stays the implementor's press whichever way the verdicts went.
+   * One button because it is one idea — *I am finished with this task* — and a
+   * second one beside it would have been two ways to say so, one of them
+   * always wrong for whoever is reading.
    */
   reviewing?: boolean
-  /** What holds the reviewer's Mark complete, in `blockers`' own shape. */
+  /** What holds the reviewer's Verified, in `blockers`' own shape. */
   reviewBlockers?: readonly string[]
   /** What Complete is waiting on, already computed by the panel above. */
   blockers: readonly string[]
+  /** What Send for Verification is waiting on — unanswered rows. */
+  sendBlockers?: readonly string[]
+  /**
+   * `SEND` while the check list still owes the reviewer something; `COMPLETE`
+   * once every row is verified, or on a task with no check list at all.
+   */
+  checklistPhase?: 'SEND' | 'COMPLETE'
 }
 
 export function ObTaskActionBar({
@@ -102,6 +110,8 @@ export function ObTaskActionBar({
   blockers,
   reviewing = false,
   reviewBlockers = [],
+  sendBlockers = [],
+  checklistPhase = 'COMPLETE',
 }: ObTaskActionBarProps) {
   const queryClient = useQueryClient()
   const me = useGetMe()
@@ -128,6 +138,7 @@ export function ObTaskActionBar({
     },
   }
   const start = useStartObJourneyStep({ mutation: refresh })
+  const submit = useSubmitObJourneyStepChecklist({ mutation: refresh })
   const complete = useCompleteObJourneyStep({ mutation: refresh })
   const closeReview = useCloseObJourneyStepReview({ mutation: refresh })
   const waiting = useMarkObJourneyStepWaitingOnClient({ mutation: refresh })
@@ -137,6 +148,7 @@ export function ObTaskActionBar({
 
   const busy =
     start.isPending ||
+    submit.isPending ||
     complete.isPending ||
     closeReview.isPending ||
     waiting.isPending ||
@@ -144,7 +156,16 @@ export function ObTaskActionBar({
     block.isPending ||
     reassign.isPending
 
-  const refusal = refusalMessage([start, complete, closeReview, waiting, resume, block, reassign])
+  const refusal = refusalMessage([
+    start,
+    submit,
+    complete,
+    closeReview,
+    waiting,
+    resume,
+    block,
+    reassign,
+  ])
 
   /** Which dialog is open. One at a time — they are all about this one task. */
   const [openDialog, setOpenDialog] = React.useState<TaskActionKey | null>(null)
@@ -152,21 +173,38 @@ export function ObTaskActionBar({
 
   const ownerName = users.find((u) => u.id === task.ownerUserId)?.displayName ?? 'the task owner'
 
-  const actions = reviewGateActions(taskActions({ task, yours, isModerator, blockers, ownerName, busy }), {
-    reviewing,
-    underReview: task.status === 'PENDING_REVIEW',
-    blockers: reviewBlockers,
-    busy,
-  })
+  const actions = reviewGateActions(
+    taskActions({
+      task,
+      yours,
+      isModerator,
+      blockers,
+      sendBlockers,
+      checklistPhase,
+      ownerName,
+      busy,
+    }),
+    {
+      reviewing,
+      underReview: task.status === 'PENDING_REVIEW',
+      blockers: reviewBlockers,
+      busy,
+    },
+  )
 
   const run = (key: TaskActionKey) => {
     switch (key) {
       case 'start':
         return start.mutate({ stepId: task.id })
+      case 'send':
+        // The whole check list to the reviewer in one request. There is no
+        // per-row Send to loop over any more, which is the point: the list
+        // moves as a unit or none of it does.
+        return submit.mutate({ stepId: task.id })
       case 'complete':
         // Same button, two meanings, decided by who is looking. The reviewer's
-        // press closes the review — which either completes the task or hands it
-        // back — and the owner's submits the work.
+        // press closes the review and hands the task back to its owner; the
+        // owner's is what finally closes it.
         return reviewing
           ? closeReview.mutate({ stepId: task.id })
           : complete.mutate({ stepId: task.id })
@@ -189,13 +227,19 @@ export function ObTaskActionBar({
     an answer a reader can act on, and a tooltip is not one they will find — and
     this is the single most asked question on the panel.
   */
-  const completeAction = actions.find((a) => a.key === 'complete')
+  const completeAction = actions.find((a) => a.key === 'complete' || a.key === 'send')
+  const held =
+    completeAction && !completeAction.enabled
+      ? reviewing && reviewBlockers.length > 0
+        ? reviewBlockers
+        : yours && completeAction.key === 'send' && sendBlockers.length > 0
+          ? sendBlockers
+          : yours && blockers.length > 0
+            ? blockers
+            : null
+      : null
   const completeWhy =
-    completeAction && !completeAction.enabled && reviewing && reviewBlockers.length > 0
-      ? `Mark complete is waiting on ${reviewBlockers.join(' and ')}.`
-      : completeAction && !completeAction.enabled && yours && blockers.length > 0
-        ? `Mark complete is waiting on ${blockers.join(' and ')}.`
-        : null
+    completeAction && held ? `${completeAction.label} is waiting on ${held.join(' and ')}.` : null
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -220,7 +264,7 @@ export function ObTaskActionBar({
 
       {reviewing && (
         <p className="m-0 text-caption text-content-muted">
-          {`${ownerName} marked this complete. Set every row to Verified or Rejected, then press Mark complete — it goes back to ${ownerName} either way: verified for them to close, rejected to redo.`}
+          {`${ownerName} sent this check list for verification. Set each row to Verified or Rejected. Rejected goes straight back to ${ownerName} with your reason; once every row left on your desk is Verified, press Verified to hand the task back for them to close.`}
         </p>
       )}
 
@@ -432,15 +476,15 @@ function ActionButton({ action, onPress }: { action: TaskAction; onPress: () => 
  *
  * <h2>Two readers, two opposite answers, one button</h2>
  *
- * <p><b>The reviewer gets Mark complete back.</b> It is the only control they
- * get: Start, Waiting on client, Block and Reassign all move work that is not
- * theirs to move, and a bar offering them would be four buttons the server
- * refuses beside one it accepts.
+ * <p><b>The reviewer gets the task's button, reading Verified.</b> It is the
+ * only control they get: Start, Waiting on client, Block and Reassign all move
+ * work that is not theirs to move, and a bar offering them would be four
+ * buttons the server refuses beside one it accepts.
  *
  * <p><b>The implementor loses it entirely</b> while the task is out for
  * review — not greyed, removed. They pressed it already; that press is what
  * sent the task away, and the check list beside it is locked for the same
- * reason. A disabled Mark complete on a submitted task reads as *something of
+ * reason. A disabled button on a submitted task reads as *something of
  * mine is unfinished* and invites a hunt through the rows for whatever it is,
  * when in fact nothing there is theirs to do until a verdict comes back. The
  * banner above the rows says where the task went; an absent button says the
@@ -464,15 +508,51 @@ function reviewGateActions(
 ): TaskAction[] {
   if (reviewing) {
     return actions.map((action) => {
-      if (action.key !== 'complete') return action
+      /*
+        Either key, because the owner's button is *two* buttons — Send for
+        Verification while the list still owes a verdict, Mark Complete once it
+        does not — and a task sitting on the reviewer's desk is always in the
+        first of those. Matching only `complete` left the manager holding a
+        button labelled **Send for Verification**, held by "1 row still to
+        review": the owner's word for the owner's act, with the reviewer's
+        blocker underneath it.
+      */
+      if (action.key !== 'complete' && action.key !== 'send') return action
       const held = busy
         ? 'Working…'
         : blockers.length > 0
           ? `Outstanding: ${blockers.join(', ')}`
           : undefined
-      return { ...action, enabled: !held, reason: held }
+      /*
+        **Verified**, in the reviewer's own word.
+
+        It said *Mark complete*, which is the owner's word for the owner's act
+        and was never what this press does — it does not complete anything.
+        What the manager is saying is "I have read the list and it holds", and
+        the button now says that. Rejection has no button beside it on purpose:
+        pressing Rejected on a row sends that row back on the spot, so by the
+        time this is pressable every row still on the desk is verified.
+      */
+      return {
+        ...action,
+        // Keyed `complete` whichever it arrived as, so the bar's own switch
+        // sends it to `closeReview` and there is one press to reason about.
+        key: 'complete' as const,
+        label: 'Verified',
+        icon: '✓',
+        enabled: !held,
+        reason: held,
+      }
     })
   }
-  if (underReview) return actions.filter((action) => action.key !== 'complete')
+  /*
+    The owner loses the button entirely while the task is out — both halves of
+    it. There is nothing to send (the list is already on the reviewer's desk)
+    and nothing to complete (the verdicts are not in), and a greyed button
+    there reads as *something of mine is unfinished*.
+  */
+  if (underReview) {
+    return actions.filter((action) => action.key !== 'complete' && action.key !== 'send')
+  }
   return [...actions]
 }

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -61,11 +62,16 @@ class ObMyTaskServiceTest {
      * having to state a timestamp it does not care about.
      */
     private static Row row(long taskId, Instant dueAt, int out, int returned, int approved) {
+        return row(taskId, dueAt, out, returned, approved, false);
+    }
+
+    private static Row row(long taskId, Instant dueAt, int out, int returned, int approved,
+                            boolean pendingMyVerification) {
         return new Row(taskId, "Week off", "PENDING", dueAt,
                 "2026-09-15 09:%02d:00".formatted(taskId % 60),
                 500L, "Student Attendance", 7L, "DAV Proj",
                 3L, "DAV School", "DAV-101", 1L, "Configuration", 1,
-                out, returned, approved);
+                out, returned, approved, pendingMyVerification);
     }
 
     @Test
@@ -178,6 +184,50 @@ class ObMyTaskServiceTest {
         assertThat(task.rowsOut()).isEqualTo(2);
         assertThat(task.rowsReturned()).isEqualTo(1);
         assertThat(task.rowsApproved()).isEqualTo(3);
+    }
+
+    /**
+     * The fourth {@code MINE} clause, told apart from the other three. This is
+     * what the "Pending for verification" tab is — nothing else on the row
+     * says whether a {@code PENDING_REVIEW} task is the caller's own
+     * submission or a review sitting on their desk.
+     */
+    @Test
+    @DisplayName("a row reviewed by the caller carries pendingMyVerification through")
+    void carriesPendingMyVerificationThrough() {
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+                .thenReturn(List.of(row(1L, NOW, 0, 0, 0, true), row(2L, NOW, 0, 0, 0, false)));
+
+        List<ObMyTask> tasks = service.list(ME, false, null, 10).data();
+
+        assertThat(tasks).extracting(ObMyTask::taskId, ObMyTask::pendingMyVerification)
+                .containsExactly(tuple(1L, true), tuple(2L, false));
+    }
+
+    /**
+     * Page-independent, unlike the row-level flag above: a caller who reviews
+     * at least one project must see the tab even on a page whose own ten rows
+     * happen to hold none of their reviews.
+     */
+    @Test
+    @DisplayName("isReviewerForAnyProject reflects the repository, not this page's rows")
+    void carriesReviewerForAnyProjectThrough() {
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+                .thenReturn(List.of(row(1L, NOW, 0, 0, 0, false)));
+        when(reads.reviewsAnyProject(ME, false)).thenReturn(true);
+
+        ObMyTaskListResponse response = service.list(ME, false, null, 10);
+
+        assertThat(response.meta().isReviewerForAnyProject()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a caller who reviews nothing gets no such tab")
+    void reviewerForAnyProjectDefaultsFalse() {
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.reviewsAnyProject(ME, false)).thenReturn(false);
+
+        assertThat(service.list(ME, false, null, 10).meta().isReviewerForAnyProject()).isFalse();
     }
 
     @Test

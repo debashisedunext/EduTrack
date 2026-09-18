@@ -4,9 +4,12 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
@@ -39,11 +42,39 @@ import java.net.URI;
  * context with no MinIO running — the same property {@code docker compose up}
  * being optional for a unit test depends on.
  *
- * <p>Credentials come from properties rather than from the SDK's default provider
- * chain. That is right for MinIO, which has no instance metadata to query, and it
- * keeps a misconfigured production deployment failing at startup on a missing
- * property rather than silently picking up whatever ambient role the host
- * happens to carry.
+ * <h2>Two things are conditional, and both are the difference between MinIO and S3</h2>
+ *
+ * <p><b>The endpoint override is applied only when one is configured.</b>
+ * {@code ObjectStorageProperties} always said the endpoint is "empty in
+ * production, where the AWS SDK resolves the real S3 endpoint from the region",
+ * and this class overrode it unconditionally anyway — so following that
+ * instruction produced {@code URI.create("")}, which has no scheme, which the
+ * SDK rejects outright. A deployment that instead left the key unset got the
+ * MinIO default and pointed production at {@code localhost:9000}. Neither is a
+ * way to reach S3; {@link ObjectStorageProperties#awsManaged()} is.
+ *
+ * <p><b>Credentials fall back to the default provider chain when none are
+ * configured.</b> This reverses what this file used to say, so the old reasoning
+ * is answered rather than deleted: it argued that static properties keep a
+ * misconfigured deployment "failing at startup on a missing property rather than
+ * silently picking up whatever ambient role the host happens to carry".
+ *
+ * <ul>
+ *   <li>The startup failure it describes never happened. The properties carry
+ *       {@code minioadmin} defaults, so a deployment missing both keys starts
+ *       cleanly and fails later, per-request, against S3.</li>
+ *   <li>Nothing is silent: the chain is reached only by deliberately blanking
+ *       both keys, and {@link ObjectStorageGuard} logs which identity was chosen
+ *       at startup.</li>
+ *   <li>The alternative it preferred is worse. Static keys in production mean a
+ *       long-lived AWS secret in an environment variable, on every host, that
+ *       nothing rotates — which is the credential most likely to end up in a log
+ *       or an image layer. An instance role's credentials are minted per host and
+ *       expire on their own.</li>
+ * </ul>
+ *
+ * <p>MinIO is unaffected either way: it has no instance metadata, and the
+ * {@code minioadmin} defaults mean local development never reaches the chain.
  */
 @Configuration
 @EnableConfigurationProperties(ObjectStorageProperties.class)
@@ -51,29 +82,46 @@ public class ObjectStorageConfig {
 
     @Bean
     S3Client objectStorageS3Client(ObjectStorageProperties properties) {
-        return S3Client.builder()
-                .endpointOverride(URI.create(properties.endpoint()))
+        S3ClientBuilder builder = S3Client.builder()
                 .region(Region.of(properties.region()))
                 .credentialsProvider(credentials(properties))
                 .serviceConfiguration(S3Configuration.builder()
                         .pathStyleAccessEnabled(properties.pathStyle())
-                        .build())
-                .build();
+                        .build());
+
+        if (!properties.awsManaged()) {
+            builder.endpointOverride(URI.create(properties.endpoint()));
+        }
+        return builder.build();
     }
 
     @Bean
     S3Presigner objectStorageS3Presigner(ObjectStorageProperties properties) {
-        return S3Presigner.builder()
-                .endpointOverride(URI.create(properties.endpoint()))
+        S3Presigner.Builder builder = S3Presigner.builder()
                 .region(Region.of(properties.region()))
                 .credentialsProvider(credentials(properties))
                 .serviceConfiguration(S3Configuration.builder()
                         .pathStyleAccessEnabled(properties.pathStyle())
-                        .build())
-                .build();
+                        .build());
+
+        if (!properties.awsManaged()) {
+            builder.endpointOverride(URI.create(properties.endpoint()));
+        }
+        return builder.build();
     }
 
-    private static StaticCredentialsProvider credentials(ObjectStorageProperties properties) {
+    /**
+     * Configured keys when both are present, the instance role otherwise.
+     *
+     * <p>{@link DefaultCredentialsProvider} resolves environment variables, the
+     * shared profile file, container credentials (ECS, and EKS via IRSA) and the
+     * EC2 instance metadata service, in that order — so one blank pair covers
+     * every way AWS hands an identity to a host.
+     */
+    private static AwsCredentialsProvider credentials(ObjectStorageProperties properties) {
+        if (!properties.hasStaticCredentials()) {
+            return DefaultCredentialsProvider.create();
+        }
         return StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(properties.accessKey(), properties.secretKey()));
     }

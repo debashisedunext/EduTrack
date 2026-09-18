@@ -147,10 +147,19 @@ final class ObDashboardDtos {
      *                  own reasoning: a display column gains nothing from a
      *                  generated client forced to discriminate two enums to
      *                  render a chip.
+     * @param blockedReason the note the owner typed when the service was
+     *                  blocked, falling back to the reason code when they
+     *                  typed none — {@code ck_ob_journey_steps_blocked_reason}
+     *                  makes the code mandatory on a BLOCKED step, so one of
+     *                  the two always exists. Null on every other status and
+     *                  on every prerequisite: OB-02's "Where it's stuck" table
+     *                  renders the fixed "Waiting on client input" for a
+     *                  client-attributed pause itself, because that has a
+     *                  counterparty rather than a culprit.
      */
     record ObDashboardItem(ObDashboardItemType itemType, long itemId, long obClientId, String obClientName,
                            Long journeyId, Long obProjectId, ObProductRef product, String title, UserRef owner,
-                           String status, Instant dueAt, boolean isOverdue) {
+                           String status, String blockedReason, Instant dueAt, boolean isOverdue) {
 
         static ObDashboardItem of(ObDashboardCardItemsRepository.ItemRow row) {
             ObProductRef product = row.productId() == null ? null
@@ -159,8 +168,8 @@ final class ObDashboardDtos {
                     : new UserRef(row.ownerUserId(), row.ownerName());
             return new ObDashboardItem(
                     ObDashboardItemType.valueOf(row.itemType()), row.itemId(), row.obClientId(), row.obClientName(),
-                    row.journeyId(), row.projectId(), product, row.title(), owner, row.status(), row.dueAt(),
-                    row.isOverdue());
+                    row.journeyId(), row.projectId(), product, row.title(), owner, row.status(),
+                    row.blockedReason(), row.dueAt(), row.isOverdue());
         }
     }
 

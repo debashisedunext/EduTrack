@@ -16,7 +16,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Clock;
-import java.time.Instant;9
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +77,7 @@ class SlaScannerIT {
         // the same thing from the other side ("22 of 25 cases failing in reset()")
         // and added this switch, applying it only to StatsRefreshIT. Using their
         // switch rather than editing worker/stats, which is Stream A's.
+        registry.add("edutrack.ob-stats.enabled", () -> "false");
         registry.add("edutrack.stats.enabled", () -> "false");
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);

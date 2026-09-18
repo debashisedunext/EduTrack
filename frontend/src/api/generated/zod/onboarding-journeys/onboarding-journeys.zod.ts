@@ -378,6 +378,92 @@ export const publishObJourneyTemplateResponse = zod.object({
 })
 
 /**
+ * Three sheets — Tasks, Task List, Document Checklist — plus
+Instructions. The Stage dropdown and the Instructions sheet's stage
+list are drawn live from this template's own stage groups, so the
+file always names stages the import will actually accept.
+
+ * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+ */
+export const downloadObJourneyTaskImportTemplateParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+})
+
+/**
+ * Every row in the workbook, checked against the same rules `POST
+task-import` commits with. Writes nothing regardless of the outcome:
+`valid: false` with the row errors, or `valid: true` with the task
+tree the file describes, for the confirm screen to render before
+anything is saved.
+
+ * @summary Validate a task-import file without writing anything (OB-07)
+ */
+export const previewObJourneyTaskImportParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+})
+
+export const previewObJourneyTaskImportBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+export const previewObJourneyTaskImportResponse = zod.object({
+  "data": zod.object({
+  "valid": zod.boolean().describe('`false` means `errors` is non-empty and nothing would be written;\n`true` means `tasks` is the exact tree a commit would produce.\n'),
+  "errors": zod.array(zod.object({
+  "sheet": zod.string().describe('Tasks, Task List or Document Checklist — the sheet the row is on.'),
+  "rowNumber": zod.number().describe('1-based Excel row number, matching what the user sees with the sheet open. 0 for a file-level error with no single row to point at.'),
+  "message": zod.string()
+}).describe('One thing wrong with the uploaded workbook, precise enough to act on\nwithout reopening the file blind.\n')),
+  "tasks": zod.array(zod.object({
+  "stageGroupName": zod.string().nullish().describe('Null means \"Ungrouped\".'),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "tatDays": zod.number(),
+  "requiresSignoff": zod.boolean(),
+  "dependsOnTaskName": zod.string().nullish().describe('Null means the task runs in parallel from journey start.'),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "mandatory": zod.boolean()
+})),
+  "docs": zod.array(zod.object({
+  "label": zod.string(),
+  "required": zod.boolean()
+}))
+}).describe('One row of the Tasks sheet, with its Task List and Document Checklist rows already attached.'))
+}).describe('`previewObJourneyTaskImport`\'s body — the row-level result of validating a workbook without writing anything.')
+})
+
+/**
+ * Every existing task, Task List entry and Document Checklist entry on
+this draft is removed and re-created from the file, in one
+transaction — nothing is left half-applied. There is no natural key a
+checklist row could upsert on, so re-running this import replaces the
+tree rather than merging into it; safe only because the target is
+always a draft nothing has been instantiated from yet.
+
+ * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+ */
+export const commitObJourneyTaskImportParams = zod.object({
+  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
+})
+
+export const commitObJourneyTaskImportHeader = zod.object({
+  "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
+})
+
+export const commitObJourneyTaskImportBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+export const commitObJourneyTaskImportResponse = zod.object({
+  "data": zod.object({
+  "taskCount": zod.number(),
+  "itemCount": zod.number(),
+  "docCount": zod.number()
+}).describe('What the commit actually wrote — the draft\'s new task, Task List and Document Checklist counts.')
+})
+
+/**
  * A **task** is the third of OB-07's four levels — Module Service,
 stage, task, task list — and the one that carries the TAT, the
 owner and the required documents. The stage it goes in is in the
@@ -801,6 +887,133 @@ export const markObJourneyStepOutcomesSeenResponse = zod.object({
   "stepId": zod.number(),
   "cleared": zod.number().describe('How many rows this press stamped. A count rather than a `204`, so a\nclient can tell \"there were three and now there are none\" from\n\"there was nothing to clear\" without re-reading the task.\n')
 })
+})
+
+/**
+ * Puts every open check-list row on the implementor manager's desk in
+**one transaction** — the task's *Send for verification*.
+
+The screen sends the list as a unit: there is no per-row Send, and the
+manager gives one verdict for the whole thing, so a half-sent list is
+a state neither side has a control for. Looping
+`submitObJourneyStepItem` from a client produced exactly that whenever
+one call of five failed — some rows on the reviewer's desk, the rest
+still with their implementor, and a task whose `PENDING_REVIEW` was
+true of most of it.
+
+**Every open row must be answered.** `422`
+`completion-gate-not-satisfied` names the blank ones in
+`unansweredMandatoryItems`. Sending the list as a unit means the unit
+has to be complete — unlike the per-row route, which lets two of five
+go now and the rest keep.
+
+Rows already `VERIFIED` in an earlier round are left alone and are not
+counted against that gate: they are shut for good, and a rejection
+that brought their neighbours back must not ask for them again.
+
+**Who may call it:** the task's owner. Anybody else answers `403`.
+
+ * @summary Send the whole Task List for verification
+ */
+export const submitObJourneyStepChecklistParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const submitObJourneyStepChecklistResponseDataNameMax = 200;
+
+export const submitObJourneyStepChecklistResponseDataBlockedReasonCodeMax = 40;
+
+export const submitObJourneyStepChecklistResponseDataBlockedNoteMax = 500;
+
+
+
+export const submitObJourneyStepChecklistResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(submitObJourneyStepChecklistResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(submitObJourneyStepChecklistResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(submitObJourneyStepChecklistResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
+})
+
+/**
+ * Sets every row that is out to `VERIFIED` or `REJECTED` and releases
+them together — the reviewer's *Verification done*.
+
+**One decision, not one per row.** A manager decides about the task,
+not about line four: they read the list and either it is right or it
+goes back. Per-row verdicts asked for five decisions to express one,
+and let a list return half-approved for its implementor to reconcile
+row by row.
+
+Only while the task is `PENDING_REVIEW` (`422`
+`invalid-step-transition`). `NOT_REVIEWED` is refused the same way —
+it was how a per-row verdict was taken back, and there is no row to
+take it back on.
+
+**A rejection must say why** (`422` `ob-step-reject-reason-required`)
+and returns the *whole* list unanswered, carrying that reason on every
+row it is about. The claim each row held is withdrawn with the
+verdict, so its implementor asserts the work again rather than
+resubmitting what was refused. Rows already `VERIFIED` in an earlier
+round stay shut.
+
+**An acceptance does not close the task.** Every row becomes
+`VERIFIED` and the task comes back to its owner;
+`POST /onboarding/journey-steps/{stepId}/review/complete` is still the
+deliberate press that ends it, so a manager who pressed Verified
+meaning Reject has not already released this task's dependants.
+
+**Who may call it:** the project's own `implementorManagerUserId`, or
+an `OB_ADMIN`. Anybody else answers `403` `step-moderator-required`,
+and a caller with no onboarding role answers `404`.
+
+ * @summary Record one verdict for the whole Task List
+ */
+export const recordObJourneyStepChecklistVerdictParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const recordObJourneyStepChecklistVerdictBodyRemarkMax = 500;
+
+
+
+export const recordObJourneyStepChecklistVerdictBody = zod.object({
+  "state": zod.enum(['NOT_REVIEWED', 'VERIFIED', 'REJECTED']).describe('The OB Manager\'s verdict on one check-list row — the second ledger\nbeside the implementor\'s own `answer`.\n\n`answer` is \*did I do the thing\*; this is \*does it hold\*. Separate\nfields for the same reason they are separate columns: one field would\nmean the verdict overwrites the claim it is judging, and nothing would\nrecord what was asserted before it was rejected. The words differ too\n— Completed\/Not completed against Verified\/Rejected — because a row\nreading \"Completed \/ Completed\" says nothing about which of the two\npeople said it.\n\nNever null, unlike `answer`: a row always holds a verdict position,\neven when that position is \"none yet\".\n\n- `NOT_REVIEWED` — what a row is created with, and what a rejected row\n  returns to when the implementor resubmits.\n- `VERIFIED` — \*\*terminal for the row.\*\* Every later write is refused,\n  from either person, which is what makes \"only the rejected rows\n  reopen\" a fact about the data rather than a claim the screen makes.\n- `REJECTED` — sent back, never without a reason in `remark`. The one\n  row an implementor may edit on a returned task.\n'),
+  "remark": zod.string().max(recordObJourneyStepChecklistVerdictBodyRemarkMax).nullish().describe('The reason, written to the row\'s own `remark`.\n\n\*\*Mandatory on `REJECTED`\*\* — `ob-step-reject-reason-required`.\nIgnored on `VERIFIED` and `NOT_REVIEWED` rather than refused: a\nclient that sends the box\'s contents with every verdict is doing\nsomething reasonable, and silently not writing it is kinder than a\n400 it cannot act on. That is also what stops a verdict of\nVerified overwriting the implementor\'s own note.\n')
+})
+
+export const recordObJourneyStepChecklistVerdictResponseDataNameMax = 200;
+
+export const recordObJourneyStepChecklistVerdictResponseDataBlockedReasonCodeMax = 40;
+
+export const recordObJourneyStepChecklistVerdictResponseDataBlockedNoteMax = 500;
+
+
+
+export const recordObJourneyStepChecklistVerdictResponse = zod.object({
+  "data": zod.object({
+  "id": zod.number(),
+  "journeyId": zod.number(),
+  "sequence": zod.number(),
+  "name": zod.string().max(recordObJourneyStepChecklistVerdictResponseDataNameMax),
+  "status": zod.enum(['PENDING', 'IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT', 'PENDING_REVIEW', 'DONE', 'SKIPPED']).describe('`ob_journey_steps.status`. `PENDING` covers both \"gate still locked\"\nand \"dependency not met\" — C-104 only ever writes\n`IN_PROGRESS`\/`BLOCKED`\/`WAITING_ON_CLIENT`\/`DONE`; `SKIPPED` is\nC-107\'s own transition.\n\n`PENDING_REVIEW` is the manager review gate. The owner has marked the\ntask complete and an OB Manager has not finished reading it.\n\n\*\*Open, not terminal.\*\* It still counts against its Step and still\nappears in its owner\'s queue; what it is not is \*theirs\* any more —\nevery write to the task and to its check-list rows is refused while it\nsits here. Anything treating \"not open\" and \"terminal\" as one question\nwill either let an answer through during a review or report a Step done\nwhile a task under it is unread.\n\nIt leaves in one of two directions, neither of them an implementor\'s to\nmake: `DONE` when every row is `VERIFIED`, or back to `IN_PROGRESS` the\nmoment any row is `REJECTED`. The TAT clock is paused throughout.\n'),
+  "ownerUserId": zod.number().nullish().describe('Null = unresolved — see C-103.'),
+  "backupOwnerUserId": zod.number().nullish(),
+  "blockedReasonCode": zod.string().max(recordObJourneyStepChecklistVerdictResponseDataBlockedReasonCodeMax).nullish(),
+  "blockedNote": zod.string().max(recordObJourneyStepChecklistVerdictResponseDataBlockedNoteMax).nullish(),
+  "startedAt": zod.string().datetime({}).nullish(),
+  "finishedAt": zod.string().datetime({}).nullish(),
+  "dueAt": zod.string().datetime({}).nullish().describe('Working-calendar aware. Untouched by every C-104 transition — computed and recomputed by C-105.')
+}).describe('`ob_journey_steps` — a Service on a running journey (C-103).')
 })
 
 /**

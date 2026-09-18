@@ -121,9 +121,11 @@ class ResourceController {
                                            @RequestParam(required = false) String role,
                                            @RequestParam(required = false) Long projectId,
                                            @RequestParam(required = false) Long managerId,
-                                           @RequestParam(required = false) Boolean isActive) {
+                                           @RequestParam(required = false) Boolean isActive,
+                                           @RequestParam(required = false) List<String> obModuleRole) {
 
-        return resources.list(filterFrom(q, role, projectId, managerId, isActive), cursor, limit);
+        return resources.list(
+                filterFrom(q, role, projectId, managerId, isActive, obModuleRole), cursor, limit);
     }
 
     /**
@@ -158,9 +160,10 @@ class ResourceController {
                 @RequestParam(required = false) Long projectId,
                 @RequestParam(required = false) Long managerId,
                 @RequestParam(required = false) Boolean isActive,
+                @RequestParam(required = false) List<String> obModuleRole,
                 HttpServletResponse response) throws IOException {
 
-        writeExport(filterFrom(q, role, projectId, managerId, isActive),
+        writeExport(filterFrom(q, role, projectId, managerId, isActive, obModuleRole),
                 format == null ? "" : format.trim().toLowerCase(Locale.ROOT),
                 response);
     }
@@ -325,8 +328,10 @@ class ResourceController {
     }
 
     private ResourceFilter filterFrom(String q, String role, Long projectId,
-                                      Long managerId, Boolean isActive) {
-        return new ResourceFilter(q, normaliseRole(role), projectId, managerId, isActive);
+                                      Long managerId, Boolean isActive,
+                                      List<String> obModuleRole) {
+        return new ResourceFilter(q, normaliseRole(role), projectId, managerId, isActive,
+                obModuleRole);
     }
 
     // ------------------------------------------------------------------

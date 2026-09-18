@@ -102,11 +102,11 @@ class ObImplementationStageServiceTest {
     }
 
     private List<String> namesInOrder() {
-        return service.list(null).stream().map(ObImplementationStageDtos.Stage::name).toList();
+        return service.list(null).stream().map(ObImplementationStageDtos.ImplementationStage::name).toList();
     }
 
     private List<Integer> sequencesInOrder() {
-        return service.list(null).stream().map(ObImplementationStageDtos.Stage::sequence).toList();
+        return service.list(null).stream().map(ObImplementationStageDtos.ImplementationStage::sequence).toList();
     }
 
     private static ObImplementationStageDtos.WriteRequest write(String name, Integer sequence) {
@@ -116,7 +116,7 @@ class ObImplementationStageServiceTest {
     @Test
     @DisplayName("a create with no position appends, and renumbers nothing")
     void createAppends() {
-        ObImplementationStageDtos.Stage created = service.create(write("UAT", null), null);
+        ObImplementationStageDtos.ImplementationStage created = service.create(write("UAT", null), null);
 
         assertThat(created.sequence()).isEqualTo(7);
         assertThat(namesInOrder()).endsWith("UAT");
@@ -206,9 +206,9 @@ class ObImplementationStageServiceTest {
                 new ObImplementationStageDtos.WriteRequest("Reports", null, false));
 
         assertThat(namesInOrder().get(2)).isEqualTo("Reports");
-        assertThat(service.list(true)).extracting(ObImplementationStageDtos.Stage::name)
+        assertThat(service.list(true)).extracting(ObImplementationStageDtos.ImplementationStage::name)
                 .doesNotContain("Reports");
-        assertThat(service.list(false)).extracting(ObImplementationStageDtos.Stage::name)
+        assertThat(service.list(false)).extracting(ObImplementationStageDtos.ImplementationStage::name)
                 .containsExactly("Reports");
     }
 
@@ -236,7 +236,7 @@ class ObImplementationStageServiceTest {
     @Test
     @DisplayName("names are trimmed, and otherwise left exactly as typed")
     void trimsButDoesNotRecase() {
-        ObImplementationStageDtos.Stage created = service.create(write("  Cutover Plan  ", null), null);
+        ObImplementationStageDtos.ImplementationStage created = service.create(write("  Cutover Plan  ", null), null);
 
         assertThat(created.name()).isEqualTo("Cutover Plan");
     }

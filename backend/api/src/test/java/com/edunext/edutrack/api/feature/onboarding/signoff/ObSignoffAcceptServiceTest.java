@@ -67,7 +67,7 @@ class ObSignoffAcceptServiceTest {
                 clientGoLive, handover, Clock.fixed(NOW, ZoneOffset.UTC));
 
         when(sessions.resolve(SESSION)).thenReturn(OptionalLong.of(SIGNOFF_ID));
-        when(contacts.find(CONTACT_ID)).thenReturn(new PublicSignoffAcceptDtos.Contact(
+        when(contacts.find(CONTACT_ID)).thenReturn(new PublicSignoffAcceptDtos.SignoffContact(
                 CONTACT_ID, "Priya Raman", "Head of Ops", "priya@client.example",
                 "+91 99999 00000", true, true));
     }
@@ -508,7 +508,7 @@ class ObSignoffAcceptServiceTest {
             assertThat(result.signoff().signedByContact().id()).isEqualTo(CONTACT_ID);
             // Contact is a seven-field record. whatsappOptIn and its two
             // companions are not on it, so no mapper can put them on the wire.
-            assertThat(PublicSignoffAcceptDtos.Contact.class.getRecordComponents()).hasSize(7);
+            assertThat(PublicSignoffAcceptDtos.SignoffContact.class.getRecordComponents()).hasSize(7);
         }
     }
 }

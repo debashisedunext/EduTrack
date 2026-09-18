@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { HttpResponse, http } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { server } from '@/mocks/server'
 
 import type { ObJourneyStepDoc } from '@/api/generated/model/obJourneyStepDoc'
 import type { UserRef } from '@/api/generated/model/userRef'
@@ -144,11 +147,87 @@ describe('the task action bar', () => {
     expect(screen.getByTestId('ob-task-action-attach')).toHaveTextContent('1/2')
   })
 
-  it('names what is holding Mark complete, in text rather than only in a tooltip', () => {
+  it('names what is holding Mark Complete, in text rather than only in a tooltip', () => {
     renderBar({ blockers: ['2 unanswered'] })
 
     expect(screen.getByTestId('ob-task-action-complete')).toBeDisabled()
-    expect(screen.getByText(/Mark complete is waiting on 2 unanswered/)).toBeInTheDocument()
+    expect(screen.getByText(/Mark Complete is waiting on 2 unanswered/)).toBeInTheDocument()
+  })
+
+  /**
+   * The owner's one button, in its first half. A check list that has not been
+   * verified is not something to complete — it is something to send — and the
+   * gate it names is the send's own, not Complete's.
+   */
+  it('offers Send for Verification while the check list still owes the reviewer', () => {
+    renderBar({ checklistPhase: 'SEND', sendBlockers: ['1 unanswered row'] })
+
+    const button = screen.getByTestId('ob-task-action-send')
+    expect(button).toHaveTextContent('Send for Verification')
+    expect(button).toBeDisabled()
+    expect(screen.getByText(/Send for Verification is waiting on 1 unanswered row/)).toBeInTheDocument()
+    expect(screen.queryByTestId('ob-task-action-complete')).not.toBeInTheDocument()
+  })
+
+  it('sends the whole check list in one request when it is pressed', async () => {
+    const user = userEvent.setup()
+    const sent: string[] = []
+    server.use(
+      http.post('*/onboarding/journey-steps/:stepId/checklist/submit', ({ params }) => {
+        sent.push(String(params.stepId))
+        return HttpResponse.json({ id: 9 })
+      }),
+    )
+    renderBar({ checklistPhase: 'SEND' })
+
+    await user.click(screen.getByTestId('ob-task-action-send'))
+
+    await waitFor(() => expect(sent).toEqual(['9']))
+  })
+
+  /** Every row verified — the same button, now the press that closes the task. */
+  it('turns into Mark Complete once the review has passed', () => {
+    renderBar({ checklistPhase: 'COMPLETE' })
+
+    expect(screen.getByTestId('ob-task-action-complete')).toHaveTextContent('Mark Complete')
+    expect(screen.queryByTestId('ob-task-action-send')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The reviewer's word for the reviewer's act. It never said *Mark complete*
+   * truthfully — this press completes nothing, it hands the task back.
+   */
+  it('says Verified for the manager holding the review', () => {
+    renderBar({
+      yours: false,
+      reviewing: true,
+      task: task({ status: 'PENDING_REVIEW', ownerUserId: COLLEAGUE }),
+    })
+
+    expect(screen.getByTestId('ob-task-action-complete')).toHaveTextContent('Verified')
+  })
+
+  /**
+   * A task on the reviewer's desk is always mid-check-list, so the owner's
+   * table offers **Send for Verification** — the owner's word for the owner's
+   * act. The reviewer's override has to catch that one too, and did not: the
+   * manager was left holding Send for Verification, greyed, under a blocker
+   * reading "1 row still to review".
+   */
+  it('says Verified even though the check list is still in its send phase', () => {
+    renderBar({
+      yours: false,
+      reviewing: true,
+      checklistPhase: 'SEND',
+      reviewBlockers: ['1 row still to review'],
+      task: task({ status: 'PENDING_REVIEW', ownerUserId: COLLEAGUE }),
+    })
+
+    const button = screen.getByTestId('ob-task-action-complete')
+    expect(button).toHaveTextContent('Verified')
+    expect(button).toBeDisabled()
+    expect(screen.getByText(/Verified is waiting on 1 row still to review/)).toBeInTheDocument()
+    expect(screen.queryByTestId('ob-task-action-send')).not.toBeInTheDocument()
   })
 
   it('tells a non-owner whose task it is, and leaves them Communication', () => {

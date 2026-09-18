@@ -3,19 +3,25 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts'
 
 import type { ObProjectBoardRow } from '@/api/generated/model'
 
-import { byLatenessDescending, lateLabel, type Slice } from './obProjectBoard'
+import { type Slice } from './obProjectBoard'
 
-export interface ObProjectDonutProps {
+export interface ObProjectDonutProps<R = ObProjectBoardRow> {
   title: string
   /** One line under the title, saying what the slices are of. */
   caption: string
-  slices: Slice[]
+  slices: Slice<R>[]
   /** What the number in the hole counts — "ongoing", "projects". */
   centreLabel: string
   /** Names the legend's rows for a screen reader — "Salesperson", "Implementor", "Status". */
   entryNoun: string
-  /** Opens the matching projects. A slice with nowhere to go is drawn as plain text, never a dead button. */
-  onSelect?: (slice: Slice) => void
+  /**
+   * What a slice holds, for the figures a screen reader is read — "projects"
+   * unless the donut is a cut of something else, as the implementor's task
+   * donut is.
+   */
+  unitNoun?: string
+  /** Opens the matching rows. A slice with nowhere to go is drawn as plain text, never a dead button. */
+  onSelect?: (slice: Slice<R>) => void
 }
 
 /**
@@ -48,45 +54,89 @@ export interface ObProjectDonutProps {
  * figure is also on the legend and in the table — the shape carries the
  * gestalt, the numbers carry the detail.
  */
-export function ObProjectDonut({
+export function ObProjectDonut<R = ObProjectBoardRow>({
   title,
   caption,
   slices,
   centreLabel,
   entryNoun,
+  unitNoun = 'projects',
   onSelect,
-}: ObProjectDonutProps) {
+}: ObProjectDonutProps<R>) {
   const headingId = useId()
+  const [view, setView] = useState<'chart' | 'table'>('chart')
+  /*
+    Which arc is lit. It drove the hover panel too; that panel is gone, so
+    this now only dims the other arcs and swaps the centre figure — both of
+    which happen inside the chart's own box and move nothing on the page.
+  */
   const [active, setActive] = useState<string | null>(null)
 
   const total = slices.reduce((sum, slice) => sum + slice.rows.length, 0)
   const activeSlice = slices.find((slice) => slice.key === active) ?? null
-  const share = (slice: Slice) => (total === 0 ? 0 : Math.round((slice.rows.length / total) * 100))
+  const share = (slice: Slice<R>) => (total === 0 ? 0 : Math.round((slice.rows.length / total) * 100))
 
   return (
     <section
       aria-labelledby={headingId}
       className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-surface p-4 shadow-rest"
     >
-      <div>
-        <h3 id={headingId} className="text-sm font-semibold text-content">
-          {title}
-        </h3>
-        <p className="text-xs text-content-muted">{caption}</p>
+      {/* Deliberately not `flex-wrap`: the toggle is `shrink-0`, so wrapping
+          would drop it onto its own line the moment a caption grew — which is
+          what a long one did. The caption wraps inside its own column
+          instead, and the control stays on the title's line. */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 id={headingId} className="text-sm font-semibold text-content">
+            {title}
+          </h3>
+          <p className="text-xs text-content-muted">{caption}</p>
+        </div>
+        {/*
+          Chart or table, chosen rather than disclosed. The table used to be
+          behind a `<details>` and the figures behind a hover, so reading one
+          off the chart meant either opening a second copy of it or holding
+          the pointer still — and the hover panel opened *under* the chart,
+          which pushed the rest of the board down every time the mouse
+          crossed an arc. Two views, one at a time, and the card keeps its
+          height whichever is up.
+        */}
+        <div
+          role="group"
+          aria-label={`${title} view`}
+          className="flex shrink-0 rounded-control bg-subtle p-0.5"
+        >
+          {(['chart', 'table'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={view === option}
+              onClick={() => setView(option)}
+              className={
+                'rounded-[6px] px-2.5 py-1 text-[11px] font-semibold capitalize ' +
+                (view === option
+                  ? 'bg-surface text-primary shadow-rest'
+                  : 'text-content-muted hover:text-content')
+              }
+            >
+              {option}
+            </button>
+          ))}
+        </div>
       </div>
 
       {total === 0 ? (
         <p className="py-8 text-center text-xs text-content-muted">
           No running projects to chart yet.
         </p>
-      ) : (
+      ) : view === 'chart' ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative h-[168px] w-[168px] shrink-0 self-center" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={slices}
-                  dataKey={(slice: Slice) => slice.rows.length}
+                  dataKey={(slice: Slice<R>) => slice.rows.length}
                   nameKey="label"
                   innerRadius="62%"
                   outerRadius="92%"
@@ -136,6 +186,7 @@ export function ObProjectDonut({
                   share={share(slice)}
                   total={total}
                   entryNoun={entryNoun}
+                  unitNoun={unitNoun}
                   isActive={active === slice.key}
                   onActivate={() => setActive(slice.key)}
                   onDeactivate={() => setActive(null)}
@@ -145,29 +196,16 @@ export function ObProjectDonut({
             ))}
           </ul>
         </div>
-      )}
-
-      {/*
-        Hover and focus both land here, so the mouse and the keyboard see the
-        same list. Rendered in place rather than as a floating tooltip: this
-        panel is up to eight client names long, and a floating layer that size
-        covers the chart it is describing.
-      */}
-      {activeSlice && (
-        <ProjectPeek slice={activeSlice} />
-      )}
-
-      <details className="text-xs">
-        <summary className="cursor-pointer text-content-muted">Show as a table</summary>
-        <table className="mt-2 w-full text-left">
+      ) : (
+        <table className="w-full text-left text-xs">
           <caption className="sr-only">{title}, as a table</caption>
           <thead className="text-content-muted">
             <tr>
               <th scope="col" className="py-1 font-medium">
                 {entryNoun}
               </th>
-              <th scope="col" className="py-1 text-right font-medium">
-                Projects
+              <th scope="col" className="py-1 text-right font-medium capitalize">
+                {unitNoun}
               </th>
               <th scope="col" className="py-1 text-right font-medium">
                 Share
@@ -189,7 +227,7 @@ export function ObProjectDonut({
             </tr>
           </tbody>
         </table>
-      </details>
+      )}
     </section>
   )
 }
@@ -203,27 +241,29 @@ export function ObProjectDonut({
  * still takes a tab stop and still announces itself as a control, which is
  * worse than a label that was never one.
  */
-function LegendRow({
+function LegendRow<R>({
   slice,
   share,
   total,
   entryNoun,
+  unitNoun,
   isActive,
   onActivate,
   onDeactivate,
   onSelect,
 }: {
-  slice: Slice
+  slice: Slice<R>
   share: number
   total: number
   entryNoun: string
+  unitNoun: string
   isActive: boolean
   onActivate: () => void
   onDeactivate: () => void
-  onSelect?: (slice: Slice) => void
+  onSelect?: (slice: Slice<R>) => void
 }) {
   const name =
-    `${entryNoun} ${slice.label}: ${slice.rows.length} of ${total} projects, ${share} percent.` +
+    `${entryNoun} ${slice.label}: ${slice.rows.length} of ${total} ${unitNoun}, ${share} percent.` +
     (onSelect ? ' Open them.' : '')
 
   const body = (
@@ -265,42 +305,5 @@ function LegendRow({
     >
       {body}
     </button>
-  )
-}
-
-/** At most this many names before the panel says how many more there are. */
-const PEEK_LIMIT = 6
-
-/**
- * The projects behind the slice under the pointer.
- *
- * Worst first, because a reader hovering a person's share is asking what to do
- * about it, and the answer starts at the top. Capped, with the remainder
- * counted rather than silently dropped — a panel that grew to forty rows would
- * push the rest of the board off the screen on hover.
- */
-function ProjectPeek({ slice }: { slice: Slice }) {
-  const rows: ObProjectBoardRow[] = [...slice.rows].sort(byLatenessDescending)
-  const shown = rows.slice(0, PEEK_LIMIT)
-
-  return (
-    <div className="rounded-control border border-border bg-subtle p-2 text-xs">
-      <p className="mb-1 font-medium text-content">
-        {slice.label} · {slice.rows.length} {slice.rows.length === 1 ? 'project' : 'projects'}
-      </p>
-      <ul className="flex flex-col gap-0.5">
-        {shown.map((row) => (
-          <li key={row.id} className="flex items-baseline justify-between gap-3">
-            <span className="min-w-0 truncate text-content">{row.client.name}</span>
-            <span className="shrink-0 text-content-muted">
-              {lateLabel(row) ?? row.currentStage ?? 'on track'}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {rows.length > shown.length && (
-        <p className="mt-1 text-content-muted">and {rows.length - shown.length} more</p>
-      )}
-    </div>
   )
 }

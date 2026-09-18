@@ -21,6 +21,7 @@ import type { ProjectTask } from './useProjectTasks'
 
 export type TaskActionKey =
   | 'start'
+  | 'send'
   | 'complete'
   | 'waitingOnClient'
   | 'resume'
@@ -75,6 +76,32 @@ export interface TaskActionContext {
   isModerator: boolean
   /** What Complete is waiting on, already computed by the panel. */
   blockers: readonly string[]
+  /**
+   * Which half of the round the owner's one button is in.
+   *
+   * <p>`SEND` — there are check-list rows the manager has not passed yet, so
+   * the button says **Send for Verification** and hands the list over.
+   * `COMPLETE` — every row is verified, or the task has no check list at all,
+   * so it says **Mark Complete** and closes the task.
+   *
+   * <p>One button rather than two because it is one idea — *I am finished with
+   * my part* — and which thing that means is never the reader's to choose: a
+   * task with unverified rows cannot be completed, and a task whose rows are
+   * all verified has nothing left to send. Two buttons would put one
+   * permanently grey beside the other.
+   */
+  checklistPhase: 'SEND' | 'COMPLETE'
+  /**
+   * What holds **Send for Verification** — unanswered rows, in `blockers`'
+   * own shape.
+   *
+   * <p>Separate from `blockers` because the two gates are not the same gate.
+   * `POST /checklist/submit` asks only that every open row is answered;
+   * required documents and the client sign-off are `POST /complete`'s
+   * business, and holding the send on them would stop a list reaching its
+   * reviewer over a file nobody needs until the task closes.
+   */
+  sendBlockers: readonly string[]
   /** For the "only X can do this" sentence. */
   ownerName: string
   /** A mutation is in flight; everything that writes is held. */
@@ -90,7 +117,7 @@ function isPaused(task: ProjectTask): boolean {
 }
 
 export function taskActions(ctx: TaskActionContext): TaskAction[] {
-  const { task, yours, isModerator, blockers, ownerName, busy } = ctx
+  const { task, yours, isModerator, blockers, sendBlockers, checklistPhase, ownerName, busy } = ctx
   const terminal = isTerminal(task)
   const paused = isPaused(task)
 
@@ -154,13 +181,38 @@ export function taskActions(ctx: TaskActionContext): TaskAction[] {
       reason,
       opensDialog: false,
     })
+  } else if (checklistPhase === 'SEND') {
+    /*
+      The hand-over, as the owner's one button.
+
+      There is no per-row Send any more: a check list goes to its reviewer as a
+      unit, because a half-sent list is a state neither side has a control for
+      — `submitChecklist`'s own note. So this is the press that moves the task,
+      and it is held by exactly what that endpoint refuses on: a row with no
+      answer. Required documents are not asked about here; they hold Complete,
+      which is a different press on a different day.
+    */
+    const reason = writeBlock(
+      notRunning() ??
+        (sendBlockers.length > 0 ? `Outstanding: ${sendBlockers.join(', ')}` : undefined),
+    )
+    out.push({
+      key: 'send',
+      label: 'Send for Verification',
+      icon: '↑',
+      tone: 'primary',
+      group: 'state',
+      enabled: !reason,
+      reason,
+      opensDialog: false,
+    })
   } else {
     const reason = writeBlock(
       notRunning() ?? (blockers.length > 0 ? `Outstanding: ${blockers.join(', ')}` : undefined),
     )
     out.push({
       key: 'complete',
-      label: 'Mark complete',
+      label: 'Mark Complete',
       icon: '✓',
       tone: 'primary',
       group: 'state',

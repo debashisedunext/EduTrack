@@ -5441,6 +5441,34 @@ function filteredUsers(q: URLSearchParams) {
   if (q.get('managerId')) {
     rows = rows.filter((u) => u.reportingManagerId === Number(q.get('managerId')));
   }
+  /*
+    Live onboarding grants only, repeatable — the Implementor manager picker
+    asks for OB_MANAGER and OB_ADMIN together. `revokedAt` is honoured here for
+    the reason the real query honours it: a withdrawn grant is still a row, and
+    offering somebody it belongs to would name them to a job they can no longer
+    do.
+  */
+  const obRoles = q
+    .getAll('obModuleRole')
+    // Comma-joined, `explode: false` — what `http.ts` sends for an array
+    // parameter and what Spring's `List<String>` binding reads. Splitting here
+    // rather than assuming repeated keys is the difference between a picker
+    // that offers managers and one that offers nobody.
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (obRoles.length > 0) {
+    const grants = getDb().obModuleAccess;
+    rows = rows.filter((u) =>
+      grants.some(
+        (g) =>
+          g.userId === u.id &&
+          g.module === 'ONBOARDING' &&
+          g.revokedAt == null &&
+          obRoles.includes(g.moduleRole),
+      ),
+    );
+  }
   return [...rows].sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 

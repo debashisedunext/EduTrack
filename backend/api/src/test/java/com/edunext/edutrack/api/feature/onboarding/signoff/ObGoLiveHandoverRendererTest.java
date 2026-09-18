@@ -31,9 +31,9 @@ class ObGoLiveHandoverRendererTest {
                 LIVE_AT,
                 List.of("Payroll Onboarding", "Compliance Suite"),
                 List.of(
-                        new ObGoLiveHandoverReader.Contact(
+                        new ObGoLiveHandoverReader.HandoverContact(
                                 "Priya Raman", "Head of Ops", "priya@client.example", "+91 99999 00000", true),
-                        new ObGoLiveHandoverReader.Contact(
+                        new ObGoLiveHandoverReader.HandoverContact(
                                 "Arjun Mehta", null, "arjun@client.example", null, false)));
     }
 

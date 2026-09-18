@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { ExportUsersFormat } from './exportUsersFormat';
 import type { RoleCode } from './roleCode';
+import type { ObModuleRole } from './obModuleRole';
 
 export type ExportUsersParams = {
 format: ExportUsersFormat;
@@ -59,4 +60,11 @@ role?: RoleCode;
 projectId?: number;
 managerId?: number;
 isActive?: boolean;
+/**
+ * The same filter `listUsers` documents. Present here because one
+code path builds both filters, and a download that quietly ignored
+it would be the exact failure the note above is about.
+
+ */
+obModuleRole?: ObModuleRole[];
 };

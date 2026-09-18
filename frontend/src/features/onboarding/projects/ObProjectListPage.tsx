@@ -244,7 +244,7 @@ export function ObProjectListPage() {
                   Steps
                 </TableHead>
                 <TableHead scope="col" className="w-28">
-                  Delayed
+                  Status
                 </TableHead>
                 <TableHead scope="col" className="w-32">
                   Tentative finish

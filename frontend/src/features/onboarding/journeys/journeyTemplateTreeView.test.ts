@@ -86,21 +86,27 @@ describe('presetFor and levelOf', () => {
     expect(TREE_LEVELS.map((l) => l.label)).toEqual(['Step', 'Task', 'Checklist'])
   })
 
-  it('closes the stages themselves at the stage level', () => {
+  it('closes the stages and the tasks inside them at the stage level', () => {
+    /*
+      The tasks close too. Each level closes every row below it, which is
+      what lets a task keep a disclosure control of its own at every level —
+      open a stage from here and its tasks are drawn with their checklists
+      shut, rather than with no control to shut.
+    */
     const state = presetFor('stage', keys)
-    expect([...state.collapsed].sort()).toEqual([stageKey(10), stageKey(11)].sort())
+    expect([...state.collapsed].sort()).toEqual(
+      [stageKey(10), stageKey(11), taskKey(1), taskKey(2), taskKey(3)].sort(),
+    )
     expect(state.showSubtasks).toBe(false)
   })
 
-  it('reports no level for the every-task-closed state the Step segment used to name', () => {
-    // Still reachable by collapsing each task by hand; it just is not a
-    // preset any more, so nothing in the strip claims to be showing it.
+  it('names the every-task-closed state Task, because that is what the segment now means', () => {
     expect(
       levelOf(
         { collapsed: new Set([taskKey(1), taskKey(2), taskKey(3)]), showSubtasks: false },
         keys,
       ),
-    ).toBeNull()
+    ).toBe('task')
   })
 
   it('reports no level once a single row is toggled by hand', () => {
@@ -112,7 +118,12 @@ describe('presetFor and levelOf', () => {
   })
 
   it('does not confuse "everything open, sub-tasks hidden" with the sub-task level', () => {
-    expect(levelOf({ collapsed: new Set(), showSubtasks: false }, keys)).toBe('task')
+    /*
+      Nothing closed and the checklists hidden is no longer a preset: Task
+      closes the tasks now, so this state is one somebody built by hand and
+      no segment should claim it.
+    */
+    expect(levelOf({ collapsed: new Set(), showSubtasks: false }, keys)).toBeNull()
     expect(levelOf({ collapsed: new Set(), showSubtasks: true }, keys)).toBe('subtask')
   })
 })

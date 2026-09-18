@@ -175,7 +175,7 @@ class ObSignoffOtpServiceTest {
         void theRightCodeWorks() {
             withCode("123456");
 
-            PublicSignoffOtpDtos.Session session = service.verify(TOKEN, "123456", null);
+            PublicSignoffOtpDtos.SignoffSession session = service.verify(TOKEN, "123456", null);
 
             assertThat(session.sessionToken()).isEqualTo("session-token");
             assertThat(session.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(15)));

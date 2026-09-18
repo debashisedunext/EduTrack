@@ -839,6 +839,167 @@ public class ObJourneyStepLifecycleService {
     }
 
     /**
+     * The whole check list to the reviewer in one press — the implementor's
+     * <b>Send for verification</b>.
+     *
+     * <h2>One request, not one per row</h2>
+     *
+     * <p>The screen sends the list as a unit now: there is no per-row Send and
+     * a manager gives one verdict for the whole thing, so a half-sent check
+     * list is a state neither side has a control for. Looping
+     * {@link #submitItem} from the client produced exactly that whenever the
+     * third of five calls failed — four rows on the reviewer's desk, one still
+     * with its implementor, and a task whose {@code PENDING_REVIEW} was true
+     * of most of it. One transaction here means the list moves or none of it
+     * does.
+     *
+     * <p>It is {@link #sendRow} over every row rather than a second way of
+     * sending one, so the row path and the bulk path cannot drift — the same
+     * reason {@link #submitItem}'s own note gives.
+     *
+     * <h2>Every row must be answered</h2>
+     *
+     * <p>{@link #submitItem} let an implementor send two of five and keep the
+     * rest; sending the list as a unit means the unit has to be complete. An
+     * unanswered row is named in the gate rather than silently skipped, so the
+     * refusal says which line to go back to.
+     *
+     * <p>Rows already {@code VERIFIED} are left alone and are not counted
+     * against the gate: they are shut for good, and a rejection that brought
+     * their neighbours back must not ask for them again.
+     *
+     * @return the step, whose status {@link #settleAfterRowMove} has moved to
+     *         {@code PENDING_REVIEW}
+     * @throws JourneyStepNotFoundException no such step
+     * @throws NotStepOwnerException        not the caller's task to send
+     * @throws StepAlreadyTerminalException the task is closed
+     * @throws StepUnderReviewException     the list is already out
+     * @throws CompletionGateException      a row is still unanswered
+     */
+    @Transactional
+    public ObJourneyStep submitChecklist(long stepId, long callerId) {
+        ObJourneyStep step = requireStep(stepId);
+        requireOwnership(step, callerId);
+
+        if (step.getStatus().isTerminal()) {
+            throw new StepAlreadyTerminalException(step.getId(), step.getStatus());
+        }
+
+        List<ObJourneyStepItem> items = stepItems.findByStepIdOrderBySequenceAsc(stepId);
+        List<ObJourneyStepItem> open = items.stream()
+                .filter(item -> item.getRowState() != ObStepRowState.VERIFIED)
+                .toList();
+
+        List<String> unanswered = open.stream()
+                .filter(item -> item.getAnswer() == null)
+                .map(ObJourneyStepItem::getLabel)
+                .toList();
+        if (!unanswered.isEmpty()) {
+            throw new CompletionGateException(stepId, unanswered, 0, false);
+        }
+
+        List<ObJourneyStepItem> toSend = open.stream()
+                .filter(item -> item.getRowState() != ObStepRowState.SENT)
+                .toList();
+        if (toSend.isEmpty()) {
+            // Either it is already on the reviewer's desk, or nothing is left
+            // that is not shut. Both mean there is nothing to send, and
+            // neither is a press that should look like it worked.
+            throw new StepUnderReviewException(step.getId(), 0);
+        }
+
+        ObJourney journey = requireJourney(step);
+        Instant now = Instant.now();
+        toSend.forEach(item -> sendRow(item, now, callerId));
+        settleAfterRowMove(journey, step, now, callerId);
+        return step;
+    }
+
+    /**
+     * One verdict for the whole check list — the reviewer's <b>Verification
+     * done</b>.
+     *
+     * <h2>Why the verdict is not per row any more</h2>
+     *
+     * <p>A manager decides about the task, not about line four: they read the
+     * list and either it is right or it goes back. Per-row verdicts asked them
+     * to record five decisions to express one, and let a list return
+     * half-approved — a state the implementor then had to reconcile row by
+     * row. So this records the same verdict on every row that is out and
+     * releases them together.
+     *
+     * <p><b>A rejection returns the whole list.</b> Every sent row comes back
+     * unanswered carrying the manager's reason: {@link #releaseRow} withdraws
+     * the claim with the verdict, which is unchanged — what changed is that it
+     * happens to all of them at once rather than to the ones picked out. Rows
+     * already {@code VERIFIED} in an earlier round stay shut.
+     *
+     * <p><b>An acceptance still does not close the task.</b> It sets every row
+     * {@code VERIFIED} and hands the task back; {@link #closeReview} remains
+     * the deliberate press that ends it, for the reason that method gives at
+     * length — closing on the verdict would take the control away in the same
+     * instant it was used.
+     *
+     * @return the step, whose status {@link #settleAfterRowMove} has moved
+     * @throws JourneyStepNotFoundException      no such step, or no onboarding role
+     * @throws NotAnOnboardingModeratorException not this project's manager, nor an admin
+     * @throws InvalidStepTransitionException    the task is not out for review
+     * @throws RejectReasonRequiredException     rejected with an empty remark
+     * @throws CompletionGateException           nothing is out to give a verdict on
+     */
+    @Transactional
+    public ObJourneyStep recordChecklistVerdict(long stepId, long callerId, String moduleRole,
+            ObStepReviewState verdict, String remark) {
+        ObJourneyStep step = requireStep(stepId);
+        requireReviewer(step, callerId, moduleRole);
+
+        if (step.getStatus() != ObJourneyStepStatus.PENDING_REVIEW) {
+            throw new InvalidStepTransitionException(step.getId(), "review", step.getStatus());
+        }
+        if (!verdict.isDecided()) {
+            // NOT_REVIEWED was how a per-row verdict was taken back. There is
+            // no row to take it back on any more, and a press that means
+            // nothing is not one this route accepts.
+            throw new InvalidStepTransitionException(step.getId(), "review", step.getStatus());
+        }
+
+        String trimmed = remark == null || remark.isBlank() ? null : remark.trim();
+        if (verdict == ObStepReviewState.REJECTED && trimmed == null) {
+            throw new RejectReasonRequiredException(step.getId());
+        }
+
+        List<ObJourneyStepItem> out = stepItems.findByStepIdOrderBySequenceAsc(stepId).stream()
+                .filter(item -> item.getRowState() == ObStepRowState.SENT)
+                .toList();
+        if (out.isEmpty()) {
+            throw new CompletionGateException(stepId, List.of(), 0, false);
+        }
+
+        ObJourney journey = requireJourney(step);
+        Instant now = Instant.now();
+        for (ObJourneyStepItem item : out) {
+            item.setReviewState(verdict);
+            item.setReviewedBy(callerId);
+            item.setReviewedAt(now);
+            /*
+              The reason goes on every row it is about, which on a rejection is
+              all of them — the implementor opens any one and finds what the
+              manager said. A verdict of Verified never touches the
+              implementor's own note, exactly as reviewItem has it.
+            */
+            if (verdict == ObStepReviewState.REJECTED) {
+                item.setRemark(trimmed);
+            }
+            releaseRow(item, now, callerId);
+        }
+        if (verdict == ObStepReviewState.REJECTED) {
+            step.setReviewRound(step.getReviewRound() + 1);
+        }
+        settleAfterRowMove(journey, step, now, callerId);
+        return step;
+    }
+
+    /**
      * Mark this task's outcomes as looked at.
      *
      * <h2>What makes a signal a signal</h2>

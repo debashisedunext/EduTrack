@@ -150,6 +150,9 @@ class ObDashboardCardItemsRepository {
                    s.owner_user_id    AS owner_user_id,
                    ou.full_name       AS owner_name,
                    s.status           AS status,
+                   CASE WHEN s.status = 'BLOCKED'
+                        THEN COALESCE(NULLIF(TRIM(s.blocked_note), ''), s.blocked_reason_code)
+                   END                AS blocked_reason,
                    s.due_at           AS due_at,
                    (%s)               AS is_overdue,
                    esc.raised_at      AS escalation_raised_at,
@@ -182,6 +185,7 @@ class ObDashboardCardItemsRepository {
                    NULL               AS owner_user_id,
                    NULL               AS owner_name,
                    t.status           AS status,
+                   NULL               AS blocked_reason,
                    t.due_at           AS due_at,
                    (%s)               AS is_overdue,
                    NULL               AS escalation_raised_at,
@@ -320,7 +324,8 @@ class ObDashboardCardItemsRepository {
      */
     record ItemRow(String itemType, long itemId, long obClientId, String obClientName, Long journeyId,
                    Long projectId, Long productId, String productCode, String productName, String title,
-                   Long ownerUserId, String ownerName, String status, Instant dueAt, boolean isOverdue,
+                   Long ownerUserId, String ownerName, String status, String blockedReason,
+                   Instant dueAt, boolean isOverdue,
                    Instant cursorAt, long sortKeySigned) {
     }
 
@@ -338,6 +343,7 @@ class ObDashboardCardItemsRepository {
             nullableLong(rs, "owner_user_id"),
             rs.getString("owner_name"),
             rs.getString("status"),
+            rs.getString("blocked_reason"),
             instant(rs, "due_at"),
             rs.getBoolean("is_overdue"),
             instant(rs, "cursor_at"),

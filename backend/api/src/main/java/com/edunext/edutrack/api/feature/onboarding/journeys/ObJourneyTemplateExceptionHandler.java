@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.net.URI;
 
 /**
- * C-102 · RFC 9457 problem documents for the four
+ * C-102 · RFC 9457 problem documents for the five
  * {@code onboarding-journeys} controllers in this package
  * ({@code CONVENTIONS.md} §3), scoped by {@code assignableTypes} on
  * {@code AssignExceptionHandler}'s own advice: a repository-wide handler is
@@ -20,7 +20,8 @@ import java.net.URI;
         ObJourneyTemplateController.class,
         ObJourneyTemplateStepController.class,
         ObJourneyTemplateStepItemController.class,
-        ObJourneyTemplateStepDocController.class
+        ObJourneyTemplateStepDocController.class,
+        ObJourneyTaskImportController.class
 })
 class ObJourneyTemplateExceptionHandler {
 
@@ -31,6 +32,7 @@ class ObJourneyTemplateExceptionHandler {
     private static final URI MODULE_SERVICE_IN_USE = URI.create("https://edutrack/errors/module-service-in-use");
     private static final URI MODULE_SERVICE_HAS_DEPENDENTS =
             URI.create("https://edutrack/errors/module-service-has-dependents");
+    private static final URI TASK_IMPORT_INVALID = URI.create("https://edutrack/errors/task-import-invalid");
 
     /** No {@code ob_journey_templates}/{@code _steps}/{@code _step_items}/{@code _step_docs} row for the given id. */
     @ExceptionHandler({
@@ -161,5 +163,22 @@ class ObJourneyTemplateExceptionHandler {
         problem.setDetail(e.getMessage());
         problem.setProperty("dependentServiceNames", e.dependentServiceNames());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    /**
+     * OB-07 · {@code 422} on {@code POST task-import} — the file that was
+     * re-uploaded to confirm no longer validates. {@code errors} carries the
+     * identical row errors a failed {@code preview} would, on an ordinary
+     * {@code Problem} envelope — {@code ObStepHasDependentsProblem}'s own
+     * shape, extended with a domain-specific property.
+     */
+    @ExceptionHandler(TaskImportValidationException.class)
+    ResponseEntity<ProblemDetail> handleTaskImportInvalid(TaskImportValidationException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        problem.setType(TASK_IMPORT_INVALID);
+        problem.setTitle("Task import file is not valid");
+        problem.setDetail(e.getMessage());
+        problem.setProperty("errors", e.errors().stream().map(ObJourneyTaskImportDtos.RowError::of).toList());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
     }
 }

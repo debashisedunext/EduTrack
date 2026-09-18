@@ -56,7 +56,7 @@ public class ObImplementationStageService {
     }
 
     @Transactional(readOnly = true)
-    public List<ObImplementationStageDtos.Stage> list(Boolean isActive) {
+    public List<ObImplementationStageDtos.ImplementationStage> list(Boolean isActive) {
         List<ObImplementationStage> rows = isActive == null
                 ? stages.findAllByOrderBySequenceAscIdAsc()
                 : stages.findAllByIsActiveOrderBySequenceAscIdAsc(isActive);
@@ -64,7 +64,7 @@ public class ObImplementationStageService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<ObImplementationStageDtos.Stage> find(long id) {
+    public Optional<ObImplementationStageDtos.ImplementationStage> find(long id) {
         return stages.findById(id).map(ObImplementationStageService::toDto);
     }
 
@@ -78,7 +78,7 @@ public class ObImplementationStageService {
      * at all.
      */
     @Transactional
-    public ObImplementationStageDtos.Stage create(
+    public ObImplementationStageDtos.ImplementationStage create(
             ObImplementationStageDtos.WriteRequest request, Long createdBy) {
 
         String name = normalise(request.name());
@@ -111,7 +111,7 @@ public class ObImplementationStageService {
      * change the position, save) does not fail on a name nobody touched.
      */
     @Transactional
-    public Optional<ObImplementationStageDtos.Stage> update(
+    public Optional<ObImplementationStageDtos.ImplementationStage> update(
             long id, ObImplementationStageDtos.WriteRequest request) {
 
         return stages.findById(id).map(row -> {
@@ -179,8 +179,8 @@ public class ObImplementationStageService {
         }
     }
 
-    private static ObImplementationStageDtos.Stage toDto(ObImplementationStage row) {
-        return new ObImplementationStageDtos.Stage(
+    private static ObImplementationStageDtos.ImplementationStage toDto(ObImplementationStage row) {
+        return new ObImplementationStageDtos.ImplementationStage(
                 row.getId(), row.getName(), row.getSequence(), row.isActive());
     }
 

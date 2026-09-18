@@ -79,14 +79,14 @@ const byOccurredAtAscending = (a: ObStepCommunicationRow, b: ObStepCommunication
 //   3. **history is append-only.** These handlers only ever push to it, and
 //      there is no route that edits or removes an entry.
 
-interface StepLocation {
+export interface StepLocation {
   client: ObClient;
   journey: ObJourney;
   step: ObStep;
 }
 
 /** Journeys are nested under clients in this db, so a step id is found by walk. */
-function findStep(db: Db, stepId: number): StepLocation | undefined {
+export function findStep(db: Db, stepId: number): StepLocation | undefined {
   for (const client of db.obClients) {
     for (const journey of client.journeys) {
       const step = journey.steps.find((s) => s.id === stepId);
@@ -168,7 +168,7 @@ function stepDto(step: ObStep, journeyId: number) {
   };
 }
 
-function stepItemDto(item: ObStepItem, stepId: number, db: Db) {
+export function stepItemDto(item: ObStepItem, stepId: number, db: Db) {
   return {
     id: item.id,
     stepId,
@@ -181,6 +181,22 @@ function stepItemDto(item: ObStepItem, stepId: number, db: Db) {
     remark: item.remark ?? null,
     doneAt: item.doneAt ?? null,
     doneBy: userRef(item.doneById ?? null, db),
+    // OB-16 · the review gate. A fixture row that predates it carries neither
+    // field, and the defaults below are what the server stores for a row nobody
+    // has submitted: on the implementor's desk, with no verdict on it.
+    rowState: item.rowState ?? 'DRAFT',
+    reviewState: item.reviewState ?? 'NOT_REVIEWED',
+    reviewLocked: (item.rowState ?? 'DRAFT') !== 'DRAFT',
+    submittedAt: item.submittedAt ?? null,
+    submittedBy: userRef(item.submittedById ?? null, db),
+    reviewedAt: item.reviewedAt ?? null,
+    reviewedBy: userRef(item.reviewedById ?? null, db),
+    outcomeSeenAt: item.outcomeSeenAt ?? null,
+    // Settled, and its owner has not looked at it yet — the server's own
+    // `isUnseenOutcome`. A row still on somebody's desk is never "unseen":
+    // there is no outcome on it to have missed.
+    unseenOutcome: ['VERIFIED', 'REJECTED'].includes(item.rowState ?? 'DRAFT')
+      && item.outcomeSeenAt == null,
   };
 }
 
@@ -202,7 +218,7 @@ function effectiveOwnerUserId(step: ObStep, db: Db): number | null {
   return ownerOnLeave ? step.backupOwnerUserId : step.ownerUserId;
 }
 
-function stepDetailDto(step: ObStep, db: Db, journeyId: number, journey?: ObJourney) {
+export function stepDetailDto(step: ObStep, db: Db, journeyId: number, journey?: ObJourney) {
   /*
     The stage a task sits in, and how much of its budget is gone. Both are
     resolved rather than stored, exactly as the server resolves them — see

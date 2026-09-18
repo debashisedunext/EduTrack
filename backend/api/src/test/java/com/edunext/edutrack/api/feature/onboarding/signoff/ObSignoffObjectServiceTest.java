@@ -66,7 +66,7 @@ class ObSignoffObjectServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         when(sessions.resolve(SESSION)).thenReturn(OptionalLong.of(SIGNOFF_ID));
-        when(contacts.find(CONTACT_ID)).thenReturn(new PublicSignoffAcceptDtos.Contact(
+        when(contacts.find(CONTACT_ID)).thenReturn(new PublicSignoffAcceptDtos.SignoffContact(
                 CONTACT_ID, "Priya Raman", "Head of Ops", "priya@client.example",
                 "+91 99999 00000", true, true));
         when(pages.read(any())).thenReturn(new ObSignoffPageReader.Page(

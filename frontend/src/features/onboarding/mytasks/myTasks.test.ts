@@ -12,6 +12,7 @@ import {
   myTaskDotState,
   myTaskStatusLabel,
   projectLabel,
+  projectOnlyLabel,
   serviceStepLabel,
 } from './myTasks'
 
@@ -169,6 +170,7 @@ const ROW: ObMyTask = {
   rowsOut: 0,
   rowsReturned: 0,
   rowsApproved: 0,
+  pendingMyVerification: false,
   taskId: 900,
   taskName: 'Week off',
   status: 'PENDING',
@@ -229,6 +231,28 @@ describe('projectLabel', () => {
     expect(
       projectLabel({ obClientName: 'Vasundhara School', projectName: 'Vasundhara Project' }),
     ).toBe('Vasundhara School — Vasundhara Project')
+  })
+})
+
+describe('projectOnlyLabel', () => {
+  /** The project half alone — for the column that prints the client below it. */
+  it('gives just the project, with the client’s prefix dropped', () => {
+    expect(projectOnlyLabel(ROW)).toBe('DAV Proj')
+    expect(
+      projectOnlyLabel({
+        obClientName: 'Delhi Public School',
+        projectName: 'Delhi Public School — EDUNEXT-ERP',
+      }),
+    ).toBe('EDUNEXT-ERP')
+  })
+
+  /** A project named for its client and nothing else is the client, once. */
+  it('prints nothing extra when the project adds nothing', () => {
+    expect(projectOnlyLabel({ obClientName: 'DAV School', projectName: 'DAV School' })).toBe('')
+  })
+
+  it('falls back to the project name with no client to strip', () => {
+    expect(projectOnlyLabel({ obClientName: '', projectName: 'DAV Proj' })).toBe('DAV Proj')
   })
 })
 

@@ -21,6 +21,7 @@ import { useObClients } from '@/features/onboarding/clients/obClientMasterQuerie
 import { activeServicesOf, categoryOf } from './moduleServicePicker'
 import { validateNewProject } from './newProjectForm'
 import { existingProjectIdFrom, useCreateObProject } from './projectQueries'
+import { useObManagerOptions } from './useObManagerOptions'
 
 /**
  * The New Project form — `/onboarding/projects/new`.
@@ -76,6 +77,9 @@ export function NewObProjectPage() {
   const { data: clientPage } = useObClients({ limit: 200 })
   const { data: products } = useListObProducts({ isActive: true })
   const { data: users } = useListUsers()
+  // Narrower than `people` on purpose — only somebody the review routes will
+  // accept may be named here. See `useObManagerOptions`.
+  const { managers } = useObManagerOptions()
   const { data: templates, isPending: servicesPending } = useListObJourneyTemplates(
     { productId: productId ?? undefined },
     // The catalogue read is meaningless without a product — asking for every
@@ -345,14 +349,14 @@ export function NewObProjectPage() {
                 id="project-implementor-manager"
                 label="Implementor manager"
                 required
-                hint="Who this project escalates to. Not read from the implementor's reporting line — a project can be overseen by somebody they do not report to."
+                hint="Who this project escalates to, and who verifies its check lists. Onboarding managers and admins only — anybody else is refused by the review routes. Not read from the implementor's reporting line: a project can be overseen by somebody they do not report to."
                 error={errors.implementorManagerUserId}
               >
                 {(aria) => (
                   <SearchableDropdown
                     {...aria}
-                    options={people}
-                    value={people.find((u) => u.id === implementorManagerUserId) ?? null}
+                    options={[...managers]}
+                    value={managers.find((u) => u.id === implementorManagerUserId) ?? null}
                     onChange={(u) => setImplementorManagerUserId(u.id)}
                     getKey={(u) => String(u.id)}
                     getLabel={(u) => u.displayName}

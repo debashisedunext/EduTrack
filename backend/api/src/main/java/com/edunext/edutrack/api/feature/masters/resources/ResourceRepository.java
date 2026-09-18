@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -279,6 +280,26 @@ class ResourceRepository {
         if (filter.isActive() != null) {
             clauses.add("u.is_active = ?");
             params.add(filter.isActive());
+        }
+        if (!filter.obModuleRoles().isEmpty()) {
+            /*
+              EXISTS for `projectId`'s reason, and `revoked_at IS NULL` for
+              A-110's: a revoked grant is still a row, and matching one would
+              offer a picker somebody whose access was withdrawn in August.
+
+              The placeholders are counted off the list itself rather than
+              interpolated from anything a caller sent, so every value stays
+              bound however many roles arrive.
+            */
+            String placeholders = String.join(", ",
+                    Collections.nCopies(filter.obModuleRoles().size(), "?"));
+            clauses.add("""
+                    EXISTS (SELECT 1 FROM user_module_access uma
+                             WHERE uma.user_id = u.id
+                               AND uma.module = 'ONBOARDING'
+                               AND uma.revoked_at IS NULL
+                               AND uma.module_role IN (%s))""".formatted(placeholders));
+            params.addAll(filter.obModuleRoles());
         }
         if (cursor != null) {
             // The keyset predicate must mirror ORDER BY (full_name, id) exactly,

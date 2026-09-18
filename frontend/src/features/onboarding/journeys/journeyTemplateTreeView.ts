@@ -98,13 +98,22 @@ export interface TreeKeys {
   taskIds: readonly number[]
 }
 
-/** The state "show the tree down to this level" means. */
+/**
+ * The state "show the tree down to this level" means.
+ *
+ * <p>Each level closes every row below it, tasks included. That is what lets
+ * a task carry a disclosure control of its own at <em>every</em> level rather
+ * than only at Checklist: the control reads the task's own collapsed state,
+ * so "Task" means every task drawn and every checklist shut, and opening one
+ * of them is a click on that task rather than a jump to another level.
+ */
 export function presetFor(level: TreeLevel, keys: TreeKeys): TreeViewState {
+  const tasks = keys.taskIds.map(taskKey)
   switch (level) {
     case 'stage':
-      return { collapsed: new Set(keys.stageIds.map(stageKey)), showSubtasks: false }
+      return { collapsed: new Set([...keys.stageIds.map(stageKey), ...tasks]), showSubtasks: false }
     case 'task':
-      return { collapsed: new Set(), showSubtasks: false }
+      return { collapsed: new Set(tasks), showSubtasks: false }
     case 'subtask':
       return EXPANDED
   }
@@ -116,15 +125,15 @@ export function presetFor(level: TreeLevel, keys: TreeKeys): TreeViewState {
  * unhighlighted rather than one of them lying.
  */
 export function levelOf(state: TreeViewState, keys: TreeKeys): TreeLevel | null {
+  const tasks = keys.taskIds.map(taskKey)
   if (state.showSubtasks) return state.collapsed.size === 0 ? 'subtask' : null
-  if (sameKeys(state.collapsed, keys.stageIds.map(stageKey))) return 'stage'
+  if (sameKeys(state.collapsed, [...keys.stageIds.map(stageKey), ...tasks])) return 'stage'
   /*
-    Every task closed and nothing else used to be its own segment. With that
-    segment gone the state is still reachable — collapse the tasks by hand —
-    and it now answers `null`, which is what the highlight already means for
-    any tree that matches no preset.
+    Every task closed and nothing else. It is a preset again — the level that
+    draws each task and none of their checklists — because a task's own
+    control is what opens one from here, rather than the strip.
   */
-  if (state.collapsed.size === 0) return 'task'
+  if (sameKeys(state.collapsed, tasks)) return 'task'
   return null
 }
 

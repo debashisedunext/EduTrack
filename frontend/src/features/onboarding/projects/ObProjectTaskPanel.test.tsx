@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 
 import type { UserRef } from '@/api/generated/model/userRef'
+import { server } from '@/mocks/server'
 
 import { ObProjectTaskPanel } from './ObProjectTaskPanel'
 import type { ProjectTask } from './useProjectTasks'
@@ -160,16 +162,20 @@ describe('the check list', () => {
     renderPanel()
 
     const columns = screen.getAllByRole('columnheader').map((c) => c.textContent)
-    expect(columns).toEqual(['#', 'Checklist item', 'Action', 'Remark', 'Send'])
+    expect(columns).toEqual(['#', 'Checklist item', 'Action', 'Remark'])
     expect(screen.getAllByTestId('ob-check-list-row')).toHaveLength(2)
   })
 
-  /** Nothing to hand over on somebody else's task, so no column for it. */
-  it('draws no Send column for a reader who owns none of it', () => {
+  /**
+   * The list goes to its reviewer as a unit, from the task's own button —
+   * there is no per-row hand-over left to give a column to.
+   */
+  it('draws no Send column at all', () => {
     renderPanel({}, false)
 
     const columns = screen.getAllByRole('columnheader').map((c) => c.textContent)
     expect(columns).toEqual(['#', 'Checklist item', 'Action', 'Remark'])
+    expect(screen.queryByTestId('ob-check-list-row-send')).not.toBeInTheDocument()
   })
 
   /**
@@ -525,7 +531,7 @@ describe('a task that came back from review', () => {
     expect(banner).not.toHaveTextContent('the rest were verified')
     expect(banner).toHaveTextContent('the check list is open again')
     // And what to do about it, which it never said.
-    expect(banner).toHaveTextContent('Fix it, answer it again, then press Send on the row')
+    expect(banner).toHaveTextContent('Fix it, answer it again, then press Send for Verification')
   })
 
   it('still says the rest are locked when there actually are others', () => {
@@ -535,15 +541,166 @@ describe('a task that came back from review', () => {
     expect(banner).toHaveTextContent('the rest were verified and are locked')
   })
 
-  /** The reviewer still gets the control — this changed nothing for them. */
-  it('keeps the verdict control for the manager holding the review', () => {
+  /**
+   * The reviewer gets the control, and it is now three options rather than one
+   * cycling button — every verdict reachable in one press, none of them hidden
+   * behind the one the row is currently holding.
+   */
+  it('gives the manager holding the review all three verdicts at once', () => {
     renderPanel(
       { status: 'PENDING_REVIEW', items: [returnedRow({ rowState: 'SENT' })] } as unknown as Partial<ProjectTask>,
       false,
       true,
     )
 
-    expect(screen.getByRole('button', { name: /Rejected/ })).toBeInTheDocument()
+    const group = screen.getByRole('radiogroup')
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+      '○Not Reviewed',
+      '✓Verified',
+      '↻Rejected',
+    ])
     expect(screen.queryByTestId('ob-check-list-row-verdict')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The Action column is the implementor's control, and a manager may not press
+   * it in any state — so it is not drawn for them at all.
+   */
+  it('drops the Action column for the manager holding the review', () => {
+    renderPanel(
+      { status: 'PENDING_REVIEW', items: [returnedRow({ rowState: 'SENT' })] } as unknown as Partial<ProjectTask>,
+      false,
+      true,
+    )
+
+    expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual([
+      '#',
+      'Checklist item',
+      'Review · manager',
+      'Remark',
+    ])
+  })
+})
+
+/**
+ * The hand-over, in both directions, from one button each.
+ *
+ * <p>There is no per-row Send and no per-row Send back any more. The
+ * implementor's list goes as a unit from the task's own button, and a
+ * rejection goes home the moment its reason is written.
+ */
+describe('the hand-over', () => {
+  /** A row on the reviewer's desk with no verdict on it yet. */
+  const sentRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    stepId: 900,
+    sequence: 1,
+    label: 'ERP Details Communicated',
+    isMandatory: true,
+    isDone: true,
+    answer: true,
+    remark: null,
+    reviewState: 'NOT_REVIEWED',
+    rowState: 'SENT',
+    ...over,
+  })
+
+  it('offers the owner Send for Verification, and names the row holding it', () => {
+    renderPanel()
+
+    const button = screen.getByTestId('ob-task-action-send')
+    expect(button).toHaveTextContent('Send for Verification')
+    expect(button).toBeDisabled()
+    expect(
+      screen.getByText(/Send for Verification is waiting on 1 unanswered row/),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('ob-task-action-complete')).not.toBeInTheDocument()
+  })
+
+  /** The other half of the same button, and the only thing that closes a task. */
+  it('turns it into Mark Complete once every row is verified', () => {
+    renderPanel({
+      items: [verifiedRow({ id: 1 }), verifiedRow({ id: 2 })],
+    } as unknown as Partial<ProjectTask>)
+
+    expect(screen.getByTestId('ob-task-action-complete')).toHaveTextContent('Mark Complete')
+    expect(screen.queryByTestId('ob-task-action-send')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Rejecting *is* sending back. The two presses this used to take left rows
+   * sitting rejected on a manager's screen that their implementor could not
+   * see — but the reason still has to come first, because a release without
+   * one is refused.
+   */
+  it('sends a rejected row back on its reason alone, with no button to find', async () => {
+    const verdicts: { itemId: string; body: unknown }[] = []
+    const released: string[] = []
+    server.use(
+      http.patch('*/onboarding/journey-step-items/:itemId/review', async ({ params, request }) => {
+        verdicts.push({ itemId: String(params.itemId), body: await request.json() })
+        return HttpResponse.json({ id: Number(params.itemId) })
+      }),
+      http.post('*/onboarding/journey-step-items/:itemId/send-back', ({ params }) => {
+        released.push(String(params.itemId))
+        return HttpResponse.json({ id: Number(params.itemId) })
+      }),
+    )
+
+    renderPanel(
+      { status: 'PENDING_REVIEW', items: [sentRow()] } as unknown as Partial<ProjectTask>,
+      false,
+      true,
+    )
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Rejected' }))
+
+    await waitFor(() => expect(verdicts).toHaveLength(1))
+    expect(verdicts[0]?.body).toEqual({ state: 'REJECTED' })
+    // Not yet. A rejection the server would refuse is not one anybody should
+    // have sent.
+    expect(released).toEqual([])
+
+    // And the box to write it in is already on the screen, with the caret in
+    // it — it used to open a refetch later, which is to say after the press
+    // that was supposed to put the reader in it.
+    const box = screen.getByLabelText('Reason for rejecting ERP Details Communicated')
+    await waitFor(() => expect(box).toHaveFocus())
+
+    fireEvent.change(box, { target: { value: 'Sheet 2 was never shared' } })
+    fireEvent.blur(box)
+
+    await waitFor(() => expect(released).toEqual(['1']))
+    expect(verdicts.at(-1)?.body).toEqual({
+      state: 'REJECTED',
+      remark: 'Sheet 2 was never shared',
+    })
+  })
+
+  /** Verified stays reversible — it is the task's own button that releases it. */
+  it('records Verified without sending anything anywhere', async () => {
+    const verdicts: unknown[] = []
+    const released: string[] = []
+    server.use(
+      http.patch('*/onboarding/journey-step-items/:itemId/review', async ({ params, request }) => {
+        verdicts.push(await request.json())
+        return HttpResponse.json({ id: Number(params.itemId) })
+      }),
+      http.post('*/onboarding/journey-step-items/:itemId/send-back', ({ params }) => {
+        released.push(String(params.itemId))
+        return HttpResponse.json({ id: Number(params.itemId) })
+      }),
+    )
+
+    renderPanel(
+      { status: 'PENDING_REVIEW', items: [sentRow()] } as unknown as Partial<ProjectTask>,
+      false,
+      true,
+    )
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Verified' }))
+
+    await waitFor(() => expect(verdicts).toEqual([{ state: 'VERIFIED' }]))
+    expect(released).toEqual([])
   })
 })

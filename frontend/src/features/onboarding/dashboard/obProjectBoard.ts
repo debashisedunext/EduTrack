@@ -98,11 +98,19 @@ export function bucketLook(bucket: string): BucketLook {
 }
 
 /** A slice of one of the three donuts: who or what, how many, and the rows behind it. */
-export interface Slice {
+/**
+ * One arc, its legend row, and the rows behind it.
+ *
+ * <p>Generic in what it holds, defaulting to a project. Every donut on this
+ * board is a cut of the project board, but the implementor's donut is a cut
+ * of their own task queue — the arcs, the legend and the table are the same
+ * control either way, and only what a hover lists differs.
+ */
+export interface Slice<R = ObProjectBoardRow> {
   key: string
   label: string
   colour: string
-  rows: ObProjectBoardRow[]
+  rows: R[]
 }
 
 /**
@@ -241,4 +249,74 @@ export function lateLabel(row: ObProjectBoardRow): string | null {
   const days = latenessOf(row)
   if (days < 1) return null
   return `${days} ${days === 1 ? 'day' : 'days'} late`
+}
+
+/**
+ * The projects behind one of the band's six figures.
+ *
+ * <p>Every card on this board is now openable, and what it opens is a panel
+ * listing the rows it counted. That panel takes its rows from here rather
+ * than fetching them: `GET /onboarding/project-board` already returned every
+ * running project, so a second read would be a chance for the list to
+ * disagree with the number that was clicked — and this board's whole claim is
+ * that a slice, a card and a list are the same projects.
+ *
+ * <p>Each predicate is the one its card's own caption states, so the count and
+ * the list are the same set by construction. Note which way round the last
+ * two go: <b>Overdue</b> is `DELAYED` — up to seven working days past the
+ * completion date — and <b>At risk</b> is `AT_RISK`, more than seven. The
+ * names read backwards and the server's buckets are the authority; this is the
+ * one place the mapping is written down.
+ *
+ * <p>An unknown key answers the whole set rather than an empty one. A card
+ * added to the band before it is added here should open a panel that is too
+ * broad, which a reader can see, rather than one that is empty, which reads as
+ * "nothing matched".
+ */
+export function projectsForCard(
+  key: string,
+  board: { projects: ObProjectBoardRow[]; today: string; weekStart: string; weekEnd: string },
+): ObProjectBoardRow[] {
+  const rows = board.projects
+  switch (key) {
+    case 'ongoing':
+      return rows
+    case 'week':
+      /* ISO dates compare lexicographically, which is why they are not parsed
+         here: `2026-09-18` between `2026-09-14` and `2026-09-20` is a string
+         comparison, and parsing would reintroduce the browser timezone this
+         board deliberately keeps out of its date arithmetic. */
+      return rows.filter(
+        (row) =>
+          row.tentativeCompletion != null &&
+          row.tentativeCompletion >= board.weekStart &&
+          row.tentativeCompletion <= board.weekEnd,
+      )
+    case 'today':
+      return rows.filter((row) => row.tentativeCompletion === board.today)
+    case 'overdue':
+      return rows.filter((row) => row.bucket === 'DELAYED')
+    case 'risk':
+      return rows.filter((row) => row.bucket === 'AT_RISK')
+    case 'escalations':
+      return rows.filter((row) => row.openEscalations > 0)
+    default:
+      return rows
+  }
+}
+
+/**
+ * Whether a project is running behind its own completion date.
+ *
+ * <p>The two buckets that mean the date has passed: `DELAYED` up to seven
+ * working days past it, `AT_RISK` more than seven. `NOT_SCHEDULED` is not
+ * behind anything — it has no date to have passed — and `ON_TIME` and `AHEAD`
+ * are the two that are not late.
+ *
+ * <p>One predicate, because three surfaces answer with it: the Overdue and At
+ * risk cards, the two Summary lists, and the Delayed projects grid. Written
+ * once so a project cannot be behind on one of them and fine on another.
+ */
+export function behindSchedule(row: ObProjectBoardRow): boolean {
+  return row.bucket === 'DELAYED' || row.bucket === 'AT_RISK'
 }
