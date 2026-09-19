@@ -1536,6 +1536,13 @@ public class ObJourneyStepLifecycleService {
         return requireStep(stepId);
     }
 
+    /** C-121: the same row-scope check used by the task action routes. */
+    public ObJourneyStep requireAttachmentAccess(long stepId, long callerId) {
+        ObJourneyStep step = requireStep(stepId);
+        requireOwnership(step, callerId);
+        return step;
+    }
+
     // ------------------------------------------------------------------
     // C-111 · the read side, and the one write that feeds it
     // ------------------------------------------------------------------

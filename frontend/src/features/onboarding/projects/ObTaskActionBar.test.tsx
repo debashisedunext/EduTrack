@@ -302,7 +302,7 @@ describe('the task action bar', () => {
       expect(within(dialog).getByRole('textbox')).toBeInTheDocument()
     })
 
-    it('lists the required documents, and says why upload is not on offer', async () => {
+    it('lists the required documents and offers the task upload control', async () => {
       const user = userEvent.setup()
       renderBar({ task: task({ docs: [doc(), doc({ id: 2, label: 'Signed consent' })] }) })
 
@@ -312,7 +312,7 @@ describe('the task action bar', () => {
       const dialog = await screen.findByTestId('ob-task-docs-dialog')
       expect(within(dialog).getAllByTestId('ob-task-doc-row')).toHaveLength(2)
       expect(within(dialog).getByText('Signed consent')).toBeInTheDocument()
-      expect(dialog).toHaveTextContent(/not available yet/i)
+      expect(within(dialog).getByLabelText('Document')).toBeInTheDocument()
       expect(within(dialog).getByRole('button', { name: 'Upload' })).toBeDisabled()
     })
 

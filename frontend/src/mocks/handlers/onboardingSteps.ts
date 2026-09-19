@@ -437,6 +437,34 @@ export const obJourneyHandlers = [
     return found ? ok(stepDetailDto(found.step, db, found.journey.id, found.journey)) : notFound('Step');
   }),
 
+  http.post(url('/onboarding/journey-steps/:stepId/attachments'), async ({ params, request }) => {
+    const db = getDb();
+    const found = findStep(db, Number(params.stepId));
+    if (!found) return notFound('Step');
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      return validationFailed({ file: ['A file is required'] });
+    }
+    const doc = found.step.docs?.find((candidate) => candidate.attachmentId == null);
+    if (doc) doc.attachmentId = nextId(db, 'attachment');
+    return ok({
+      id: doc?.attachmentId ?? nextId(db, 'attachment'),
+      fileName: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      kind: 'SUBMISSION',
+      uploadedByType: 'STAFF',
+      uploadedBy: userRef(db.currentUserId, db),
+      scanStatus: 'PENDING',
+      downloadUrl: null,
+      isDeleted: false,
+      deletedBy: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  }),
+
   http.patch(url('/onboarding/journey-steps/:stepId'), async ({ params, request }) => {
     const db = getDb();
     const found = findStep(db, Number(params.stepId));
