@@ -8,6 +8,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.net.URI;
 
@@ -50,6 +51,7 @@ class ObJourneyStepLifecycleExceptionHandler {
     private static final URI ATTACHMENT_TOO_LARGE = URI.create("https://edutrack/errors/attachment-too-large");
     private static final URI UNSUPPORTED_ATTACHMENT_TYPE =
             URI.create("https://edutrack/errors/unsupported-attachment-type");
+    private static final URI STORAGE_UNAVAILABLE = URI.create("https://edutrack/errors/storage-unavailable");
 
     /** No {@code ob_journey_steps} row for the given id. */
     @ExceptionHandler(JourneyStepNotFoundException.class)
@@ -85,6 +87,15 @@ class ObJourneyStepLifecycleExceptionHandler {
         problem.setTitle("File type not allowed");
         problem.setDetail(e.getMessage());
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(problem);
+    }
+
+    @ExceptionHandler(S3Exception.class)
+    ResponseEntity<ProblemDetail> handleStorageError(S3Exception e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.SERVICE_UNAVAILABLE);
+        problem.setType(STORAGE_UNAVAILABLE);
+        problem.setTitle("Document storage is temporarily unavailable");
+        problem.setDetail("The file could not be stored. Please try again later.");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
 
     /** C-111 · no {@code ob_journey_step_items} row for the given id. */
