@@ -3,8 +3,11 @@ package com.edunext.edutrack.api.feature.portal.onboarding;
 import com.edunext.edutrack.api.feature.onboarding.signoff.ObSignoffCsatUnavailableException;
 import com.edunext.edutrack.api.feature.onboarding.signoff.ObSignoffNotForClientException;
 import com.edunext.edutrack.api.feature.onboarding.signoff.ObSignoffNotPendingException;
+import com.edunext.edutrack.api.feature.onboarding.prereqs.ObPrereqTaskService;
 import com.edunext.edutrack.api.feature.onboarding.signoff.PortalSignoffDecisionService;
 import com.edunext.edutrack.api.security.PrincipalType;
+import com.edunext.edutrack.domain.onboarding.ObAttachmentUploaderType;
+import com.edunext.edutrack.domain.onboarding.ObClientPrereqTask;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +20,7 @@ import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -24,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,6 +42,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -71,6 +77,15 @@ class PortalOnboardingSignoffsControllerTest {
 
     @MockitoBean
     PortalSignoffDecisionService decisions;
+
+        @MockitoBean
+        ObPrereqTaskService tasks;
+
+        @MockitoBean
+        PortalPrereqAttachmentService attachments;
+
+        @MockitoBean
+        PortalPrimaryContactReader clients;
 
     /** {@code PortalTicketControllerTest}'s client token, verbatim. */
     private static JwtAuthenticationToken client(Long obClientId) {
@@ -112,6 +127,30 @@ class PortalOnboardingSignoffsControllerTest {
                 Instant.parse("2026-08-02T09:00:00Z"), "Priya Nair", "Looks good.",
                 null, null,
                 false);
+    }
+
+    @Test
+    @DisplayName("uploads a prerequisite document through the portal multipart route")
+    void uploadsPortalPrerequisiteAttachment() throws Exception {
+        ObClientPrereqTask task = new ObClientPrereqTask();
+        task.setId(8L);
+        task.setObClientId(9L);
+        when(tasks.require(8L)).thenReturn(task);
+        when(clients.activePrimaryContactId(9L)).thenReturn(Optional.of(77L));
+        when(attachments.upload(eq(8L), eq(77L), eq("certificate.pdf"), any(byte[].class)))
+                .thenReturn(new PortalOnboardingDtos.PortalSubmissionFile(
+                        41L, "certificate.pdf", 4L, ObAttachmentUploaderType.CLIENT,
+                        Instant.parse("2026-09-19T09:03:42Z"), null));
+
+        mvc.perform(multipart("/api/v1/portal/onboarding/prereq-tasks/8/attachments")
+                        .file(new MockMultipartFile("file", "certificate.pdf",
+                                MediaType.APPLICATION_PDF_VALUE, "%PDF".getBytes()))
+                        .with(authentication(client(9L))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.attachmentId").value(41))
+                .andExpect(jsonPath("$.data.fileName").value("certificate.pdf"));
+
+        verify(attachments).upload(eq(8L), eq(77L), eq("certificate.pdf"), any(byte[].class));
     }
 
     @Nested
