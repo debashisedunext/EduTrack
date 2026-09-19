@@ -10128,6 +10128,42 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
+  /onboarding/journey-steps/{stepId}/attachments:
+    parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
+    post:
+      tags: [onboarding-journeys]
+      operationId: uploadObJourneyStepAttachment
+      summary: Attach a document to a running task (OB-06)
+      description: Stores one task document through the shared onboarding upload pipeline. Only the step owner or backup owner may upload; the attachment is owned by the step and uses kind `SUBMISSION`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Accepted for scanning.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObAttachmentResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/ObModuleGated' }
+        '413':
+          description: The file is larger than the configured upload limit.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '415':
+          description: Extension or sniffed MIME type not allowed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/UnprocessableTransition' }
+
   /onboarding/journey-steps/{stepId}/skip:
     parameters: [{ $ref: '#/components/parameters/ObJourneyStepId' }]
     post:

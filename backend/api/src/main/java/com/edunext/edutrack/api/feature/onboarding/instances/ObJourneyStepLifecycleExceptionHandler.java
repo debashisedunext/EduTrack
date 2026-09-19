@@ -1,5 +1,8 @@
 package com.edunext.edutrack.api.feature.onboarding.instances;
 
+import com.edunext.edutrack.api.feature.onboarding.attachments.ObAttachmentTooLargeException;
+import com.edunext.edutrack.api.upload.UnsupportedUploadTypeException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +30,7 @@ import java.net.URI;
         // "something went wrong", and a not-found item returned 500 rather than 404.
         // Adding a controller to this package means adding it here.
         ObJourneyStepItemController.class,
+        ObJourneyStepAttachmentController.class,
 })
 class ObJourneyStepLifecycleExceptionHandler {
 
@@ -43,6 +47,9 @@ class ObJourneyStepLifecycleExceptionHandler {
     private static final URI STEP_ITEM_VERIFIED = URI.create("https://edutrack/errors/ob-step-item-verified");
     private static final URI STEP_REJECT_REASON_REQUIRED =
             URI.create("https://edutrack/errors/ob-step-reject-reason-required");
+    private static final URI ATTACHMENT_TOO_LARGE = URI.create("https://edutrack/errors/attachment-too-large");
+    private static final URI UNSUPPORTED_ATTACHMENT_TYPE =
+            URI.create("https://edutrack/errors/unsupported-attachment-type");
 
     /** No {@code ob_journey_steps} row for the given id. */
     @ExceptionHandler(JourneyStepNotFoundException.class)
@@ -51,6 +58,33 @@ class ObJourneyStepLifecycleExceptionHandler {
         problem.setTitle("Not found");
         problem.setDetail(e.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    @ExceptionHandler(ObAttachmentTooLargeException.class)
+    ResponseEntity<ProblemDetail> handleAttachmentTooLarge(ObAttachmentTooLargeException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.PAYLOAD_TOO_LARGE);
+        problem.setType(ATTACHMENT_TOO_LARGE);
+        problem.setTitle("Document too large");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(problem);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ProblemDetail> handleContainerLimit(MaxUploadSizeExceededException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.PAYLOAD_TOO_LARGE);
+        problem.setType(ATTACHMENT_TOO_LARGE);
+        problem.setTitle("Document too large");
+        problem.setDetail("That file is larger than this server accepts for one document.");
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(problem);
+    }
+
+    @ExceptionHandler(UnsupportedUploadTypeException.class)
+    ResponseEntity<ProblemDetail> handleUnsupportedType(UnsupportedUploadTypeException e) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        problem.setType(UNSUPPORTED_ATTACHMENT_TYPE);
+        problem.setTitle("File type not allowed");
+        problem.setDetail(e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(problem);
     }
 
     /** C-111 · no {@code ob_journey_step_items} row for the given id. */

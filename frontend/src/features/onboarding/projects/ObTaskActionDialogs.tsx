@@ -1,5 +1,7 @@
 import * as React from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
+import { getGetObJourneyQueryKey } from '@/api/generated/onboarding-journeys/onboarding-journeys'
 import type { UserRef } from '@/api/generated/model/userRef'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 import { ObTaskCommunications } from './ObTaskCommunications'
 import type { ProjectTask } from './useProjectTasks'
+import { useUploadObJourneyStepAttachment } from './uploadObJourneyStepAttachment'
 
 /**
  * The four forms behind {@link ObTaskActionBar}, and the timeline behind its
@@ -322,6 +325,27 @@ export interface ObTaskDocsDialogProps {
  */
 export function ObTaskDocsDialog({ open, onOpenChange, task }: ObTaskDocsDialogProps) {
   const satisfied = task.docs.filter((d) => d.isSatisfied).length
+  const inputId = React.useId()
+  const upload = useUploadObJourneyStepAttachment()
+  const queryClient = useQueryClient()
+  const [file, setFile] = React.useState<File | null>(null)
+
+  React.useEffect(() => {
+    if (open) setFile(null)
+  }, [open])
+
+  const submit = () => {
+    if (!file) return
+    upload.mutate(
+      { stepId: task.id, data: { file } },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getGetObJourneyQueryKey(task.journeyId) })
+          onOpenChange(false)
+        },
+      },
+    )
+  }
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
@@ -364,20 +388,22 @@ export function ObTaskDocsDialog({ open, onOpenChange, task }: ObTaskDocsDialogP
           ))}
         </ul>
 
-        <p
-          className="mt-4 rounded-control border border-warning bg-level-high-soft px-3 py-2 text-caption text-warning-text"
-          role="status"
-        >
-          Uploading against a task is not available yet — it needs{' '}
-          <code>POST /onboarding/journey-steps/&#123;stepId&#125;/attachments</code>, which the
-          contract does not carry. Attach the file to the client record meanwhile.
-        </p>
+        <label htmlFor={inputId} className="mt-4 block text-sm font-medium text-content">
+          Document
+          <input
+            id={inputId}
+            type="file"
+            className="mt-1 block w-full text-sm text-content-muted"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            disabled={upload.isPending}
+          />
+        </label>
 
         <ModalFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button variant="primary" disabled title="The upload route does not exist yet">
+          <Button variant="primary" disabled={!file || upload.isPending} onClick={submit}>
             Upload
           </Button>
         </ModalFooter>
