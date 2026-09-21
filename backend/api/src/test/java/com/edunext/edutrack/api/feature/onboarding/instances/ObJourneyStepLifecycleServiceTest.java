@@ -19,6 +19,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepDocRepository
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObProject;
+import com.edunext.edutrack.domain.onboarding.ObProjectStatus;
 import com.edunext.edutrack.domain.onboarding.ObProjectRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
@@ -1823,5 +1824,54 @@ class ObJourneyStepLifecycleServiceTest {
         // re-settling must not restamp a journey that already landed.
         assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
         verify(dependencyRelease, never()).release(anyLong());
+    }
+
+    // ── the project's own earned completion ──────────────────────────────
+
+    /**
+     * {@code ObProject.complete()} is documented as what happens when the
+     * project's last journey completes, and {@code ObProjectWriteService}
+     * refuses a hand-set {@code COMPLETED} on that ground — but nothing
+     * called it. A project whose every task was done stayed {@code RUNNING},
+     * and both the Projects grid and the project header said so.
+     */
+    @Test
+    void completingTheLastJourneyOfAProjectStampsTheProjectComplete() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObProject project = projects.findById(PROJECT).orElseThrow();
+
+        service.complete(STEP, OWNER);
+
+        assertThat(project.getStatus()).isEqualTo(ObProjectStatus.COMPLETED);
+    }
+
+    @Test
+    void aProjectWhoseOtherModuleServiceIsStillRunningStaysRunning() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        when(journeys.existsByProjectIdAndArchivedAtIsNullAndCompletedAtIsNullAndIdNot(PROJECT, JOURNEY))
+                .thenReturn(true);
+        ObProject project = projects.findById(PROJECT).orElseThrow();
+
+        service.complete(STEP, OWNER);
+
+        // The journey landed; the project did not, because a sibling service
+        // of the same project is still carrying work.
+        assertThat(journeyRows.get(JOURNEY).getCompletedAt()).isNotNull();
+        assertThat(project.getStatus()).isEqualTo(ObProjectStatus.RUNNING);
+    }
+
+    /**
+     * ON_HOLD and DROPPED record a decision somebody made rather than
+     * progress, so a journey landing afterwards must not overwrite it.
+     */
+    @Test
+    void aDroppedProjectIsNotCompletedByItsLastJourneyLanding() {
+        stepRows.get(STEP).setStatus(ObJourneyStepStatus.IN_PROGRESS);
+        ObProject project = projects.findById(PROJECT).orElseThrow();
+        project.recordStatus(ObProjectStatus.DROPPED, "client cancelled the rollout");
+
+        service.complete(STEP, OWNER);
+
+        assertThat(project.getStatus()).isEqualTo(ObProjectStatus.DROPPED);
     }
 }

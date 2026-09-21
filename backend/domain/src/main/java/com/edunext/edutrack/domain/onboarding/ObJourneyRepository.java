@@ -47,6 +47,29 @@ public interface ObJourneyRepository extends JpaRepository<ObJourney, Long>,
     boolean existsByObClientIdAndGateStatus(Long obClientId, ObGateStatus gateStatus);
 
     /**
+     * Has this project any live journey still running?
+     *
+     * <p>What {@code ObProject.complete()} waits for — the earned transition
+     * its own javadoc describes as "every journey of this project has
+     * completed", which nothing asked until now. False means the project's
+     * last journey has just landed.
+     *
+     * <p>Archived journeys are excluded on the same reading as everywhere
+     * else: a service withdrawn from a client is not work the project is
+     * still waiting on, and counting it would leave a project permanently one
+     * journey short of complete.
+     *
+     * <p>The journey that has just landed is excluded by id rather than left
+     * to be found complete. Its {@code completed_at} is set on a managed
+     * entity that may not have been flushed when this runs, and a check that
+     * depended on the flush would answer "still running" about the very
+     * journey that triggered it — intermittently, which is the worst way for
+     * it to be wrong.
+     */
+    boolean existsByProjectIdAndArchivedAtIsNullAndCompletedAtIsNullAndIdNot(
+            Long projectId, Long journeyId);
+
+    /**
      * C-123 · the client's live journey for one <b>service</b> — what a
      * newly instantiated journey is held behind when its template declares a
      * service-level dependency (plan §5.5). Same "live" condition as the

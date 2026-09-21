@@ -19,6 +19,7 @@ import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItem;
 import com.edunext.edutrack.domain.onboarding.ObJourneyTemplateStepItemRepository;
 import com.edunext.edutrack.domain.onboarding.ObProject;
 import com.edunext.edutrack.domain.onboarding.ObProjectRepository;
+import com.edunext.edutrack.domain.onboarding.ObProjectStatus;
 import com.edunext.edutrack.domain.onboarding.ObSignoffKind;
 import com.edunext.edutrack.domain.onboarding.ObSignoffRepository;
 import com.edunext.edutrack.domain.onboarding.ObSignoffStatus;
@@ -2009,6 +2010,41 @@ public class ObJourneyStepLifecycleService {
             activateEligibleSteps(released);
             dependencyRelease.notifyUnblocked(released, journeyId);
         }
+
+        completeProjectIfLastJourney(journey);
+    }
+
+    /**
+     * The project's own earned transition, stamped where the journey's is.
+     *
+     * <p>{@code ObProject.complete()} is documented as what happens "when the
+     * project's last journey completes", and {@code ObProjectWriteService}
+     * refuses a hand-set {@code COMPLETED} on exactly that ground — but
+     * nothing called it, so {@code ob_projects.status} stayed {@code RUNNING}
+     * through a project whose every task was done. The Projects grid and the
+     * project header both read that status, and both said so.
+     *
+     * <p>After the release loop rather than before it: a journey this one
+     * unblocks is work the project is still waiting on, and it is counted by
+     * the query below because its {@code completed_at} is null.
+     *
+     * <p>Only from {@code RUNNING}. A project somebody put {@code ON_HOLD} or
+     * {@code DROPPED} has a status that records a decision rather than
+     * progress, and a late-landing journey must not overwrite it.
+     */
+    private void completeProjectIfLastJourney(ObJourney journey) {
+        Long projectId = journey.getProjectId();
+        if (projectId == null) {
+            return;
+        }
+        boolean stillRunning = journeys.existsByProjectIdAndArchivedAtIsNullAndCompletedAtIsNullAndIdNot(
+                projectId, journey.getId());
+        if (stillRunning) {
+            return;
+        }
+        projects.findById(projectId)
+                .filter(project -> project.getStatus() == ObProjectStatus.RUNNING)
+                .ifPresent(ObProject::complete);
     }
 
     /**
