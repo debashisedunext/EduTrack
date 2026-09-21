@@ -4,6 +4,7 @@ import type { ObProjectBoardRow } from '@/api/generated/model'
 
 import {
   projectsForCard,
+  byLatenessAscending,
   byLatenessDescending,
   bucketLook,
   lateLabel,
@@ -159,7 +160,7 @@ describe('lateness', () => {
     expect(lateLabel(row({ id: 2, daysPastCompletion: 4 }))).toBe('4 days late')
   })
 
-  it('sorts worst first, which is how every list on the board is worked', () => {
+  it('sorts worst first, which is how the At risk and Overdue lists are worked', () => {
     const sorted = [
       row({ id: 1, daysPastCompletion: 2 }),
       row({ id: 2, daysPastCompletion: 11 }),
@@ -167,6 +168,24 @@ describe('lateness', () => {
     ].sort(byLatenessDescending)
 
     expect(sorted.map((r) => r.id)).toEqual([2, 1, 3])
+  })
+
+  /** The panel a card opens reads the other way — see byLatenessAscending. */
+  it('sorts least late first for the panel, leaving the worst at the bottom', () => {
+    const sorted = [
+      row({ id: 1, daysPastCompletion: 2 }),
+      row({ id: 2, daysPastCompletion: 11 }),
+      row({ id: 3 }),
+    ].sort(byLatenessAscending)
+
+    expect(sorted.map((r) => r.id)).toEqual([3, 1, 2])
+  })
+
+  /** Equally late rows keep the order the board sent, so the list never shuffles. */
+  it('leaves rows that are not late in the order they arrived', () => {
+    const sorted = [row({ id: 7 }), row({ id: 3 }), row({ id: 5 })].sort(byLatenessAscending)
+
+    expect(sorted.map((r) => r.id)).toEqual([7, 3, 5])
   })
 })
 

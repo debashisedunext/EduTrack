@@ -239,9 +239,22 @@ export function latenessOf(row: ObProjectBoardRow): number {
   return row.daysPastCompletion ?? row.delayedByDays ?? 0
 }
 
-/** Worst first. What every list on this board is worked from the top of. */
+/** Worst first. What the At risk and Overdue lists are worked from the top of. */
 export function byLatenessDescending(a: ObProjectBoardRow, b: ObProjectBoardRow): number {
   return latenessOf(b) - latenessOf(a)
+}
+
+/**
+ * Least late first, so the late rows fall to the bottom.
+ *
+ * For the panel a card opens, which lists every project behind a figure rather
+ * than the breaches alone. A reader opening <b>Ongoing projects</b> came for
+ * the work in flight; worst-first buried all seven running projects under the
+ * two that had slipped, and the board already singles those two out in its own
+ * At risk and Overdue lists.
+ */
+export function byLatenessAscending(a: ObProjectBoardRow, b: ObProjectBoardRow): number {
+  return latenessOf(a) - latenessOf(b)
 }
 
 /** `3 days late`, `1 day late`, or null when the row is not late at all. */

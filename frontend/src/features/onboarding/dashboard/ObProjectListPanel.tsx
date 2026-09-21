@@ -10,7 +10,13 @@ import {
   SlideOverTitle,
 } from '@/components/ui/slide-over'
 
-import { bucketLook, byLatenessDescending, lateLabel } from './obProjectBoard'
+import {
+  bucketLook,
+  byLatenessAscending,
+  byLatenessDescending,
+  lateLabel,
+  latenessOf,
+} from './obProjectBoard'
 
 /**
  * The projects behind a figure on OB-02's project board — the S-06 slide-over,
@@ -57,9 +63,22 @@ export interface ObProjectListPanelProps {
 
 export function ObProjectListPanel({ title, rows, open, onClose }: ObProjectListPanelProps) {
   const navigate = useNavigate()
-  /* Worst first, like every other list on this board: a reader opening a
-     figure is asking what to do about it, and the answer starts at the top. */
-  const sorted = [...rows].sort(byLatenessDescending)
+  /*
+    Which way round the list reads is decided by the list itself.
+
+    A figure counting nothing but breaches — Overdue, At risk, or the schedule
+    donut's own late arcs — has no running work for a late row to bury, and
+    the reader opened it to find the one that has slipped furthest: worst
+    first. Every other figure is a mixed list, where the late rows belong at
+    the bottom; that is the bug this fixed, seven running projects sitting
+    under the two that had slipped.
+
+    Read off the rows rather than passed in, because the donut slices open this
+    panel too and a slice has no card key to test. The sort is stable either
+    way, so rows that are equally late keep the order the board sent them in.
+  */
+  const allLate = rows.length > 0 && rows.every((row) => latenessOf(row) > 0)
+  const sorted = [...rows].sort(allLate ? byLatenessDescending : byLatenessAscending)
 
   return (
     <SlideOver open={open} onOpenChange={(next) => !next && onClose()}>
