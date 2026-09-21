@@ -31,6 +31,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -1083,7 +1084,7 @@ public class ObJourneyTemplateService {
      */
     @Transactional
     public void replaceTasksFromImport(long templateId,
-                                       List<ObJourneyTaskImportShapes.ImportedTask> tasksToImport) {
+                                       List<ObModuleServiceImportShapes.TaskToWrite> tasksToImport) {
         requireEditable(templateId);
 
         List<ObJourneyTemplateStep> existing = steps.findByTemplateIdOrderBySequenceAsc(templateId);
@@ -1091,32 +1092,78 @@ public class ObJourneyTemplateService {
             removeStep(existing.get(i).getId());
         }
 
-        Map<String, Long> stageGroupIdByName = new HashMap<>();
-        for (ObJourneyTemplateStage group : stageGroups.findByTemplateIdOrderBySequenceAscIdAsc(templateId)) {
-            stageGroupIdByName.put(group.getName().toUpperCase(Locale.ROOT), group.getId());
-        }
-        long ungroupedId = ungroupedGroupOf(templateId).getId();
+        for (ObModuleServiceImportShapes.TaskToWrite task : tasksToImport) {
+            /*
+              Every fixed default the four-column file does not carry, applied
+              in one place. `null` owner falls back at instantiation to the
+              project's implementor; `null` dependency is what makes every
+              imported task parallel, which is the whole of "without checking
+              dependency" and the reason this method no longer needs a
+              name-to-id map or a second pass.
+            */
+            ObJourneyTemplateStep created = addTask(task.stageGroupId(), task.name(), null,
+                    DEFAULT_STAGE_TAT_DAYS, null, false, null);
 
-        Map<String, Long> createdStepIdByName = new LinkedHashMap<>();
-        for (ObJourneyTaskImportShapes.ImportedTask task : tasksToImport) {
-            long stageGroupId = task.stageGroupName() == null
-                    ? ungroupedId
-                    : stageGroupIdByName.getOrDefault(task.stageGroupName().toUpperCase(Locale.ROOT), ungroupedId);
-            Long dependsOnStepId = task.dependsOnTaskName() == null
-                    ? null
-                    : createdStepIdByName.get(task.dependsOnTaskName().toUpperCase(Locale.ROOT));
-
-            ObJourneyTemplateStep created = addTask(stageGroupId, task.name(), task.description(),
-                    task.tatDays(), null, task.requiresSignoff(), dependsOnStepId);
-            createdStepIdByName.put(task.name().toUpperCase(Locale.ROOT), created.getId());
-
-            for (ObJourneyTaskImportShapes.ImportedItem item : task.items()) {
-                addStepItem(created.getId(), item.label(), item.mandatory());
-            }
-            for (ObJourneyTaskImportShapes.ImportedDoc doc : task.docs()) {
-                addStepDoc(created.getId(), doc.label(), doc.required());
+            for (String label : task.checklist()) {
+                addStepItem(created.getId(), label, true);
             }
         }
+    }
+
+    /**
+     * OB-07 · binds one <b>already-active</b> Implementation Stage to this
+     * draft as a stage group, if it does not hold that stage yet.
+     *
+     * <h2>This does not weaken "stages are decided on OB-15"</h2>
+     *
+     * <p>It creates nothing an admin could not already have: the stage exists
+     * on the OB-15 master, and the name and sequence are copied from it at
+     * bind time, exactly as {@link #seedStageGroups} copies them at create
+     * time. What it covers is the gap that seeding alone leaves — a Module
+     * Service created in July does not hold a stage added to the master in
+     * September, and {@code seedStageGroups} only ever runs once, at birth.
+     * Without this, an import naming that stage would fail on a service whose
+     * only fault is being older than the vocabulary.
+     *
+     * <p>A <b>retired</b> stage is refused rather than bound. Seeding reads
+     * active stages only, so binding a retired one here would let an import
+     * put a service into a state creating one never could.
+     *
+     * <p>Idempotent, on {@link #seedStageGroups}' own reasoning:
+     * {@code uq_ob_template_stages} would refuse the second insert as a
+     * constraint violation, and this is the same outcome expressed as nothing
+     * happening.
+     *
+     * @throws TemplateNotEditableException if the template has ever been published
+     * @throws StageGroupNotFoundException  if no such Implementation Stage exists,
+     *                                      or it is retired
+     */
+    @Transactional
+    public ObJourneyTemplateStage ensureStageGroup(long templateId, long implementationStageId) {
+        requireEditable(templateId);
+
+        Optional<ObJourneyTemplateStage> existing =
+                stageGroups.findByTemplateIdAndImplementationStageId(templateId, implementationStageId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        ObImplementationStage stage = implementationStages.findById(implementationStageId)
+                .filter(ObImplementationStage::isActive)
+                .orElseThrow(() -> StageGroupNotFoundException.forImplementationStage(implementationStageId));
+
+        ObJourneyTemplateStage group = stageGroups.save(new ObJourneyTemplateStage(
+                templateId, stage.getId(), stage.getName(), stage.getSequence()));
+        stageGroups.flush();
+        /*
+          A new group can sort before groups that already hold tasks, and
+          `renumberByStage` walks groups in display order — so without this the
+          template-wide `sequence` invariant ("stage groups in order, then
+          tasks within a group") is broken the moment a stage is bound in the
+          middle. See its javadoc for the four readers that depend on it.
+        */
+        renumberByStage(templateId);
+        return group;
     }
 
     /**

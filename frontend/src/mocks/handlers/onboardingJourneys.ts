@@ -1026,62 +1026,87 @@ export const onboardingJourneyHandlers = [
     return noContent();
   }),
 
-  // OB-07 · task-import. `preview` and the commit deliberately do not call
-  // `request.formData()` — `rest.ts`'s `/imports/:schema/upload` documents at
-  // length why no genuine multipart body reaches a handler under vitest (Node
-  // stringifies jsdom's `FormData` to the literal `[object FormData]`, and the
-  // call hangs rather than throws). Both answer with a canned, template-shaped
-  // response regardless of what was actually uploaded; a test that needs a
-  // specific tree or row errors overrides the handler with `server.use(...)`.
-  http.get(url('/onboarding/journey-templates/:templateId/task-import/template'), ({ params }) => {
-    const db = getDb();
-    const template = db.obJourneyTemplates.find((t) => t.id === Number(params.templateId));
-    if (!template) return notFound('Journey template');
+  // OB-07 · module-service-import. `preview` and the commit deliberately do
+  // not call `request.formData()` — `rest.ts`'s `/imports/:schema/upload`
+  // documents at length why no genuine multipart body reaches a handler under
+  // vitest (Node stringifies jsdom's `FormData` to the literal
+  // `[object FormData]`, and the call hangs rather than throws). That is also
+  // why neither reads `productId`, which arrives in the same body: both answer
+  // with a canned, template-shaped response regardless of what was uploaded,
+  // and a test that needs a specific tree or specific row errors overrides the
+  // handler with `server.use(...)`.
+  //
+  // None of the three is template-scoped any more. One file names as many
+  // Module Services as it likes and creates the ones the product does not
+  // have, so there is no `templateId` to look up and no editability conflict
+  // to answer with — a published service is a row *error* inside a `200`
+  // preview, not a `409`.
+  http.get(url('/onboarding/module-service-import/template'), () => {
     return new HttpResponse(new Blob(['mock xlsx template']), {
       headers: {
-        'Content-Type': TASK_IMPORT_XLSX_MEDIA_TYPE,
-        'Content-Disposition': 'attachment; filename="module-service-tasks-template.xlsx"',
+        'Content-Type': MODULE_IMPORT_XLSX_MEDIA_TYPE,
+        'Content-Disposition': 'attachment; filename="module-service-import-template.xlsx"',
       },
     });
   }),
-  http.post(url('/onboarding/journey-templates/:templateId/task-import/preview'), ({ params }) => {
-    const db = getDb();
-    const template = db.obJourneyTemplates.find((t) => t.id === Number(params.templateId));
-    const conflict = editabilityConflict(template);
-    if (conflict) return conflict;
-    return ok(cannedTaskImportPreview());
+  http.post(url('/onboarding/module-service-import/preview'), () => {
+    return ok(cannedModuleImportPreview());
   }),
-  http.post(url('/onboarding/journey-templates/:templateId/task-import'), ({ params }) => {
-    const db = getDb();
-    const template = db.obJourneyTemplates.find((t) => t.id === Number(params.templateId));
-    const conflict = editabilityConflict(template);
-    if (conflict) return conflict;
-    const preview = cannedTaskImportPreview();
+  http.post(url('/onboarding/module-service-import'), () => {
+    const preview = cannedModuleImportPreview();
+    const steps = preview.services.flatMap((s) => s.steps);
+    const tasks = steps.flatMap((s) => s.tasks);
     return ok({
-      taskCount: preview.tasks.length,
-      itemCount: preview.tasks.reduce((sum, t) => sum + t.items.length, 0),
-      docCount: preview.tasks.reduce((sum, t) => sum + t.docs.length, 0),
+      servicesCreated: preview.services.filter((s) => s.action === 'CREATE').length,
+      servicesReplaced: preview.services.filter((s) => s.action === 'REPLACE').length,
+      stepCount: steps.length,
+      taskCount: tasks.length,
+      checklistCount: tasks.reduce((sum, t) => sum + t.checklist.length, 0),
     });
   }),
 ];
 
-const TASK_IMPORT_XLSX_MEDIA_TYPE =
+const MODULE_IMPORT_XLSX_MEDIA_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-function cannedTaskImportPreview() {
+/**
+ * One service of each action, and one task of each checklist shape.
+ *
+ * `Enquiry Data Port` carries a single entry equal to its own name — the
+ * server's default for a task whose rows all left the Checklist column blank
+ * — so the dialog's tree is exercised against the case most real files
+ * produce, not only against the hand-authored one below it.
+ */
+function cannedModuleImportPreview() {
   return {
     valid: true,
     errors: [] as { sheet: string; rowNumber: number; message: string }[],
-    tasks: [
+    services: [
       {
-        stageGroupName: null,
-        name: 'Imported task',
-        description: null,
-        tatDays: 1,
-        requiresSignoff: false,
-        dependsOnTaskName: null,
-        items: [{ label: 'Imported checklist item', mandatory: true }],
-        docs: [] as { label: string; required: boolean }[],
+        name: 'Admission Management',
+        action: 'CREATE',
+        steps: [
+          {
+            name: 'Data Migration',
+            tasks: [
+              { name: 'Enquiry Data Port', checklist: ['Enquiry Data Port'] },
+              {
+                name: 'Student Data Port',
+                checklist: ['Validate source file', 'Reconcile record counts'],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'Fee Management',
+        action: 'REPLACE',
+        steps: [
+          {
+            name: 'Configuration',
+            tasks: [{ name: 'Fee Head Setup', checklist: ['Fee Head Setup'] }],
+          },
+        ],
       },
     ],
   };

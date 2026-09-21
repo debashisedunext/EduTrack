@@ -77,6 +77,14 @@ class PortalAuthController {
      * <p>200 with a bearer token the caller stores and sends. <b>No refresh
      * cookie</b> — see {@link PortalAuthService}'s note on why rotation is not
      * in this task, and what that costs.
+     *
+     * <p><b>Succeeding is not the same as being let in.</b> A login whose
+     * account still owes us a password change returns 200 with
+     * {@code mustChangePassword} set, and the token it carries is refused by
+     * {@code PortalPasswordChangeGate} on every portal route but
+     * {@code PATCH /portal/me/password}. Refusing the login itself would be
+     * wrong twice over: the credentials are correct, and the client would have
+     * no session with which to reach the form that fixes it.
      */
     @PostMapping(path = "/login",
             consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -87,7 +95,8 @@ class PortalAuthController {
         ClientAccessTokenIssuer.Minted minted = tokens.issue(account);
 
         return new PortalAuthDtos.LoginResponseEnvelope(new PortalAuthDtos.LoginResponse(
-                minted.value(), minted.expiresInSeconds(), PortalAuthDtos.Client.of(account)));
+                minted.value(), minted.expiresInSeconds(), account.mustChangePassword(),
+                PortalAuthDtos.Client.of(account)));
     }
 
     /**

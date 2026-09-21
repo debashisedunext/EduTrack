@@ -71,6 +71,27 @@ final class PortalAuthExceptions {
     }
 
     /**
+     * The replacement password is the one being replaced.
+     *
+     * <p>Its own refusal rather than a {@link WeakPortalPassword} with a
+     * different message, because it is a different kind of failure: the
+     * password may be perfectly strong and is still refused. A forced change
+     * that accepted the temporary password back would clear
+     * {@code must_change_password} while leaving in place the exact credential
+     * a staff member read off a screen — the one outcome the whole mechanism
+     * exists to prevent.
+     *
+     * <p>Safe to name, like the policy refusal below and for the same reason:
+     * the caller has already proved they know the current password, so they
+     * learn nothing here they did not supply themselves.
+     */
+    static final class PortalPasswordUnchanged extends RuntimeException {
+        PortalPasswordUnchanged() {
+            super("Choose a password different from your current one.", null, false, false);
+        }
+    }
+
+    /**
      * The chosen password does not meet the policy.
      *
      * <p>Specific, unlike everything above it, and safely so: the caller is

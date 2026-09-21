@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Upload } from 'lucide-react'
 
 import { ApiError } from '@/api/http'
 import type { ObProduct } from '@/api/generated/model/obProduct'
@@ -28,6 +29,7 @@ import { DependsOnMultiSelect } from './DependsOnMultiSelect'
 import { useCreateJourneyTemplate, useJourneyTemplate } from './journeyTemplateQueries'
 import { checklistCount, cycleFreeCandidates, defaultImplementor } from './moduleServiceCatalogue'
 import { useUpdateModuleServiceDependsOn } from './moduleServiceCatalogueQueries'
+import { ModuleServiceImportDialog } from './ModuleServiceImportDialog'
 
 /**
  * C-123 · OB-07's other half — the Module Service catalogue itself, one **row**
@@ -81,6 +83,9 @@ import { useUpdateModuleServiceDependsOn } from './moduleServiceCatalogueQueries
  * here and the uniqueness rule in the database cannot drift apart.
  */
 export function ModuleServiceCataloguePage() {
+  /** OB-07 · the Import dialog — pick a product, download, upload, preview, confirm. */
+  const [importing, setImporting] = React.useState(false)
+
   const navigate = useNavigate()
   const query = useListObProducts()
   const templates = useListObJourneyTemplates()
@@ -193,7 +198,19 @@ export function ModuleServiceCataloguePage() {
           not offered here as well: this page defines services, not roles, and
           three doors to one screen is two more than the reader needs.
         */}
+        {/*
+          OB-07 · Import sits here rather than in the designer, because a file
+          creates Module Services as well as filling them — there is no one
+          service to be "inside" while it runs. The designer's own button was
+          removed in the same change for that reason.
+        */}
+        <Button type="button" variant="secondary" onClick={() => setImporting(true)}>
+          <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+          Import
+        </Button>
       </header>
+
+      <ModuleServiceImportDialog open={importing} onOpenChange={setImporting} />
 
       <form
         onSubmit={doCreate}

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import * as http from '@/api/http'
 import * as portalApi from '@/api/generated/portal/portal'
@@ -46,6 +46,7 @@ it('clears the shared access token before signing in, so the POST goes out anony
       data: {
         accessToken: 'portal.token',
         expiresIn: 900,
+        mustChangePassword: false,
         client: {
           username: 'KVVARANASI.shivendra',
           displayName: 'Shivendra Keshari',
@@ -67,4 +68,46 @@ it('clears the shared access token before signing in, so the POST goes out anony
   expect(tokenDuringLogin).toBeNull()
   await waitFor(() => expect(usePortalAuthStore.getState().status).toBe('authenticated'))
   expect(http.getAccessToken()).toBe('portal.token')
+})
+
+/**
+ * The other thing that is not obvious: **a login can succeed and still not
+ * be a way in.** An account issued a temporary password answers 200 with
+ * `mustChangePassword`, and the token it carries is refused by
+ * `PortalPasswordChangeGate` on every portal route but the change itself. So
+ * the screen must route to the form rather than to the chooser — otherwise
+ * the client lands on a page whose first call 403s.
+ */
+it('routes a must-change login to the change-password form, not the chooser', async () => {
+  vi.spyOn(portalApi, 'portalLogin').mockResolvedValue({
+    data: {
+      accessToken: 'portal.temporary.token',
+      expiresIn: 900,
+      mustChangePassword: true,
+      client: {
+        username: 'DEMO-101',
+        displayName: 'Demo School',
+        hasTicketing: false,
+        hasOnboarding: true,
+      },
+    },
+  })
+
+  render(
+    <MemoryRouter initialEntries={['/portal/login']}>
+      <Routes>
+        <Route path="/portal/login" element={<PortalLoginPage />} />
+        <Route path="/portal/change-password" element={<div>change password screen</div>} />
+        <Route path="/portal/choose" element={<div>module chooser</div>} />
+      </Routes>
+    </MemoryRouter>,
+  )
+
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'DEMO-101' } })
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Demo-Passw0rd!' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+  expect(await screen.findByText('change password screen')).toBeInTheDocument()
+  expect(screen.queryByText('module chooser')).not.toBeInTheDocument()
+  expect(usePortalAuthStore.getState().mustChangePassword).toBe(true)
 })

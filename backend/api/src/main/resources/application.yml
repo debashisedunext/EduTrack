@@ -146,23 +146,38 @@ edutrack:
     sweep-interval: PT5M
 
   portal:
-    # Hand the operator a client's portal password instead of mailing them a
-    # link. Off, and the default is the product: ClientAccountAdminDtos gives
-    # the argument for why a credential is normally absent from that response,
-    # and every word of it still holds when this is on.
+    # How a client's first portal password comes into existence.
     #
-    # PortalDevCredentialConfig refuses to start if this is true outside the
-    # local / dev-noauth / fixtures profiles, so setting the env var alone on a
-    # production box fails loudly rather than quietly exposing passwords.
+    # ON by default, and that reverses an earlier decision deliberately. The
+    # flow it replaces mailed the contact a one-time link and showed staff
+    # nothing; where the mail did not arrive - transport `logging`, no worker
+    # deployed, a contact address nobody reads - the account was created with a
+    # password derived from bytes that were then discarded, so NOBODY could
+    # ever sign in to it. An operator was told a login existed and it did not.
     #
-    # For a demo:  PORTAL_DEV_CREDENTIALS=true, with the local profile active.
-    dev-credentials:
-      enabled: ${PORTAL_DEV_CREDENTIALS:false}
-      # Blank means one password is generated per account, which is the safer
-      # of the two. Set a value to share one across every client a demo
-      # creates — it must pass the portal's own rules (12+ characters, upper,
-      # lower, a digit and a symbol) or the request that needed it is refused.
-      password: ${PORTAL_DEV_CREDENTIALS_PASSWORD:}
+    # Now: the account is issued a temporary password, returned once on the
+    # create/reset response, and the client is made to change it at first
+    # sign-in. PortalPasswordChangeGate is what makes that compulsory rather
+    # than suggested - the session the temporary password opens can reach
+    # nothing but PATCH /portal/me/password.
+    #
+    # The credential mail is still sent. It is the recovery path now, not the
+    # only way in.
+    #
+    # Set false to go back to link-only, which is correct ONLY where
+    # edutrack.ob-outbox.email.transport is `smtp` and the mail is known to
+    # arrive.
+    temporary-password:
+      enabled: ${PORTAL_TEMPORARY_PASSWORD:true}
+      # Blank - the default, and the only value a real deployment may hold -
+      # generates one password per account. A fixed value shares ONE password
+      # across every client, so one issued login discloses the way into every
+      # client created after it; PortalTemporaryPasswordConfig refuses to start
+      # with this set outside the local / dev-noauth / fixtures profiles.
+      #
+      # A value must pass the portal's own rules (12+ characters, upper, lower,
+      # a digit and a symbol) or the request that needed it is refused.
+      fixed: ${PORTAL_TEMPORARY_PASSWORD_FIXED:}
 
   jwt:
     # A-022 · HS256. NimbusJwtEncoder rejects anything under 256 bits, so this

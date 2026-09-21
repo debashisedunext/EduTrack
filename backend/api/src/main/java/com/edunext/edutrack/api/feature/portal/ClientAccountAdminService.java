@@ -36,14 +36,30 @@ import java.util.Map;
  * differ in the event they queue and in whether a row is inserted first. Disable
  * issues nothing — it is the one operation that must not put a new way in.
  *
- * <h2>The mail carries a link, never a password</h2>
+ * <h2>The mail still carries a link, never a password</h2>
  *
- * <p>B-111's ruling, restated where it is cashed in:
+ * <p>B-111's ruling, unchanged and restated where it is cashed in:
  * {@code CLIENT_LOGIN_CREATED} declares no password variable because
  * "the payload is JSON on a row that outlives the send, so a temporary password
- * in it is a live credential in the database indefinitely". See
- * {@link ClientCredentialTokens} for the account's own placeholder password and
- * why it exists.
+ * in it is a live credential in the database indefinitely". That is why the
+ * temporary password below goes on the <em>response</em> and never into the
+ * outbox. See {@link ClientCredentialTokens} for the account's own placeholder
+ * password and why it exists.
+ *
+ * <h2>Two ways in, and which one is the primary</h2>
+ *
+ * <p><b>The temporary password is how a client gets in.</b> It is set here, on
+ * every deployment, and returned once - see
+ * {@link PortalTemporaryPasswordProperties} for why that reversed an earlier
+ * decision, and {@code PortalPasswordChangeGate} for what makes it safe: the
+ * session it opens can do nothing but change it.
+ *
+ * <p><b>The link is the recovery path.</b> It is still minted and still mailed,
+ * because a client who never received the password, or lost it, needs a route
+ * that does not involve ringing somebody - and because an onboarding demo
+ * should still be exercising the mail it demonstrates. It is no longer the only
+ * way in, which is the whole change: where mail does not arrive, an account is
+ * now usable rather than stillborn.
  *
  * <h2>What this task does not build, said out loud</h2>
  *
@@ -75,7 +91,7 @@ public class ClientAccountAdminService {
     private final ObOutboxEnqueuer outbox;
     private final PasswordEncoder passwordEncoder;
     private final PortalPasswordRules passwordRules;
-    private final PortalDevCredentialProperties devCredentials;
+    private final PortalTemporaryPasswordProperties temporaryPasswords;
     private final Clock clock;
 
     ClientAccountAdminService(ClientAccountRepository accounts,
@@ -85,7 +101,7 @@ public class ClientAccountAdminService {
                               ObOutboxEnqueuer outbox,
                               PasswordEncoder passwordEncoder,
                               PortalPasswordRules passwordRules,
-                              PortalDevCredentialProperties devCredentials,
+                              PortalTemporaryPasswordProperties temporaryPasswords,
                               Clock clock) {
         this.accounts = accounts;
         this.tokens = tokens;
@@ -94,7 +110,7 @@ public class ClientAccountAdminService {
         this.outbox = outbox;
         this.passwordEncoder = passwordEncoder;
         this.passwordRules = passwordRules;
-        this.devCredentials = devCredentials;
+        this.temporaryPasswords = temporaryPasswords;
         this.clock = clock;
     }
 
@@ -145,14 +161,14 @@ public class ClientAccountAdminService {
                 client.contactEmail(),
                 actorUserId);
 
-        String devPassword = applyReadablePasswordIfEnabled(accountId);
+        String temporaryPassword = issueTemporaryPassword(accountId);
 
         issueCredential(accountId, obClientId, client, username,
                 ClientCredentialTokens.PURPOSE_INITIAL,
                 ObNotificationEvent.CLIENT_LOGIN_CREATED, actorUserId);
 
         return with(find(scope, obClientId)
-                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), devPassword);
+                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), temporaryPassword);
     }
 
     /**
@@ -172,14 +188,14 @@ public class ClientAccountAdminService {
         ClientAccountRow account = accounts.findByObClientId(obClientId)
                 .orElseThrow(() -> new ClientAccountNotFoundException(obClientId));
 
-        String devPassword = applyReadablePasswordIfEnabled(account.id());
+        String temporaryPassword = issueTemporaryPassword(account.id());
 
         issueCredential(account.id(), obClientId, client, account.username(),
                 ClientCredentialTokens.PURPOSE_RESET,
                 ObNotificationEvent.CLIENT_PASSWORD_RESET, actorUserId);
 
         return with(find(scope, obClientId)
-                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), devPassword);
+                .orElseThrow(() -> new ClientAccountNotFoundException(obClientId)), temporaryPassword);
     }
 
     /**
@@ -337,52 +353,53 @@ public class ClientAccountAdminService {
     }
 
     /**
-     * Development deployments only: replace the unguessable placeholder with a
-     * password the operator can read back.
+     * Replaces the unguessable placeholder with a password the operator can
+     * read back, and leaves the account owing us a change.
      *
-     * <p>Returns {@code null} when the switch is off, which is the shipped
-     * behaviour and the reason this is one method called from two places
-     * rather than a condition written twice.
+     * <p>Returns {@code null} only where a deployment has switched the flow off
+     * - see {@link PortalTemporaryPasswordProperties#issuesTemporaryPassword()}
+     * - which is the link-only behaviour this used to default to. One method
+     * called from two places rather than a condition written twice.
      *
      * <p><b>The credential path still runs either way.</b> The link is minted
-     * and queued as before, because switching the property off has to leave a
-     * working account behind rather than one whose only way in was suppressed
-     * on the day it was created — and because a demo of the onboarding flow
-     * should still be exercising the mail it is demonstrating.
+     * and queued as before, because the two are not alternatives: the password
+     * is what the operator hands over now, and the link is what the client uses
+     * when that hand-over did not happen.
      *
-     * <p>{@code setPassword} clears {@code must_change_password} in the same
-     * statement — not because login enforces it ({@code PortalAuthService}
-     * checks the password, {@code is_active} and the lockout, and never that
-     * flag) but because leaving it set would have the panel report a pending
-     * change that nothing will ever ask for. The column is the panel's answer
-     * to "has this client chosen their own password", and after this it has
-     * been chosen, by the operator.
+     * <p>{@code setTemporaryPassword} <b>keeps</b> {@code must_change_password}
+     * set, which is the opposite of what the development-only predecessor did.
+     * That flag is the whole mechanism: {@code ClientAccessTokenIssuer} stamps
+     * it on to the token, {@code PortalPasswordChangeGate} refuses every portal
+     * route but the change itself while it is set, and
+     * {@code PortalPasswordChangeService} is the only thing that clears it. An
+     * operator-chosen password that did not force a change would be a password
+     * staff can read sitting on a live account indefinitely.
      *
      * <p>Called <em>before</em> the account is read back, so the response
-     * reports the {@code mustChangePassword} this actually left behind rather
-     * than the {@code true} the row was inserted with.
+     * reports the {@code mustChangePassword} this actually left behind.
      *
-     * @throws PortalAuthExceptions.WeakPortalPassword the configured password
-     *         would be refused by the portal's own rules. Checked here rather
-     *         than at startup so the failure names the request that wanted it,
-     *         and so a misconfigured demo box still serves every other route.
+     * @throws PortalAuthExceptions.WeakPortalPassword the configured fixed
+     *         password would be refused by the portal's own rules. Checked here
+     *         rather than at startup so the failure names the request that
+     *         wanted it, and so a misconfigured box still serves every other
+     *         route.
      */
-    private String applyReadablePasswordIfEnabled(long accountId) {
-        if (!devCredentials.issuesReadablePassword()) {
+    private String issueTemporaryPassword(long accountId) {
+        if (!temporaryPasswords.issuesTemporaryPassword()) {
             return null;
         }
-        String password = devCredentials.hasFixedPassword()
-                ? devCredentials.password()
-                : ClientCredentialTokens.readableDevPassword();
+        String password = temporaryPasswords.hasFixedPassword()
+                ? temporaryPasswords.fixed()
+                : ClientCredentialTokens.readableTemporaryPassword();
         passwordRules.enforce(password);
 
-        accounts.setPassword(accountId, passwordEncoder.encode(password));
+        accounts.setTemporaryPassword(accountId, passwordEncoder.encode(password));
         return password;
     }
 
-    /** The account as read back, carrying {@code devPassword} only if one was set. */
+    /** The account as read back, carrying the temporary password only if one was set. */
     private static ClientAccountAdminDtos.Account with(ClientAccountAdminDtos.Account account,
-                                                      String devPassword) {
-        return devPassword == null ? account : account.withDevPassword(devPassword);
+                                                      String temporaryPassword) {
+        return temporaryPassword == null ? account : account.withTemporaryPassword(temporaryPassword);
     }
 }

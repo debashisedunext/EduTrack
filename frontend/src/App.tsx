@@ -130,6 +130,11 @@ const PortalLoginPage = lazy(() =>
 const PortalSetPasswordPage = lazy(() =>
   import('./features/portal/auth/PortalSetPasswordPage').then((m) => ({ default: m.PortalSetPasswordPage })),
 )
+const PortalChangePasswordPage = lazy(() =>
+  import('./features/portal/auth/PortalChangePasswordPage').then((m) => ({
+    default: m.PortalChangePasswordPage,
+  })),
+)
 const PortalModuleChooserPage = lazy(() =>
   import('./features/portal/PortalModuleChooserPage').then((m) => ({ default: m.PortalModuleChooserPage })),
 )
@@ -338,6 +343,18 @@ export default function App() {
           <Route path="set-password" element={withSuspense(<PortalSetPasswordPage />)} />
 
           <Route element={<PortalRequireAuth />}>
+            {/* The forced password change. Authenticated — a client reaches it
+                holding the temporary password's session — and deliberately
+                INSIDE `PortalRequireAuth`, which is what redirects every other
+                portal route here while `mustChangePassword` is set. Shell-less
+                for the chooser's reason below: there is nothing to navigate to
+                yet.
+
+                Server-side this is the one route `PortalPasswordChangeGate`
+                leaves open; the guard here only saves an honest client from
+                landing on a page that would 403. */}
+            <Route path="change-password" element={withSuspense(<PortalChangePasswordPage />)} />
+
             {/* CP-02. Shell-less, like the staff launcher and for the same
                 reason: a screen about picking a module framed by one
                 module's chrome is a menu of dead ends. */}

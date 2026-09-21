@@ -7807,17 +7807,22 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
 
-  /onboarding/journey-templates/{templateId}/task-import/template:
-    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+  /onboarding/module-service-import/template:
     get:
       tags: [onboarding-journeys]
-      operationId: downloadObJourneyTaskImportTemplate
-      summary: Download the Tasks / Task List / Document Checklist template (OB-07)
+      operationId: downloadObModuleServiceImportTemplate
+      summary: Download the Module Service / Step / Task / Checklist template (OB-07)
       description: |
-        Three sheets — Tasks, Task List, Document Checklist — plus
-        Instructions. The Stage dropdown and the Instructions sheet's stage
-        list are drawn live from this template's own stage groups, so the
-        file always names stages the import will actually accept.
+        One sheet of four columns — `Module Service | Step | Task | Checklist`
+        — plus Instructions. One row per checklist entry, with the first three
+        columns repeated down the rows that share them; the import regroups
+        the flat rows back into the tree.
+
+        The Step dropdown and the Instructions sheet's Step list are drawn
+        live from the active Implementation Stages (OB-15), so the file can
+        never offer a Step the import would then reject. No product is needed
+        to download it — the columns are the same for every product, and the
+        product is chosen when the file is uploaded.
       responses:
         '200':
           description: The .xlsx template.
@@ -7826,78 +7831,96 @@ paths:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
-  /onboarding/journey-templates/{templateId}/task-import/preview:
-    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+  /onboarding/module-service-import/preview:
     post:
       tags: [onboarding-journeys]
-      operationId: previewObJourneyTaskImport
-      summary: Validate a task-import file without writing anything (OB-07)
+      operationId: previewObModuleServiceImport
+      summary: Validate a Module Service import file without writing anything (OB-07)
       description: |
-        Every row in the workbook, checked against the same rules `POST
-        task-import` commits with. Writes nothing regardless of the outcome:
-        `valid: false` with the row errors, or `valid: true` with the task
-        tree the file describes, for the confirm screen to render before
-        anything is saved.
+        Every row in the file, checked against the same rules `POST
+        module-service-import` commits with. Writes nothing regardless of the
+        outcome: `valid: false` with the row errors, or `valid: true` with the
+        Module Service / Step / Task / Checklist tree the file describes and,
+        per service, whether confirming will `CREATE` a draft or `REPLACE` an
+        existing one — for the confirm screen to render before anything is
+        saved.
+
+        A task whose rows all left Checklist blank comes back carrying one
+        checklist entry named after the task itself, because that is what the
+        commit will write. The preview never shows a tree the commit would
+        not produce.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [productId, file]
               properties:
+                productId:
+                  type: integer
+                  format: int64
+                  description: The product whose Module Services this file authors. One file loads one product.
                 file: { type: string, format: binary }
       responses:
         '200':
           description: Always 200 — see `valid` for the outcome.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ObJourneyTaskImportPreviewResponse' }
+              schema: { $ref: '#/components/schemas/ModuleImportPreviewResponse' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
 
-  /onboarding/journey-templates/{templateId}/task-import:
-    parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateId' }]
+  /onboarding/module-service-import:
     post:
       tags: [onboarding-journeys]
-      operationId: commitObJourneyTaskImport
-      summary: Replace this draft's entire task tree with the file's contents (OB-07)
+      operationId: commitObModuleServiceImport
+      summary: Create or replace this product's Module Services from the file (OB-07)
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       description: |
-        Every existing task, Task List entry and Document Checklist entry on
-        this draft is removed and re-created from the file, in one
-        transaction — nothing is left half-applied. There is no natural key a
-        checklist row could upsert on, so re-running this import replaces the
-        tree rather than merging into it; safe only because the target is
-        always a draft nothing has been instantiated from yet.
+        A Module Service the file names and the product does not have is
+        created as a new **draft**. One that exists as a draft has its entire
+        Step / Task / Checklist tree **replaced** — there is no natural key a
+        checklist row could upsert on, and the target is always a draft
+        nothing has been instantiated from. One whose latest version is
+        already published is refused as a row error, and the caller begins a
+        revision on it first.
+
+        Every service in the file lands in one transaction, so nothing is
+        left half-applied, and nothing is published.
+
+        Imported tasks are created **parallel** — the file carries no
+        dependency column, and ordering a task behind another is a designer
+        edit afterwards.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [productId, file]
               properties:
+                productId:
+                  type: integer
+                  format: int64
+                  description: The product whose Module Services this file authors. One file loads one product.
                 file: { type: string, format: binary }
       responses:
         '200':
-          description: Replaced.
+          description: Applied.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ObJourneyTaskImportResultResponse' }
+              schema: { $ref: '#/components/schemas/ModuleImportResultResponse' }
         '404': { $ref: '#/components/responses/ObModuleGated' }
-        '409':
-          description: The template has ever been published — only a draft's task tree can be replaced.
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/Problem' }
         '422':
           description: |
-            The re-uploaded file no longer validates — the stage groups or
-            the file itself changed since `preview`. Carries the same row
-            errors a failed preview would, as `errors` on the problem body.
+            The re-uploaded file no longer validates — the Implementation
+            Stage master, the product's services, or the file itself changed
+            since `preview`. Carries the same row errors a failed preview
+            would, as `errors` on the problem body, so the dialog renders it
+            with the component it already has.
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/ObJourneyTaskImportInvalidProblem' }
+              schema: { $ref: '#/components/schemas/ModuleImportInvalidProblem' }
 
   /onboarding/journey-template-stages/{stageId}/tasks:
     parameters: [{ $ref: '#/components/parameters/ObJourneyTemplateStageId' }]
@@ -13191,10 +13214,18 @@ paths:
   # own commit named the contract as its one outstanding DoD item. Stream A
   # should confirm these schemas match at review.
   #
-  # No refresh token, no logout route, no forced-password-change-after-login
-  # gate: a portal session lasts one access-token lifetime, and a login only
-  # ever succeeds once a real password has been chosen via redemption below —
-  # there is no separate must-change state to clear afterwards.
+  # No refresh token and no logout route: a portal session lasts one
+  # access-token lifetime, and ending one is a client-side discard.
+  #
+  # There IS a forced password change. A login is issued with a temporary
+  # password staff read off the create/reset response and hand over, so
+  # `client_accounts.must_change_password` is set until the client replaces it
+  # — `changePortalPassword` below is the only route reachable meanwhile, and
+  # `PortalPasswordChangeGate` refuses the rest with
+  # `portal-password-change-required`. The credential link is still mailed and
+  # is now the recovery path rather than the only way in; it exists because a
+  # deployment whose mail does not arrive used to create accounts nobody could
+  # ever sign in to.
   /portal/auth/login:
     post:
       tags: [portal]
@@ -13202,10 +13233,17 @@ paths:
       summary: Sign in to the client portal
       security: []
       description: |
-        Ordinary sign-in, for an account that has already chosen its own
-        password via `redeemPortalCredentialLink`. A newly created or reset
-        account has no password to type yet — that's what the credential
-        link is for.
+        Ordinary sign-in. A newly created or reset account signs in with the
+        temporary password from `createObClient`'s `meta.portalLogin` or from
+        `resetObClientPortalPassword`, and the response then carries
+        `mustChangePassword: true`.
+
+        **Succeeding is not the same as being let in.** While
+        `mustChangePassword` is true the token this returns is refused on
+        every portal route but `changePortalPassword`, with
+        `portal-password-change-required`. Refusing the login itself would be
+        wrong twice over: the credentials are correct, and the client would
+        have no session with which to reach the form that fixes it.
 
         Failures are deliberately indistinguishable, exactly as `login` is
         for staff: wrong username, wrong password and unknown username all
@@ -13291,6 +13329,59 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+
+  /portal/me/password:
+    patch:
+      tags: [portal]
+      operationId: changePortalPassword
+      summary: Change your own portal password
+      description: |
+        The mirror of staff's `changeMyPassword`, and the one route a client
+        who still owes us a password change may call — see
+        `PortalPasswordChangeGate.ALWAYS_ALLOWED`. Renaming this path without
+        changing that set deadlocks every such client out of the portal,
+        including out of the way back in.
+
+        Whose password is decided by the bearer token and by nothing in the
+        body; there is no id a caller could supply.
+
+        **200 with a fresh session, not 204** — the one place this departs
+        from the staff route. The portal has no refresh route, so a 204 would
+        leave the caller holding the only token they have, still carrying the
+        must-change claim the change just cleared, and still refused by the
+        gate. The returned session is minted after the write, so its
+        `mustChangePassword` is false because the fact it reports is false.
+
+        `invalid-credentials` covers a wrong `currentPassword` and a
+        deactivated account alike, matching the login surface's own rule. A
+        wrong guess is deliberately NOT charged to the login lockout: an
+        attacker holding a stolen token could otherwise spend five of them
+        locking the real client out of the sign-in screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalPasswordChangeRequest' }
+      responses:
+        '200':
+          description: Password changed; a fresh session is returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalLoginResponse' }
+        # Three distinct causes share this status: ordinary Bean Validation
+        # (blank, over 200 chars) as ValidationFailed; the 12-char/upper/
+        # lower/digit/symbol policy as a `weak-password` Problem naming the
+        # one failed rule; and `password-unchanged` when the replacement IS
+        # the current password, which a forced change must refuse however
+        # strong it is.
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Wrong current password, or the account is no longer active — one body for both.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ══════════════════════════════════════════════ client portal · onboarding ═══
   # C-121 · CP-03/CP-04 — /portal/onboarding/**. No obClientId path segment
@@ -20327,93 +20418,108 @@ components:
       required: [data]
       properties: { data: { $ref: '#/components/schemas/ObJourneyTemplateDetail' } }
 
-    ObJourneyTaskImportRowError:
+    ModuleImportRowError:
       type: object
       required: [sheet, rowNumber, message]
       properties:
-        sheet:
-          type: string
-          description: 'Tasks, Task List or Document Checklist — the sheet the row is on.'
+        sheet: { type: string, description: The sheet the offending row is on — always `Import` for this file. }
         rowNumber:
           type: integer
-          description: 1-based Excel row number, matching what the user sees with the sheet open. 0 for a file-level error with no single row to point at.
-        message:
-          type: string
-      description: |
-        One thing wrong with the uploaded workbook, precise enough to act on
-        without reopening the file blind.
-
-    ObJourneyTaskImportedItem:
-      type: object
-      required: [label, mandatory]
-      properties:
-        label: { type: string }
-        mandatory: { type: boolean }
-
-    ObJourneyTaskImportedDoc:
-      type: object
-      required: [label, required]
-      properties:
-        label: { type: string }
-        required: { type: boolean }
-
-    ObJourneyTaskImported:
-      type: object
-      required: [name, tatDays, requiresSignoff, items, docs]
-      properties:
-        stageGroupName:
-          type: [string, 'null']
-          description: 'Null means "Ungrouped".'
-        name: { type: string }
-        description: { type: [string, 'null'] }
-        tatDays: { type: integer }
-        requiresSignoff: { type: boolean }
-        dependsOnTaskName:
-          type: [string, 'null']
-          description: 'Null means the task runs in parallel from journey start.'
-        items:
-          type: array
-          items: { $ref: '#/components/schemas/ObJourneyTaskImportedItem' }
-        docs:
-          type: array
-          items: { $ref: '#/components/schemas/ObJourneyTaskImportedDoc' }
-      description: One row of the Tasks sheet, with its Task List and Document Checklist rows already attached.
-
-    ObJourneyTaskImportPreview:
-      type: object
-      required: [valid, errors, tasks]
-      properties:
-        valid:
-          type: boolean
           description: |
-            `false` means `errors` is non-empty and nothing would be written;
-            `true` means `tasks` is the exact tree a commit would produce.
-        errors:
+            1-based, as Excel numbers it, so the message points at a row the
+            author can actually find. `0` is a complaint about the file as a
+            whole (no rows, unknown product) rather than about a line in it.
+        message: { type: string, description: What to fix, in the author's terms. }
+
+    ModuleImportTaskDto:
+      type: object
+      required: [name, checklist]
+      properties:
+        name: { type: string }
+        checklist:
           type: array
-          items: { $ref: '#/components/schemas/ObJourneyTaskImportRowError' }
+          items: { type: string }
+          description: |
+            The task's checklist entries, in file order. **Never empty**: a
+            task whose rows all left Checklist blank gets one entry named
+            after the task itself, so every imported task has something to
+            tick on the client journey.
+
+    ModuleImportStepDto:
+      type: object
+      required: [name, tasks]
+      properties:
+        name:
+          type: string
+          description: |
+            The Implementation Stage's own spelling from the OB-15 master, not
+            the file's — matching is case-insensitive, and the group is created
+            with the master's name.
         tasks:
           type: array
-          items: { $ref: '#/components/schemas/ObJourneyTaskImported' }
-      description: '`previewObJourneyTaskImport`''s body — the row-level result of validating a workbook without writing anything.'
-    ObJourneyTaskImportPreviewResponse:
-      type: object
-      required: [data]
-      properties: { data: { $ref: '#/components/schemas/ObJourneyTaskImportPreview' } }
+          items: { $ref: '#/components/schemas/ModuleImportTaskDto' }
 
-    ObJourneyTaskImportResult:
+    ModuleImportServiceDto:
       type: object
-      required: [taskCount, itemCount, docCount]
+      required: [name, action, steps]
       properties:
-        taskCount: { type: integer }
-        itemCount: { type: integer }
-        docCount: { type: integer }
-      description: What the commit actually wrote — the draft's new task, Task List and Document Checklist counts.
-    ObJourneyTaskImportResultResponse:
+        name: { type: string }
+        action:
+          type: string
+          enum: [CREATE, REPLACE]
+          description: |
+            What confirming will do to this service. `CREATE` — the product has
+            no service of this name, so a new draft is made. `REPLACE` — an
+            unpublished draft exists and its whole Step / Task / Checklist tree
+            is rewritten. A service whose latest version is published appears
+            as a row error instead of either, so an admin sees which of their
+            drafts is about to be overwritten before anything is.
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/ModuleImportStepDto' }
+
+    ModuleImportPreviewData:
+      type: object
+      required: [valid, errors, services]
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ModuleImportRowError' }
+          description: Empty when `valid`.
+        services:
+          type: array
+          items: { $ref: '#/components/schemas/ModuleImportServiceDto' }
+          description: |
+            Empty unless `valid` — a file with any row error describes no tree
+            worth rendering, and showing a partial one invites confirming it.
+      description: '`previewObModuleServiceImport`''s body — the row-level result of validating a workbook without writing anything.'
+
+    ModuleImportPreviewResponse:
       type: object
       required: [data]
-      properties: { data: { $ref: '#/components/schemas/ObJourneyTaskImportResult' } }
+      properties: { data: { $ref: '#/components/schemas/ModuleImportPreviewData' } }
 
-    ObJourneyTaskImportInvalidProblem:
+    ModuleImportResultData:
+      type: object
+      required: [servicesCreated, servicesReplaced, stepCount, taskCount, checklistCount]
+      properties:
+        servicesCreated: { type: integer, description: Module Services the file named that the product did not have. }
+        servicesReplaced: { type: integer, description: Existing drafts whose whole task tree was rewritten. }
+        stepCount: { type: integer, description: Stage groups written across every service in the file. }
+        taskCount: { type: integer }
+        checklistCount:
+          type: integer
+          description: |
+            Checklist entries written — including the ones defaulted from a
+            task's own name, so this is never less than `taskCount`.
+
+    ModuleImportResultResponse:
+      type: object
+      required: [data]
+      properties: { data: { $ref: '#/components/schemas/ModuleImportResultData' } }
+
+    ModuleImportInvalidProblem:
       allOf:
         - { $ref: '#/components/schemas/Problem' }
         - type: object
@@ -20421,11 +20527,12 @@ components:
           properties:
             errors:
               type: array
-              items: { $ref: '#/components/schemas/ObJourneyTaskImportRowError' }
+              items: { $ref: '#/components/schemas/ModuleImportRowError' }
       description: |
-        `422` on `commitObJourneyTaskImport` — the re-uploaded file no longer
+        `422` on `commitObModuleServiceImport` — the re-uploaded file no longer
         validates. Carries the identical row errors a failed `preview` would,
         on an ordinary `Problem` envelope rather than a bespoke JSON shape.
+        `type` is `https://edutrack/errors/module-import-invalid`.
 
     ObStepHasDependentsProblem:
       allOf:
@@ -20575,10 +20682,14 @@ components:
         mustChangePassword:
           type: boolean
           description: |
-            True until the client redeems a credential link and sets their own
-            password. A newly created account is always true — the column
-            defaults to it, so an account created by any path starts in the
-            state that forces the change.
+            True until the client has chosen their own password — by signing
+            in with the temporary one and calling `changePortalPassword`, or
+            by redeeming a credential link. A newly created or reset account
+            is always true; the column defaults to it, so an account created
+            by any path starts in the state that forces the change.
+
+            While it is true, `PortalPasswordChangeGate` refuses that client
+            every portal route but the change itself.
         lastLoginAt:
           type: [string, 'null']
           format: date-time
@@ -20596,25 +20707,31 @@ components:
             When the most recent credential link was **issued**, not delivered.
             The outbox owns delivery, and a panel claiming a mail arrived would
             be asserting something this feature cannot see.
-        devPassword:
+        temporaryPassword:
           type: [string, 'null']
           description: |
-            **Null in the product, and the only field here that is ever a
-            credential.**
+            **The only field here that is ever a credential**, and it is
+            present on `createObClientAccount` and
+            `resetObClientAccountPassword` only. Every read of the account
+            returns null, so it is never served twice.
 
-            Populated on `createObClientAccount` and
-            `resetObClientAccountPassword` only when
-            `edutrack.portal.dev-credentials.enabled` is set, which the
-            application refuses to start with outside a development profile.
-            When it is set, the account's password is replaced with this value
-            and `mustChangePassword` is cleared, so the operator can sign in as
-            the client immediately.
+            It is the temporary password just set on the account. Give it to
+            the client: `portalLogin` accepts it, answers
+            `mustChangePassword: true`, and the portal then refuses them every
+            route but `changePortalPassword` until they have chosen their own.
+            That is what makes a credential on a staff response an acceptable
+            cost rather than a refused one — it buys exactly one session, and
+            that session can do nothing but replace it.
 
-            It exists for demos against a database of invented clients whose
-            mail transport is `logging` — where the credential link the real
-            flow depends on arrives nowhere, and there is otherwise no way to
-            reach the portal at all. The schema note above still describes what
-            is true of every deployment that has not opted in.
+            `mustChangePassword` on the same response is therefore **true**,
+            not cleared. A password an operator read off a screen that did not
+            force a change would sit on a live account indefinitely.
+
+            **Null where a deployment has set
+            `edutrack.portal.temporary-password.enabled: false`**, which
+            returns to mailing a one-time link and showing staff nothing. A
+            screen must read null as "a link was mailed", not as a missing
+            value.
     ObClientAccountResponse:
       type: object
       required: [data]
@@ -21482,14 +21599,19 @@ components:
         password:
           type: [string, 'null']
           description: |
-            **Development builds only**, and null in the product, where the
-            client is mailed a one-time link instead. Set by
-            `edutrack.portal.dev-credentials`, which `PortalDevCredentialConfig`
-            refuses to start with outside the `local`, `dev-noauth` and
-            `fixtures` profiles.
+            The temporary password the client signs in with once. Give it to
+            them: `portalLogin` will accept it, return
+            `mustChangePassword: true`, and the portal will then refuse every
+            route but `changePortalPassword` until they have chosen their own.
 
-            A screen showing this must read null as "a link was mailed", not as
-            a missing value.
+            That is what makes a credential on a staff response an acceptable
+            cost rather than a refused one — it buys exactly one session, and
+            that session can do nothing but replace it.
+
+            **Null where a deployment has set
+            `edutrack.portal.temporary-password.enabled: false`**, which
+            returns to the link-only flow. A screen showing this must read
+            null as "a link was mailed", not as a missing value.
     ObClientCreateMeta:
       type: object
       properties:
@@ -24957,7 +25079,7 @@ components:
             row with neither is unreachable (`ck_client_accounts_has_a_master`).
     PortalLoginResult:
       type: object
-      required: [accessToken, expiresIn, client]
+      required: [accessToken, expiresIn, mustChangePassword, client]
       description: |
         No refresh token: a portal session lasts one access-token lifetime,
         and expiry means signing in again. `expiresIn` is seconds, not an
@@ -24966,6 +25088,18 @@ components:
       properties:
         accessToken: { type: string }
         expiresIn: { type: integer, examples: [900] }
+        mustChangePassword:
+          type: boolean
+          description: |
+            True until the client has replaced the temporary password they
+            were issued. **A report, not the control** — the enforcement is
+            server-side on every portal route (`PortalPasswordChangeGate`),
+            and a caller ignoring this field is refused rather than let
+            through. It is here so the shell can route straight to the change
+            form instead of rendering a page that would only be refused.
+
+            Always false on `changePortalPassword`'s response, which is
+            minted after the change has been written.
         client: { $ref: '#/components/schemas/PortalClient' }
     PortalLoginResponse:
       type: object
@@ -24989,6 +25123,37 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/PortalCredentialLink' }
+    PortalPasswordChangeRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      description: |
+        Whose password is changing is decided by the bearer token, never by
+        this body — an `accountId` field here would be an endpoint for
+        re-passwording strangers.
+
+        Neither field carries a policy constraint beyond a length bound.
+        Policy applies when a password is *set*, not when one is offered, so
+        `currentPassword` is unconstrained; `newPassword`'s shape is enforced
+        server-side so the form gets back the single rule it broke rather
+        than a list of all of them. The length bound is not cosmetic —
+        Argon2id's cost is a function of what it is given.
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            The password being replaced. For a newly issued login this is the
+            temporary password the client was given.
+        newPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            At least 12 characters with upper case, lower case, a digit and a
+            symbol, and it must differ from `currentPassword` — a forced
+            change that accepted the same password back would clear the flag
+            while leaving the staff-readable credential in place.
     PortalCredentialRedeemRequest:
       type: object
       required: [password]

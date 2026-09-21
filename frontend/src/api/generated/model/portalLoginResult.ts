@@ -58,5 +58,16 @@ compute the wrong deadline from a timestamp.
 export interface PortalLoginResult {
   accessToken: string;
   expiresIn: number;
+  /** True until the client has replaced the temporary password they
+were issued. **A report, not the control** — the enforcement is
+server-side on every portal route (`PortalPasswordChangeGate`),
+and a caller ignoring this field is refused rather than let
+through. It is here so the shell can route straight to the change
+form instead of rendering a page that would only be refused.
+
+Always false on `changePortalPassword`'s response, which is
+minted after the change has been written.
+ */
+  mustChangePassword: boolean;
   client: PortalClient;
 }

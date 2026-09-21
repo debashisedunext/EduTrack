@@ -63,14 +63,19 @@ never stored and never read back.
 export interface ObPortalLoginIssued {
   /** The client's `clientCode`, which is what they sign in with. */
   username: string;
-  /** **Development builds only**, and null in the product, where the
-client is mailed a one-time link instead. Set by
-`edutrack.portal.dev-credentials`, which `PortalDevCredentialConfig`
-refuses to start with outside the `local`, `dev-noauth` and
-`fixtures` profiles.
+  /** The temporary password the client signs in with once. Give it to
+them: `portalLogin` will accept it, return
+`mustChangePassword: true`, and the portal will then refuse every
+route but `changePortalPassword` until they have chosen their own.
 
-A screen showing this must read null as "a link was mailed", not as
-a missing value.
+That is what makes a credential on a staff response an acceptable
+cost rather than a refused one — it buys exactly one session, and
+that session can do nothing but replace it.
+
+**Null where a deployment has set
+`edutrack.portal.temporary-password.enabled: false`**, which
+returns to the link-only flow. A screen showing this must read
+null as "a link was mailed", not as a missing value.
  */
   password?: ObPortalLoginIssuedPassword;
 }

@@ -43,8 +43,20 @@ final class PortalAuthDtos {
      * <p>{@code expiresIn} is seconds, not an absolute time: a client whose
      * clock disagrees with ours would compute the wrong deadline from a
      * timestamp, and a duration cannot be misread.
+     *
+     * <p>{@code mustChangePassword} is <b>a report, not the control</b>. It is
+     * here so the portal shell can route straight to the change form instead of
+     * rendering a page that would only be refused; the refusal itself is
+     * {@code PortalPasswordChangeGate}'s, server-side, on every portal route
+     * but one. Anybody reading this field as the enforcement has misread it,
+     * and A-026 makes the same point for staff in the same words.
+     *
+     * <p>It is also what {@code PATCH /portal/me/password} answers with, where
+     * it is false by construction — see {@link PortalPasswordChangeService} for
+     * why that route hands back a session rather than a 204.
      */
-    record LoginResponse(String accessToken, int expiresIn, Client client) {
+    record LoginResponse(String accessToken, int expiresIn,
+                         boolean mustChangePassword, Client client) {
     }
 
     /**
@@ -90,6 +102,39 @@ final class PortalAuthDtos {
             @Schema(description = "The password the client is choosing. Must satisfy the portal policy: "
                     + "at least 12 characters with upper case, lower case, a digit and a symbol.")
             String password) {
+    }
+
+    /**
+     * Changing a password you already hold, as opposed to redeeming a link.
+     *
+     * <p>{@code currentPassword} carries no policy annotation, exactly as
+     * {@code LoginRequest}'s password does not: policy applies when a password
+     * is <i>set</i>, not when one is offered, and rejecting a malformed
+     * current password here would tell a caller holding a borrowed token which
+     * candidates are not worth trying.
+     *
+     * <p>{@code newPassword} is bounded but not shape-checked here either. The
+     * shape is {@link PortalPasswordRules}' job, enforced in the service, so
+     * that one policy is stated in one place and the form gets back the single
+     * rule it broke rather than a Bean Validation message listing all of them.
+     * The length bound is not cosmetic — Argon2id's cost is a function of what
+     * it is given, so an unbounded field is a way to spend the server's memory
+     * from a route a caller can reach.
+     */
+    record PasswordChangeRequest(
+            @NotBlank
+            @Size(max = PortalPasswordRules.MAX_LENGTH)
+            @Schema(description = "The password being replaced. For a newly issued login this is the "
+                    + "temporary password the client was given.")
+            String currentPassword,
+
+            @NotBlank
+            @Size(max = PortalPasswordRules.MAX_LENGTH,
+                    message = "That password is longer than " + PortalPasswordRules.MAX_LENGTH + " characters.")
+            @Schema(description = "The password the client is choosing. Must satisfy the portal policy: "
+                    + "at least 12 characters with upper case, lower case, a digit and a symbol, "
+                    + "and must differ from the current one.")
+            String newPassword) {
     }
 
     record LoginResponseEnvelope(LoginResponse data) {

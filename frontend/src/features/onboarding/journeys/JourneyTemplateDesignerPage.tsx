@@ -63,7 +63,6 @@ import {
   type TreeViewState,
 } from './journeyTemplateTreeView'
 import { ModuleServiceAdmin } from './ModuleServiceAdmin'
-import { TaskImportDialog } from './TaskImportDialog'
 
 /**
  * C-102 · OB-07's journey template designer: back link, a two-line head, then
@@ -391,9 +390,6 @@ function Designer({
      on every visit after it. */
   const [showHow, setShowHow] = React.useState(false)
 
-  /** OB-07 · the "Import tasks" dialog — download, upload, preview, confirm. */
-  const [importing, setImporting] = React.useState(false)
-
   /*
     Stages and tasks share the one set, prefixed rather than merged, because
     both are now disclosure rows: `stage:201` and `task:201` are different
@@ -695,11 +691,6 @@ function Designer({
             </Button>
           )}
           {editable && (
-            <Button type="button" variant="secondary" onClick={() => setImporting(true)}>
-              Import tasks
-            </Button>
-          )}
-          {editable && (
             <Button
               type="button"
               disabled={publish.isPending || steps.length === 0}
@@ -711,10 +702,6 @@ function Designer({
           )}
         </div>
       </header>
-
-      {editable && (
-        <TaskImportDialog templateId={templateId} open={importing} onOpenChange={setImporting} />
-      )}
 
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}

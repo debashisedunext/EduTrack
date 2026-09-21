@@ -66,7 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  CommitObJourneyTaskImportBody,
+  CommitObModuleServiceImportBody,
   ConflictResponse,
   ForbiddenResponse,
   ListObClientCommunicationsParams,
@@ -74,7 +74,11 @@ import type {
   ListObJourneysParams,
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
+  ModuleImportInvalidProblem,
+  ModuleImportPreviewResponse,
+  ModuleImportResultResponse,
   NotFoundResponse,
+  ObAttachmentResponse,
   ObBlockJourneyStepRequest,
   ObClientCommunicationListResponse,
   ObCompletionGateProblem,
@@ -87,9 +91,6 @@ import type {
   ObJourneyStepItemUpdateRequest,
   ObJourneyStepResponse,
   ObJourneyStepUpdateRequest,
-  ObJourneyTaskImportInvalidProblem,
-  ObJourneyTaskImportPreviewResponse,
-  ObJourneyTaskImportResultResponse,
   ObJourneyTemplateCatalogueOrderRequest,
   ObJourneyTemplateCreateRequest,
   ObJourneyTemplateDependsOnRequest,
@@ -114,10 +115,11 @@ import type {
   ObStepOutcomesSeenResponse,
   ObStepSkipRequest,
   PreconditionFailedResponse,
-  PreviewObJourneyTaskImportBody,
+  PreviewObModuleServiceImportBody,
   Problem,
   UnauthorizedResponse,
   UnprocessableTransitionResponse,
+  UploadObJourneyStepAttachmentBody,
   ValidationFailedResponse
 } from '.././model';
 
@@ -750,21 +752,27 @@ export const usePublishObJourneyTemplate = <TError = ObModuleGatedResponse | Pro
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * Three sheets — Tasks, Task List, Document Checklist — plus
-Instructions. The Stage dropdown and the Instructions sheet's stage
-list are drawn live from this template's own stage groups, so the
-file always names stages the import will actually accept.
+ * One sheet of four columns — `Module Service | Step | Task | Checklist`
+— plus Instructions. One row per checklist entry, with the first three
+columns repeated down the rows that share them; the import regroups
+the flat rows back into the tree.
 
- * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+The Step dropdown and the Instructions sheet's Step list are drawn
+live from the active Implementation Stages (OB-15), so the file can
+never offer a Step the import would then reject. No product is needed
+to download it — the columns are the same for every product, and the
+product is chosen when the file is uploaded.
+
+ * @summary Download the Module Service / Step / Task / Checklist template (OB-07)
  */
-export const downloadObJourneyTaskImportTemplate = (
-    templateId: number,
+export const downloadObModuleServiceImportTemplate = (
+    
  signal?: AbortSignal
 ) => {
       
       
       return http<Blob>(
-      {url: `/onboarding/journey-templates/${templateId}/task-import/template`, method: 'GET',
+      {url: `/onboarding/module-service-import/template`, method: 'GET',
         responseType: 'blob', signal
     },
       );
@@ -773,69 +781,69 @@ export const downloadObJourneyTaskImportTemplate = (
 
 
 
-export const getDownloadObJourneyTaskImportTemplateQueryKey = (templateId?: number,) => {
+export const getDownloadObModuleServiceImportTemplateQueryKey = () => {
     return [
-    `/onboarding/journey-templates/${templateId}/task-import/template`
+    `/onboarding/module-service-import/template`
     ] as const;
     }
 
     
-export const getDownloadObJourneyTaskImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+export const getDownloadObModuleServiceImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError = ObModuleGatedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getDownloadObJourneyTaskImportTemplateQueryKey(templateId);
+  const queryKey =  queryOptions?.queryKey ?? getDownloadObModuleServiceImportTemplateQueryKey();
 
   
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>> = ({ signal }) => downloadObJourneyTaskImportTemplate(templateId, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>> = ({ signal }) => downloadObModuleServiceImportTemplate(signal);
 
       
 
       
 
-   return  { queryKey, queryFn, enabled: !!(templateId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type DownloadObJourneyTaskImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>>
-export type DownloadObJourneyTaskImportTemplateQueryError = ObModuleGatedResponse
+export type DownloadObModuleServiceImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>>
+export type DownloadObModuleServiceImportTemplateQueryError = ObModuleGatedResponse
 
 
-export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
- templateId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>> & Pick<
+export function useDownloadObModuleServiceImportTemplate<TData = Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError = ObModuleGatedResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>,
+          Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>,
           TError,
-          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>
+          Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
- templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>> & Pick<
+export function useDownloadObModuleServiceImportTemplate<TData = Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError = ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>,
+          Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>,
           TError,
-          Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>
+          Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>
         > , 'initialData'
       >, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
- templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+export function useDownloadObModuleServiceImportTemplate<TData = Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError = ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+ * @summary Download the Module Service / Step / Task / Checklist template (OB-07)
  */
 
-export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError = ObModuleGatedResponse>(
- templateId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObJourneyTaskImportTemplate>>, TError, TData>>, }
+export function useDownloadObModuleServiceImportTemplate<TData = Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError = ObModuleGatedResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadObModuleServiceImportTemplate>>, TError, TData>>, }
  , queryClient?: QueryClient 
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getDownloadObJourneyTaskImportTemplateQueryOptions(templateId,options)
+  const queryOptions = getDownloadObModuleServiceImportTemplateQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -848,25 +856,32 @@ export function useDownloadObJourneyTaskImportTemplate<TData = Awaited<ReturnTyp
 
 
 /**
- * Every row in the workbook, checked against the same rules `POST
-task-import` commits with. Writes nothing regardless of the outcome:
-`valid: false` with the row errors, or `valid: true` with the task
-tree the file describes, for the confirm screen to render before
-anything is saved.
+ * Every row in the file, checked against the same rules `POST
+module-service-import` commits with. Writes nothing regardless of the
+outcome: `valid: false` with the row errors, or `valid: true` with the
+Module Service / Step / Task / Checklist tree the file describes and,
+per service, whether confirming will `CREATE` a draft or `REPLACE` an
+existing one — for the confirm screen to render before anything is
+saved.
 
- * @summary Validate a task-import file without writing anything (OB-07)
+A task whose rows all left Checklist blank comes back carrying one
+checklist entry named after the task itself, because that is what the
+commit will write. The preview never shows a tree the commit would
+not produce.
+
+ * @summary Validate a Module Service import file without writing anything (OB-07)
  */
-export const previewObJourneyTaskImport = (
-    templateId: number,
-    previewObJourneyTaskImportBody: PreviewObJourneyTaskImportBody,
+export const previewObModuleServiceImport = (
+    previewObModuleServiceImportBody: PreviewObModuleServiceImportBody,
  signal?: AbortSignal
 ) => {
       
       const formData = new FormData();
-formData.append(`file`, previewObJourneyTaskImportBody.file)
+formData.append(`productId`, previewObModuleServiceImportBody.productId.toString())
+formData.append(`file`, previewObModuleServiceImportBody.file)
 
-      return http<ObJourneyTaskImportPreviewResponse>(
-      {url: `/onboarding/journey-templates/${templateId}/task-import/preview`, method: 'POST',
+      return http<ModuleImportPreviewResponse>(
+      {url: `/onboarding/module-service-import/preview`, method: 'POST',
       headers: {'Content-Type': 'multipart/form-data', },
        data: formData, signal
     },
@@ -875,11 +890,11 @@ formData.append(`file`, previewObJourneyTaskImportBody.file)
   
 
 
-export const getPreviewObJourneyTaskImportMutationOptions = <TError = ObModuleGatedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext> => {
+export const getPreviewObModuleServiceImportMutationOptions = <TError = ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObModuleServiceImport>>, TError,{data: PreviewObModuleServiceImportBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof previewObModuleServiceImport>>, TError,{data: PreviewObModuleServiceImportBody}, TContext> => {
 
-const mutationKey = ['previewObJourneyTaskImport'];
+const mutationKey = ['previewObModuleServiceImport'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -889,10 +904,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, {templateId: number;data: PreviewObJourneyTaskImportBody}> = (props) => {
-          const {templateId,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewObModuleServiceImport>>, {data: PreviewObModuleServiceImportBody}> = (props) => {
+          const {data} = props ?? {};
 
-          return  previewObJourneyTaskImport(templateId,data,)
+          return  previewObModuleServiceImport(data,)
         }
 
         
@@ -900,47 +915,55 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PreviewObJourneyTaskImportMutationResult = NonNullable<Awaited<ReturnType<typeof previewObJourneyTaskImport>>>
-    export type PreviewObJourneyTaskImportMutationBody = PreviewObJourneyTaskImportBody
-    export type PreviewObJourneyTaskImportMutationError = ObModuleGatedResponse
+    export type PreviewObModuleServiceImportMutationResult = NonNullable<Awaited<ReturnType<typeof previewObModuleServiceImport>>>
+    export type PreviewObModuleServiceImportMutationBody = PreviewObModuleServiceImportBody
+    export type PreviewObModuleServiceImportMutationError = ObModuleGatedResponse
 
     /**
- * @summary Validate a task-import file without writing anything (OB-07)
+ * @summary Validate a Module Service import file without writing anything (OB-07)
  */
-export const usePreviewObJourneyTaskImport = <TError = ObModuleGatedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObJourneyTaskImport>>, TError,{templateId: number;data: PreviewObJourneyTaskImportBody}, TContext>, }
+export const usePreviewObModuleServiceImport = <TError = ObModuleGatedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewObModuleServiceImport>>, TError,{data: PreviewObModuleServiceImportBody}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof previewObJourneyTaskImport>>,
+        Awaited<ReturnType<typeof previewObModuleServiceImport>>,
         TError,
-        {templateId: number;data: PreviewObJourneyTaskImportBody},
+        {data: PreviewObModuleServiceImportBody},
         TContext
       > => {
 
-      const mutationOptions = getPreviewObJourneyTaskImportMutationOptions(options);
+      const mutationOptions = getPreviewObModuleServiceImportMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
     /**
- * Every existing task, Task List entry and Document Checklist entry on
-this draft is removed and re-created from the file, in one
-transaction — nothing is left half-applied. There is no natural key a
-checklist row could upsert on, so re-running this import replaces the
-tree rather than merging into it; safe only because the target is
-always a draft nothing has been instantiated from yet.
+ * A Module Service the file names and the product does not have is
+created as a new **draft**. One that exists as a draft has its entire
+Step / Task / Checklist tree **replaced** — there is no natural key a
+checklist row could upsert on, and the target is always a draft
+nothing has been instantiated from. One whose latest version is
+already published is refused as a row error, and the caller begins a
+revision on it first.
 
- * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+Every service in the file lands in one transaction, so nothing is
+left half-applied, and nothing is published.
+
+Imported tasks are created **parallel** — the file carries no
+dependency column, and ordering a task behind another is a designer
+edit afterwards.
+
+ * @summary Create or replace this product's Module Services from the file (OB-07)
  */
-export const commitObJourneyTaskImport = (
-    templateId: number,
-    commitObJourneyTaskImportBody: CommitObJourneyTaskImportBody,
+export const commitObModuleServiceImport = (
+    commitObModuleServiceImportBody: CommitObModuleServiceImportBody,
  signal?: AbortSignal
 ) => {
       
       const formData = new FormData();
-formData.append(`file`, commitObJourneyTaskImportBody.file)
+formData.append(`productId`, commitObModuleServiceImportBody.productId.toString())
+formData.append(`file`, commitObModuleServiceImportBody.file)
 
-      return http<ObJourneyTaskImportResultResponse>(
-      {url: `/onboarding/journey-templates/${templateId}/task-import`, method: 'POST',
+      return http<ModuleImportResultResponse>(
+      {url: `/onboarding/module-service-import`, method: 'POST',
       headers: {'Content-Type': 'multipart/form-data', },
        data: formData, signal
     },
@@ -949,11 +972,11 @@ formData.append(`file`, commitObJourneyTaskImportBody.file)
   
 
 
-export const getCommitObJourneyTaskImportMutationOptions = <TError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext> => {
+export const getCommitObModuleServiceImportMutationOptions = <TError = ObModuleGatedResponse | ModuleImportInvalidProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObModuleServiceImport>>, TError,{data: CommitObModuleServiceImportBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof commitObModuleServiceImport>>, TError,{data: CommitObModuleServiceImportBody}, TContext> => {
 
-const mutationKey = ['commitObJourneyTaskImport'];
+const mutationKey = ['commitObModuleServiceImport'];
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -963,10 +986,10 @@ const {mutation: mutationOptions} = options ?
       
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, {templateId: number;data: CommitObJourneyTaskImportBody}> = (props) => {
-          const {templateId,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitObModuleServiceImport>>, {data: CommitObModuleServiceImportBody}> = (props) => {
+          const {data} = props ?? {};
 
-          return  commitObJourneyTaskImport(templateId,data,)
+          return  commitObModuleServiceImport(data,)
         }
 
         
@@ -974,23 +997,23 @@ const {mutation: mutationOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type CommitObJourneyTaskImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitObJourneyTaskImport>>>
-    export type CommitObJourneyTaskImportMutationBody = CommitObJourneyTaskImportBody
-    export type CommitObJourneyTaskImportMutationError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem
+    export type CommitObModuleServiceImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitObModuleServiceImport>>>
+    export type CommitObModuleServiceImportMutationBody = CommitObModuleServiceImportBody
+    export type CommitObModuleServiceImportMutationError = ObModuleGatedResponse | ModuleImportInvalidProblem
 
     /**
- * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+ * @summary Create or replace this product's Module Services from the file (OB-07)
  */
-export const useCommitObJourneyTaskImport = <TError = ObModuleGatedResponse | Problem | ObJourneyTaskImportInvalidProblem,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObJourneyTaskImport>>, TError,{templateId: number;data: CommitObJourneyTaskImportBody}, TContext>, }
+export const useCommitObModuleServiceImport = <TError = ObModuleGatedResponse | ModuleImportInvalidProblem,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitObModuleServiceImport>>, TError,{data: CommitObModuleServiceImportBody}, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof commitObJourneyTaskImport>>,
+        Awaited<ReturnType<typeof commitObModuleServiceImport>>,
         TError,
-        {templateId: number;data: CommitObJourneyTaskImportBody},
+        {data: CommitObModuleServiceImportBody},
         TContext
       > => {
 
-      const mutationOptions = getCommitObJourneyTaskImportMutationOptions(options);
+      const mutationOptions = getCommitObModuleServiceImportMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }
@@ -2863,6 +2886,74 @@ export const useUpdateObJourneyStep = <TError = ValidationFailedResponse | Unaut
       > => {
 
       const mutationOptions = getUpdateObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Stores one task document through the shared onboarding upload pipeline. Only the step owner or backup owner may upload; the attachment is owned by the step and uses kind `SUBMISSION`.
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const uploadObJourneyStepAttachment = (
+    stepId: number,
+    uploadObJourneyStepAttachmentBody: UploadObJourneyStepAttachmentBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, uploadObJourneyStepAttachmentBody.file)
+
+      return http<ObAttachmentResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/attachments`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getUploadObJourneyStepAttachmentMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext> => {
+
+const mutationKey = ['uploadObJourneyStepAttachment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, {stepId: number;data: UploadObJourneyStepAttachmentBody}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  uploadObJourneyStepAttachment(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadObJourneyStepAttachmentMutationResult = NonNullable<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>>
+    export type UploadObJourneyStepAttachmentMutationBody = UploadObJourneyStepAttachmentBody
+    export type UploadObJourneyStepAttachmentMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse
+
+    /**
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const useUploadObJourneyStepAttachment = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>,
+        TError,
+        {stepId: number;data: UploadObJourneyStepAttachmentBody},
+        TContext
+      > => {
+
+      const mutationOptions = getUploadObJourneyStepAttachmentMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

@@ -49,7 +49,7 @@ the database rejects mutation independently via triggers and grants.
 import type { ObClientAccountLastLoginAt } from './obClientAccountLastLoginAt';
 import type { ObClientAccountLockedUntil } from './obClientAccountLockedUntil';
 import type { ObClientAccountCredentialSentAt } from './obClientAccountCredentialSentAt';
-import type { ObClientAccountDevPassword } from './obClientAccountDevPassword';
+import type { ObClientAccountTemporaryPassword } from './obClientAccountTemporaryPassword';
 
 /**
  * B-126 · a client's portal login as the OB-05 panel sees it.
@@ -105,10 +105,14 @@ being able to describe itself.
   displayName: string;
   email: string;
   isActive: boolean;
-  /** True until the client redeems a credential link and sets their own
-password. A newly created account is always true — the column
-defaults to it, so an account created by any path starts in the
-state that forces the change.
+  /** True until the client has chosen their own password — by signing
+in with the temporary one and calling `changePortalPassword`, or
+by redeeming a credential link. A newly created or reset account
+is always true; the column defaults to it, so an account created
+by any path starts in the state that forces the change.
+
+While it is true, `PortalPasswordChangeGate` refuses that client
+every portal route but the change itself.
  */
   mustChangePassword: boolean;
   /** Null when the client has never signed in. */
@@ -122,22 +126,28 @@ The outbox owns delivery, and a panel claiming a mail arrived would
 be asserting something this feature cannot see.
  */
   credentialSentAt?: ObClientAccountCredentialSentAt;
-  /** **Null in the product, and the only field here that is ever a
-credential.**
+  /** **The only field here that is ever a credential**, and it is
+present on `createObClientAccount` and
+`resetObClientAccountPassword` only. Every read of the account
+returns null, so it is never served twice.
 
-Populated on `createObClientAccount` and
-`resetObClientAccountPassword` only when
-`edutrack.portal.dev-credentials.enabled` is set, which the
-application refuses to start with outside a development profile.
-When it is set, the account's password is replaced with this value
-and `mustChangePassword` is cleared, so the operator can sign in as
-the client immediately.
+It is the temporary password just set on the account. Give it to
+the client: `portalLogin` accepts it, answers
+`mustChangePassword: true`, and the portal then refuses them every
+route but `changePortalPassword` until they have chosen their own.
+That is what makes a credential on a staff response an acceptable
+cost rather than a refused one — it buys exactly one session, and
+that session can do nothing but replace it.
 
-It exists for demos against a database of invented clients whose
-mail transport is `logging` — where the credential link the real
-flow depends on arrives nowhere, and there is otherwise no way to
-reach the portal at all. The schema note above still describes what
-is true of every deployment that has not opted in.
+`mustChangePassword` on the same response is therefore **true**,
+not cleared. A password an operator read off a screen that did not
+force a change would sit on a live account indefinitely.
+
+**Null where a deployment has set
+`edutrack.portal.temporary-password.enabled: false`**, which
+returns to mailing a one-time link and showing staff nothing. A
+screen must read null as "a link was mailed", not as a missing
+value.
  */
-  devPassword?: ObClientAccountDevPassword;
+  temporaryPassword?: ObClientAccountTemporaryPassword;
 }

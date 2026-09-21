@@ -99,14 +99,15 @@ describe('OB-05 client-account panel', () => {
   })
 
   /**
-   * The development switch — `edutrack.portal.dev-credentials.enabled`.
+   * The temporary password, which is how a portal login is issued.
    *
-   * The mock has no such switch and should not grow one: it would be a second
-   * implementation of a server decision, and the panel's job is only to render
-   * whichever answer arrives. So these override the response directly.
+   * The mock has no switch for `edutrack.portal.temporary-password.enabled`
+   * and should not grow one: it would be a second implementation of a server
+   * decision, and the panel's job is only to render whichever answer arrives.
+   * So these override the response directly.
    */
-  describe('when the server is issuing readable passwords', () => {
-    function respondWithDevPassword(devPassword: string) {
+  describe('when a temporary password comes back', () => {
+    function respondWithTemporaryPassword(temporaryPassword: string) {
       server.use(
         http.post('*/onboarding/clients/:obClientId/account', () =>
           HttpResponse.json({
@@ -116,57 +117,65 @@ describe('OB-05 client-account panel', () => {
               displayName: 'Arjun Shetty',
               email: 'arjun@sunrise.example',
               isActive: true,
-              // Cleared by the same statement that set the password — a forced
-              // change would make the value below dead on arrival.
-              mustChangePassword: false,
+              // Still TRUE, and that is the whole mechanism. The password
+              // below buys one session which can do nothing but replace it;
+              // clearing the flag here would leave a staff-readable credential
+              // on a live account indefinitely.
+              mustChangePassword: true,
               lastLoginAt: null,
               lockedUntil: null,
               credentialSentAt: '2026-09-10T04:00:00Z',
-              devPassword,
+              temporaryPassword,
             },
           }),
         ),
       )
     }
 
-    it('shows the username and password together, marked as a development build', async () => {
+    it('shows the username and password together, as one hand-over', async () => {
       const user = userEvent.setup()
-      respondWithDevPassword('Demo-abc23xyz9')
+      respondWithTemporaryPassword('Ed-abc23xyz9kp4')
       renderPanel(2)
 
       await user.click(await screen.findByRole('button', { name: /create portal login/i }))
 
-      expect(await screen.findByText('Demo-abc23xyz9')).toBeInTheDocument()
-      expect(screen.getByText(/development build/i)).toBeInTheDocument()
+      expect(await screen.findByText('Ed-abc23xyz9kp4')).toBeInTheDocument()
       // Both halves, or it is not something anybody can sign in with.
       expect(screen.getAllByText('SUNRISEEDTEC.arjun').length).toBeGreaterThan(0)
     })
 
-    it('says why it is on screen, so nobody reads it as normal behaviour', async () => {
+    /**
+     * The copy has to say the password is temporary. An operator who reads it
+     * as the client's permanent password files it somewhere, and the bargain
+     * that makes showing a credential acceptable — that it survives one
+     * sign-in — stops holding the moment somebody believes otherwise.
+     */
+    it('says the client will be asked to choose their own', async () => {
       const user = userEvent.setup()
-      respondWithDevPassword('Demo-abc23xyz9')
+      respondWithTemporaryPassword('Ed-abc23xyz9kp4')
       renderPanel(2)
 
       await user.click(await screen.findByRole('button', { name: /create portal login/i }))
 
-      expect(await screen.findByText(/dev-credentials/i)).toBeInTheDocument()
+      expect(await screen.findByText(/choose their own password/i)).toBeInTheDocument()
+      expect(screen.getByText(/temporary password/i)).toBeInTheDocument()
     })
 
     /*
-      The guard that matters. `devPassword` is absent on every response from a
-      deployment that has not opted in, and the panel must render exactly what
-      it renders today — this fails if the field is ever defaulted to a value
-      rather than left null.
+      The guard that matters. `temporaryPassword` is absent on every read of
+      the account and on any deployment that has switched the flow off, and the
+      panel must then render no credential at all — this fails if the field is
+      ever defaulted to a value rather than left null.
     */
-    it('renders nothing extra when the field is absent, which is the shipped case', async () => {
+    it('renders no credential when the field is absent', async () => {
       const user = userEvent.setup()
       renderPanel(2)
 
       await user.click(await screen.findByRole('button', { name: /create portal login/i }))
 
       await screen.findByRole('status')
-      expect(screen.queryByText(/development build/i)).not.toBeInTheDocument()
-      expect(screen.queryByText(/^Demo-/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/send these to the client/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^Ed-/)).not.toBeInTheDocument()
     })
   })
 })

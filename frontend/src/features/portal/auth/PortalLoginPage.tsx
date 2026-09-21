@@ -66,7 +66,18 @@ export function PortalLoginPage() {
       setAccessToken(null)
       const response = await portalLogin(values)
       signIn(response.data)
-      navigate(from ?? '/portal/choose', { replace: true })
+      /*
+        A newly issued or reset login signs in with a temporary password and
+        owes us a change. `PortalRequireAuth` would redirect anyway — this is
+        the same decision one navigation earlier, so the client does not see
+        the chooser flash before being moved off it.
+
+        `from` is deliberately discarded in that case: wherever they were
+        heading, the server will refuse it until the password is replaced.
+      */
+      navigate(response.data.mustChangePassword ? '/portal/change-password' : (from ?? '/portal/choose'), {
+        replace: true,
+      })
     } catch (error) {
       setFormError(messageFor(error))
     }

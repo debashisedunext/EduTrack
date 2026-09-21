@@ -105,40 +105,48 @@ class ClientCredentialTokens {
     }
 
     /**
-     * A password a person can read off a screen and type, for the development
-     * switch described by {@code PortalDevCredentialProperties}.
+     * The temporary password a client is issued and then made to change, for
+     * the flow {@link PortalTemporaryPasswordProperties} describes.
      *
      * <p><b>Shaped rather than random, because {@link PortalPasswordRules} has
      * a shape.</b> The rules want upper, lower, a digit and a symbol; a random
      * Base64 string satisfies them only by luck, and the failure mode of luck
      * here is an account created with a password its own portal refuses — the
-     * exact dead end this switch exists to remove. The fixed {@code Demo-}
-     * prefix supplies the upper case, the lower case and the symbol, so only
-     * the entropy is left to chance.
+     * exact dead end this exists to remove. The fixed {@code Ed-} prefix
+     * supplies the upper case, the lower case and the symbol, so only the
+     * entropy is left to chance.
      *
-     * <p>Still {@link java.security.SecureRandom}: this ends up as a working
-     * credential on a running deployment, and "it is only a demo" is how a
-     * predictable password reaches something that turned out to matter. The
-     * alphabet excludes the characters people mistype from a screen — no O/0,
-     * no l/1/I — since being read aloud is the whole purpose.
+     * <p><b>The prefix is neutral on purpose.</b> This is now issued on every
+     * deployment rather than on a demo box, and a password beginning
+     * {@code Demo-} on a live client's account reads as a mistake somebody
+     * should report — or, worse, as a value somebody may guess the rest of.
+     *
+     * <p>{@link java.security.SecureRandom}, and that matters more than it did:
+     * this is a working credential on a real deployment for as long as it takes
+     * the client to sign in once. The alphabet excludes the characters people
+     * mistype from a screen — no O/0, no l/1/I — since being read down a phone
+     * line is the whole purpose.
      */
-    static String readableDevPassword() {
-        StringBuilder password = new StringBuilder("Demo-");
-        for (int i = 0; i < DEV_PASSWORD_ENTROPY_CHARS; i++) {
-            password.append(DEV_PASSWORD_ALPHABET.charAt(RANDOM.nextInt(DEV_PASSWORD_ALPHABET.length())));
+    static String readableTemporaryPassword() {
+        StringBuilder password = new StringBuilder("Ed-");
+        for (int i = 0; i < TEMPORARY_PASSWORD_ENTROPY_CHARS; i++) {
+            password.append(TEMPORARY_PASSWORD_ALPHABET.charAt(
+                    RANDOM.nextInt(TEMPORARY_PASSWORD_ALPHABET.length())));
         }
         return password.append(RANDOM.nextInt(10)).toString();
     }
 
     /** Unambiguous when read off a screen: no O/0, no l/1/I. */
-    private static final String DEV_PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final String TEMPORARY_PASSWORD_ALPHABET =
+            "abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     /**
-     * Nine, which with the prefix and the trailing digit makes fifteen — over
-     * {@link PortalPasswordRules#MIN_LENGTH} with room to spare, so a later
-     * tightening of the minimum does not silently start rejecting these.
+     * Eleven, which with the three-character prefix and the trailing digit
+     * makes fifteen — over {@link PortalPasswordRules#MIN_LENGTH} with room to
+     * spare, so a later tightening of the minimum does not silently start
+     * rejecting these.
      */
-    private static final int DEV_PASSWORD_ENTROPY_CHARS = 9;
+    private static final int TEMPORARY_PASSWORD_ENTROPY_CHARS = 11;
 
     record Minted(String token, Instant expiresAt) {
     }

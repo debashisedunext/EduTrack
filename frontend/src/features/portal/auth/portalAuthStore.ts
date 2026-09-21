@@ -48,6 +48,17 @@ interface PortalAuthState {
   status: PortalAuthStatus
   client: PortalClient | null
   expiresAt: number | null
+  /**
+   * The client is signed in with the temporary password they were issued and
+   * has not replaced it yet.
+   *
+   * **A report, not the control.** `PortalPasswordChangeGate` refuses every
+   * portal route but the change itself server-side, so a bug here costs an
+   * honest client a confusing error page, not an unauthorised session. It is
+   * held so `PortalRequireAuth` can route to the form rather than let a page
+   * render and then fail.
+   */
+  mustChangePassword: boolean
 
   signIn: (session: PortalLoginResult) => void
   signOut: () => void
@@ -57,6 +68,7 @@ export const initialPortalAuthState = {
   status: 'anonymous' as PortalAuthStatus,
   client: null,
   expiresAt: null,
+  mustChangePassword: false,
 }
 
 /**
@@ -98,6 +110,14 @@ interface StoredPortalSession {
   accessToken: string
   client: PortalClient
   expiresAt: number
+  /**
+   * Persisted with the rest of the session, because a reload must not lose
+   * it. Losing it would drop a half-onboarded client onto the module chooser,
+   * which would then 403 on its first call — the server is still refusing
+   * them, and the only thing this flag decides is whether they see a form or
+   * an error.
+   */
+  mustChangePassword: boolean
 }
 
 /**
@@ -114,7 +134,12 @@ function readStoredSession(): StoredPortalSession | null {
     if (typeof parsed?.accessToken !== 'string' || typeof parsed?.expiresAt !== 'number' || !parsed.client) {
       return null
     }
-    return parsed as StoredPortalSession
+    // Defaulted rather than required, so a session written before this field
+    // existed restores instead of being discarded. False is the safe default
+    // for the same reason the token claim is emitted only when true: a stale
+    // `false` costs one 403 and a redirect, a stale `true` would strand a
+    // client on a form they have already completed.
+    return { ...parsed, mustChangePassword: parsed.mustChangePassword === true } as StoredPortalSession
   } catch {
     return null
   }
@@ -144,8 +169,18 @@ export const usePortalAuthStore = create<PortalAuthState>((set) => ({
   signIn: (session) => {
     const expiresAt = Date.now() + session.expiresIn * 1000
     setAccessToken(session.accessToken)
-    writeStoredSession({ accessToken: session.accessToken, client: session.client, expiresAt })
-    set({ status: 'authenticated', client: session.client, expiresAt })
+    writeStoredSession({
+      accessToken: session.accessToken,
+      client: session.client,
+      expiresAt,
+      mustChangePassword: session.mustChangePassword,
+    })
+    set({
+      status: 'authenticated',
+      client: session.client,
+      expiresAt,
+      mustChangePassword: session.mustChangePassword,
+    })
   },
 
   signOut: () => {
@@ -154,7 +189,7 @@ export const usePortalAuthStore = create<PortalAuthState>((set) => ({
     // must never find `http.ts` still holding a live token to refetch with.
     setAccessToken(null)
     clearStoredSession()
-    set({ status: 'anonymous', client: null, expiresAt: null })
+    set({ status: 'anonymous', client: null, expiresAt: null, mustChangePassword: false })
   },
 }))
 
@@ -191,5 +226,6 @@ export function restorePortalSession(): void {
     status: 'authenticated',
     client: stored.client,
     expiresAt: stored.expiresAt,
+    mustChangePassword: stored.mustChangePassword,
   })
 }

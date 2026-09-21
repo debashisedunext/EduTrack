@@ -241,10 +241,17 @@ export const listPortalTicketAttachmentsResponse = zod.object({
 })
 
 /**
- * Ordinary sign-in, for an account that has already chosen its own
-password via `redeemPortalCredentialLink`. A newly created or reset
-account has no password to type yet — that's what the credential
-link is for.
+ * Ordinary sign-in. A newly created or reset account signs in with the
+temporary password from `createObClient`'s `meta.portalLogin` or from
+`resetObClientPortalPassword`, and the response then carries
+`mustChangePassword: true`.
+
+**Succeeding is not the same as being let in.** While
+`mustChangePassword` is true the token this returns is refused on
+every portal route but `changePortalPassword`, with
+`portal-password-change-required`. Refusing the login itself would be
+wrong twice over: the credentials are correct, and the client would
+have no session with which to reach the form that fixes it.
 
 Failures are deliberately indistinguishable, exactly as `login` is
 for staff: wrong username, wrong password and unknown username all
@@ -267,6 +274,7 @@ export const portalLoginResponse = zod.object({
   "data": zod.object({
   "accessToken": zod.string(),
   "expiresIn": zod.number(),
+  "mustChangePassword": zod.boolean().describe('True until the client has replaced the temporary password they\nwere issued. \*\*A report, not the control\*\* — the enforcement is\nserver-side on every portal route (`PortalPasswordChangeGate`),\nand a caller ignoring this field is refused rather than let\nthrough. It is here so the shell can route straight to the change\nform instead of rendering a page that would only be refused.\n\nAlways false on `changePortalPassword`\'s response, which is\nminted after the change has been written.\n'),
   "client": zod.object({
   "username": zod.string(),
   "displayName": zod.string(),
@@ -315,6 +323,56 @@ export const redeemPortalCredentialLinkBodyPasswordMax = 200;
 export const redeemPortalCredentialLinkBody = zod.object({
   "password": zod.string().min(1).max(redeemPortalCredentialLinkBodyPasswordMax).describe('The password the client is choosing. Bean Validation on\n`RedeemRequest` only bounds the length (`@Size(max=200)`); the\n12-character-plus-complexity rule (`PortalPasswordRules`) is\nenforced afterwards as a business rule — a failure there is the\n`weak-password` 400 below, not a `ValidationFailed` one.\n')
 }).describe('The token travels in the path, not here, so the page can validate a\nlink on load with a GET and reuse the same shape for the POST.\n')
+
+/**
+ * The mirror of staff's `changeMyPassword`, and the one route a client
+who still owes us a password change may call — see
+`PortalPasswordChangeGate.ALWAYS_ALLOWED`. Renaming this path without
+changing that set deadlocks every such client out of the portal,
+including out of the way back in.
+
+Whose password is decided by the bearer token and by nothing in the
+body; there is no id a caller could supply.
+
+**200 with a fresh session, not 204** — the one place this departs
+from the staff route. The portal has no refresh route, so a 204 would
+leave the caller holding the only token they have, still carrying the
+must-change claim the change just cleared, and still refused by the
+gate. The returned session is minted after the write, so its
+`mustChangePassword` is false because the fact it reports is false.
+
+`invalid-credentials` covers a wrong `currentPassword` and a
+deactivated account alike, matching the login surface's own rule. A
+wrong guess is deliberately NOT charged to the login lockout: an
+attacker holding a stolen token could otherwise spend five of them
+locking the real client out of the sign-in screen.
+
+ * @summary Change your own portal password
+ */
+export const changePortalPasswordBodyCurrentPasswordMax = 200;
+
+export const changePortalPasswordBodyNewPasswordMax = 200;
+
+
+
+export const changePortalPasswordBody = zod.object({
+  "currentPassword": zod.string().min(1).max(changePortalPasswordBodyCurrentPasswordMax).describe('The password being replaced. For a newly issued login this is the\ntemporary password the client was given.\n'),
+  "newPassword": zod.string().min(1).max(changePortalPasswordBodyNewPasswordMax).describe('At least 12 characters with upper case, lower case, a digit and a\nsymbol, and it must differ from `currentPassword` — a forced\nchange that accepted the same password back would clear the flag\nwhile leaving the staff-readable credential in place.\n')
+}).describe('Whose password is changing is decided by the bearer token, never by\nthis body — an `accountId` field here would be an endpoint for\nre-passwording strangers.\n\nNeither field carries a policy constraint beyond a length bound.\nPolicy applies when a password is \*set\*, not when one is offered, so\n`currentPassword` is unconstrained; `newPassword`\'s shape is enforced\nserver-side so the form gets back the single rule it broke rather\nthan a list of all of them. The length bound is not cosmetic —\nArgon2id\'s cost is a function of what it is given.\n')
+
+export const changePortalPasswordResponse = zod.object({
+  "data": zod.object({
+  "accessToken": zod.string(),
+  "expiresIn": zod.number(),
+  "mustChangePassword": zod.boolean().describe('True until the client has replaced the temporary password they\nwere issued. \*\*A report, not the control\*\* — the enforcement is\nserver-side on every portal route (`PortalPasswordChangeGate`),\nand a caller ignoring this field is refused rather than let\nthrough. It is here so the shell can route straight to the change\nform instead of rendering a page that would only be refused.\n\nAlways false on `changePortalPassword`\'s response, which is\nminted after the change has been written.\n'),
+  "client": zod.object({
+  "username": zod.string(),
+  "displayName": zod.string(),
+  "hasTicketing": zod.boolean().describe('A Ticketing card renders when true.'),
+  "hasOnboarding": zod.boolean().describe('An Onboarding card renders when true. At least one of\n`hasTicketing`\/`hasOnboarding` is always true — a `client_accounts`\nrow with neither is unreachable (`ck_client_accounts_has_a_master`).\n')
+}).describe('The signed-in client, as the portal shell renders it. Two ids are\nderivable from these booleans — a null id means that tree is empty —\nso the shell decides which module cards to draw without a second\nvocabulary for the same fact. CP-02\'s whole source of truth for the\nmodule chooser: read straight off the login response, no extra call.\n')
+}).describe('No refresh token: a portal session lasts one access-token lifetime,\nand expiry means signing in again. `expiresIn` is seconds, not an\nabsolute time, so a client whose clock disagrees with ours cannot\ncompute the wrong deadline from a timestamp.\n')
+})
 
 /**
  * The prerequisites are the full staff wire shape (`ObClientPrereqs`) —

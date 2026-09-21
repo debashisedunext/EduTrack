@@ -17,6 +17,7 @@ import { initialPortalAuthState, restorePortalSession, usePortalAuthStore } from
 const loginResult = (overrides: Partial<PortalLoginResult> = {}): PortalLoginResult => ({
   accessToken: 'portal.test.token',
   expiresIn: 900,
+  mustChangePassword: false,
   client: { username: 'northwind.ops', displayName: 'Northwind Ops', hasTicketing: false, hasOnboarding: true },
   ...overrides,
 })
@@ -115,4 +116,42 @@ it('signs out: clears the shared access token before clearing local state', () =
   const state = usePortalAuthStore.getState()
   expect(state.status).toBe('anonymous')
   expect(state.client).toBeNull()
+})
+
+/**
+ * The flag has to survive a reload. Losing it would drop a client who has not
+ * chosen a password onto the chooser, whose first call the server then 403s —
+ * the refusal is server-side either way, so all this decides is whether they
+ * see a form or an error page.
+ */
+it('persists mustChangePassword across a restore', () => {
+  usePortalAuthStore.getState().signIn(loginResult({ mustChangePassword: true }))
+
+  usePortalAuthStore.setState(initialPortalAuthState)
+  restorePortalSession()
+
+  expect(usePortalAuthStore.getState().mustChangePassword).toBe(true)
+})
+
+/**
+ * A session written before the field existed must restore rather than be
+ * discarded, and must restore as false: a stale `false` costs one 403 and a
+ * redirect, a stale `true` would strand a client on a form they have already
+ * completed.
+ */
+it('restores a session stored before mustChangePassword existed, as false', () => {
+  sessionStorage.setItem(
+    'edutrack.portal.session',
+    JSON.stringify({
+      accessToken: 'legacy.token',
+      client: loginResult().client,
+      expiresAt: Date.now() + 900_000,
+    }),
+  )
+
+  restorePortalSession()
+
+  const state = usePortalAuthStore.getState()
+  expect(state.status).toBe('authenticated')
+  expect(state.mustChangePassword).toBe(false)
 })

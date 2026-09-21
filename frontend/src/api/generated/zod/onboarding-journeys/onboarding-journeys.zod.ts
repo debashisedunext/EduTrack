@@ -378,89 +378,83 @@ export const publishObJourneyTemplateResponse = zod.object({
 })
 
 /**
- * Three sheets — Tasks, Task List, Document Checklist — plus
-Instructions. The Stage dropdown and the Instructions sheet's stage
-list are drawn live from this template's own stage groups, so the
-file always names stages the import will actually accept.
+ * Every row in the file, checked against the same rules `POST
+module-service-import` commits with. Writes nothing regardless of the
+outcome: `valid: false` with the row errors, or `valid: true` with the
+Module Service / Step / Task / Checklist tree the file describes and,
+per service, whether confirming will `CREATE` a draft or `REPLACE` an
+existing one — for the confirm screen to render before anything is
+saved.
 
- * @summary Download the Tasks / Task List / Document Checklist template (OB-07)
+A task whose rows all left Checklist blank comes back carrying one
+checklist entry named after the task itself, because that is what the
+commit will write. The preview never shows a tree the commit would
+not produce.
+
+ * @summary Validate a Module Service import file without writing anything (OB-07)
  */
-export const downloadObJourneyTaskImportTemplateParams = zod.object({
-  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
-})
-
-/**
- * Every row in the workbook, checked against the same rules `POST
-task-import` commits with. Writes nothing regardless of the outcome:
-`valid: false` with the row errors, or `valid: true` with the task
-tree the file describes, for the confirm screen to render before
-anything is saved.
-
- * @summary Validate a task-import file without writing anything (OB-07)
- */
-export const previewObJourneyTaskImportParams = zod.object({
-  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
-})
-
-export const previewObJourneyTaskImportBody = zod.object({
+export const previewObModuleServiceImportBody = zod.object({
+  "productId": zod.number().describe('The product whose Module Services this file authors. One file loads one product.'),
   "file": zod.instanceof(File)
 })
 
-export const previewObJourneyTaskImportResponse = zod.object({
+export const previewObModuleServiceImportResponse = zod.object({
   "data": zod.object({
-  "valid": zod.boolean().describe('`false` means `errors` is non-empty and nothing would be written;\n`true` means `tasks` is the exact tree a commit would produce.\n'),
+  "valid": zod.boolean(),
   "errors": zod.array(zod.object({
-  "sheet": zod.string().describe('Tasks, Task List or Document Checklist — the sheet the row is on.'),
-  "rowNumber": zod.number().describe('1-based Excel row number, matching what the user sees with the sheet open. 0 for a file-level error with no single row to point at.'),
-  "message": zod.string()
-}).describe('One thing wrong with the uploaded workbook, precise enough to act on\nwithout reopening the file blind.\n')),
-  "tasks": zod.array(zod.object({
-  "stageGroupName": zod.string().nullish().describe('Null means \"Ungrouped\".'),
+  "sheet": zod.string().describe('The sheet the offending row is on — always `Import` for this file.'),
+  "rowNumber": zod.number().describe('1-based, as Excel numbers it, so the message points at a row the\nauthor can actually find. `0` is a complaint about the file as a\nwhole (no rows, unknown product) rather than about a line in it.\n'),
+  "message": zod.string().describe('What to fix')
+})).describe('Empty when `valid`.'),
+  "services": zod.array(zod.object({
   "name": zod.string(),
-  "description": zod.string().nullish(),
-  "tatDays": zod.number(),
-  "requiresSignoff": zod.boolean(),
-  "dependsOnTaskName": zod.string().nullish().describe('Null means the task runs in parallel from journey start.'),
-  "items": zod.array(zod.object({
-  "label": zod.string(),
-  "mandatory": zod.boolean()
-})),
-  "docs": zod.array(zod.object({
-  "label": zod.string(),
-  "required": zod.boolean()
+  "action": zod.enum(['CREATE', 'REPLACE']).describe('What confirming will do to this service. `CREATE` — the product has\nno service of this name, so a new draft is made. `REPLACE` — an\nunpublished draft exists and its whole Step \/ Task \/ Checklist tree\nis rewritten. A service whose latest version is published appears\nas a row error instead of either, so an admin sees which of their\ndrafts is about to be overwritten before anything is.\n'),
+  "steps": zod.array(zod.object({
+  "name": zod.string().describe('The Implementation Stage\'s own spelling from the OB-15 master, not\nthe file\'s — matching is case-insensitive, and the group is created\nwith the master\'s name.\n'),
+  "tasks": zod.array(zod.object({
+  "name": zod.string(),
+  "checklist": zod.array(zod.string()).describe('The task\'s checklist entries, in file order. \*\*Never empty\*\*: a\ntask whose rows all left Checklist blank gets one entry named\nafter the task itself, so every imported task has something to\ntick on the client journey.\n')
 }))
-}).describe('One row of the Tasks sheet, with its Task List and Document Checklist rows already attached.'))
-}).describe('`previewObJourneyTaskImport`\'s body — the row-level result of validating a workbook without writing anything.')
+}))
+})).describe('Empty unless `valid` — a file with any row error describes no tree\nworth rendering, and showing a partial one invites confirming it.\n')
+}).describe('`previewObModuleServiceImport`\'s body — the row-level result of validating a workbook without writing anything.')
 })
 
 /**
- * Every existing task, Task List entry and Document Checklist entry on
-this draft is removed and re-created from the file, in one
-transaction — nothing is left half-applied. There is no natural key a
-checklist row could upsert on, so re-running this import replaces the
-tree rather than merging into it; safe only because the target is
-always a draft nothing has been instantiated from yet.
+ * A Module Service the file names and the product does not have is
+created as a new **draft**. One that exists as a draft has its entire
+Step / Task / Checklist tree **replaced** — there is no natural key a
+checklist row could upsert on, and the target is always a draft
+nothing has been instantiated from. One whose latest version is
+already published is refused as a row error, and the caller begins a
+revision on it first.
 
- * @summary Replace this draft's entire task tree with the file's contents (OB-07)
+Every service in the file lands in one transaction, so nothing is
+left half-applied, and nothing is published.
+
+Imported tasks are created **parallel** — the file carries no
+dependency column, and ordering a task behind another is a designer
+edit afterwards.
+
+ * @summary Create or replace this product's Module Services from the file (OB-07)
  */
-export const commitObJourneyTaskImportParams = zod.object({
-  "templateId": zod.number().describe('C-102 · an `ob_journey_templates` id — \*\*one version\*\*, not one\nproduct. See `ObJourneyTemplate.version` for what that means for a\nproduct\'s history.\n')
-})
-
-export const commitObJourneyTaskImportHeader = zod.object({
+export const commitObModuleServiceImportHeader = zod.object({
   "Idempotency-Key": zod.string().uuid().optional().describe('Replaying a key within 24 hours returns the original response instead of\ncreating a second row. Send one on every create — a retried request after\na network timeout is the normal case, not the exception.\n')
 })
 
-export const commitObJourneyTaskImportBody = zod.object({
+export const commitObModuleServiceImportBody = zod.object({
+  "productId": zod.number().describe('The product whose Module Services this file authors. One file loads one product.'),
   "file": zod.instanceof(File)
 })
 
-export const commitObJourneyTaskImportResponse = zod.object({
+export const commitObModuleServiceImportResponse = zod.object({
   "data": zod.object({
+  "servicesCreated": zod.number().describe('Module Services the file named that the product did not have.'),
+  "servicesReplaced": zod.number().describe('Existing drafts whose whole task tree was rewritten.'),
+  "stepCount": zod.number().describe('Stage groups written across every service in the file.'),
   "taskCount": zod.number(),
-  "itemCount": zod.number(),
-  "docCount": zod.number()
-}).describe('What the commit actually wrote — the draft\'s new task, Task List and Document Checklist counts.')
+  "checklistCount": zod.number().describe('Checklist entries written — including the ones defaulted from a\ntask\'s own name, so this is never less than `taskCount`.\n')
+})
 })
 
 /**
@@ -1916,6 +1910,18 @@ export const updateObJourneyStepResponse = zod.object({
   "elapsedHours": zod.number().optional().describe('Working hours consumed on this service, client waits excluded,\nsummed from `ob_step_clock_events` at read time. Never stored:\na cached total that disagreed with the events it claims to sum\nwould be argued about rather than trusted.\n'),
   "effectiveOwnerUserId": zod.number().nullish().describe('C-108 · who owns this service \*today\* — the backup owner when\n`ownerUserId` is on approved leave today, or when there is no\nresolved `ownerUserId` at all; `ownerUserId` otherwise. Derived\nagainst the working calendar at read time and never stored, so\nit is deliberately excluded from this response\'s own `ETag` —\nit can change overnight with nothing here having been written.\n')
 })).describe('The OB-06 panel.')
+})
+
+/**
+ * Stores one task document through the shared onboarding upload pipeline. Only the step owner or backup owner may upload; the attachment is owned by the step and uses kind `SUBMISSION`.
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const uploadObJourneyStepAttachmentParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const uploadObJourneyStepAttachmentBody = zod.object({
+  "file": zod.instanceof(File)
 })
 
 /**

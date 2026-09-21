@@ -12,16 +12,32 @@ import { usePortalAuthStore } from './portalAuthStore'
  *
  * No `'unknown'` splash state — see `portalAuthStore`'s own note: a portal
  * session is never restored on load, so the status is always known
- * synchronously. No forced-password-change redirect either — A-130's
- * redemption flow is the whole story for that (see `PortalOnboardingController`'s
- * javadoc); there is no must-change state left for this guard to police.
+ * synchronously.
  */
 export function PortalRequireAuth() {
   const status = usePortalAuthStore((state) => state.status)
+  const mustChangePassword = usePortalAuthStore((state) => state.mustChangePassword)
   const location = useLocation()
 
   if (status === 'anonymous') {
     return <Navigate to="/portal/login" replace state={{ from: location }} />
+  }
+
+  /*
+    The session is valid and every portal route except the change-password
+    screen is closed until the temporary password is replaced. Enforced here
+    rather than per-page, for `RequireAuth`'s reason one principal type over:
+    a check on the module chooser alone leaves `/portal/onboarding` open to
+    anyone who types the URL, and `PortalPasswordChangeGate` would then be the
+    only thing stopping them — which shows up as an unexplained error page
+    instead of a form.
+
+    No `from` state, unlike the anonymous branch above. A client who has not
+    chosen a password was not going anywhere in particular; they had just
+    signed in. Sending them onward afterwards would be guessing.
+  */
+  if (mustChangePassword && location.pathname !== '/portal/change-password') {
+    return <Navigate to="/portal/change-password" replace />
   }
 
   return <Outlet />

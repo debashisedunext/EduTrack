@@ -50,6 +50,29 @@ public record ClientPrincipal(long accountId, Long clientId, Long obClientId) {
     static final String OB_CLIENT_ID_CLAIM = "ob_client_id";
 
     /**
+     * {@code must_change_password} on the token — set only when it is true.
+     *
+     * <p>Declared here rather than on {@code ClientAccessTokenIssuer}, which is
+     * package-private and should stay that way: a class that mints credentials
+     * is not something the security package needs to see. This record is
+     * already the public vocabulary for what a portal token carries, and
+     * {@code PortalPasswordChangeGate} reads the claim from here.
+     *
+     * <p><b>Deliberately not a component of this record.</b> Every other field
+     * is part of the authorisation answer — who this caller is and which rows
+     * they own — and this one is a state the caller is in. Folding it in would
+     * put it in front of every {@code ClientPrincipal} consumer, none of which
+     * has any business branching on it; the gate is the one reader, and it
+     * reads the verified token directly.
+     *
+     * <p>Spelled exactly as {@code AccessTokenIssuer.MUST_CHANGE_PASSWORD_CLAIM}
+     * spells it for staff. The two are the same fact about two kinds of
+     * principal, and a second spelling is how one gate ends up reading a claim
+     * the other does not write.
+     */
+    public static final String MUST_CHANGE_PASSWORD_CLAIM = "must_change_password";
+
+    /**
      * The portal caller behind an authentication, or empty if there is not one.
      *
      * <p>Empty covers every "this is not a portal caller" case with one answer —

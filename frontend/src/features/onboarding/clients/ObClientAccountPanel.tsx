@@ -30,23 +30,26 @@ import { Button } from '@/components/ui/button';
  * that the panel is broken, which is `ObDashboardCardTile`'s argument about
  * dead controls, applied here.
  *
- * ## Nothing on this panel is a credential — except under one switch
+ * ## One credential, on one response, for one hand-over
  *
- * The response carries no password, no hash and no link, so there is nothing
- * here to copy and paste. That is deliberate on the server (see
- * `ObClientAccountResponse`), and the screen states what actually happened —
- * "a link has been emailed to …" — rather than implying the operator now holds
- * something they must pass on.
+ * Every *read* of the account carries no password, no hash and no link, so
+ * there is nothing on the panel at rest to copy and paste. That is deliberate
+ * on the server (see `ObClientAccountResponse`).
  *
- * The exception is `devPassword`, which is null unless the server sets
- * `edutrack.portal.dev-credentials.enabled` — and `PortalDevCredentialConfig`
- * refuses to start with that outside a development profile. It exists because
- * a demo database's mail transport is `logging`, so the link the paragraph
- * above depends on arrives nowhere and the portal is unreachable.
+ * `temporaryPassword` is the exception, and it arrives only on the response to
+ * a create or a reset the operator just performed. It is what they hand to the
+ * client: signing in with it works once, and the portal then refuses that
+ * client every route but the change-password form until they have chosen their
+ * own. So it is a credential on this screen for as long as it takes to be used
+ * once — which is the bargain that makes showing it reasonable, and which the
+ * copy below states, because an operator who thinks this is the client's
+ * permanent password will file it somewhere.
  *
- * When it is present the panel says so in as many words, and shows it in an
- * amber block rather than beside the username: a working client password
- * rendered as ordinary panel content is one nobody reads twice.
+ * It is shown in a highlighted block rather than beside the username for the
+ * reason it always was: a working client password rendered as ordinary panel
+ * content is one nobody reads twice. It is null where a deployment has set
+ * `edutrack.portal.temporary-password.enabled: false` and gone back to mailing
+ * a link.
  */
 export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
   const queryClient = useQueryClient();
@@ -99,7 +102,8 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
     password. Sourcing it here means the display cannot outlive the action that
     produced it.
   */
-  const devPassword = create.data?.data.devPassword ?? reset.data?.data.devPassword ?? null;
+  const temporaryPassword =
+    create.data?.data.temporaryPassword ?? reset.data?.data.temporaryPassword ?? null;
 
   const setStatus = useMutation({
     mutationFn: (isActive: boolean) => setObClientAccountStatus(obClientId, { isActive }),
@@ -137,30 +141,31 @@ export function ObClientAccountPanel({ obClientId }: { obClientId: number }) {
       ) : null}
 
       {/*
-        Development builds only — `devPassword` is null on every deployment that
-        has not set `edutrack.portal.dev-credentials.enabled`, which the server
-        refuses to start with outside a development profile.
+        The credentials the operator has to pass on, and the one moment they
+        are readable. Highlighted rather than folded into the panel body: this
+        is a live password, and a panel that rendered one as ordinary content
+        would be one nobody reads twice.
 
-        Stated as loudly as it is useful. A panel that showed a working client
-        password with no explanation would read as a feature, and the next
-        person to see it would reasonably assume production does this too.
+        The closing line is not decoration. An operator who believes this is
+        the client's permanent password will file it somewhere, so the screen
+        says what it actually is.
       */}
-      {devPassword ? (
+      {temporaryPassword ? (
         <div
           role="status"
           className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
         >
-          <p className="m-0 font-semibold">Development build — sign-in details</p>
+          <p className="m-0 font-semibold">Sign-in details — send these to the client</p>
           <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1">
             <dt>Username</dt>
             <dd className="font-mono">{create.data?.data.username ?? reset.data?.data.username}</dd>
-            <dt>Password</dt>
-            <dd className="font-mono">{devPassword}</dd>
+            <dt>Temporary password</dt>
+            <dd className="font-mono">{temporaryPassword}</dd>
           </dl>
           <p className="m-0 mt-2 text-xs">
-            Shown because this deployment sets{' '}
-            <code>edutrack.portal.dev-credentials</code>. It is not shown again once you
-            leave this page, and no production build ever shows it.
+            The client will be asked to choose their own password the first time they sign
+            in. This one is shown once and is not recoverable — reset the login if it is
+            lost.
           </p>
         </div>
       ) : null}

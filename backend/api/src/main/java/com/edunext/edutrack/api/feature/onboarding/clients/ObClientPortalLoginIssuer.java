@@ -41,19 +41,26 @@ public interface ObClientPortalLoginIssuer {
      *                    exactly as it is on the panel's own route.
      * @param obClientId  the client, which must exist within {@code scope}.
      * @param actorUserId the staff user to stamp the credential against.
-     * @return the username, and the readable password only on development
-     *         deployments that set one.
+     * @return the username, and the temporary password the client signs in with
+     *         once before being made to change it.
      */
     IssuedLogin issueFor(ObClientScope scope, long obClientId, Long actorUserId);
 
     /**
      * What the dialog needs to show, and nothing more.
      *
-     * <p>{@code password} is null wherever the dev-credential switch is off,
-     * which is every real deployment — there the client's way in is the
-     * one-time link the credential mail carries, and there is no password for
-     * anyone to read. A screen showing this has to treat null as "we mailed
-     * them a link" rather than as a missing value.
+     * <p>{@code password} is the temporary one just set on the account. The
+     * operator hands it to the client, the client signs in with it, and the
+     * portal then refuses them everything but the change-password form until
+     * they have chosen their own - see {@code PortalPasswordChangeGate}. So it
+     * is a credential on a staff screen for exactly as long as it takes to be
+     * used once, which is the bargain
+     * {@code PortalTemporaryPasswordProperties} sets out.
+     *
+     * <p><b>It can still be null</b>, where a deployment has switched the flow
+     * off and gone back to the link-only behaviour. A screen showing this has
+     * to treat null as "we mailed them a link" rather than as a missing value,
+     * because on such a deployment that is exactly what happened.
      */
     record IssuedLogin(String username, String password) {
     }

@@ -112,6 +112,30 @@ class ClientAccountRepository {
             """;
 
     /**
+     * Issuing a temporary password, which is the opposite statement.
+     *
+     * <p>A separate constant rather than a boolean parameter on the one above,
+     * because the two say opposite things about the same column and the cost of
+     * passing the wrong flag is an account that is never asked to change a
+     * password an operator read off a screen. Two statements cannot be confused
+     * by a caller; one statement with a flag can.
+     *
+     * <p><b>The lockout is cleared in the same breath.</b> A reset exists
+     * because somebody cannot get in, and half of those are locked out rather
+     * than forgetful — leaving {@code failed_attempts} and {@code locked_until}
+     * standing would hand the client a brand new password and then refuse it
+     * for another fifteen minutes, which reads as the reset not having worked.
+     * {@code ClientAccountAdminService} is the only caller and it is staff-
+     * initiated, so this is not a path anybody can use to clear their own lock.
+     */
+    private static final String SET_TEMPORARY_PASSWORD = """
+            UPDATE client_accounts
+               SET password_hash = ?, must_change_password = 1,
+                   failed_attempts = 0, locked_until = NULL
+             WHERE id = ?
+            """;
+
+    /**
      * B-126 · the OB-05 panel's read — one client's portal login, if it has one.
      *
      * <p>No {@code is_active} predicate here either, but for a different reason
@@ -191,8 +215,21 @@ class ClientAccountRepository {
         jdbc.sql(RECORD_SUCCESS).param(Timestamp.from(at)).param(id).update();
     }
 
+    /**
+     * Sets a password the client chose, and clears the must-change flag.
+     */
     void setPassword(long id, String argon2idHash) {
         jdbc.sql(SET_PASSWORD).param(argon2idHash).param(id).update();
+    }
+
+    /**
+     * Sets a password staff issued, and leaves the client owing us a change.
+     *
+     * <p>See {@link #SET_TEMPORARY_PASSWORD} for why this is its own statement
+     * and why it also clears the lockout.
+     */
+    void setTemporaryPassword(long id, String argon2idHash) {
+        jdbc.sql(SET_TEMPORARY_PASSWORD).param(argon2idHash).param(id).update();
     }
 
     /**

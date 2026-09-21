@@ -21,7 +21,7 @@ import java.net.URI;
         ObJourneyTemplateStepController.class,
         ObJourneyTemplateStepItemController.class,
         ObJourneyTemplateStepDocController.class,
-        ObJourneyTaskImportController.class
+        ObModuleServiceImportController.class
 })
 class ObJourneyTemplateExceptionHandler {
 
@@ -32,7 +32,8 @@ class ObJourneyTemplateExceptionHandler {
     private static final URI MODULE_SERVICE_IN_USE = URI.create("https://edutrack/errors/module-service-in-use");
     private static final URI MODULE_SERVICE_HAS_DEPENDENTS =
             URI.create("https://edutrack/errors/module-service-has-dependents");
-    private static final URI TASK_IMPORT_INVALID = URI.create("https://edutrack/errors/task-import-invalid");
+    private static final URI MODULE_IMPORT_INVALID =
+            URI.create("https://edutrack/errors/module-import-invalid");
 
     /** No {@code ob_journey_templates}/{@code _steps}/{@code _step_items}/{@code _step_docs} row for the given id. */
     @ExceptionHandler({
@@ -172,13 +173,14 @@ class ObJourneyTemplateExceptionHandler {
      * {@code Problem} envelope — {@code ObStepHasDependentsProblem}'s own
      * shape, extended with a domain-specific property.
      */
-    @ExceptionHandler(TaskImportValidationException.class)
-    ResponseEntity<ProblemDetail> handleTaskImportInvalid(TaskImportValidationException e) {
+    @ExceptionHandler(ModuleImportValidationException.class)
+    ResponseEntity<ProblemDetail> handleModuleImportInvalid(ModuleImportValidationException e) {
         ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
-        problem.setType(TASK_IMPORT_INVALID);
-        problem.setTitle("Task import file is not valid");
+        problem.setType(MODULE_IMPORT_INVALID);
+        problem.setTitle("Module Service import file is not valid");
         problem.setDetail(e.getMessage());
-        problem.setProperty("errors", e.errors().stream().map(ObJourneyTaskImportDtos.RowError::of).toList());
+        problem.setProperty("errors", e.errors().stream()
+                .map(ObModuleServiceImportDtos.ModuleImportRowError::of).toList());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
     }
 }

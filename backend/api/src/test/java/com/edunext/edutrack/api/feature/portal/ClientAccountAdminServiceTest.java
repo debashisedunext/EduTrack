@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -56,17 +57,18 @@ class ClientAccountAdminServiceTest {
     private ClientAccountAdminService service;
 
     /**
-     * The service under one setting of the development credential switch.
+     * The service under one setting of the temporary-password properties.
      *
-     * <p>A factory rather than a mutable field, so a test that turns the switch
-     * on cannot leave it on for the next one. {@code new
-     * PortalDevCredentialProperties(null, null)} is the shipped shape — the
-     * compact constructor supplies the defaults — which is what every test that
-     * does not mention the switch gets.
+     * <p>A factory rather than a mutable field, so a test that changes the
+     * setting cannot leave it changed for the next one. {@code new
+     * PortalTemporaryPasswordProperties(null, null)} is the shipped shape — the
+     * compact constructor supplies the defaults, which are <b>on</b> with a
+     * per-account generated password — and is what every test that does not
+     * mention the setting gets.
      */
-    private ClientAccountAdminService serviceWith(PortalDevCredentialProperties devCredentials) {
+    private ClientAccountAdminService serviceWith(PortalTemporaryPasswordProperties temporaryPasswords) {
         return new ClientAccountAdminService(accounts, tokens, credentials, clients, outbox,
-                encoder, new PortalPasswordRules(), devCredentials,
+                encoder, new PortalPasswordRules(), temporaryPasswords,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -79,7 +81,7 @@ class ClientAccountAdminServiceTest {
         encoder = mock(PasswordEncoder.class);
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         credentials = new ClientCredentialTokens(tokens, clock);
-        service = serviceWith(new PortalDevCredentialProperties(null, null));
+        service = serviceWith(new PortalTemporaryPasswordProperties(null, null));
 
         when(encoder.encode(anyString())).thenReturn("$argon2id$fake");
         when(clients.find(any(), eq(OB_CLIENT))).thenReturn(Optional.of(
@@ -209,14 +211,15 @@ class ClientAccountAdminServiceTest {
 
             ClientAccountAdminDtos.Account account = service.create(ADMIN, OB_CLIENT, ACTOR);
 
-            verify(encoder).encode(anyString());
+            // The placeholder, then the temporary password that replaces it.
+            verify(encoder, atLeastOnce()).encode(anyString());
             // Account is a ten-field record and the only credential among them
-            // is `devPassword`, which is null unless a development deployment
-            // has deliberately switched it on — see PortalDevCredentialConfig,
-            // which refuses to start with it enabled outside local/dev-noauth/
-            // fixtures. The count is the guard: a new field here fails this
+            // is `temporaryPassword`, which is present on this response and on
+            // reset's, and null on every read — see ClientAccountAdminDtos,
+            // where `withoutCredential` is what makes that structural rather
+            // than a habit. The count is the guard: a new field here fails this
             // test, so nothing joins the response without somebody deciding it
-            // may. It last read nine, before `devPassword` was added.
+            // may. It last read nine, before the credential was added.
             assertThat(ClientAccountAdminDtos.Account.class.getRecordComponents()).hasSize(10);
             // Read back off the row, so this asserts the response carries the
             // stored username rather than re-deriving it.
@@ -356,68 +359,102 @@ class ClientAccountAdminServiceTest {
     }
 
     /**
-     * {@code edutrack.portal.dev-credentials} — the switch that lets a demo
-     * sign in as a client whose credential mail went to the logging transport.
+     * {@code edutrack.portal.temporary-password} — how a client's first
+     * password comes into existence.
      *
-     * <p>The first test here is the one that matters most and is the one about
-     * the default: everything else in this file already runs with the switch
-     * off, and this states the consequence rather than leaving it implied
-     * across thirty assertions that happen not to mention a password.
+     * <p>The first test here is the one that matters most, and it is about the
+     * default. This was a development-only switch that defaulted to off; it now
+     * defaults to <b>on</b>, because the link-only flow it replaced created
+     * accounts nobody could sign in to wherever the mail did not arrive. A
+     * regression to the old default is a silent return to that, so it is
+     * asserted rather than left implied.
      */
     @Nested
-    @DisplayName("the development credential switch")
-    class DevCredentials {
+    @DisplayName("the temporary password")
+    class TemporaryPassword {
 
         @Test
-        @DisplayName("off by default: no password is set and none is returned")
-        void offByDefault() {
+        @DisplayName("on by default: a readable password is set and returned once")
+        void onByDefault() {
             when(accounts.findByObClientId(OB_CLIENT))
                     .thenReturn(Optional.empty(), Optional.of(row(true)));
 
             ClientAccountAdminDtos.Account account = service.create(ADMIN, OB_CLIENT, ACTOR);
 
-            assertThat(account.devPassword()).isNull();
-            // The placeholder is still encoded on insert; what must not happen
-            // is the second write that replaces it with something knowable.
+            assertThat(account.temporaryPassword()).isNotBlank();
+            verify(accounts).setTemporaryPassword(eq(ACCOUNT), anyString());
+        }
+
+        /**
+         * The half that makes exposing a credential acceptable.
+         *
+         * <p>{@code setTemporaryPassword} keeps {@code must_change_password}
+         * set; {@code setPassword} clears it. Calling the wrong one leaves a
+         * password an operator read off a screen sitting on a live account
+         * with nothing ever asking for it to be changed — which is not a
+         * failure any other test in this file would notice.
+         */
+        @Test
+        @DisplayName("issues it as temporary, so the client is still made to change it")
+        void keepsTheMustChangeFlag() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
+
+            service.create(ADMIN, OB_CLIENT, ACTOR);
+
+            verify(accounts).setTemporaryPassword(eq(ACCOUNT), anyString());
             verify(accounts, never()).setPassword(anyLong(), anyString());
         }
 
         @Test
-        @DisplayName("on: creating sets a readable password and returns it once")
-        void onReturnsPassword() {
+        @DisplayName("off: no password is set and none is returned")
+        void offSetsNothing() {
             when(accounts.findByObClientId(OB_CLIENT))
-                    .thenReturn(Optional.empty(), Optional.of(row(false)));
-            ClientAccountAdminService enabled =
-                    serviceWith(new PortalDevCredentialProperties(true, null));
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
+            ClientAccountAdminService off =
+                    serviceWith(new PortalTemporaryPasswordProperties(false, null));
 
-            ClientAccountAdminDtos.Account account = enabled.create(ADMIN, OB_CLIENT, ACTOR);
+            ClientAccountAdminDtos.Account account = off.create(ADMIN, OB_CLIENT, ACTOR);
 
-            assertThat(account.devPassword()).isNotBlank();
-            verify(accounts).setPassword(eq(ACCOUNT), anyString());
+            assertThat(account.temporaryPassword()).isNull();
+            // The placeholder is still encoded on insert; what must not happen
+            // is the second write that replaces it with something knowable.
+            verify(accounts, never()).setTemporaryPassword(anyLong(), anyString());
         }
 
         @Test
         @DisplayName("a generated password satisfies the portal's own rules")
         void generatedPasswordIsAccepted() {
             // The failure this pins is an account created with a password its
-            // own login screen refuses — the dead end the switch exists to
-            // remove, reachable if the generator ever loses its shape.
+            // own login screen refuses — a dead end reachable if the generator
+            // ever loses its shape.
             for (int i = 0; i < 200; i++) {
                 assertThatNoException().isThrownBy(
                         () -> new PortalPasswordRules().enforce(
-                                ClientCredentialTokens.readableDevPassword()));
+                                ClientCredentialTokens.readableTemporaryPassword()));
             }
+        }
+
+        @Test
+        @DisplayName("generated passwords differ per account, so one login discloses no other")
+        void generatedPasswordsDiffer() {
+            // The property PortalTemporaryPasswordConfig refuses to start
+            // without outside a development profile. If the generator ever
+            // became deterministic, every client created would share a
+            // password and one issued login would open all of them.
+            assertThat(ClientCredentialTokens.readableTemporaryPassword())
+                    .isNotEqualTo(ClientCredentialTokens.readableTemporaryPassword());
         }
 
         @Test
         @DisplayName("a configured password is shared, so a demo types one thing")
         void fixedPasswordIsUsed() {
             when(accounts.findByObClientId(OB_CLIENT))
-                    .thenReturn(Optional.empty(), Optional.of(row(false)));
-            ClientAccountAdminService enabled =
-                    serviceWith(new PortalDevCredentialProperties(true, "Demo-Passw0rd!"));
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
+            ClientAccountAdminService fixed =
+                    serviceWith(new PortalTemporaryPasswordProperties(true, "Demo-Passw0rd!"));
 
-            assertThat(enabled.create(ADMIN, OB_CLIENT, ACTOR).devPassword())
+            assertThat(fixed.create(ADMIN, OB_CLIENT, ACTOR).temporaryPassword())
                     .isEqualTo("Demo-Passw0rd!");
         }
 
@@ -425,37 +462,56 @@ class ClientAccountAdminServiceTest {
         @DisplayName("a configured password the portal would refuse fails the request, not startup")
         void weakFixedPasswordIsRefused() {
             when(accounts.findByObClientId(OB_CLIENT)).thenReturn(Optional.empty());
-            ClientAccountAdminService enabled =
-                    serviceWith(new PortalDevCredentialProperties(true, "short"));
+            ClientAccountAdminService fixed =
+                    serviceWith(new PortalTemporaryPasswordProperties(true, "short"));
 
             assertThatExceptionOfType(PortalAuthExceptions.WeakPortalPassword.class)
-                    .isThrownBy(() -> enabled.create(ADMIN, OB_CLIENT, ACTOR));
+                    .isThrownBy(() -> fixed.create(ADMIN, OB_CLIENT, ACTOR));
         }
 
         @Test
-        @DisplayName("the credential link is still minted and mailed, switch or no switch")
+        @DisplayName("the credential link is still minted and mailed, password or no password")
         void credentialPathStillRuns() {
             when(accounts.findByObClientId(OB_CLIENT))
-                    .thenReturn(Optional.empty(), Optional.of(row(false)));
-            ClientAccountAdminService enabled =
-                    serviceWith(new PortalDevCredentialProperties(true, null));
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
 
-            enabled.create(ADMIN, OB_CLIENT, ACTOR);
+            service.create(ADMIN, OB_CLIENT, ACTOR);
 
-            // Switching the property off must leave a working account behind,
-            // not one whose only way in was suppressed on the day it was made.
+            // The link is the recovery path now rather than the only way in,
+            // and it has to keep working: a client who never received the
+            // password needs a route that is not a phone call.
             verify(tokens).insert(anyLong(), anyString(), anyString(), any(), any());
             verify(outbox).enqueue(any());
         }
 
         @Test
-        @DisplayName("reset issues a readable password too, or a demo can never recover one")
-        void resetAlsoIssuesOne() {
-            when(accounts.findByObClientId(OB_CLIENT)).thenReturn(Optional.of(row(false)));
-            ClientAccountAdminService enabled =
-                    serviceWith(new PortalDevCredentialProperties(true, null));
+        @DisplayName("the mail still carries no password, only the link")
+        void mailCarriesNoPassword() {
+            when(accounts.findByObClientId(OB_CLIENT))
+                    .thenReturn(Optional.empty(), Optional.of(row(true)));
+            ClientAccountAdminService fixed =
+                    serviceWith(new PortalTemporaryPasswordProperties(true, "Demo-Passw0rd!"));
 
-            assertThat(enabled.resetPassword(ADMIN, OB_CLIENT, ACTOR).devPassword()).isNotBlank();
+            fixed.create(ADMIN, OB_CLIENT, ACTOR);
+
+            // B-111's ruling, and the reason the credential goes on the
+            // response instead: ob_notification_outbox keeps its payload after
+            // sending, so a password in it is a live credential in the
+            // database indefinitely.
+            ArgumentCaptor<ObNotification> mail = ArgumentCaptor.forClass(ObNotification.class);
+            verify(outbox).enqueue(mail.capture());
+            assertThat(mail.getValue().payload().values())
+                    .noneMatch(v -> String.valueOf(v).contains("Demo-Passw0rd!"));
+        }
+
+        @Test
+        @DisplayName("reset issues one too, or a client who lost theirs can never recover")
+        void resetAlsoIssuesOne() {
+            when(accounts.findByObClientId(OB_CLIENT)).thenReturn(Optional.of(row(true)));
+
+            assertThat(service.resetPassword(ADMIN, OB_CLIENT, ACTOR).temporaryPassword())
+                    .isNotBlank();
+            verify(accounts).setTemporaryPassword(eq(ACCOUNT), anyString());
         }
 
         private ClientAccountRow row(boolean mustChangePassword) {

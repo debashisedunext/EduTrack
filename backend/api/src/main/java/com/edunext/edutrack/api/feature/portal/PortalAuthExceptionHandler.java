@@ -20,7 +20,7 @@ import java.net.URI;
  * <p>{@code type} is the stable part clients branch on. The URIs below must not
  * change once the portal frontend switches on them.
  */
-@RestControllerAdvice(assignableTypes = PortalAuthController.class)
+@RestControllerAdvice(assignableTypes = {PortalAuthController.class, PortalPasswordController.class})
 class PortalAuthExceptionHandler {
 
     /**
@@ -44,6 +44,15 @@ class PortalAuthExceptionHandler {
             URI.create("https://edutrack/errors/invalid-credential-link");
 
     private static final URI WEAK_PASSWORD = URI.create("https://edutrack/errors/weak-password");
+
+    /**
+     * Its own URI rather than reusing {@code weak-password}. The form has to
+     * say something different — "that is the password you already have", not
+     * "that password is not strong enough" — and a client that branched on
+     * {@code type} would otherwise render the wrong advice for a password that
+     * may be perfectly strong.
+     */
+    private static final URI PASSWORD_UNCHANGED = URI.create("https://edutrack/errors/password-unchanged");
 
     /**
      * One handler, one status, one body — unknown account, wrong password and
@@ -101,13 +110,28 @@ class PortalAuthExceptionHandler {
     }
 
     /**
-     * 400, and the one refusal on this surface that names its reason.
+     * 400, and named for the same reason the policy refusal below is: the
+     * caller has already proved they know the current password, so they learn
+     * nothing here they did not supply themselves.
+     */
+    @ExceptionHandler(PortalAuthExceptions.PortalPasswordUnchanged.class)
+    ResponseEntity<ProblemDetail> handleUnchanged(PortalAuthExceptions.PortalPasswordUnchanged exception) {
+        ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        problem.setType(PASSWORD_UNCHANGED);
+        problem.setTitle("Password unchanged");
+        problem.setDetail(exception.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    /**
+     * 400, naming the one rule that failed.
      *
-     * <p>Safe because the caller is redeeming a link only they could have
-     * received, and necessary because a rule somebody has to satisfy is a rule
-     * they have to be told. The {@code detail} comes from the exception here,
-     * unlike every handler above — the message names one failed rule so the
-     * form can say what to fix instead of restating the whole policy.
+     * <p>Safe because the caller either holds a link only they could have
+     * received or has already proved they know the current password, and
+     * necessary because a rule somebody has to satisfy is a rule they have to
+     * be told. The {@code detail} comes from the exception here, unlike the
+     * credential handlers above — the message names one failed rule so the form
+     * can say what to fix instead of restating the whole policy.
      */
     @ExceptionHandler(PortalAuthExceptions.WeakPortalPassword.class)
     ResponseEntity<ProblemDetail> handleWeakPassword(PortalAuthExceptions.WeakPortalPassword exception) {

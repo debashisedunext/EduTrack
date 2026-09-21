@@ -29,10 +29,20 @@ import type { ObPortalLoginIssued } from '@/api/generated/model/obPortalLoginIss
  * <h2>Not the same component, and why</h2>
  *
  * That one shows one string. This shows two, and the second is **optional** —
- * off a development build there is no password at all, because the client is
- * mailed a one-time link instead. Bending it to carry a username and a
- * sometimes-absent password would have made both screens harder to read than
- * having two.
+ * a deployment that has switched `edutrack.portal.temporary-password` off is
+ * back to mailing a one-time link and has no password to show. Bending the
+ * other component to carry a username and a sometimes-absent password would
+ * have made both screens harder to read than having two.
+ *
+ * ## What the password is, and why showing it is acceptable
+ *
+ * It is temporary. The client signs in with it once and the portal then
+ * refuses them everything but the change-password form until they have chosen
+ * their own — `PortalPasswordChangeGate`, server-side. So it is a credential
+ * on a staff screen for exactly as long as it takes to be used once, which is
+ * the bargain that makes showing it reasonable rather than reckless. The copy
+ * below says so, because an operator who thinks this is the client's permanent
+ * password will file it somewhere.
  *
  * <h2>Closing needs a deliberate click</h2>
  *
@@ -66,7 +76,7 @@ export function ObPortalLoginIssuedDialog({
           </ModalTitle>
           <ModalDescription>
             {login?.password
-              ? 'Shown once and not recoverable — send it to the client now. A reset is on the client’s account panel if it is lost.'
+              ? 'Send both to the client now — the password is shown once and is not recoverable. They will be asked to choose their own the first time they sign in. A reset is on the client’s account panel if it is lost.'
               : 'Their contact has been mailed a one-time link to set a password. The username is on the client’s account panel if it is needed again.'}
           </ModalDescription>
         </ModalHeader>
@@ -74,7 +84,11 @@ export function ObPortalLoginIssuedDialog({
         <div className="flex flex-col gap-2 px-6 pb-2">
           <CredentialRow label="Username" value={login?.username ?? ''} testId="portal-username" />
           {login?.password ? (
-            <CredentialRow label="Password" value={login.password} testId="portal-password" />
+            <CredentialRow
+              label="Temporary password"
+              value={login.password}
+              testId="portal-password"
+            />
           ) : null}
         </div>
 

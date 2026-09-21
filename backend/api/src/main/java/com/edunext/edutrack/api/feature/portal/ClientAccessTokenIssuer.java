@@ -57,7 +57,26 @@ import java.util.UUID;
  *       {@code ClientPrincipal.of} refuses a token holding neither.</li>
  *   <li>{@code jti} — fresh per call, so the same logout blacklist and reuse
  *       detection that key on it work here too.</li>
+ *   <li>{@link ClientPrincipal#MUST_CHANGE_PASSWORD_CLAIM} — <b>only when
+ *       true</b>. See below.</li>
  * </ul>
+ *
+ * <h2>The must-change claim, and why absence means "not required"</h2>
+ *
+ * <p>{@code A-026}'s {@code AccessTokenIssuer} makes this exact call for staff
+ * and the reasoning transfers whole. The claim is emitted only when the flag is
+ * set, so an absent claim reads as "not required" — the fail-open direction,
+ * chosen on purpose, because every token minted before this existed has no such
+ * claim and reading absence as "required" would lock out every live session at
+ * once. The claim is inside a signature we verify, so its absence cannot be
+ * arranged by a caller, only by us failing to emit it.
+ *
+ * <p>It is stamped from the row rather than recomputed, and the row is read on
+ * the login that mints the token — so a token is at most one access-token
+ * lifetime stale. That staleness is why
+ * {@code PortalPasswordChangeService} hands back a fresh token: without it a
+ * client would change their password successfully and stay locked out of the
+ * portal by the very flag they had just cleared.
  *
  * <p>A null id is omitted rather than written as null: {@code ClientPrincipal}
  * reads an absent claim and an unparseable one identically, and a written null
@@ -91,6 +110,11 @@ class ClientAccessTokenIssuer {
         }
         if (account.obClientId() != null) {
             claims.claim(ClientPrincipal.OB_CLIENT_ID_CLAIM, account.obClientId());
+        }
+        // Emitted only when true - see the class javadoc on why absence is the
+        // safe reading rather than the dangerous one.
+        if (account.mustChangePassword()) {
+            claims.claim(ClientPrincipal.MUST_CHANGE_PASSWORD_CLAIM, true);
         }
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();

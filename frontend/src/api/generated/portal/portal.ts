@@ -66,6 +66,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ForbiddenResponse,
   ListPortalPrereqCommentsParams,
   ListPortalTicketAttachmentsParams,
   ListPortalTicketCommentsParams,
@@ -85,6 +86,7 @@ import type {
   PortalLoginRequest,
   PortalLoginResponse,
   PortalOnboardingHomeResponse,
+  PortalPasswordChangeRequest,
   PortalPrereqCommentListResponse,
   PortalPrereqCommentResponse,
   PortalPrereqSubmitRequest,
@@ -538,10 +540,17 @@ export function useListPortalTicketAttachments<TData = Awaited<ReturnType<typeof
 
 
 /**
- * Ordinary sign-in, for an account that has already chosen its own
-password via `redeemPortalCredentialLink`. A newly created or reset
-account has no password to type yet — that's what the credential
-link is for.
+ * Ordinary sign-in. A newly created or reset account signs in with the
+temporary password from `createObClient`'s `meta.portalLogin` or from
+`resetObClientPortalPassword`, and the response then carries
+`mustChangePassword: true`.
+
+**Succeeding is not the same as being let in.** While
+`mustChangePassword` is true the token this returns is refused on
+every portal route but `changePortalPassword`, with
+`portal-password-change-required`. Refusing the login itself would be
+wrong twice over: the credentials are correct, and the client would
+have no session with which to reach the form that fixes it.
 
 Failures are deliberately indistinguishable, exactly as `login` is
 for staff: wrong username, wrong password and unknown username all
@@ -775,6 +784,91 @@ export const useRedeemPortalCredentialLink = <TError = ValidationFailedResponse 
       > => {
 
       const mutationOptions = getRedeemPortalCredentialLinkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * The mirror of staff's `changeMyPassword`, and the one route a client
+who still owes us a password change may call — see
+`PortalPasswordChangeGate.ALWAYS_ALLOWED`. Renaming this path without
+changing that set deadlocks every such client out of the portal,
+including out of the way back in.
+
+Whose password is decided by the bearer token and by nothing in the
+body; there is no id a caller could supply.
+
+**200 with a fresh session, not 204** — the one place this departs
+from the staff route. The portal has no refresh route, so a 204 would
+leave the caller holding the only token they have, still carrying the
+must-change claim the change just cleared, and still refused by the
+gate. The returned session is minted after the write, so its
+`mustChangePassword` is false because the fact it reports is false.
+
+`invalid-credentials` covers a wrong `currentPassword` and a
+deactivated account alike, matching the login surface's own rule. A
+wrong guess is deliberately NOT charged to the login lockout: an
+attacker holding a stolen token could otherwise spend five of them
+locking the real client out of the sign-in screen.
+
+ * @summary Change your own portal password
+ */
+export const changePortalPassword = (
+    portalPasswordChangeRequest: PortalPasswordChangeRequest,
+ ) => {
+      
+      
+      return http<PortalLoginResponse>(
+      {url: `/portal/me/password`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: portalPasswordChangeRequest
+    },
+      );
+    }
+  
+
+
+export const getChangePortalPasswordMutationOptions = <TError = ValidationFailedResponse | Problem | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePortalPassword>>, TError,{data: PortalPasswordChangeRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof changePortalPassword>>, TError,{data: PortalPasswordChangeRequest}, TContext> => {
+
+const mutationKey = ['changePortalPassword'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changePortalPassword>>, {data: PortalPasswordChangeRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  changePortalPassword(data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangePortalPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof changePortalPassword>>>
+    export type ChangePortalPasswordMutationBody = PortalPasswordChangeRequest
+    export type ChangePortalPasswordMutationError = ValidationFailedResponse | Problem | ForbiddenResponse | NotFoundResponse
+
+    /**
+ * @summary Change your own portal password
+ */
+export const useChangePortalPassword = <TError = ValidationFailedResponse | Problem | ForbiddenResponse | NotFoundResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePortalPassword>>, TError,{data: PortalPasswordChangeRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof changePortalPassword>>,
+        TError,
+        {data: PortalPasswordChangeRequest},
+        TContext
+      > => {
+
+      const mutationOptions = getChangePortalPasswordMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

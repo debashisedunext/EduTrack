@@ -8,22 +8,27 @@ import java.time.Instant;
 /**
  * B-126 · the wire shapes for the OB-05/OB-08 client-account panel.
  *
- * <p><b>Nothing here carries a password, a hash, or a token.</b> The panel is
- * read by staff, and the one secret in this feature — the credential link —
- * goes to the client's own mailbox and nowhere else. A "here is the link, send
- * it yourself" field on this response would put a live credential on a staff
- * screen, in a browser cache and in whatever the reader pastes it into, and
+ * <p><b>The panel's read carries no credential.</b> Staff read this screen,
+ * and a "here is the link, send it yourself" field on it would put a live
+ * credential in a browser cache and in whatever the reader pastes it into, and
  * would make the audit answer to "who could have used this login" everyone who
  * has ever opened the client.
  *
- * <p><b>The one exception is {@code devPassword}, and it is null in the
- * product.</b> It is populated only when {@link PortalDevCredentialProperties}
- * is switched on, which {@code PortalDevCredentialConfig} permits only under a
- * development profile. Everything in the paragraph above is still true of it —
- * that is precisely why it is gated rather than added. The field exists so a
- * demo can log in as a client it just invented, against a database where the
- * mail transport is {@code logging} and the credential link therefore arrives
- * nowhere.
+ * <p><b>{@code temporaryPassword} is the one exception, and it is present only
+ * on the response to the request that created it.</b> {@link Account#withoutCredential}
+ * is what every read uses and it cannot carry one; only
+ * {@code ClientAccountAdminService}'s create and reset reach
+ * {@link Account#withTemporaryPassword}. So the credential is on exactly one
+ * response — the single moment the operator who asked for the login is entitled
+ * to read it — and on no subsequent {@code GET}.
+ *
+ * <p>Everything in the first paragraph is still true of that field. It is an
+ * accepted cost rather than a refused one, for the reason
+ * {@link PortalTemporaryPasswordProperties} gives: the flow that refused it
+ * produced accounts nobody could ever sign in to wherever the mail did not
+ * arrive. What bounds the cost is that the password opens exactly one session
+ * and that session can do nothing but change it —
+ * {@code PortalPasswordChangeGate} is the half that makes that true.
  */
 final class ClientAccountAdminDtos {
 
@@ -49,8 +54,9 @@ final class ClientAccountAdminDtos {
             Instant lastLoginAt,
             Instant lockedUntil,
             Instant credentialSentAt,
-            @Schema(description = "Development builds only; null in the product. See the schema note.")
-            String devPassword
+            @Schema(description = "The temporary password just issued, on the create/reset response only. "
+                    + "Null on every read. The client must change it at first sign-in.")
+            String temporaryPassword
     ) {
         /**
          * The read model's shape: an account as the panel lists it, with no
@@ -71,13 +77,14 @@ final class ClientAccountAdminDtos {
         }
 
         /**
-         * The same account, carrying the password a development deployment
-         * just set on it.
+         * The same account, carrying the temporary password just set on it.
          *
-         * <p>Reached only from {@code ClientAccountAdminService} under
-         * {@link PortalDevCredentialProperties#issuesReadablePassword()}.
+         * <p>Reached only from {@code ClientAccountAdminService}'s create and
+         * reset, under {@link PortalTemporaryPasswordProperties#issuesTemporaryPassword()}.
+         * Never from {@link #withoutCredential}'s callers, which is what keeps
+         * the credential off every read.
          */
-        Account withDevPassword(String password) {
+        Account withTemporaryPassword(String password) {
             return new Account(id, username, displayName, email, isActive, mustChangePassword,
                     lastLoginAt, lockedUntil, credentialSentAt, password);
         }

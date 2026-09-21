@@ -44,6 +44,6 @@ class ObClientPortalLoginAdapter implements ObClientPortalLoginIssuer {
     @Override
     public IssuedLogin issueFor(ObClientScope scope, long obClientId, Long actorUserId) {
         ClientAccountAdminDtos.Account account = accounts.create(scope, obClientId, actorUserId);
-        return new IssuedLogin(account.username(), account.devPassword());
+        return new IssuedLogin(account.username(), account.temporaryPassword());
     }
 }

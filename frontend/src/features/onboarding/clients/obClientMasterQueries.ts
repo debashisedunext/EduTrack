@@ -126,9 +126,10 @@ function invalidate(queryClient: ReturnType<typeof useQueryClient>) {
 /**
  * The client, and the portal login if one was asked for.
  *
- * `meta` is absent unless `createPortalLogin` was true, and its `password` is
- * null off a development build — there the client is mailed a one-time link
- * and there is no password for anyone to read.
+ * `meta` is absent unless `createPortalLogin` was true. Its `password` is the
+ * temporary one the client signs in with once before being made to change it,
+ * and is null only where a deployment has switched that flow off — there the
+ * client is mailed a one-time link and there is no password for anyone to read.
  */
 export interface CreatedObClient {
   client: ObClientDetail

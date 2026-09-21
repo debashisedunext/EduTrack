@@ -344,11 +344,30 @@ class ObWireConformanceTest {
         if (type.isEnum()) return type.getEnumConstants()[0];
         if (List.class.isAssignableFrom(type)) {
             Class<?> element = elementType(generic);
-            List<Object> one = new ArrayList<>();
-            if (element != null) {
-                one.add(value(element, element, depth + 1));
-            }
-            return List.copyOf(one);
+            Object one = element == null ? null : value(element, element, depth + 1);
+            /*
+              OB-07 · past the cut-off the depth guard answers `null` for any
+              reference type, and `List.copyOf` rejects a null element with an
+              NPE thrown from inside the JDK — the same class of unreadable
+              failure B-102's `zeroIfPrimitive` was added to stop, one type
+              away from it. So a list whose element the guard declined to build
+              samples as EMPTY rather than as a one-element list of nothing.
+
+              An empty array is an honest sample of such a list, and it costs
+              this test nothing: both assertions ask what *shape* a field
+              arrives in — present, and an object rather than a scalar — and
+              neither reads what is inside it. Nothing below the cut-off was
+              ever being checked; before this it simply crashed instead of
+              saying so.
+
+              First reached by ModuleImportPreviewResponse -> PreviewData ->
+              services[] -> ServiceDto -> steps[] -> StepDto -> tasks[], five
+              record levels the contract declares in full. Those records are
+              not new; what is new is that the contract now names their schemas
+              after them (it said ObJourneyTaskImport* before), so they match
+              by simple name and reach this sampler for the first time.
+            */
+            return one == null ? List.of() : List.of(one);
         }
         if (type.isRecord()) return sample(type, depth + 1);
         return null;

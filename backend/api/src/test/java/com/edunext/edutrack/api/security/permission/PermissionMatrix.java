@@ -779,6 +779,16 @@ final class PermissionMatrix {
             {"password":"Correct-Horse-Battery-1!"}""";
 
     /**
+     * {@code PortalAuthDtos.PasswordChangeRequest}: both fields are
+     * {@code @NotBlank} and bounded at 200. A body that failed validation would
+     * be rejected during argument resolution, before {@code @PreAuthorize} runs
+     * — so the row below would be asserting 400 rather than the authorization
+     * outcome it exists to assert.
+     */
+    private static final String PORTAL_PASSWORD_CHANGE = """
+            {"currentPassword":"Ed-abc23xyz9kp4","newPassword":"Correct-Horse-Battery-1!"}""";
+
+    /**
      * A-121 · {@code ObSignoffOtpVerifyRequest}: {@code token} is
      * {@code @NotBlank} and {@code otp} must be six digits. Unlike the request
      * above this one refuses with 401, which is a refusal only a caller who got
@@ -2959,6 +2969,24 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/portal/auth/credential/{token}"),
             everyRole("POST", "/api/v1/portal/auth/credential/{token}", PORTAL_REDEEM),
 
+            // The forced password change, and the one route reachable by a
+            // client who has not replaced the temporary password they were
+            // issued. "everyRole" on the portal block's reading above: 404 is
+            // not 403, and no staff token reaches it at all.
+            //
+            // Deliberately NOT under /portal/auth/**, which SecurityConfig
+            // permits wholesale. Under /portal/me/ the chain's .authenticated()
+            // rule applies, so the route is authenticated by the chain and not
+            // only by an annotation somebody could refactor away — see
+            // PortalPasswordController for the argument.
+            //
+            // What actually decides who may call it is PortalPasswordChangeGate
+            // (this is its single allowlist entry) and the account id on the
+            // caller's own verified token. Neither is a platform role, so
+            // neither is this matrix's vocabulary; PortalPasswordChangeGateTest
+            // and PortalPasswordChangeServiceTest are their subjects.
+            everyRole("PATCH", "/api/v1/portal/me/password", PORTAL_PASSWORD_CHANGE),
+
             // == The onboarding routes that reached develop without an entry ==
             //
             // everyRole throughout, exactly as every /onboarding/** block above
@@ -2990,7 +3018,7 @@ final class PermissionMatrix {
             everyRole("GET", "/api/v1/onboarding/signoffs"),
             everyRole("GET", "/api/v1/onboarding/signoffs/{signoffId}"),
             everyRole("GET", "/api/v1/onboarding/dashboard/review-summary"),
-            everyRole("GET", "/api/v1/onboarding/journey-templates/{templateId}/task-import/template"),
+            everyRole("GET", "/api/v1/onboarding/module-service-import/template"),
             everyRole("POST", "/api/v1/onboarding/clients/{obClientId}/prereq-tasks", OB_PREREQ_TASK_CREATE),
             everyRole("PATCH", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}", OB_PREREQ_TASK_PATCH),
             everyRole("POST", "/api/v1/onboarding/prereq-tasks/{prereqTaskId}/submit"),
@@ -3002,8 +3030,8 @@ final class PermissionMatrix {
             everyRole("DELETE", "/api/v1/onboarding/journey-templates/{templateId}"),
             everyRole("PUT", "/api/v1/onboarding/journey-templates/order", OB_TEMPLATE_ORDER),
             everyRole("PUT", "/api/v1/onboarding/journey-templates/{templateId}/depends-on", OB_TEMPLATE_DEPENDS_ON),
-            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import/preview"),
-            everyRole("POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import"),
+            everyRole("POST", "/api/v1/onboarding/module-service-import/preview"),
+            everyRole("POST", "/api/v1/onboarding/module-service-import"),
             everyRole("POST", "/api/v1/onboarding/journey-step-items/{itemId}/submit"),
             everyRole("POST", "/api/v1/onboarding/journey-step-items/{itemId}/send-back"),
             everyRole("PATCH", "/api/v1/onboarding/journey-step-items/{itemId}/review", OB_STEP_REVIEW_VERDICT),

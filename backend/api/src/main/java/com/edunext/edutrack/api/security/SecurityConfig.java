@@ -8,6 +8,8 @@ import com.edunext.edutrack.api.security.module.ModuleAccessFilter;
 import com.edunext.edutrack.api.security.module.ModuleAccessGuard;
 import com.edunext.edutrack.api.security.module.ObModuleRoleFilter;
 import com.edunext.edutrack.api.security.module.ObModuleRoleRules;
+import com.edunext.edutrack.api.security.portal.PortalPasswordChangeFilter;
+import com.edunext.edutrack.api.security.portal.PortalPasswordChangeGate;
 import com.edunext.edutrack.api.security.portal.PortalRouteFilter;
 import com.edunext.edutrack.api.security.portal.PortalRouteGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -239,6 +241,7 @@ public class SecurityConfig {
                                          ModuleAccessGuard moduleGuard,
                                          ObModuleRoleRules moduleRoleRules,
                                          PortalRouteGuard portalGuard,
+                                         PortalPasswordChangeGate portalPasswordGate,
                                          ObjectMapper objectMapper) throws Exception {
         return http
                 // A-074. Enabled for the two cookie-authenticated routes and no
@@ -347,7 +350,23 @@ public class SecurityConfig {
                 // ModuleAccessFilter then defers on any request carrying a
                 // client principal.
                 .addFilterAfter(new PortalRouteFilter(portalGuard, objectMapper), AuthorizationFilter.class)
-                .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper), PortalRouteFilter.class)
+
+                // The forced password change, immediately after the gate that
+                // established this is a client on the client's own tree. A
+                // portal login is issued with a temporary password staff read
+                // off a screen, and the whole case for exposing one is that it
+                // buys exactly one session which can do nothing but replace it.
+                // Reporting the flag to the SPA and trusting the redirect would
+                // make that a suggestion; this is what makes it a refusal.
+                //
+                // After PortalRouteFilter and not before, so a staff token on a
+                // portal path is 404ed rather than told about a password policy
+                // that does not apply to it. Before ModuleAccessFilter for the
+                // same reason that one defers to the portal gate at all.
+                .addFilterAfter(new PortalPasswordChangeFilter(portalPasswordGate, objectMapper),
+                        PortalRouteFilter.class)
+                .addFilterAfter(new ModuleAccessFilter(moduleGuard, objectMapper),
+                        PortalPasswordChangeFilter.class)
 
                 // A-122 · after the module gate, never before. That gate answers
                 // 404 to a caller with no ONBOARDING grant; running the role

@@ -478,22 +478,24 @@ public class ObModuleRoleRules {
         put(m, "GET", "/api/v1/onboarding/notification-templates/vocabulary", ADMIN_ONLY);
         put(m, "PATCH", "/api/v1/onboarding/notification-templates/{templateId}", ADMIN_ONLY);
 
-        // -- OB-07 - bulk task import into a template ------------------------
+        // -- OB-07 - bulk Module Service import ------------------------------
         //
         // ADMIN_ONLY, following the template writes at the top of this method:
         // rules 3 gives journey templates to the OB Admin, and importing a
-        // workbook authors steps exactly as the designer does - the difference
-        // is how many arrive at once, which is an argument for MORE care
-        // rather than less. The downloadable blank is Admin-only for the same
-        // reason it is on the write: it describes the shape of a template only
-        // an Admin can fill, and publishing it more widely would be the one
-        // asymmetry in this block that nothing in rules 3 asks for.
-        put(m, "GET", "/api/v1/onboarding/journey-templates/{templateId}/task-import/template",
-                ADMIN_ONLY);
-        put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import/preview",
-                ADMIN_ONLY);
-        put(m, "POST", "/api/v1/onboarding/journey-templates/{templateId}/task-import",
-                ADMIN_ONLY);
+        // workbook authors services, steps and tasks exactly as the designer
+        // does - the difference is how many arrive at once, which is an
+        // argument for MORE care rather than less. This one also CREATES
+        // Module Services, so it is at least as strong as
+        // POST /journey-templates, which is Admin's alone.
+        //
+        // The downloadable blank is Admin-only for the same reason the write
+        // is: it names the org's Implementation Stages and describes the shape
+        // of a catalogue only an Admin can fill, and publishing it more widely
+        // would be the one asymmetry in this block that nothing in rules 3
+        // asks for.
+        put(m, "GET", "/api/v1/onboarding/module-service-import/template", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/module-service-import/preview", ADMIN_ONLY);
+        put(m, "POST", "/api/v1/onboarding/module-service-import", ADMIN_ONLY);
 
         // -- OB-16 - the manager review gate ---------------------------------
         //
