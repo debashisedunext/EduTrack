@@ -303,12 +303,21 @@ function ProjectBody({
 
               <div id={GO_LIVE_ANCHOR} className="flex scroll-mt-4 flex-col gap-2.5">
                 {completedServices.length > 0 ? (
+                  /*
+                    One panel per finished Module Service, because that is where
+                    the sign-off record lives — a project with two finished
+                    services has two sign-offs, each at its own status.
+                    `serviceName` is what stops that reading as the same panel
+                    drawn twice: without it both are headed "Go-live sign-off"
+                    and nothing on either says which service it settles.
+                  */
                   completedServices.map((service) => (
                     <SignoffPanel
                       key={service.journeyId}
                       kind="GO_LIVE"
                       journeyId={service.journeyId}
                       obClientId={obClientId}
+                      serviceName={service.serviceName}
                     />
                   ))
                 ) : (
