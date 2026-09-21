@@ -598,11 +598,22 @@ export const obAdminHandlers = [
    * Counted live here because the fixture db has no stats worker. The server
    * reads `ob_implementor_daily_stats` — CLAUDE.md forbids a live `COUNT(*)`
    * for a real dashboard, and this is a mock rather than the dashboard.
+   *
+   * **`today` is the real clock, not `COMPUTED_AT`.** The two flow figures
+   * used to be counted against the fixture's frozen `2026-08-20`, while
+   * `onboardingStepReview.ts` stamps `reviewedAt` with `new Date()` like the
+   * server does. So the two never met: every approval and send-back a reader
+   * actually performed was dated today and compared against a day in August,
+   * and "approved today" / "came back today" sat for ever on whatever the
+   * fixture happened to seed — the reported "the numbers on the tile do not
+   * update", which no amount of refetching could have fixed. The stock pair
+   * below is dateless and was never affected, which is why only two of the
+   * four figures looked frozen.
    */
   http.get(url('/onboarding/dashboard/review-summary'), () => {
     const db = getDb();
     const me = currentUser(db).id;
-    const today = COMPUTED_AT.slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
 
     let reviewsPending = 0;
     let sentForReview = 0;
@@ -633,7 +644,9 @@ export const obAdminHandlers = [
 
     return ok({
       reviewsPending, sentForReview, reviewsApproved, reviewsRejected,
-      computedAt: COMPUTED_AT,
+      // Now, not `COMPUTED_AT`: these four are counted on the request, so the
+      // fixture's August stamp would date a figure produced this second.
+      computedAt: new Date().toISOString(),
     });
   }),
 
