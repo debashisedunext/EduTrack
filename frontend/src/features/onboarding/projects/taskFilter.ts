@@ -1,5 +1,5 @@
 import { isSettled } from './moduleStripStats'
-import type { TreeService, TreeStage } from './projectTree'
+import type { TreeStage } from './projectTree'
 import type { ProjectTask } from './useProjectTasks'
 
 /**
@@ -82,21 +82,3 @@ export function hiddenStepCount(stages: readonly TreeStage[], filter: ObTaskFilt
   return stages.length - stepViews(stages, filter).length
 }
 
-/**
- * The first module holding something this filter would draw, or null.
- *
- * <p>What the page opens onto: a reader who lands on a project with one module
- * finished and one running wants the running one open, not the first row in
- * the list. Null where the filter draws nothing at all, which is a project
- * whose work is finished rather than a fault — nothing opens, and **Show all**
- * has it back.
- */
-export function firstServiceWithWork(
-  tree: readonly TreeService[],
-  filter: ObTaskFilter,
-): number | null {
-  for (const service of tree) {
-    if (stepViews(service.stages, filter).length > 0) return service.service.journeyId
-  }
-  return null
-}

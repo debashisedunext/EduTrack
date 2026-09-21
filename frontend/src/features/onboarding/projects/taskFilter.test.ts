@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { ObProjectStage } from '@/api/generated/model/obProjectStage'
 
-import type { TreeService, TreeStage } from './projectTree'
-import { firstServiceWithWork, hiddenStepCount, stepViews } from './taskFilter'
+import type { TreeStage } from './projectTree'
+import { hiddenStepCount, stepViews } from './taskFilter'
 import type { ProjectTask } from './useProjectTasks'
 
 /**
@@ -51,30 +51,6 @@ function step(stageKey: number, name: string, tasks: ProjectTask[]): TreeStage {
     tasks,
     settled: tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').length,
     hasMine: true,
-  }
-}
-
-function service(journeyId: number, stages: TreeStage[]): TreeService {
-  const tasks = stages.flatMap((s) => s.tasks)
-  return {
-    service: {
-      journeyId,
-      templateId: 9,
-      serviceName: `Service ${journeyId}`,
-      gateStatus: 'OPEN',
-      isComplete: false,
-      stages: stages.map((s) => s.stage),
-    },
-    stages,
-    tasks,
-    allTasks: tasks,
-    taskCount: tasks.length,
-    settled: stages.reduce((n, s) => n + s.settled, 0),
-    stagesComplete: stages.filter((s) => s.tasks.length > 0 && s.settled === s.tasks.length).length,
-    stageCount: stages.length,
-    hiddenStageCount: 0,
-    hasMine: true,
-    totalTatDays: tasks.length,
   }
 }
 
@@ -135,24 +111,5 @@ describe('stepViews under Show all', () => {
     ])
     expect(views.every((v) => v.hiddenCount === 0)).toBe(true)
     expect(views.flatMap((v) => v.tasks)).toHaveLength(5)
-  })
-})
-
-describe('firstServiceWithWork', () => {
-  it('skips a finished module for the one that still has something in it', () => {
-    const tree = [service(500, [FINISHED]), service(501, [UNTOUCHED])]
-
-    expect(firstServiceWithWork(tree, 'PENDING')).toBe(501)
-    // Asked for everything, the first module is the one that opens.
-    expect(firstServiceWithWork(tree, 'ALL')).toBe(500)
-  })
-
-  /** A project whose work is done opens nothing — not a fault, and Show all has it back. */
-  it('is null when no module has outstanding work', () => {
-    expect(firstServiceWithWork([service(500, [FINISHED])], 'PENDING')).toBeNull()
-  })
-
-  it('is null for a project boarded through no module at all', () => {
-    expect(firstServiceWithWork([], 'PENDING')).toBeNull()
   })
 })
