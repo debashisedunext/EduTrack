@@ -29,6 +29,16 @@ import { signoffSimulationEnabled, simulateSignoff } from './simulateSignoff'
  * decision back. Mounted twice on OB-05: once per step that
  * `requiresSignoff`, and once per journey for the go-live.
  *
+ * ## Why the heading can name a service
+ *
+ * A go-live sign-off belongs to one Module Service, not to the project, so a
+ * project with two finished services legitimately has two of these panels.
+ * Headed by the same constant words they read as the page drawing one panel
+ * twice — which is what the project page was reported as doing. `serviceName`
+ * is how a call site that stacks them says which is which. It is optional
+ * because the call sites that mount one panel under a heading that already
+ * names the service would only be repeating themselves.
+ *
  * ## One component for both kinds, because they differ by two fields
  *
  * `ObSignoffKind` is the whole difference on the wire — a `STEP` sign-off
@@ -87,9 +97,12 @@ export interface SignoffPanelProps {
   /** Whose contacts fill the picker. The page has already read this client,
    * so the lookup below is a cache hit rather than a second request. */
   obClientId: number
+  /** The Module Service this sign-off is for, named in the heading. Pass it
+   * wherever more than one of these panels can sit on a page together. */
+  serviceName?: string
 }
 
-export function SignoffPanel({ kind, journeyId, stepId, obClientId }: SignoffPanelProps) {
+export function SignoffPanel({ kind, journeyId, stepId, obClientId, serviceName }: SignoffPanelProps) {
   const queryClient = useQueryClient()
   const [contactId, setContactId] = React.useState<number | ''>('')
   const [cancelling, setCancelling] = React.useState(false)
@@ -159,7 +172,10 @@ export function SignoffPanel({ kind, journeyId, stepId, obClientId }: SignoffPan
   const canRequest = signoff == null || status === 'EXPIRED' || status === 'CANCELLED'
   const isLive = status === 'PENDING'
 
-  const heading = kind === 'GO_LIVE' ? 'Go-live sign-off' : 'Client sign-off'
+  const kindHeading = kind === 'GO_LIVE' ? 'Go-live sign-off' : 'Client sign-off'
+  // An em dash rather than a colon: the service is the panel's subject, not a
+  // value under a label, and the heading is read aloud as one phrase.
+  const heading = serviceName ? `${kindHeading} — ${serviceName}` : kindHeading
 
   return (
     <section
