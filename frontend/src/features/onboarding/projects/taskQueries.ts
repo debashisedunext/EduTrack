@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { getGetObJourneyQueryKey } from '@/api/generated/onboarding-journeys/onboarding-journeys'
+import { invalidateObDashboard } from '@/features/onboarding/dashboard/obDashboardFreshness'
 
 /**
  * What has to be re-read after anything is written to a task.
@@ -36,11 +37,22 @@ const MY_TASKS_LIST_PREFIX = ['/onboarding/my-tasks'] as const
 const myTaskKeyPrefix = (taskId: number) => [`/onboarding/my-tasks/${taskId}`] as const
 
 /**
- * Re-read the journey and every queue that lists a task from it.
+ * Re-read the journey, every queue that lists a task from it, and the board.
  *
  * <p>`taskId` narrows the second invalidation to the one task's own page where
  * the caller knows which task moved; without it the list alone is refreshed,
  * which is all a caller that moved several rows can honestly say.
+ *
+ * <p>The dashboard is the third screen this file exists to stop forgetting.
+ * OB-02's review cards count the reader's own verifications, so approving or
+ * sending back a row is exactly the action that moves them, and until this
+ * call was here the cached answer outlived the press. Invalidating is not
+ * fetching — nothing is requested for a board that is not mounted — so it
+ * costs a caller that happened not to move a figure nothing.
+ *
+ * <p>It is an invalidation, not a promise of a new number: the review counters
+ * are pre-aggregated and the refetch returns the same figures until the stats
+ * worker's next pass writes new ones.
  */
 export function invalidateAfterTaskWrite(
   queryClient: QueryClient,
@@ -52,4 +64,5 @@ export function invalidateAfterTaskWrite(
   if (taskId != null) {
     void queryClient.invalidateQueries({ queryKey: myTaskKeyPrefix(taskId) })
   }
+  invalidateObDashboard(queryClient)
 }

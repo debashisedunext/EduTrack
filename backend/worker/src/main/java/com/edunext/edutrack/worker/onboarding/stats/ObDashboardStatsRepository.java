@@ -1032,6 +1032,30 @@ public class ObDashboardStatsRepository {
      * cleared is the one failure mode a dashboard cannot recover from by
      * itself, because it looks exactly like a real three.
      *
+     * <h2>The day is the day's UTC bounds, not {@code DATE(reviewed_at)}</h2>
+     *
+     * <p>This method used to compare {@code DATE(i.reviewed_at)} — a UTC
+     * column — against {@code stat_date}, which is a date in the
+     * organisation's zone. That is the exact trap {@link ObStatsDay}'s class
+     * note is written about: in IST the two describe windows five and a half
+     * hours apart, so every verdict recorded between midnight and 05:30 local
+     * was counted on the previous day and the morning's figures were wrong by
+     * a plausible-looking amount. Every other flow query here already takes
+     * {@code day.start()} / {@code day.end()}; this one was the last holdout.
+     *
+     * <h2>Known gap: {@code reviews_rejected} decays</h2>
+     *
+     * <p>Both event counters read the row's <em>current</em> state, and only
+     * {@code VERIFIED} is terminal. When an implementor fixes a rejected row
+     * and sends it again, {@code ObJourneyStepLifecycleService.sendRow} moves
+     * it back to {@code SENT} and sets {@code reviewed_at} to NULL — correctly,
+     * because a verdict on replaced work is not a verdict on the work that
+     * replaced it. The side effect is that the send-back that happened this
+     * morning stops being counted the moment it is acted on, so "came back
+     * today" drifts towards zero over a day in which people are doing exactly
+     * what a send-back asks of them. Counting an event out of stock state
+     * cannot express this; it needs a stamp the resubmit does not clear.
+     *
      * @return rows written
      */
     @Transactional
@@ -1073,9 +1097,11 @@ public class ObDashboardStatsRepository {
                         SELECT js.owner_user_id AS user_id,
                                SUM(i.row_state = 'SENT')                                AS sent,
                                SUM(i.row_state = 'VERIFIED'
-                                   AND DATE(i.reviewed_at) = :day)                      AS approved,
+                                   AND i.reviewed_at >= :dayStart
+                                   AND i.reviewed_at <  :dayEnd)                        AS approved,
                                SUM(i.row_state = 'REJECTED'
-                                   AND DATE(i.reviewed_at) = :day)                      AS rejected
+                                   AND i.reviewed_at >= :dayStart
+                                   AND i.reviewed_at <  :dayEnd)                         AS rejected
                           FROM ob_journey_step_items i
                           JOIN ob_journey_steps js ON js.id = i.step_id
                           JOIN ob_journeys jr      ON jr.id = js.journey_id
@@ -1092,6 +1118,8 @@ public class ObDashboardStatsRepository {
                     computed_at      = VALUES(computed_at)
                 """)
                 .param("day", day.date())
+                .param("dayStart", day.start())
+                .param("dayEnd", day.end())
                 .param("computedAt", computedAt)
                 .update();
     }

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { useGetObReviewSummary } from '@/api/generated/onboarding/onboarding'
 import { cn } from '@/lib/utils'
 
+import { OB_DASHBOARD_QUERY } from './obDashboardFreshness'
+
 /**
  * C-141 · the two review cards, above the seven of OB-02.
  *
@@ -34,9 +36,23 @@ import { cn } from '@/lib/utils'
  * lag the queue they describe. That is why each card is a link rather than a
  * destination: the count invites, and My Tasks — computed live — is what
  * actually directs.
+ *
+ * <h2>Why it passes the board's freshness options</h2>
+ *
+ * <p>These two were the only cards on OB-02 reading on the app default — 30
+ * seconds stale, no refetch on focus or on mount — so approving a row and
+ * coming back to the board re-rendered the figures the reader had already
+ * seen, and the one card describing the reader's own actions was the one that
+ * would not admit they had happened. `OB_DASHBOARD_QUERY` is the same object
+ * every other card passes; see `obDashboardFreshness.ts` for why it is
+ * per-query rather than a change to the default.
+ *
+ * <p>It moves the figure within the worker's refresh window, not on the press:
+ * the counters are pre-aggregated, and live `COUNT(*)` on a dashboard is not
+ * something this project does.
  */
 export function ObReviewCards() {
-  const { data, isPending, isError } = useGetObReviewSummary()
+  const { data, isPending, isError } = useGetObReviewSummary({ query: OB_DASHBOARD_QUERY })
   const s = data?.data
 
   if (isPending || isError || !s) return null
@@ -45,6 +61,7 @@ export function ObReviewCards() {
   const sent = s.sentForReview ?? 0
   const approved = s.reviewsApproved ?? 0
   const rejected = s.reviewsRejected ?? 0
+  const asOf = computedAtLabel(s.computedAt)
 
   const hasManager = pending > 0
   const hasOwn = sent > 0 || approved > 0 || rejected > 0
@@ -103,10 +120,40 @@ export function ObReviewCards() {
             */}
             check-list rows, not tasks — one task can be in all three
           </span>
+          {/*
+            When the figures were computed, because "today" on the two flow
+            figures is a claim about freshness the reader cannot otherwise
+            check. These come from a summary table a separate worker writes,
+            so a figure that does not move has two possible explanations —
+            nothing happened, or nothing is computing — and they are
+            indistinguishable without this line. Every other card on the board
+            already carries it; this one was reported as broken partly because
+            it did not.
+          */}
+          {asOf && (
+            <span data-testid="ob-review-card-own-asof" className="text-[11px] text-content-muted">
+              {asOf}
+            </span>
+          )}
         </Link>
       )}
     </div>
   )
+}
+
+/**
+ * "Counted at 14:32" — or nothing at all when the worker has never run.
+ *
+ * <p>Null rather than "unknown": on a database the stats worker has not
+ * touched, the service answers four zeroes with a null stamp, and an empty
+ * card that says nothing is honest where "counted at — " would only raise a
+ * question the card cannot answer.
+ */
+function computedAtLabel(computedAt: string | null | undefined): string | null {
+  if (!computedAt) return null
+  const at = new Date(computedAt)
+  if (Number.isNaN(at.getTime())) return null
+  return `counted at ${at.toLocaleTimeString(undefined, { timeStyle: 'short' })}`
 }
 
 function Figure({ n, label, tone }: { n: number; label: string; tone: 'review' | 'good' | 'back' }) {
