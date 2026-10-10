@@ -109,6 +109,56 @@ describe('S-08 create', () => {
     expect(created?.mustChangePassword).toBe(true)
   })
 
+  it('leaves onboarding access untouched when no onboarding role is picked', async () => {
+    renderForm('/masters/resources/new')
+
+    await fillRequiredFields()
+    fireEvent.click(screen.getByRole('button', { name: 'Create resource' }))
+
+    await screen.findByTestId('temporary-password')
+    const created = getDb().users.find((u) => u.username === 'new.person')
+    expect(getDb().obModuleAccess.some((g) => g.userId === created?.id)).toBe(false)
+  })
+
+  it('picking an onboarding role from the merged dropdown sets the platform role it implies and grants access', async () => {
+    renderForm('/masters/resources/new')
+
+    // Personal + username only — picking the combined Role option below
+    // stands in for `fillRequiredFields`' own Role step.
+    fireEvent.change(await screen.findByLabelText(/^Employee code/), { target: { value: 'EMP-100' } })
+    fireEvent.change(screen.getByLabelText(/^Full name/), { target: { value: 'New Person' } })
+    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'new.person@edunext.example' } })
+    fireEvent.change(screen.getByLabelText(/^Username/), { target: { value: 'new.person' } })
+
+    fireEvent.keyDown(screen.getByLabelText(/^Role/), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('option', { name: 'Implementor' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create resource' }))
+
+    await screen.findByTestId('temporary-password')
+    // No warning banner — the grant went through, not just the account.
+    expect(screen.queryByRole('alert', { name: /onboarding access/i })).not.toBeInTheDocument()
+
+    const created = getDb().users.find((u) => u.username === 'new.person')
+    expect(created?.role).toBe('DEVELOPER')
+    await waitFor(() => {
+      const grant = getDb().obModuleAccess.find((g) => g.userId === created?.id)
+      expect(grant).toMatchObject({ module: 'ONBOARDING', moduleRole: 'OB_STEP_OWNER' })
+    })
+  })
+
+  it('offers ticketing and onboarding roles as one grouped dropdown, not two fields', async () => {
+    renderForm('/masters/resources/new')
+
+    expect(screen.queryByLabelText(/^Onboarding role/)).not.toBeInTheDocument()
+
+    fireEvent.keyDown(await screen.findByLabelText(/^Role/), { key: 'Enter' })
+    expect(await screen.findByRole('option', { name: 'Developer' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Implementor' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Implementor Manager' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Sales Person' })).toBeInTheDocument()
+  })
+
   /**
    * `http.ts` is explicit: a key created inside the mutation changes on every
    * retry and defends against nothing.

@@ -33,12 +33,20 @@ export interface TemporaryPasswordDialogProps {
   password: string | null
   displayName: string
   onClose: () => void
+  /**
+   * The one thing this dialog reports beyond the password itself: the
+   * account exists either way, so a failed onboarding-access grant belongs
+   * here as a warning to act on, not in a banner that reads like the create
+   * itself failed.
+   */
+  warning?: string | null
 }
 
 export function TemporaryPasswordDialog({
   password,
   displayName,
   onClose,
+  warning,
 }: TemporaryPasswordDialogProps) {
   const [copied, setCopied] = React.useState(false)
 
@@ -95,6 +103,12 @@ export function TemporaryPasswordDialog({
             {copied ? 'Copied' : 'Copy'}
           </Button>
         </div>
+
+        {warning && (
+          <p role="alert" className="rounded-control border border-danger bg-surface px-3 py-2 text-sm text-danger-text">
+            {warning}
+          </p>
+        )}
 
         <ModalFooter>
           <Button type="button" onClick={onClose}>

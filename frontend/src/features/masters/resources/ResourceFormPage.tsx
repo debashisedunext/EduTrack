@@ -6,16 +6,19 @@ import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 import { useListProjects } from '@/api/generated/projects/projects'
 import { useListUsers } from '@/api/generated/users/users'
+import { useGrantObModuleAccess } from '@/api/generated/onboarding-masters/onboarding-masters'
 import { ApiError, newIdempotencyKey } from '@/api/http'
 import type { RoleCode } from '@/api/generated/model/roleCode'
 import type { User } from '@/api/generated/model/user'
+import { ObModule } from '@/api/generated/model/obModule'
+import { ObModuleRole } from '@/api/generated/model/obModuleRole'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 import { SearchableDropdown } from '@/components/ui/searchable-dropdown'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/use-toast'
 
 import { WeeklyOffPicker } from '../calendar/WeeklyOffPicker'
@@ -38,6 +41,58 @@ import {
 } from './resourceForm'
 
 const ROLES = Object.keys(ROLE_LABEL) as RoleCode[]
+
+interface RoleOption {
+  /** The `<Select>` item's value — unique across both groups, so one control can hold either. */
+  key: string
+  label: string
+  platformRole: RoleCode
+  /** `''` for a plain ticketing role: nothing to grant beyond the account itself. */
+  onboardingRole: ObModuleRole | ''
+}
+
+const TICKETING_ROLE_OPTIONS: RoleOption[] = ROLES.map((role) => ({
+  key: role,
+  label: ROLE_LABEL[role],
+  platformRole: role,
+  onboardingRole: '',
+}))
+
+/**
+ * The onboarding module's own role vocabulary (A-118), folded into the same
+ * "Role" control as a create-time convenience rather than a second dropdown
+ * — one decision ("what is this person") instead of two ("what is their
+ * ticketing role" and, separately, "what is their onboarding role").
+ *
+ * Wording follows how this organisation actually talks about the job
+ * (`Implementor`, not `Step Owner`); `Onboarding → Module Access` (OB-08) is
+ * still where an existing grant is seen, changed or revoked, and uses its
+ * own, differently-worded labels for the same codes.
+ *
+ * <h2>The platform role each one implies</h2>
+ *
+ * A user account still needs one of the six platform roles regardless — it
+ * is what ticketing permissions read — so picking an onboarding option here
+ * also picks a platform role for it, rather than leaving that question
+ * unanswered. The pairing mirrors what this organisation's own
+ * `Onboarding → Module Access` grants already show (a Developer who is a
+ * Step Owner, a PM who is an Onboarding Manager, and so on), not an
+ * arbitrary default. The trade this makes: an Implementor is always created
+ * as a Developer. Two people who need the platform role and the onboarding
+ * role to disagree still can — edit the platform role afterwards, or grant
+ * the onboarding role separately from OB-08 — just not in this one field.
+ */
+const ONBOARDING_ROLE_OPTIONS: RoleOption[] = [
+  { key: ObModuleRole.OB_STEP_OWNER, label: 'Implementor', platformRole: 'DEVELOPER', onboardingRole: ObModuleRole.OB_STEP_OWNER },
+  { key: ObModuleRole.OB_MANAGER, label: 'Implementor Manager', platformRole: 'PM', onboardingRole: ObModuleRole.OB_MANAGER },
+  { key: ObModuleRole.OB_SALES, label: 'Sales Person', platformRole: 'SUPPORT', onboardingRole: ObModuleRole.OB_SALES },
+  { key: ObModuleRole.OB_ADMIN, label: 'Onboarding Admin', platformRole: 'ADMIN', onboardingRole: ObModuleRole.OB_ADMIN },
+  { key: ObModuleRole.OB_VIEWER, label: 'Viewer (Onboarding)', platformRole: 'QA', onboardingRole: ObModuleRole.OB_VIEWER },
+]
+
+const ROLE_OPTIONS_BY_KEY = new Map<string, RoleOption>(
+  [...TICKETING_ROLE_OPTIONS, ...ONBOARDING_ROLE_OPTIONS].map((option) => [option.key, option]),
+)
 
 /**
  * S-08 Resource Master — Create / Edit (B-011).
@@ -89,6 +144,8 @@ export function ResourceFormPage() {
 
   const [createdPassword, setCreatedPassword] = React.useState<string | null>(null)
   const [createdName, setCreatedName] = React.useState('')
+  /** Set only when the account was created but the onboarding grant that was asked for failed. */
+  const [onboardingGrantWarning, setOnboardingGrantWarning] = React.useState<string | null>(null)
   const [bannerError, setBannerError] = React.useState<string | null>(null)
   /** How many open tickets refused this save, or null when that is not why. */
   const [blockedTickets, setBlockedTickets] = React.useState<number | null>(null)
@@ -110,8 +167,15 @@ export function ResourceFormPage() {
     }
   }, [loaded, form])
 
+  // Drive the merged Role control: which key it shows, and — via
+  // `selectRole` below — what the submit handler reads to decide whether to
+  // call the onboarding grant at all.
+  const roleValue = form.watch('role')
+  const onboardingRoleValue = form.watch('onboardingRole')
+
   const createResource = useCreateResource()
   const updateResource = useUpdateResource()
+  const grantOnboardingAccess = useGrantObModuleAccess()
   const isSaving = createResource.isPending || updateResource.isPending
 
   /**
@@ -188,6 +252,30 @@ export function ResourceFormPage() {
       // only place the password is readable.
       setCreatedName(created.resource.displayName)
       setCreatedPassword(created.temporaryPassword)
+
+      // A second grant, deliberately after the account exists rather than
+      // folded into one request: `POST /users` and `POST /onboarding/module-access`
+      // are two different resources with two different audit trails, and the
+      // grant needs the id the first call just produced. The account is
+      // already real at this point, so a failure here must not look like the
+      // whole create failed — it surfaces as a warning inside the same
+      // dialog, not a banner that sends the admin back to an empty form.
+      if (values.onboardingRole) {
+        try {
+          await grantOnboardingAccess.mutateAsync({
+            data: {
+              userId: created.resource.id,
+              module: ObModule.ONBOARDING,
+              moduleRole: values.onboardingRole as ObModuleRole,
+            },
+          })
+        } catch {
+          setOnboardingGrantWarning(
+            'The account was created, but granting onboarding access did not go through. ' +
+              'Grant it from Onboarding → Module Access.',
+          )
+        }
+      }
     } catch (error) {
       applyServerErrors(error)
     }
@@ -328,27 +416,68 @@ export function ResourceFormPage() {
           {(aria) => <Input {...aria} {...form.register('username')} autoComplete="off" />}
         </FormField>
 
-        <FormField id="role" label="Role" required error={errors.role?.message}>
-          {(aria) => (
-            <Controller
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger {...aria}>
-                    <SelectValue placeholder="Choose a role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ROLES.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {ROLE_LABEL[role]}
+        <FormField
+          id="role"
+          label="Role"
+          required
+          error={errors.role?.message}
+          hint={
+            !isEdit
+              ? 'Picking an onboarding role also grants Onboarding-module access, so there is nothing further to do before they can work a client project.'
+              : undefined
+          }
+        >
+          {(aria) => {
+            // Which key the control shows: the onboarding role if one was
+            // picked, otherwise the platform role itself. Both live in RHF —
+            // `onboardingRole` has no field of its own to render once this
+            // replaced the second dropdown, but it is still what the submit
+            // handler reads to decide whether to call the grant endpoint.
+            const selectedKey = onboardingRoleValue || roleValue
+
+            function selectRole(key: string) {
+              const option = ROLE_OPTIONS_BY_KEY.get(key)
+              if (!option) return
+              form.setValue('role', option.platformRole, { shouldValidate: true, shouldDirty: true })
+              form.setValue('onboardingRole', option.onboardingRole, { shouldDirty: true })
+            }
+
+            return (
+              <Select value={selectedKey} onValueChange={selectRole}>
+                <SelectTrigger {...aria}>
+                  <SelectValue placeholder="Choose a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  {isEdit ? (
+                    TICKETING_ROLE_OPTIONS.map((option) => (
+                      <SelectItem key={option.key} value={option.key}>
+                        {option.label}
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          )}
+                    ))
+                  ) : (
+                    <>
+                      <SelectGroup>
+                        <SelectLabel>Ticketing</SelectLabel>
+                        {TICKETING_ROLE_OPTIONS.map((option) => (
+                          <SelectItem key={option.key} value={option.key}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      <SelectGroup>
+                        <SelectLabel>Onboarding</SelectLabel>
+                        {ONBOARDING_ROLE_OPTIONS.map((option) => (
+                          <SelectItem key={option.key} value={option.key}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            )
+          }}
         </FormField>
 
         {isEdit ? (
@@ -573,8 +702,10 @@ export function ResourceFormPage() {
       <TemporaryPasswordDialog
         password={createdPassword}
         displayName={createdName}
+        warning={onboardingGrantWarning}
         onClose={() => {
           setCreatedPassword(null)
+          setOnboardingGrantWarning(null)
           navigate('/masters/resources')
         }}
       />
