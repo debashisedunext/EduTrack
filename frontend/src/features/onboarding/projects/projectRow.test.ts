@@ -30,12 +30,34 @@ function project(over: Partial<ObProject> = {}): ObProject {
 }
 
 describe('delayCell', () => {
-  it('says "Not started" for a locked gate rather than "On time"', () => {
+  it('says "Not started" when nothing is finished and nothing is running', () => {
     // The two states the server sends as the same null. Folding them would
     // print praise against work nobody has begun.
-    const cell = delayCell(project({ gateStatus: 'LOCKED', delayedByDays: null }))
+    const cell = delayCell(
+      project({ stagesComplete: 0, currentStage: null, delayedByDays: null }),
+    )
     expect(cell.label).toBe('Not started')
     expect(cell.tone).toBe('unknown')
+  })
+
+  /**
+   * The bug: the gate is the client's prerequisite checklist and is advisory,
+   * so a project can run to completion behind a locked one. It read "Not
+   * started" under a header saying 5 of 5 tasks completed.
+   */
+  it('does not call a locked project "Not started" once its work has begun', () => {
+    expect(delayCell(project({ gateStatus: 'LOCKED', stagesComplete: 2 })).label).toBe('On time')
+    expect(
+      delayCell(project({ gateStatus: 'LOCKED', stagesComplete: 0, currentStage: 'Configuration' }))
+        .label,
+    ).toBe('On time')
+    expect(
+      delayCell(project({ gateStatus: 'LOCKED', status: 'COMPLETED', currentStage: null })).label,
+    ).toBe('Completed')
+  })
+
+  it('still counts the delay on a late project behind a locked gate', () => {
+    expect(delayCell(project({ gateStatus: 'LOCKED', delayedByDays: 3 })).label).toBe('3 d')
   })
 
   it('says "On time" for a running project with nothing overdue', () => {

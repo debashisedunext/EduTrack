@@ -18,18 +18,26 @@ export interface DelayCell {
  * Three states, not two, and the third is the one that matters.
  *
  * `delayedByDays` is null both for "on time" and for "the question does not
- * apply", and folding them would print **On time** against a project whose
- * journeys have never opened — which reads as praise for work nobody has
- * started. `gateStatus` is what separates them.
+ * apply", and folding them would print **On time** against a project nobody
+ * has started — which reads as praise for work that has not happened.
+ *
+ * <h2>Started is a question about the work, not about the gate</h2>
+ *
+ * This used to answer it with `gateStatus`, and returned **Not started** for
+ * every `LOCKED` project before it looked at anything else. The gate is the
+ * *client's prerequisite checklist* — `ObPrerequisiteGateService` is the only
+ * thing that opens it — and it is advisory: a journey activates its steps
+ * "whether or not its client's checklist has cleared". So a project could run
+ * to 100%, with every module service complete, and still print **Not started**
+ * under a header reading 5 of 5 tasks completed. That is the bug this fixed.
+ *
+ * What the wire can actually answer it with is the work: a project with a
+ * finished stage behind it, or one running now, has plainly started. The
+ * remaining gap is a project whose tasks have all begun and are all blocked —
+ * `currentStage` is null there too, so it still reads as not started. Closing
+ * that needs a started-at on the project rather than a better guess here.
  */
 export function delayCell(project: ObProject): DelayCell {
-  if (project.gateStatus === 'LOCKED') {
-    return {
-      label: 'Not started',
-      tone: 'unknown',
-      hint: 'No clock is running: this project’s journeys have not opened yet.',
-    }
-  }
   if (project.status === 'ON_HOLD' || project.status === 'DROPPED') {
     return {
       label: '—',
@@ -40,6 +48,13 @@ export function delayCell(project: ObProject): DelayCell {
   if (project.status === 'COMPLETED') {
     return { label: 'Completed', tone: 'ok', hint: 'Every module service of this project is done.' }
   }
+  if (notStarted(project)) {
+    return {
+      label: 'Not started',
+      tone: 'unknown',
+      hint: 'No clock is running: no task of this project has been finished, and none is running now.',
+    }
+  }
   if (project.delayedByDays == null) {
     return { label: 'On time', tone: 'ok', hint: 'Nothing is past its due date.' }
   }
@@ -48,6 +63,18 @@ export function delayCell(project: ObProject): DelayCell {
     tone: 'late',
     hint: 'Working days past the earliest overdue task’s due date — weekends and holidays excluded.',
   }
+}
+
+/**
+ * Nothing finished, and nothing running — see the note on {@link delayCell}.
+ *
+ * <p>`stagesComplete` counts the project's finished stages across every module
+ * service, and `currentStage` names the earliest one running in any of them.
+ * Both empty is the only reading of the wire under which no task has ever been
+ * worked.
+ */
+function notStarted(project: ObProject): boolean {
+  return project.stagesComplete === 0 && project.currentStage == null
 }
 
 /**
