@@ -10,7 +10,7 @@ import { ObModuleStrip } from './ObModuleStrip'
 import { ObStepTimeline } from './ObStepTimeline'
 import { ObTaskDialog } from './ObTaskDialog'
 import { buildProjectTree, findTaskPath, taskAnchorId, type TreeService } from './projectTree'
-import { firstServiceWithWork, type ObTaskFilter } from './taskFilter'
+import { type ObTaskFilter } from './taskFilter'
 import { isMine, type ProjectTask } from './useProjectTasks'
 import type { ObViewerScope } from './viewerScope'
 
@@ -43,25 +43,23 @@ import type { ObViewerScope } from './viewerScope'
  * end, and the timeline it came from is what the reader wants back when it is
  * done. The dialog stays open across those actions.
  *
- * <h2>The page opens onto one task, not onto forty</h2>
+ * <h2>The page opens onto the first module</h2>
  *
- * <p>A project boarded through three services opens as three rows, one of them
- * open: the <b>first module holding outstanding work</b>, with the first
- * outstanding Step inside it open and its tasks listed. Every other row stays
- * closed, carrying its own figures and a dot per Step, so "where is everyone"
- * is answered without opening anything.
+ * <p>A project boarded through three services opens as three rows, the
+ * <b>first of them</b> open, with the first Step inside it open and its tasks
+ * listed. Every other row stays closed, carrying its own figures and a dot per
+ * Step, so "where is everyone" is answered without opening anything.
  *
- * <p>It used to open with everything closed, on the argument that a list of
- * services is the cheapest thing to scan. It is also the one thing nobody
- * arrives wanting: a reader opening their own project came to see what is on
- * them, and made the same two clicks — the module, then the Step — every
- * single visit to get there.
+ * <p>It opened on the first module holding <em>outstanding work</em> until Sep
+ * 2026, which skipped a finished module 1 and opened module 2 — read as a bug
+ * by everyone who met it, because the list order is the order the reader sees
+ * and the row they expect to open is the one at the top. A finished module
+ * opens onto its own "nothing outstanding here" line, which is an answer
+ * rather than a blank.
  *
- * <p>The seeding happens once, and only once the tasks have arrived: which
- * module has work is not knowable while the journey reads are in flight, and
- * re-seeding on a later refetch would re-open a module the reader had closed.
- * A link naming a task — `?task=` — takes precedence over it entirely, because
- * that reader came for that row.
+ * <p>The seeding happens once: re-seeding on a later refetch would re-open a
+ * module the reader had closed. A link naming a task — `?task=` — takes
+ * precedence over it entirely, because that reader came for that row.
  *
  * <h2>Pending work, or all of it</h2>
  *
@@ -137,8 +135,8 @@ export function ObProjectWorkspace({
   )
 
   /**
-   * Which modules are open. Empty until the seeding effect below picks the
-   * first one with outstanding work — see the class note.
+   * Which modules are open. Empty until the seeding effect below opens the
+   * first module in the list — see the class note.
    */
   const [openSet, setOpened] = React.useState<ReadonlySet<number>>(() => new Set())
   const [chosenTask, setChosenTask] = React.useState<number | null>(null)
@@ -163,14 +161,14 @@ export function ObProjectWorkspace({
   treeRef.current = tree
 
   /*
-    Which module the page opens onto, decided once the tasks are in.
+    Which module the page opens onto: the first in the list, whatever state it
+    is in.
 
     Guarded by a ref rather than by a dependency list: the tree is a fresh
     object on every refetch, and an effect that re-ran on it would re-open a
-    module the reader had since closed. `null` means no module has work the
-    current filter would draw — a finished project, where nothing opens and
-    **Show all** has it all back — so the seed is not spent and the switch can
-    still open something.
+    module the reader had since closed. An empty tree is the services not
+    having arrived yet, so the seed is not spent and a later render can still
+    open one.
   */
   const seeded = React.useRef(false)
   React.useEffect(() => {
@@ -180,11 +178,11 @@ export function ObProjectWorkspace({
       seeded.current = true
       return
     }
-    const first = firstServiceWithWork(tree, filter)
+    const first = tree[0]?.service.journeyId
     if (first == null) return
     seeded.current = true
     setOpened((current) => (current.size > 0 ? current : new Set([first])))
-  }, [tree, filter, revealTaskId])
+  }, [tree, revealTaskId])
 
   React.useEffect(() => {
     if (revealTaskId == null) return

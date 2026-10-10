@@ -143,12 +143,11 @@ const serviceStrip = (name: string) =>
 describe('the project workspace', () => {
   /**
    * One row per service, and the page opens onto a task rather than onto a
-   * list: the first module with outstanding work is open, its first
-   * outstanding Step with it. Every other row stays closed and carries its own
-   * figures and a dot per Step, so the project still reads without opening
-   * anything.
+   * list: the first module in the list is open, its first drawn Step with it.
+   * Every other row stays closed and carries its own figures and a dot per
+   * Step, so the project still reads without opening anything.
    */
-  it('opens the first module holding outstanding work, and no other', async () => {
+  it('opens the first module in the list, and no other', async () => {
     renderWorkspace()
 
     const rows = await screen.findAllByTestId('ob-tree-service')
@@ -158,6 +157,28 @@ describe('the project workspace', () => {
     // SIS's outstanding Step, open, with its task on the page.
     expect(screen.getByText('Report card template')).toBeInTheDocument()
     expect(screen.queryByText('Week off')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The page used to open the first module holding outstanding work, so a
+   * finished module 1 was skipped and module 2 opened in its place — which
+   * every reader met as the page opening the wrong row.
+   */
+  it('opens the first module even when its work is all finished', async () => {
+    renderWorkspace({
+      tasks: [
+        task({ id: 1, journeyId: SIS, name: 'Admission No Scheme', status: 'DONE' }),
+        task({ id: 3, journeyId: ATTENDANCE, name: 'Week off', serviceName: 'Student Attendance' }),
+      ],
+    })
+
+    await screen.findAllByTestId('ob-tree-service')
+    expect(serviceButton('SIS')).toHaveAttribute('aria-expanded', 'true')
+    expect(serviceButton('Student Attendance')).toHaveAttribute('aria-expanded', 'false')
+    // Opens onto an answer rather than a blank: Pending draws none of its Steps.
+    expect(
+      screen.getByText('Nothing outstanding here — every task of this service is finished.'),
+    ).toBeInTheDocument()
   })
 
   /** The finished work is one press away, and the same press on every module. */
