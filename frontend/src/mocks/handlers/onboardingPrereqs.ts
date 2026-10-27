@@ -65,7 +65,7 @@ const draftVersion = (db: Db) => db.obPrereqVersions.find((v) => v.isDraft);
 const isOverdue = (t: ObClientPrereqTaskRow) =>
   (t.status === 'PENDING' || t.status === 'SUBMITTED') && Date.parse(t.dueAt) < Date.now();
 
-function taskDto(t: ObClientPrereqTaskRow, db: Db) {
+export function taskDto(t: ObClientPrereqTaskRow, db: Db) {
   return {
     id: t.id, obClientId: t.obClientId, templateTaskId: t.templateTaskId,
     sequence: t.sequence, title: t.title, description: t.description,
@@ -81,7 +81,7 @@ function taskDto(t: ObClientPrereqTaskRow, db: Db) {
   };
 }
 
-const taskDetailDto = (t: ObClientPrereqTaskRow, db: Db) => ({
+export const taskDetailDto = (t: ObClientPrereqTaskRow, db: Db) => ({
   ...taskDto(t, db),
   submissions: t.submissions,
 });
@@ -102,7 +102,7 @@ const clientTasks = (obClientId: number, db: Db) =>
 const gateSatisfied = (tasks: ObClientPrereqTaskRow[]) =>
   tasks.every((t) => (t.isMandatory ? t.status === 'VERIFIED' : t.status === 'VERIFIED' || t.status === 'SKIPPED'));
 
-function prereqsDto(obClientId: number, db: Db) {
+export function prereqsDto(obClientId: number, db: Db) {
   const header = db.obClientPrereqs.find((h) => h.obClientId === obClientId);
   if (!header) return null;
   const tasks = clientTasks(obClientId, db);
@@ -180,7 +180,7 @@ function applyGate(db: Db, task: ObClientPrereqTaskRow) {
   });
 }
 
-const findTask = (db: Db, id: number) => db.obClientPrereqTasks.find((t) => t.id === id);
+export const findTask = (db: Db, id: number) => db.obClientPrereqTasks.find((t) => t.id === id);
 
 /** A draft is required for every master write — editing a published version is refused. */
 const noDraft = () =>
