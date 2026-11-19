@@ -75,6 +75,7 @@ import type {
   ListObStepCommunicationsParams,
   ListObStepHistoryParams,
   NotFoundResponse,
+  ObAttachmentResponse,
   ObBlockJourneyStepRequest,
   ObClientCommunicationListResponse,
   ObCompletionGateProblem,
@@ -118,6 +119,7 @@ import type {
   Problem,
   UnauthorizedResponse,
   UnprocessableTransitionResponse,
+  UploadObJourneyStepAttachmentBody,
   ValidationFailedResponse
 } from '.././model';
 
@@ -2863,6 +2865,74 @@ export const useUpdateObJourneyStep = <TError = ValidationFailedResponse | Unaut
       > => {
 
       const mutationOptions = getUpdateObJourneyStepMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    /**
+ * Stores one task document through the shared onboarding upload pipeline. Only the step owner or backup owner may upload; the attachment is owned by the step and uses kind `SUBMISSION`.
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const uploadObJourneyStepAttachment = (
+    stepId: number,
+    uploadObJourneyStepAttachmentBody: UploadObJourneyStepAttachmentBody,
+ signal?: AbortSignal
+) => {
+      
+      const formData = new FormData();
+formData.append(`file`, uploadObJourneyStepAttachmentBody.file)
+
+      return http<ObAttachmentResponse>(
+      {url: `/onboarding/journey-steps/${stepId}/attachments`, method: 'POST',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData, signal
+    },
+      );
+    }
+  
+
+
+export const getUploadObJourneyStepAttachmentMutationOptions = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext> => {
+
+const mutationKey = ['uploadObJourneyStepAttachment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+      
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, {stepId: number;data: UploadObJourneyStepAttachmentBody}> = (props) => {
+          const {stepId,data} = props ?? {};
+
+          return  uploadObJourneyStepAttachment(stepId,data,)
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadObJourneyStepAttachmentMutationResult = NonNullable<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>>
+    export type UploadObJourneyStepAttachmentMutationBody = UploadObJourneyStepAttachmentBody
+    export type UploadObJourneyStepAttachmentMutationError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse
+
+    /**
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const useUploadObJourneyStepAttachment = <TError = ValidationFailedResponse | ObModuleGatedResponse | Problem | UnprocessableTransitionResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>, TError,{stepId: number;data: UploadObJourneyStepAttachmentBody}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadObJourneyStepAttachment>>,
+        TError,
+        {stepId: number;data: UploadObJourneyStepAttachmentBody},
+        TContext
+      > => {
+
+      const mutationOptions = getUploadObJourneyStepAttachmentMutationOptions(options);
 
       return useMutation(mutationOptions, queryClient);
     }

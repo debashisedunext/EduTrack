@@ -175,6 +175,14 @@ class ObProjectReadRepository {
                 AND cj.archived_at IS NULL)
             """;
 
+    private static final String JOURNEYS_COMPLETE = """
+            (SELECT COUNT(*)
+               FROM ob_journeys cj
+              WHERE cj.project_id = p.id
+                AND cj.archived_at IS NULL
+                AND cj.completed_at IS NOT NULL)
+            """;
+
     private static final String COLUMNS = """
             SELECT p.id                  AS id,
                    p.name                AS name,
@@ -199,6 +207,7 @@ class ObProjectReadRepository {
                    imm.full_name                 AS implementorManagerName,
                    %s                    AS gateStatus,
                    %s                    AS journeyCount,
+                   %s                    AS journeysComplete,
                    %s                    AS earliestOverdueAt
               FROM ob_projects p
               JOIN ob_clients  cl ON cl.id = p.ob_client_id
@@ -207,7 +216,7 @@ class ObProjectReadRepository {
          LEFT JOIN users im ON im.id = p.implementor_user_id
          LEFT JOIN users imm ON imm.id = p.implementor_manager_user_id
          LEFT JOIN users cb ON cb.id = p.created_by
-            """.formatted(GATE_STATUS, JOURNEY_COUNT, EARLIEST_OVERDUE_AT);
+            """.formatted(GATE_STATUS, JOURNEY_COUNT, JOURNEYS_COMPLETE, EARLIEST_OVERDUE_AT);
 
     /**
      * The grid's filters. Every one is null-tolerant in the same shape, so an
@@ -539,7 +548,7 @@ class ObProjectReadRepository {
                Long salesPersonId, String salesPersonName,
                Long implementorId, String implementorName,
                Long implementorManagerId, String implementorManagerName,
-               String gateStatus, int journeyCount,
+               String gateStatus, int journeyCount, int journeysComplete,
                Instant earliestOverdueAt) {
     }
 
@@ -588,6 +597,7 @@ class ObProjectReadRepository {
             rs.getString("implementorManagerName"),
             rs.getString("gateStatus"),
             rs.getInt("journeyCount"),
+            rs.getInt("journeysComplete"),
             instant(rs, "earliestOverdueAt"));
 
     private static final RowMapper<StageRow> STAGE_MAPPER = (rs, n) -> new StageRow(

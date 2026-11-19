@@ -77,7 +77,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a task past its due date is overdue")
     void marksAnOverdueTask() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW.minusSeconds(3600))));
 
         ObMyTaskListResponse response = service.list(ME, false, null, null);
@@ -89,7 +89,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a task due later today is not overdue")
     void doesNotMarkAFutureDeadline() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW.plusSeconds(3600))));
 
         assertThat(service.list(ME, false, null, null).data())
@@ -103,7 +103,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a task with no due date is never overdue")
     void neverMarksATaskWithNoDeadline() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, null)));
 
         ObMyTask task = service.list(ME, false, null, null).data().getFirst();
@@ -119,21 +119,21 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("the query is run for the calling user")
     void queriesForTheCaller() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any())).thenReturn(List.of());
 
         service.list(ME, false, null, null);
 
-        verify(reads).openTasksOf(ME, false, null, 51);
+        verify(reads).openTasksOf(ME, false, null, 51, null);
     }
 
     @Test
     @DisplayName("a requested page size is clamped and fetches one extra row")
     void fetchesOneMoreThanThePage() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any())).thenReturn(List.of());
 
         service.list(ME, false, null, 10);
 
-        verify(reads).openTasksOf(ME, false, null, 11);
+        verify(reads).openTasksOf(ME, false, null, 11, null);
     }
 
     /**
@@ -149,7 +149,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("the next cursor carries the sort key, not the due date")
     void cursorCarriesTheCoalescedKey() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, null), row(2L, null)));
 
         ObMyTaskListResponse response = service.list(ME, false, null, 1);
@@ -176,7 +176,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("the review counts pass straight through")
     void carriesTheReviewCounts() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW, 2, 1, 3)));
 
         ObMyTask task = service.list(ME, false, null, 10).data().getFirst();
@@ -195,7 +195,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a row reviewed by the caller carries pendingMyVerification through")
     void carriesPendingMyVerificationThrough() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW, 0, 0, 0, true), row(2L, NOW, 0, 0, 0, false)));
 
         List<ObMyTask> tasks = service.list(ME, false, null, 10).data();
@@ -212,7 +212,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("isReviewerForAnyProject reflects the repository, not this page's rows")
     void carriesReviewerForAnyProjectThrough() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW, 0, 0, 0, false)));
         when(reads.reviewsAnyProject(ME, false)).thenReturn(true);
 
@@ -224,7 +224,7 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a caller who reviews nothing gets no such tab")
     void reviewerForAnyProjectDefaultsFalse() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any())).thenReturn(List.of());
         when(reads.reviewsAnyProject(ME, false)).thenReturn(false);
 
         assertThat(service.list(ME, false, null, 10).meta().isReviewerForAnyProject()).isFalse();
@@ -233,13 +233,13 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("a decoded cursor is handed to the query")
     void passesTheCursorThrough() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any())).thenReturn(List.of());
         String encoded = new Cursor("2026-09-16 13:00:00", 900L).encode();
 
         service.list(ME, false, encoded, null);
 
         ArgumentCaptor<Cursor> captor = ArgumentCaptor.forClass(Cursor.class);
-        verify(reads).openTasksOf(anyLong(), anyBoolean(), captor.capture(), anyInt());
+        verify(reads).openTasksOf(anyLong(), anyBoolean(), captor.capture(), anyInt(), any());
         assertThat(captor.getValue().id()).isEqualTo(900L);
         assertThat(captor.getValue().sortKey()).isEqualTo("2026-09-16 13:00:00");
     }
@@ -248,17 +248,17 @@ class ObMyTaskServiceTest {
     @Test
     @DisplayName("an unreadable cursor is the first page")
     void treatsAForgedCursorAsTheFirstPage() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt())).thenReturn(List.of());
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any())).thenReturn(List.of());
 
         service.list(ME, false, "not-a-cursor", null);
 
-        verify(reads).openTasksOf(ME, false, null, 51);
+        verify(reads).openTasksOf(ME, false, null, 51, null);
     }
 
     @Test
     @DisplayName("the last page has nowhere to resume to")
     void reportsTheLastPage() {
-        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt()))
+        when(reads.openTasksOf(anyLong(), anyBoolean(), any(), anyInt(), any()))
                 .thenReturn(List.of(row(1L, NOW)));
 
         ObMyTaskListResponse response = service.list(ME, false, null, 10);

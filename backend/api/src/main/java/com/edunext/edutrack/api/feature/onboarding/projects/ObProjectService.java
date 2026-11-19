@@ -169,7 +169,7 @@ class ObProjectService {
                     summary.implementorManager(),
                     summary.status(), row.statusReason(), summary.gateStatus(),
                     summary.currentStage(), summary.stagesComplete(), summary.stagesTotal(),
-                    summary.journeyCount(), summary.delayedByDays(), summary.tentativeCompletion(),
+                    summary.journeyCount(), summary.journeysComplete(), summary.delayedByDays(), summary.tentativeCompletion(),
                     summary.totalTatDays(),
                     stages(stageRows),
                     serviceRows.stream()
@@ -210,6 +210,7 @@ class ObProjectService {
                         .filter(s -> s.taskCount() > 0 && s.tasksOutstanding() == 0).count(),
                 stageRows.size(),
                 row.journeyCount(),
+                row.journeysComplete(),
                 delayedByDays(row.earliestOverdueAt(), now, status, calendar),
                 tentativeCompletion(row.startDate(), totalTatDays, calendar),
                 totalTatDays);

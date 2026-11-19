@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { keepPreviousData } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { useGetMe } from '@/api/generated/auth/auth'
@@ -140,6 +140,14 @@ import { ObMyTasksLegend } from './ObMyTasksLegend'
  * one page, and this only decides which tab shows what.
  */
 
+const TAB_COUNT_KEY = {
+  'pending-verification': 'pendingVerification',
+  'in-progress': 'inProgress',
+  approved: 'approved',
+  'pending-approval': 'pendingApproval',
+  'not-started': 'notStarted',
+} as const satisfies Record<MyTasksTabId, string>
+
 function isMyTasksTabId(value: string | null): value is MyTasksTabId {
   return value !== null && (MY_TASKS_TAB_IDS as readonly string[]).includes(value)
 }
@@ -150,10 +158,16 @@ export function ObMyTasksPage() {
     empty key is deliberate rather than an oversight: when a filter arrives it
     goes here, and the reset comes with it.
   */
-  const pages = useCursorPages('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab: MyTasksTabId = isMyTasksTabId(searchParams.get('tab'))
+    ? (searchParams.get('tab') as MyTasksTabId)
+    : DEFAULT_MY_TASKS_TAB
+
+  // The tab is the filter: each tab pages its own rows, and switching resets to page one.
+  const pages = useCursorPages(activeTab)
 
   const { data, isPending, isError, isFetching } = useListObMyTasks(
-    { cursor: pages.cursor, limit: OB_PAGE_SIZE },
+    { cursor: pages.cursor, limit: OB_PAGE_SIZE, tab: activeTab },
     { query: { placeholderData: keepPreviousData } },
   )
 
@@ -168,12 +182,9 @@ export function ObMyTasksPage() {
   const visibleTabIds = visibleMyTasksTabs(data?.meta?.isReviewerForAnyProject ?? false)
 
   /** The row whose task is open in the popup. */
-  const [openRow, setOpenRow] = React.useState<ObMyTask | null>(null)
+  const tabTotals = data?.meta?.tabCounts
 
-  const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab: MyTasksTabId = isMyTasksTabId(searchParams.get('tab'))
-    ? (searchParams.get('tab') as MyTasksTabId)
-    : DEFAULT_MY_TASKS_TAB
+  const [openRow, setOpenRow] = React.useState<ObMyTask | null>(null)
 
   function selectTab(id: string) {
     setSearchParams(
@@ -188,9 +199,11 @@ export function ObMyTasksPage() {
 
   const tabItems: TabItem[] = visibleTabIds.map((id) => {
     const rows = tasksForMyTasksTab(tasks, id)
+    // Whole-queue total from the server; the page's own rows only when it sends none (mocks).
+    const total = tabTotals?.[TAB_COUNT_KEY[id]] ?? rows.length
     return {
       id,
-      label: `${MY_TASKS_TAB_LABEL[id]} (${rows.length})`,
+      label: `${MY_TASKS_TAB_LABEL[id]} (${total})`,
       content: (
         <MyTasksTabPanel rows={rows} emptyMessage={MY_TASKS_TAB_EMPTY[id]} onOpen={setOpenRow} />
       ),
@@ -221,12 +234,8 @@ export function ObMyTasksPage() {
         <Skeleton className="h-64 w-full" />
       ) : isError ? (
         <p className="text-sm text-danger-text">Your tasks could not be loaded.</p>
-      ) : tasks.length === 0 && !pages.canGoBack ? (
-        <EmptyState
-          title="Nothing open against you"
-          description="Every task you own is complete or waived. New work appears here as projects reach your steps."
-        />
       ) : (
+        // An empty queue still gets the page: each tab says "nothing here" itself.
         // The key and the thing it is a key to, in one block — the page's own
         // 24px rhythm would set the legend adrift halfway to the strip, where
         // it reads as a second banner rather than as the table's caption.
@@ -270,27 +279,7 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
       // legend draws its swatches from.
       className={cn(flag && FLAG_ROW_CLASS[flag.tone])}
     >
-      <TableCell className="text-content-muted">
-        {/*
-          The project links to "what else is happening here", and the client
-          it belongs to sits underneath in small type — the project is what a
-          reader picks a row by, the client is what places it.
-        */}
-        <Link
-          to={`/onboarding/projects/${task.projectId}`}
-          className="hover:underline"
-          title="The whole project"
-        >
-          {projectOnlyLabel(task)}
-        </Link>
-        {task.obClientName ? (
-          <span className="mt-0.5 block text-[11px] text-content-muted">
-            {task.obClientName}
-            {task.obClientCode ? <span className="ml-1 font-mono">({task.obClientCode})</span> : null}
-          </span>
-        ) : null}
-      </TableCell>
-      <TableCell className="font-medium">
+      <TableCell className="pl-12 font-medium">
         <span className="inline-flex items-center gap-1.5">
           <button
             type="button"
@@ -311,6 +300,11 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
             <ExternalLink aria-hidden="true" className="size-3.5" />
           </Link>
         </span>
+        {task.stepName ? (
+          <span className="mt-0.5 block text-[11px] font-normal text-content-muted">
+            {task.stepName}
+          </span>
+        ) : null}
         {/* The words the colour is not allowed to carry alone. */}
         {flag ? (
           <span
@@ -319,20 +313,6 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
           >
             {flag.note}
           </span>
-        ) : null}
-      </TableCell>
-      {/*
-        The step on top, plain text rather than the chip it used to wear (a
-        chip around "Web/App Reflection" wraps to two lines and reads as a
-        status, which a stage name is not). The module beneath it in small
-        type, because a step name is a stage label reused across every
-        module — "Configuration" alone means nothing until the module beside
-        it says what is being configured.
-      */}
-      <TableCell className="text-content">
-        {task.stepName}
-        {task.serviceName ? (
-          <span className="mt-0.5 block text-[11px] text-content-muted">{task.serviceName}</span>
         ) : null}
       </TableCell>
       <TableCell
@@ -359,7 +339,35 @@ function MyTaskRow({ task, onOpen }: { task: ObMyTask; onOpen: () => void }) {
   )
 }
 
-/** One tab's rows — the grid if there are any, the tab's own empty line if not. */
+/** Project -> module -> tasks, in the order the server sent them. */
+function groupByProjectAndModule(rows: readonly ObMyTask[]) {
+  const projects = new Map<
+    number,
+    { sample: ObMyTask; modules: Map<number, { sample: ObMyTask; tasks: ObMyTask[] }> }
+  >()
+  for (const task of rows) {
+    let project = projects.get(task.projectId)
+    if (!project) {
+      project = { sample: task, modules: new Map() }
+      projects.set(task.projectId, project)
+    }
+    let module = project.modules.get(task.journeyId)
+    if (!module) {
+      module = { sample: task, tasks: [] }
+      project.modules.set(task.journeyId, module)
+    }
+    module.tasks.push(task)
+  }
+  return [...projects.values()]
+}
+
+/**
+ * One tab's rows as a tree — the project, then its modules, each collapsed
+ * until pressed, then the tasks inside. The tab's own empty line if none.
+ *
+ * shortcut: the open state is per mount and not kept in the URL, so paging or
+ * switching tab collapses everything again.
+ */
 function MyTasksTabPanel({
   rows,
   emptyMessage,
@@ -369,19 +377,24 @@ function MyTasksTabPanel({
   emptyMessage: string
   onOpen: (task: ObMyTask) => void
 }) {
+  const [open, setOpen] = React.useState<ReadonlySet<number>>(new Set())
   if (rows.length === 0) {
     return <EmptyState title={emptyMessage} />
   }
+  const toggle = (journeyId: number) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(journeyId)) next.delete(journeyId)
+      else next.add(journeyId)
+      return next
+    })
+
   return (
     <TableContainer>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">Project</TableHead>
-            <TableHead scope="col">Task</TableHead>
-            <TableHead scope="col" className="w-64">
-              Module
-            </TableHead>
+            <TableHead scope="col">Project / Module</TableHead>
             <TableHead scope="col" className="w-32">
               Due date
             </TableHead>
@@ -391,8 +404,57 @@ function MyTasksTabPanel({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((task) => (
-            <MyTaskRow key={task.taskId} task={task} onOpen={() => onOpen(task)} />
+          {groupByProjectAndModule(rows).map(({ sample, modules }) => (
+            <React.Fragment key={sample.projectId}>
+              <TableRow className="bg-subtle">
+                <TableCell colSpan={3} className="font-semibold text-content">
+                  <Link
+                    to={`/onboarding/projects/${sample.projectId}`}
+                    className="hover:underline"
+                    title="The whole project"
+                  >
+                    {projectOnlyLabel(sample) || sample.projectName}
+                  </Link>
+                  {sample.obClientName ? (
+                    <span className="mt-0.5 block text-[11px] font-normal text-content-muted">
+                      {sample.obClientName}
+                      {sample.obClientCode ? (
+                        <span className="ml-1 font-mono">({sample.obClientCode})</span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+              {[...modules.values()].map(({ sample: m, tasks }) => {
+                const isOpen = open.has(m.journeyId)
+                const Chevron = isOpen ? ChevronDown : ChevronRight
+                return (
+                  <React.Fragment key={m.journeyId}>
+                    <TableRow>
+                      <TableCell colSpan={3} className="pl-6">
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          onClick={() => toggle(m.journeyId)}
+                          className="inline-flex items-center gap-2 rounded-control text-left font-medium text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        >
+                          <Chevron aria-hidden="true" className="size-4 text-content-muted" />
+                          {m.serviceName ?? 'Module'}
+                          <span className="text-xs font-normal tabular-nums text-content-muted">
+                            ({tasks.length} {tasks.length === 1 ? 'task' : 'tasks'})
+                          </span>
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                    {isOpen
+                      ? tasks.map((task) => (
+                          <MyTaskRow key={task.taskId} task={task} onOpen={() => onOpen(task)} />
+                        ))
+                      : null}
+                  </React.Fragment>
+                )
+              })}
+            </React.Fragment>
           ))}
         </TableBody>
       </Table>

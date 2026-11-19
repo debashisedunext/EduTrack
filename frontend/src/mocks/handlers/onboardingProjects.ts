@@ -297,6 +297,7 @@ function projectDto(project: ObProjectRow, db: Db, now: Date) {
     stagesComplete: stages.filter((s) => s.taskCount > 0 && s.tasksOutstanding === 0).length,
     stagesTotal: stages.length,
     journeyCount: journeysOf(db, project).length,
+    journeysComplete: journeysOf(db, project).filter((j) => j.completedAt != null).length,
     delayedByDays,
     tentativeCompletion: addWorkingDays(project.startDate, totalTatDays),
     totalTatDays,

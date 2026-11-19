@@ -103,7 +103,7 @@ final class ObProjectDtos {
                             UserRef implementorManager,
                             String status, String gateStatus, String currentStage,
                             int stagesComplete, int stagesTotal, int journeyCount,
-                            Integer delayedByDays, LocalDate tentativeCompletion,
+                            int journeysComplete, Integer delayedByDays, LocalDate tentativeCompletion,
                             int totalTatDays) {
     }
 
@@ -122,7 +122,8 @@ final class ObProjectDtos {
                            UserRef implementorManager,
                            String status, String statusReason, String gateStatus,
                            String currentStage, int stagesComplete, int stagesTotal,
-                           int journeyCount, Integer delayedByDays, LocalDate tentativeCompletion,
+                           int journeyCount, int journeysComplete, Integer delayedByDays,
+                           LocalDate tentativeCompletion,
                            int totalTatDays, List<ObProjectStage> stages,
                            List<ObProjectServiceRef> moduleServices,
                            UserRef createdBy, Instant createdAt) {

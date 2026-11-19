@@ -99,10 +99,13 @@ interface ObMyTaskDtos {
      * work rather than anybody's review — see
      * {@code ObMyTaskReadRepository.reviewsAnyProject}.
      */
-    record ObMyTaskListMeta(String nextCursor, boolean hasMore, boolean isReviewerForAnyProject) {
+    record ObMyTaskListMeta(String nextCursor, boolean hasMore, boolean isReviewerForAnyProject,
+                            ObMyTaskReadRepository.TabCounts tabCounts) {
 
-        static ObMyTaskListMeta of(PageMeta page, boolean isReviewerForAnyProject) {
-            return new ObMyTaskListMeta(page.nextCursor(), page.hasMore(), isReviewerForAnyProject);
+        static ObMyTaskListMeta of(PageMeta page, boolean isReviewerForAnyProject,
+                                   ObMyTaskReadRepository.TabCounts tabCounts) {
+            return new ObMyTaskListMeta(page.nextCursor(), page.hasMore(), isReviewerForAnyProject,
+                    tabCounts);
         }
     }
 

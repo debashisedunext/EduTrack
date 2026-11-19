@@ -42,11 +42,17 @@ class ObMyTaskService {
      *              {@link ObMyTaskReadRepository}'s own javadoc.
      */
     ObMyTaskListResponse list(long userId, boolean admin, String cursor, Integer limitParam) {
+        return list(userId, admin, cursor, limitParam, null);
+    }
+
+    /** {@code tab} narrows the keyset page itself, so each tab pages its own rows. */
+    ObMyTaskListResponse list(long userId, boolean admin, String cursor, Integer limitParam,
+                              String tab) {
         int limit = PageLimit.clamp(limitParam);
         Instant now = clock.instant();
 
         List<Row> fetched = reads.openTasksOf(userId, admin, Cursor.decode(cursor),
-                PageLimit.fetchSize(limit));
+                PageLimit.fetchSize(limit), tab);
 
         CursorPage<Row> page = CursorPage.of(fetched, limit,
                 row -> new Cursor(row.sortKey(), row.taskId()));
@@ -61,7 +67,8 @@ class ObMyTaskService {
 
         return new ObMyTaskListResponse(
                 page.data().stream().map(row -> task(row, now)).toList(),
-                ObMyTaskListMeta.of(page.meta(), reviewsAnyProject));
+                ObMyTaskListMeta.of(page.meta(), reviewsAnyProject,
+                        reads.tabCounts(userId, admin)));
     }
 
     /**

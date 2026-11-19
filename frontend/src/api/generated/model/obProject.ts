@@ -120,6 +120,8 @@ grid renders 0/0 rather than 100%.
   stagesTotal: number;
   /** One per module service it was boarded through. */
   journeyCount: number;
+  /** Of `journeyCount`, the module services finished. */
+  journeysComplete: number;
   /** Ceiling working days between the earliest overdue task's due date
 and now, through the working calendar — weekends, org holidays and
 resource leave. Ceiling rather than floor: a task due Friday and

@@ -1,4 +1,6 @@
 import * as React from 'react'
+import * as PopoverPrimitive from '@radix-ui/react-popover'
+import { Columns3 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { useListObProducts } from '@/api/generated/onboarding-masters/onboarding-masters'
@@ -40,7 +42,101 @@ import {
   useDeleteObProject,
   useObProjects,
 } from './projectQueries'
-import { currentStageLabel, delayCell, formatDate, stageProgress } from './projectRow'
+import { currentStageLabel, delayCell, formatDate, moduleProgress, stageProgress } from './projectRow'
+
+/** Project and the row actions are not offered: a grid with neither has nothing to open or act on. */
+const OPTIONAL_COLUMNS = [
+  { key: 'client', label: 'Client' },
+  { key: 'product', label: 'Product' },
+  { key: 'started', label: 'Started' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'implementor', label: 'Implementor' },
+  { key: 'currentStep', label: 'Current step' },
+  { key: 'progress', label: 'Steps / Module' },
+  { key: 'status', label: 'Status' },
+  { key: 'finish', label: 'Tentative finish' },
+] as const
+
+type ColumnKey = (typeof OPTIONAL_COLUMNS)[number]['key']
+const COLUMNS_STORAGE_KEY = 'edutrack.ob.projects.hiddenColumns'
+
+function loadHidden(): Set<ColumnKey> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLUMNS_STORAGE_KEY) ?? '[]'))
+  } catch {
+    return new Set()
+  }
+}
+
+/** Per-viewer choice, kept in this browser only — shortcut: not synced across devices. */
+function useHiddenColumns() {
+  const [hidden, setHidden] = React.useState(loadHidden)
+  const toggle = (key: ColumnKey) =>
+    setHidden((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      try {
+        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify([...next]))
+      } catch {
+        /* storage blocked: the choice lasts for this visit */
+      }
+      return next
+    })
+  const reset = () => {
+    setHidden(new Set())
+    try {
+      localStorage.removeItem(COLUMNS_STORAGE_KEY)
+    } catch {
+      /* nothing to clear */
+    }
+  }
+  return { hidden, toggle, reset }
+}
+
+function ColumnPicker({
+  hidden,
+  onToggle,
+  onReset,
+}: {
+  hidden: Set<ColumnKey>
+  onToggle: (key: ColumnKey) => void
+  onReset: () => void
+}) {
+  return (
+    <PopoverPrimitive.Root>
+      <PopoverPrimitive.Trigger asChild>
+        <Button variant="secondary" aria-label="Choose columns">
+          <Columns3 className="mr-2 h-4 w-4" aria-hidden />
+          Columns{hidden.size > 0 ? ` (${OPTIONAL_COLUMNS.length - hidden.size}/${OPTIONAL_COLUMNS.length})` : ''}
+        </Button>
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 w-56 rounded-control border border-border bg-surface p-2 shadow-modal"
+        >
+          <fieldset>
+            <legend className="px-2 pb-1 text-xs font-medium text-content-muted">Show columns</legend>
+            {OPTIONAL_COLUMNS.map((c) => (
+              <label
+                key={c.key}
+                className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-sm text-content hover:bg-subtle"
+              >
+                <input type="checkbox" checked={!hidden.has(c.key)} onChange={() => onToggle(c.key)} />
+                {c.label}
+              </label>
+            ))}
+          </fieldset>
+          <Button variant="secondary" className="mt-2 w-full" onClick={onReset}>
+            Show all
+          </Button>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  )
+}
 
 const STATUSES = ['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED'] as const
 
@@ -86,6 +182,8 @@ const STATUSES = ['RUNNING', 'COMPLETED', 'ON_HOLD', 'DROPPED'] as const
 export function ObProjectListPage() {
   const [params, setParams] = useSearchParams()
   const [deleting, setDeleting] = React.useState<ObProject | null>(null)
+  const { hidden, toggle, reset } = useHiddenColumns()
+  const show = (key: ColumnKey) => !hidden.has(key)
 
   const q = params.get('q') ?? ''
   const clientId = numberParam(params.get('clientId'))
@@ -209,6 +307,10 @@ export function ObProjectListPage() {
             Showing one client · clear
           </Button>
         ) : null}
+
+        <div className="ml-auto">
+          <ColumnPicker hidden={hidden} onToggle={toggle} onReset={reset} />
+        </div>
       </div>
 
       {isPending ? (
@@ -226,29 +328,43 @@ export function ObProjectListPage() {
             <TableHeader>
               <TableRow>
                 <TableHead scope="col">Project</TableHead>
-                <TableHead scope="col">Client</TableHead>
-                <TableHead scope="col">Product</TableHead>
-                <TableHead scope="col" className="w-28">
-                  Started
-                </TableHead>
-                <TableHead scope="col" className="w-32">
-                  Sales
-                </TableHead>
-                <TableHead scope="col" className="w-32">
-                  Implementor
-                </TableHead>
-                <TableHead scope="col" className="w-44">
-                  Current step
-                </TableHead>
-                <TableHead scope="col" className="w-32">
-                  Steps
-                </TableHead>
-                <TableHead scope="col" className="w-28">
-                  Status
-                </TableHead>
-                <TableHead scope="col" className="w-32">
-                  Tentative finish
-                </TableHead>
+                {show('client') && <TableHead scope="col">Client</TableHead>}
+                {show('product') && <TableHead scope="col">Product</TableHead>}
+                {show('started') && (
+                  <TableHead scope="col" className="w-28">
+                    Started
+                  </TableHead>
+                )}
+                {show('sales') && (
+                  <TableHead scope="col" className="w-32">
+                    Sales
+                  </TableHead>
+                )}
+                {show('implementor') && (
+                  <TableHead scope="col" className="w-32">
+                    Implementor
+                  </TableHead>
+                )}
+                {show('currentStep') && (
+                  <TableHead scope="col" className="w-44">
+                    Current step
+                  </TableHead>
+                )}
+                {show('progress') && (
+                  <TableHead scope="col" className="w-44">
+                    Steps / Module
+                  </TableHead>
+                )}
+                {show('status') && (
+                  <TableHead scope="col" className="w-28">
+                    Status
+                  </TableHead>
+                )}
+                {show('finish') && (
+                  <TableHead scope="col" className="w-32">
+                    Tentative finish
+                  </TableHead>
+                )}
                 <TableHead scope="col" className="w-24">
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -259,6 +375,7 @@ export function ObProjectListPage() {
                 <ProjectRow
                   key={project.id}
                   project={project}
+                  show={show}
                   onDelete={() => setDeleting(project)}
                 />
               ))}
@@ -290,9 +407,18 @@ export function ObProjectListPage() {
   )
 }
 
-function ProjectRow({ project, onDelete }: { project: ObProject; onDelete: () => void }) {
+function ProjectRow({
+  project,
+  show,
+  onDelete,
+}: {
+  project: ObProject
+  show: (key: ColumnKey) => boolean
+  onDelete: () => void
+}) {
   const delay = delayCell(project)
   const stages = stageProgress(project)
+  const modules = moduleProgress(project)
 
   return (
     <TableRow>
@@ -308,50 +434,56 @@ function ProjectRow({ project, onDelete }: { project: ObProject; onDelete: () =>
           </span>
         ) : null}
       </TableCell>
-      <TableCell className="text-content-muted">{project.client.name}</TableCell>
-      <TableCell className="text-content-muted">{project.product.name}</TableCell>
-      <TableCell className="tabular-nums text-content-muted">
-        {formatDate(project.startDate)}
-      </TableCell>
-      <TableCell className="text-content-muted">{project.salesPerson?.displayName ?? '—'}</TableCell>
-      <TableCell className="text-content-muted">{project.implementor?.displayName ?? '—'}</TableCell>
-      <TableCell>
-        <Chip variant={project.currentStage ? 'info' : 'neutral'}>
-          {currentStageLabel(project)}
-        </Chip>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          {/*
-            A meter rather than a progress bar: this is a measurement within a
-            known range, not the progress of an operation the page started.
-          */}
-          <div
-            className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-subtle"
-            role="meter"
-            aria-valuemin={0}
-            aria-valuemax={project.stagesTotal}
-            aria-valuenow={project.stagesComplete}
-            aria-label={`${stages.label} steps complete`}
-          >
-            <span
-              className="block h-full bg-primary"
-              style={{ width: `${Math.round(stages.fraction * 100)}%` }}
+      {show('client') && <TableCell className="text-content-muted">{project.client.name}</TableCell>}
+      {show('product') && <TableCell className="text-content-muted">{project.product.name}</TableCell>}
+      {show('started') && (
+        <TableCell className="tabular-nums text-content-muted">{formatDate(project.startDate)}</TableCell>
+      )}
+      {show('sales') && (
+        <TableCell className="text-content-muted">{project.salesPerson?.displayName ?? '—'}</TableCell>
+      )}
+      {show('implementor') && (
+        <TableCell className="text-content-muted">{project.implementor?.displayName ?? '—'}</TableCell>
+      )}
+      {show('currentStep') && (
+        <TableCell>
+          <Chip variant={project.currentStage ? 'info' : 'neutral'}>{currentStageLabel(project)}</Chip>
+        </TableCell>
+      )}
+      {show('progress') && (
+        <TableCell>
+          <div className="flex flex-col gap-1.5">
+            <ProgressLine
+              name="Steps"
+              label={stages.label}
+              fraction={stages.fraction}
+              total={project.stagesTotal}
+              complete={project.stagesComplete}
+            />
+            <ProgressLine
+              name="Module"
+              label={modules.label}
+              fraction={modules.fraction}
+              total={project.journeyCount}
+              complete={project.journeysComplete}
             />
           </div>
-          <span className="tabular-nums text-content-muted">{stages.label}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <span title={delay.hint}>
-          <Chip variant={delay.tone === 'late' ? 'danger' : delay.tone === 'ok' ? 'success' : 'neutral'}>
-            {delay.label}
-          </Chip>
-        </span>
-      </TableCell>
-      <TableCell className="tabular-nums text-content-muted">
-        {formatDate(project.tentativeCompletion)}
-      </TableCell>
+        </TableCell>
+      )}
+      {show('status') && (
+        <TableCell>
+          <span title={delay.hint}>
+            <Chip variant={delay.tone === 'late' ? 'danger' : delay.tone === 'ok' ? 'success' : 'neutral'}>
+              {delay.label}
+            </Chip>
+          </span>
+        </TableCell>
+      )}
+      {show('finish') && (
+        <TableCell className="tabular-nums text-content-muted">
+          {formatDate(project.tentativeCompletion)}
+        </TableCell>
+      )}
       <TableCell>
         <Button
           variant="secondary"
@@ -364,6 +496,38 @@ function ProjectRow({ project, onDelete }: { project: ObProject; onDelete: () =>
         </Button>
       </TableCell>
     </TableRow>
+  )
+}
+
+/** One named meter: a measurement within a known range, not the progress of an operation. */
+function ProgressLine({
+  name,
+  label,
+  fraction,
+  total,
+  complete,
+}: {
+  name: string
+  label: string
+  fraction: number
+  total: number
+  complete: number
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-12 shrink-0 text-content-muted">{name}</span>
+      <div
+        className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-subtle"
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={complete}
+        aria-label={`${label} ${name.toLowerCase()} complete`}
+      >
+        <span className="block h-full bg-primary" style={{ width: `${Math.round(fraction * 100)}%` }} />
+      </div>
+      <span className="tabular-nums text-content-muted">{label}</span>
+    </div>
   )
 }
 
