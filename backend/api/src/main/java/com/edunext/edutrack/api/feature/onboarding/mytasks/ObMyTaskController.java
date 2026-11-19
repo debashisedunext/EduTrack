@@ -67,9 +67,10 @@ class ObMyTaskController {
     ObMyTaskDtos.ObMyTaskListResponse list(
             Authentication caller,
             @RequestParam(required = false) String cursor,
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String tab) {
 
-        return service.list(identity(caller).userId(), isObAdmin(caller), cursor, limit);
+        return service.list(identity(caller).userId(), isObAdmin(caller), cursor, limit, tab);
     }
 
     /**

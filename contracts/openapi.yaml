@@ -8674,6 +8674,15 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
+        - name: tab
+          in: query
+          required: false
+          description: |
+            Narrows the list to one My Tasks tab **before** paging, so a tab
+            pages its own rows rather than the ten of a mixed page.
+          schema:
+            type: string
+            enum: [pending-verification, in-progress, approved, pending-approval, not-started]
       responses:
         '200':
           description: One page of the caller's open tasks.
@@ -21672,7 +21681,7 @@ components:
             been completed, the same rule the folded list follows.
     ObProject:
       type: object
-      required: [id, name, client, product, startDate, status, gateStatus, stagesComplete, stagesTotal, journeyCount, totalTatDays]
+      required: [id, name, client, product, startDate, status, gateStatus, stagesComplete, stagesTotal, journeyCount, journeysComplete, totalTatDays]
       properties:
         id: { type: integer, format: int64 }
         name:
@@ -21748,6 +21757,7 @@ components:
             misconfigured Module Service rather than a finished project — the
             grid renders 0/0 rather than 100%.
         journeyCount: { type: integer, description: 'One per module service it was boarded through.' }
+        journeysComplete: { type: integer, description: 'Of `journeyCount`, the module services finished.' }
         delayedByDays:
           type: [integer, 'null']
           description: |
@@ -21950,6 +21960,15 @@ components:
               properties:
                 isReviewerForAnyProject:
                   type: boolean
+                tabCounts:
+                  type: object
+                  description: Whole-queue totals per tab, not this page's rows.
+                  properties:
+                    pendingVerification: { type: integer }
+                    inProgress: { type: integer }
+                    approved: { type: integer }
+                    pendingApproval: { type: integer }
+                    notStarted: { type: integer }
           description: |
             Carries `isReviewerForAnyProject` alongside the cursor — not
             `Meta` alone, which deliberately carries no third field (see its

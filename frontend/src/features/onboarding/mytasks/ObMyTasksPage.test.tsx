@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { describe, expect, it, onTestFinished } from 'vitest'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -143,8 +143,21 @@ function stubQueue(
   return asked
 }
 
-function renderQueue(initialPath = '/onboarding/my-tasks') {
+/**
+ * Modules start collapsed. Unless a test says otherwise, it stands in for a
+ * reader who has opened them: any collapsed module toggle that appears is pressed.
+ */
+function renderQueue(initialPath = '/onboarding/my-tasks', { expand = true } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (expand) {
+    const observer = new MutationObserver(() => {
+      document
+        .querySelectorAll<HTMLButtonElement>('table button[aria-expanded="false"]')
+        .forEach((button) => act(() => button.click()))
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    onTestFinished(() => observer.disconnect())
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialPath]}>
@@ -155,18 +168,25 @@ function renderQueue(initialPath = '/onboarding/my-tasks') {
 }
 
 describe('My Tasks', () => {
-  it('draws the five columns, in the order somebody reads them', async () => {
+  it('draws the three columns of the tree', async () => {
     stubQueue()
     renderQueue()
 
     const headers = await screen.findAllByRole('columnheader')
-    expect(headers.map((h) => h.textContent)).toEqual([
-      'Project',
-      'Task',
-      'Module',
-      'Due date',
-      'Status',
-    ])
+    expect(headers.map((h) => h.textContent)).toEqual(['Project / Module', 'Due date', 'Status'])
+  })
+
+  it('shows project, then module, with the tasks hidden until the module is opened', async () => {
+    stubQueue()
+    renderQueue('/onboarding/my-tasks', { expand: false })
+
+    const toggle = await screen.findByRole('button', { name: /Student Attendance/, expanded: false })
+    expect(screen.getByText('DAV Proj')).toBeInTheDocument()
+    expect(screen.queryByText('Week off')).not.toBeInTheDocument()
+
+    await userEvent.click(toggle)
+    expect(await screen.findByText('Week off')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Student Attendance/, expanded: true })).toBeInTheDocument()
   })
 
   /**
@@ -179,11 +199,11 @@ describe('My Tasks', () => {
     renderQueue()
 
     const row = (await screen.findByText('Week off')).closest('tr')!
-    expect(within(row).getByText('DAV Proj')).toBeInTheDocument()
-    expect(within(row).getByText('DAV School')).toBeInTheDocument()
-    expect(within(row).getByText('(DAV-101)')).toBeInTheDocument()
+    const project = screen.getByText('DAV Proj').closest('tr')!
+    expect(within(project).getByText('DAV School')).toBeInTheDocument()
+    expect(within(project).getByText('(DAV-101)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Student Attendance/ })).toBeInTheDocument()
     expect(within(row).getByText('Configuration')).toBeInTheDocument()
-    expect(within(row).getByText('Student Attendance')).toBeInTheDocument()
     expect(within(row).getByRole('img', { name: 'In process' })).toBeInTheDocument()
   })
 
@@ -215,9 +235,9 @@ describe('My Tasks', () => {
     stubQueue([{ ...ROWS[0], taskName: 'Fee structure', projectName: 'DAV School — EDUNEXT-ERP' }])
     renderQueue()
 
-    const row = (await screen.findByText('Fee structure')).closest('tr')!
-    expect(within(row).getByText('EDUNEXT-ERP')).toBeInTheDocument()
-    expect(within(row).getByText('DAV School')).toBeInTheDocument()
+    await screen.findByText('Fee structure')
+    const project = screen.getByText('EDUNEXT-ERP').closest('tr')!
+    expect(within(project).getByText('DAV School')).toBeInTheDocument()
   })
 
   /**
@@ -394,6 +414,7 @@ describe('My Tasks', () => {
       </QueryClientProvider>,
     )
 
+    await user.click(await screen.findByRole('button', { name: /Student Attendance/ }))
     await user.click(await screen.findByRole('button', { name: 'Week off' }))
     const first = await screen.findByRole('dialog')
     expect(await within(first).findByText('Awaiting review')).toBeInTheDocument()
@@ -451,12 +472,12 @@ describe('My Tasks', () => {
     expect(screen.queryByText('Task 01')).not.toBeInTheDocument()
   })
 
-  it('says so, rather than showing an empty grid, when nothing is open', async () => {
+  it('still shows the tabbed page, each tab saying it is empty, when nothing is open', async () => {
     stubQueue([])
     renderQueue()
 
-    expect(await screen.findByText(/nothing open against you/i)).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: /work in progress \(0\)/i })).toBeInTheDocument()
+    expect(screen.queryByText(/nothing open against you/i)).not.toBeInTheDocument()
   })
 
   /**
@@ -500,13 +521,12 @@ describe('My Tasks', () => {
       expect(states).toEqual(['PENDING', 'IN_PROCESS', 'OVERDUE', 'COMPLETED'])
     })
 
-    /** Nothing to key when there is no table under it. */
-    it('is not drawn over an empty queue', async () => {
+    /** The page keeps its shape for an empty queue, key included. */
+    it('is still drawn over an empty queue', async () => {
       stubQueue([])
       renderQueue()
 
-      expect(await screen.findByText(/nothing open against you/i)).toBeInTheDocument()
-      expect(screen.queryByTestId('ob-my-tasks-legend')).not.toBeInTheDocument()
+      expect(await screen.findByTestId('ob-my-tasks-legend')).toBeInTheDocument()
     })
   })
 
@@ -600,7 +620,9 @@ describe('My Tasks', () => {
       const names = within(table)
         .getAllByRole('row')
         .slice(1) // drop the header row
-        .map((row) => within(row).getByRole('button').textContent)
+        .flatMap((row) => within(row).queryAllByRole('button', { expanded: undefined }))
+        .filter((button) => !button.hasAttribute('aria-expanded'))
+        .map((button) => button.textContent)
 
       expect(names).toEqual(['Import gradebook', 'Configure fee heads', 'Attendance policy'])
     })

@@ -93,7 +93,8 @@ function ListCard({
       {rows.length === 0 ? (
         <p className="px-4 py-6 text-center text-xs text-content-muted">{empty}</p>
       ) : (
-        <ul>
+        // Fixed height: a long list scrolls inside its card instead of stretching the page.
+        <ul className="max-h-[32rem] overflow-y-auto">
           {rows.map((row, index) => (
             <li key={row.id} className={index > 0 ? 'border-t border-border' : ''}>
               <Row row={row} detail={detail(row)} />

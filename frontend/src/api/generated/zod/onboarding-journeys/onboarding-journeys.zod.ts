@@ -1919,6 +1919,18 @@ export const updateObJourneyStepResponse = zod.object({
 })
 
 /**
+ * Stores one task document through the shared onboarding upload pipeline. Only the step owner or backup owner may upload; the attachment is owned by the step and uses kind `SUBMISSION`.
+ * @summary Attach a document to a running task (OB-06)
+ */
+export const uploadObJourneyStepAttachmentParams = zod.object({
+  "stepId": zod.number().describe('C-104 · an `ob_journey_steps` id — a Service on a running journey,\nsnapshotted from an `ob_journey_template_steps` row at instantiation\n(C-103). Not the same id space as `ObJourneyTemplateStepId`.\n')
+})
+
+export const uploadObJourneyStepAttachmentBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+/**
  * `SKIPPED` with a mandatory reason and the actor recorded in
 `skippedBy`. Skipping is how a journey completes when a service does
 not apply, and it is deliberately an explicit act with a name against

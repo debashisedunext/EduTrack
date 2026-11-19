@@ -176,16 +176,38 @@ class ObMyTaskReadRepository {
          LEFT JOIN ob_journey_template_stages g  ON g.id = ts.template_stage_id
             """;
 
-    private static final String PAGE = PROJECTION + """
+    /**
+     * One predicate per tab — whitelisted, never concatenated from the request.
+     * Mirrors {@code matchesMyTasksTab} in {@code myTasks.ts}; an unknown or absent
+     * tab means no narrowing.
+     */
+    private static String tabPredicate(String tab) {
+        if (tab == null) return "TRUE";
+        return switch (tab) {
+            case "pending-verification" ->
+                    "((p.implementor_manager_user_id = :me OR :admin = TRUE) AND js.status = 'PENDING_REVIEW')";
+            case "in-progress" -> "js.status IN ('IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT')";
+            case "approved" -> "EXISTS (SELECT 1 FROM ob_journey_step_items oi WHERE oi.step_id = js.id"
+                    + " AND oi.row_state = 'VERIFIED' AND oi.outcome_seen_at IS NULL)";
+            case "pending-approval" -> "js.status = 'PENDING_REVIEW'";
+            case "not-started" -> "js.status = 'PENDING'";
+            default -> "TRUE";
+        };
+    }
+
+    private static String pageSql(String tab) {
+        return PROJECTION + """
              WHERE js.status NOT IN ('DONE', 'SKIPPED')
                AND p.status NOT IN ('ON_HOLD', 'DROPPED')
+               AND (%s)
                AND (%s)
                AND (:cursorKey IS NULL
                  OR js.created_at < :cursorKey
                  OR (js.created_at = :cursorKey AND js.id < :cursorId))
           ORDER BY js.created_at DESC, js.id DESC
              LIMIT :limit
-            """.formatted(MINE);
+            """.formatted(MINE, tabPredicate(tab));
+    }
 
     private static final String FIND_ONE = PROJECTION + """
              WHERE js.id = :taskId
@@ -202,8 +224,8 @@ class ObMyTaskReadRepository {
      * @param fetchSize one more than the page — {@code PageLimit.fetchSize}
      * @return up to {@code fetchSize} rows, soonest due first
      */
-    List<Row> openTasksOf(long userId, boolean admin, Cursor cursor, int fetchSize) {
-        return jdbc.sql(PAGE)
+    List<Row> openTasksOf(long userId, boolean admin, Cursor cursor, int fetchSize, String tab) {
+        return jdbc.sql(pageSql(tab))
                 .param("me", userId)
                 .param("admin", admin)
                 .param("cursorKey", cursor == null ? null : cursor.sortKey())
@@ -249,6 +271,10 @@ class ObMyTaskReadRepository {
      *                              ownership one — see the column's own comment on
      *                              {@link #PROJECTION}
      */
+    record TabCounts(int pendingVerification, int inProgress, int approved, int pendingApproval,
+                     int notStarted) {
+    }
+
     record Row(long taskId, String taskName, String status, Instant dueAt, String sortKey,
                long journeyId, String serviceName, long projectId, String projectName,
                long obClientId, String obClientName, String obClientCode,
@@ -297,6 +323,38 @@ class ObMyTaskReadRepository {
      * {@code OB_ADMIN} always reviews, which is the unsticking path for a
      * project whose named manager has left.
      */
+    /**
+     * Whole-queue totals per tab, over the same {@code WHERE} as {@code PAGE}
+     * minus the cursor — so a tab's number is the full list, not this page's ten.
+     * The CASEs mirror {@code matchesMyTasksTab} in {@code myTasks.ts}; change both.
+     */
+    TabCounts tabCounts(long userId, boolean admin) {
+        return jdbc.sql("""
+                        SELECT COALESCE(SUM(t.pendingMyVerification), 0) AS pendingVerification,
+                               COALESCE(SUM(t.status IN ('IN_PROGRESS', 'BLOCKED', 'WAITING_ON_CLIENT')), 0) AS inProgress,
+                               COALESCE(SUM(t.rowsApproved > 0), 0)      AS approved,
+                               COALESCE(SUM(t.status = 'PENDING_REVIEW'), 0) AS pendingApproval,
+                               COALESCE(SUM(t.status = 'PENDING'), 0)    AS notStarted
+                          FROM (SELECT js.status AS status,
+                                       ((p.implementor_manager_user_id = :me OR :admin = TRUE)
+                                         AND js.status = 'PENDING_REVIEW') AS pendingMyVerification,
+                                       (SELECT COUNT(*) FROM ob_journey_step_items oi
+                                         WHERE oi.step_id = js.id AND oi.row_state = 'VERIFIED'
+                                           AND oi.outcome_seen_at IS NULL) AS rowsApproved
+                                  FROM ob_journey_steps js
+                                  JOIN ob_journeys jr ON jr.id = js.journey_id AND jr.archived_at IS NULL
+                                  JOIN ob_projects p  ON p.id = jr.project_id
+                                 WHERE js.status NOT IN ('DONE', 'SKIPPED')
+                                   AND p.status NOT IN ('ON_HOLD', 'DROPPED')
+                                   AND (%s)) t
+                        """.formatted(MINE))
+                .param("me", userId)
+                .param("admin", admin)
+                .query((rs, n) -> new TabCounts(rs.getInt("pendingVerification"), rs.getInt("inProgress"),
+                        rs.getInt("approved"), rs.getInt("pendingApproval"), rs.getInt("notStarted")))
+                .single();
+    }
+
     boolean reviewsAnyProject(long userId, boolean admin) {
         return Boolean.TRUE.equals(jdbc.sql("""
                         SELECT EXISTS (

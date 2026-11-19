@@ -46,7 +46,10 @@ the database rejects mutation independently via triggers and grants.
 
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ObMyTaskListResponseMetaAllOfTabCounts } from './obMyTaskListResponseMetaAllOfTabCounts';
 
 export type ObMyTaskListResponseMetaAllOf = {
   isReviewerForAnyProject?: boolean;
+  /** Whole-queue totals per tab, not this page's rows. */
+  tabCounts?: ObMyTaskListResponseMetaAllOfTabCounts;
 };

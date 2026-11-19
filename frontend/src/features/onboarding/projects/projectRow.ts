@@ -75,6 +75,16 @@ export function stageProgress(project: ObProject): { label: string; fraction: nu
   }
 }
 
+/** Module services finished of those boarded — same shape as {@link stageProgress}. */
+export function moduleProgress(project: ObProject): { label: string; fraction: number } {
+  const total = project.journeyCount ?? 0
+  const complete = project.journeysComplete ?? 0
+  return {
+    label: `${complete}/${total}`,
+    fraction: total > 0 ? Math.min(1, complete / total) : 0,
+  }
+}
+
 /** `15 Sep 2026`, in the viewer's locale, from the server's plain date. */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—'

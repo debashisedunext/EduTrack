@@ -48,6 +48,7 @@ the database rejects mutation independently via triggers and grants.
  */
 import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
+import type { ListObMyTasksTab } from './listObMyTasksTab';
 
 export type ListObMyTasksParams = {
 /**
@@ -59,4 +60,10 @@ cursor?: CursorParameter;
  * @maximum 200
  */
 limit?: LimitParameter;
+/**
+ * Narrows the list to one My Tasks tab **before** paging, so a tab
+pages its own rows rather than the ten of a mixed page.
+
+ */
+tab?: ListObMyTasksTab;
 };
